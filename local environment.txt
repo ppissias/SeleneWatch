@@ -35,7 +35,16 @@ Source Control
   Remote repository: https://github.com/ppissias/SeleneWatch.git
   Note: Local environment files (local environment.txt, CMakeUserPresets.json) are tracked in Git as reference for setting up on another machine.
 
-Command Line Build
+Quick Start (PowerShell Shortcut)
+  Launch C:\dev\powershell-selenewatch.lnk
+  This automatically runs C:\dev\selenewatch-env.ps1, which imports the MSVC 2026 x64 toolset,
+  Qt 6.12.0 kit, CMake, and Ninja into PATH and drops into C:\dev\projects\SeleneWatch.
+  From there, you can directly run:
+    cmake --preset Debug-x64
+    cmake --build out/build/debug
+    .\out\build\debug\SeleneWatch.exe
+
+Command Line Build (Manual)
   Open a command prompt or PowerShell, then:
 
   call "C:\dev\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
