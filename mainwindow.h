@@ -1,17 +1,47 @@
 #pragma once
 
-#include <QtWidgets/QMainWindow>
+#include "frame.h"
+#include "synthetic_frame_source.h"
 #include "ui_mainwindow.h"
+
+#include <QtWidgets/QMainWindow>
+#include <QtWidgets/QLabel>
+#include <memory>
+#include <atomic>
+#include <chrono>
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
+
+private slots:
+    void onStartClicked();
+    void onStopClicked();
+    void onTargetFpsChanged(int fps);
 
 private:
-    Ui::MainWindowClass ui;
-};
+    void setupStatusBar();
+    void onFrameArrived(const Frame& frame);
+    void displayFrame(const Frame& frame);
 
+    Ui::MainWindowClass ui;
+    std::unique_ptr<SyntheticFrameSource> frameSource_;
+
+    // Status bar indicator labels
+    QLabel* statusLabel_{nullptr};
+    QLabel* fpsLabel_{nullptr};
+    QLabel* framesLabel_{nullptr};
+    QLabel* resolutionLabel_{nullptr};
+
+    // FPS measurement and diagnostics
+    std::chrono::steady_clock::time_point lastFpsCalcTime_{};
+    int framesInCurrentSecond_{0};
+    uint64_t totalFrames_{0};
+
+    // UI rendering backpressure guard
+    std::atomic<bool> renderingFrame_{false};
+};

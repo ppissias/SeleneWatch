@@ -20,6 +20,9 @@ set(PROJECT_SOURCES
     mainwindow.ui
     mainwindow.h
     mainwindow.cpp
+    frame.h
+    synthetic_frame_source.h
+    synthetic_frame_source.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
