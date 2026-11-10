@@ -1,0 +1,52 @@
+SeleneWatch local environment
+Checked 2026-11-10 on this machine.
+
+Project
+  Root: C:\dev\projects\SeleneWatch
+  Description: PROJECT_DESCRIPTION.md
+  Language: C++20, set by CMAKE_CXX_STANDARD in CMakeLists.txt
+  Build presets & Qt kit definition: CMakeUserPresets.json
+    - Presets: Debug-x64, Release-x64
+    - Generator: Ninja
+    - Build outputs: out\build\debug, out\build\release
+    - Active Qt kit: configured under 'QTDIR' in CMakeUserPresets.json (currently C:\dev\tools\Qt\6.12.0\msvc2022_64)
+
+Qt Kit (MSVC 2022 64-bit)
+  The active kit path is set by QTDIR in CMakeUserPresets.json.
+  Key paths relative to %QTDIR%:
+    qmake:       %QTDIR%\bin\qmake.exe
+    windeployqt: %QTDIR%\bin\windeployqt.exe
+    CMake:       %QTDIR%\lib\cmake\Qt6
+    Plugins:     %QTDIR%\plugins
+
+  Do not point the build at the MinGW kit (C:\dev\tools\Qt\6.12.0\mingw_64).
+  The project toolchain is MSVC; keep using the MSVC Qt kit.
+
+Visual Studio & Toolchain
+  Visual Studio Community 2026 (v18.11.3): C:\dev\Microsoft Visual Studio\18\Community
+  Developer environment setup:             C:\dev\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat
+  CMake used by build:                     C:\dev\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe (v4.3.1)
+  Ninja:                                   C:\dev\tools\Qt\Tools\Ninja\ninja.exe
+  MSVC default compiler:                   v14.51 (cl.exe 19.51.36260)
+  Installed Windows SDKs:                  10.0.28000 and 10.0.26100
+
+Source Control
+  Git initialized on branch 'main'.
+  Remote repository: https://github.com/ppissias/SeleneWatch.git
+  Note: Local environment files (local environment.txt, CMakeUserPresets.json) are tracked in Git as reference for setting up on another machine.
+
+Command Line Build
+  Open a command prompt or PowerShell, then:
+
+  call "C:\dev\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
+  cd /d C:\dev\projects\SeleneWatch
+  "C:\dev\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --preset Debug-x64
+  "C:\dev\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build out\build\debug
+
+  (Release uses --preset Release-x64 and out\build\release.)
+
+Running the Executable from the Command Line
+  Ensure Qt runtime DLLs and plugins are accessible:
+  set PATH=C:\dev\tools\Qt\6.12.0\msvc2022_64\bin;%PATH%
+  set QT_PLUGIN_PATH=C:\dev\tools\Qt\6.12.0\msvc2022_64\plugins
+  out\build\debug\SeleneWatch.exe

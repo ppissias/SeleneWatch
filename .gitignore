@@ -24,10 +24,6 @@ CMakeLists.txt.user*
 .qt/
 *_autogen/
 
-# Local machine / environment files
-local environment.txt
-CMakeUserPresets.json
-
 # OS-generated files
 Thumbs.db
 .DS_Store
