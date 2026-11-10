@@ -1,0 +1,33 @@
+# Build and binary directories
+out/
+build/
+bin/
+lib/
+
+# Object, debug and executable files
+*.obj
+*.ilk
+*.pdb
+*.exe
+*.manifest
+
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.user.*
+*.sln.docstates
+
+# Qt generated / temporary files
+*.autosave
+CMakeLists.txt.user*
+.qt/
+*_autogen/
+
+# Local machine / environment files
+local environment.txt
+CMakeUserPresets.json
+
+# OS-generated files
+Thumbs.db
+.DS_Store
