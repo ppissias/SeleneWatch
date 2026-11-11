@@ -12,7 +12,7 @@
 class SyntheticFrameSource
 {
 public:
-    using FrameCallback = std::function<void(const Frame&)>;
+    using FrameCallback = std::function<void(Frame&)>;
 
     explicit SyntheticFrameSource(int width = 640, int height = 480, double targetFps = 30.0);
     ~SyntheticFrameSource();
@@ -37,7 +37,7 @@ public:
 
 private:
     void run(std::stop_token stopToken);
-    Frame generateFrame(uint64_t index);
+    void generateFrame(Frame& frame, uint64_t index);
 
     int width_;
     int height_;

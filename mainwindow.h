@@ -1,6 +1,7 @@
 #pragma once
 
 #include "frame.h"
+#include "frame_ring_buffer.h"
 #include "synthetic_frame_source.h"
 #include "ui_mainwindow.h"
 
@@ -25,16 +26,19 @@ private slots:
 
 private:
     void setupStatusBar();
-    void onFrameArrived(const Frame& frame);
-    void displayFrame(const Frame& frame);
+    void updateBufferReadout();
+    void onFrameArrived(Frame& frame);
+    void displayImage(QImage image);
 
     Ui::MainWindowClass ui;
     std::unique_ptr<SyntheticFrameSource> frameSource_;
+    std::unique_ptr<FrameRingBuffer> ringBuffer_;
 
     // Status bar indicator labels
     QLabel* statusLabel_{nullptr};
     QLabel* fpsLabel_{nullptr};
     QLabel* framesLabel_{nullptr};
+    QLabel* bufferLabel_{nullptr};
     QLabel* resolutionLabel_{nullptr};
 
     // FPS measurement and diagnostics

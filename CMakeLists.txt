@@ -23,6 +23,8 @@ set(PROJECT_SOURCES
     frame.h
     synthetic_frame_source.h
     synthetic_frame_source.cpp
+    frame_ring_buffer.h
+    frame_ring_buffer.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})

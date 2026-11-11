@@ -87,17 +87,19 @@ void SyntheticFrameSource::run(std::stop_token stopToken)
     uint64_t frameIndex = 0;
     auto nextFrameTime = clock::now();
 
+    Frame currentFrame;
+
     while (!stopToken.stop_requested() && isRunning_.load())
     {
         const double fps = targetFps_.load();
         const auto frameInterval = std::chrono::duration_cast<clock::duration>(
             std::chrono::duration<double>(1.0 / fps));
 
-        Frame frame = generateFrame(frameIndex++);
+        generateFrame(currentFrame, frameIndex++);
 
         if (callback_)
         {
-            callback_(frame);
+            callback_(currentFrame);
         }
 
         nextFrameTime += frameInterval;
@@ -115,16 +117,20 @@ void SyntheticFrameSource::run(std::stop_token stopToken)
     }
 }
 
-Frame SyntheticFrameSource::generateFrame(uint64_t index)
+void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
 {
-    Frame frame;
     frame.width = width_;
     frame.height = height_;
     frame.format = PixelFormat::Mono8;
     frame.frameIndex = index;
     frame.timestamp = std::chrono::system_clock::now();
     frame.steadyTimestamp = std::chrono::steady_clock::now();
-    frame.data.resize(static_cast<size_t>(width_ * height_));
+
+    const size_t targetSize = static_cast<size_t>(width_ * height_);
+    if (frame.data.size() != targetSize)
+    {
+        frame.data.resize(targetSize);
+    }
 
     const float cx = width_ * 0.5f;
     const float cy = height_ * 0.5f;
@@ -176,6 +182,4 @@ Frame SyntheticFrameSource::generateFrame(uint64_t index)
             }
         }
     }
-
-    return frame;
 }
