@@ -11,6 +11,8 @@
 #include <atomic>
 #include <chrono>
 
+class QTimer;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -27,6 +29,7 @@ private slots:
 private:
     void setupStatusBar();
     void updateBufferReadout();
+    void updateStreamReadout();
     void onFrameArrived(Frame& frame);
     void displayImage(QImage image);
 
@@ -40,11 +43,12 @@ private:
     QLabel* framesLabel_{nullptr};
     QLabel* bufferLabel_{nullptr};
     QLabel* resolutionLabel_{nullptr};
+    QTimer* bufferReadoutTimer_{nullptr};
 
-    // FPS measurement and diagnostics
-    std::chrono::steady_clock::time_point lastFpsCalcTime_{};
-    int framesInCurrentSecond_{0};
-    uint64_t totalFrames_{0};
+    // Acquisition count. The source thread increments it; the UI timer reads it.
+    std::atomic<uint64_t> acquiredFrames_{0};
+    uint64_t lastAcquiredSample_{0};
+    std::chrono::steady_clock::time_point lastFpsSampleTime_{};
 
     // UI rendering backpressure guard
     std::atomic<bool> renderingFrame_{false};

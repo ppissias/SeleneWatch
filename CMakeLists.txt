@@ -6,6 +6,8 @@ include(qt.cmake)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_NO_SYSTEM_FROM_IMPORTED TRUE)
+
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR}
     COMPONENTS
@@ -40,4 +42,8 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Gui
         Qt::Widgets
 )
+
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE winmm)
+endif()
 

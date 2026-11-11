@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include <QtCore/QMetaObject>
+#include <QtCore/QTimer>
 #include <QtGui/QPixmap>
 #include <QtWidgets/QStatusBar>
 
@@ -25,10 +26,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui.startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui.stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
     connect(ui.targetFpsSpinBox, &QSpinBox::valueChanged, this, &MainWindow::onTargetFpsChanged);
+
+    bufferReadoutTimer_ = new QTimer(this);
+    bufferReadoutTimer_->setInterval(1000);
+    connect(bufferReadoutTimer_, &QTimer::timeout, this, &MainWindow::updateStreamReadout);
 }
 
 MainWindow::~MainWindow()
 {
+    if (bufferReadoutTimer_)
+    {
+        bufferReadoutTimer_->stop();
+    }
     if (frameSource_)
     {
         frameSource_->stop();
@@ -75,11 +84,36 @@ void MainWindow::updateBufferReadout()
         .arg(mb, 0, 'f', 1));
 }
 
+void MainWindow::updateStreamReadout()
+{
+    updateBufferReadout();
+
+    const auto now = std::chrono::steady_clock::now();
+    const uint64_t acquired = acquiredFrames_.load(std::memory_order_relaxed);
+    const double elapsed = std::chrono::duration<double>(now - lastFpsSampleTime_).count();
+
+    if (fpsLabel_ && elapsed > 0.0)
+    {
+        const double fps = static_cast<double>(acquired - lastAcquiredSample_) / elapsed;
+        fpsLabel_->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
+    }
+
+    lastAcquiredSample_ = acquired;
+    lastFpsSampleTime_ = now;
+
+    if (framesLabel_)
+    {
+        framesLabel_->setText(QString("Frames: %1").arg(acquired));
+    }
+}
+
 void MainWindow::onStartClicked()
 {
-    totalFrames_ = 0;
-    framesInCurrentSecond_ = 0;
-    lastFpsCalcTime_ = std::chrono::steady_clock::now();
+    acquiredFrames_.store(0, std::memory_order_relaxed);
+    lastAcquiredSample_ = 0;
+    lastFpsSampleTime_ = std::chrono::steady_clock::now();
+    framesLabel_->setText("Frames: 0");
+    fpsLabel_->setText("FPS: --");
 
     if (ringBuffer_)
     {
@@ -89,6 +123,7 @@ void MainWindow::onStartClicked()
 
     frameSource_->setTargetFps(ui.targetFpsSpinBox->value());
     frameSource_->start();
+    bufferReadoutTimer_->start();
 
     ui.startButton->setEnabled(false);
     ui.stopButton->setEnabled(true);
@@ -97,12 +132,14 @@ void MainWindow::onStartClicked()
 
 void MainWindow::onStopClicked()
 {
+    bufferReadoutTimer_->stop();
     frameSource_->stop();
 
     ui.startButton->setEnabled(true);
     ui.stopButton->setEnabled(false);
     statusLabel_->setText("Status: Stopped");
     fpsLabel_->setText("FPS: --");
+    framesLabel_->setText(QString("Frames: %1").arg(acquiredFrames_.load(std::memory_order_relaxed)));
 
     updateBufferReadout();
 }
@@ -117,6 +154,8 @@ void MainWindow::onTargetFpsChanged(int fps)
 
 void MainWindow::onFrameArrived(Frame& frame)
 {
+    acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
+
     // Deliver preview frame to Qt GUI thread if not busy rendering
     if (!renderingFrame_.exchange(true))
     {
@@ -133,26 +172,6 @@ void MainWindow::onFrameArrived(Frame& frame)
 
 void MainWindow::displayImage(QImage image)
 {
-    // Update frame diagnostics
-    ++totalFrames_;
-    ++framesInCurrentSecond_;
-
-    const auto now = std::chrono::steady_clock::now();
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFpsCalcTime_).count();
-
-    if (elapsed >= 1000)
-    {
-        const double fps = (framesInCurrentSecond_ * 1000.0) / elapsed;
-        fpsLabel_->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
-        framesInCurrentSecond_ = 0;
-        lastFpsCalcTime_ = now;
-
-        updateBufferReadout();
-    }
-
-    framesLabel_->setText(QString("Frames: %1").arg(totalFrames_));
-
-    // Render image to viewport label
     if (!image.isNull())
     {
         const QSize targetSize = ui.viewportLabel->size();

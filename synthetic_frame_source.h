@@ -38,6 +38,8 @@ public:
 private:
     void run(std::stop_token stopToken);
     void generateFrame(Frame& frame, uint64_t index);
+    void acquireFineSleep();
+    void releaseFineSleep();
 
     int width_;
     int height_;
@@ -45,5 +47,6 @@ private:
 
     FrameCallback callback_;
     std::atomic<bool> isRunning_{false};
+    bool fineSleepHeld_{false};
     std::jthread workerThread_;
 };

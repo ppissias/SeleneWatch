@@ -21,14 +21,8 @@ void FrameRingBuffer::push(Frame& frame)
     slot.timestamp = frame.timestamp;
     slot.steadyTimestamp = frame.steadyTimestamp;
 
-    // Ensure slot buffer has matching capacity during buffer initialization/ramp-up
-    if (slot.data.size() != frame.data.size())
-    {
-        slot.data.resize(frame.data.size());
-    }
-
-    // Recycle storage: swap pixel buffers so the slot receives the newly acquired pixels
-    // and 'frame.data' receives the retired buffer back for zero-allocation reuse.
+    // The slot takes the new pixels. The caller gets the slot's previous buffer
+    // back, which may be empty until the ring has filled once.
     std::swap(slot.data, frame.data);
 
     head_ = (head_ + 1) % capacity_;

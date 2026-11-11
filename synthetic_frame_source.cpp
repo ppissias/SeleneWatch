@@ -4,6 +4,11 @@
 #include <chrono>
 #include <cmath>
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <timeapi.h>
+
 SyntheticFrameSource::SyntheticFrameSource(int width, int height, double targetFps)
     : width_(width)
     , height_(height)
@@ -57,9 +62,19 @@ bool SyntheticFrameSource::start()
         return true; // Already running
     }
 
-    workerThread_ = std::jthread([this](std::stop_token stopToken) {
-        run(stopToken);
-    });
+    acquireFineSleep();
+    try
+    {
+        workerThread_ = std::jthread([this](std::stop_token stopToken) {
+            run(stopToken);
+        });
+    }
+    catch (...)
+    {
+        releaseFineSleep();
+        isRunning_.store(false);
+        throw;
+    }
 
     return true;
 }
@@ -73,6 +88,26 @@ void SyntheticFrameSource::stop()
             workerThread_.request_stop();
             workerThread_.join();
         }
+        releaseFineSleep();
+    }
+}
+
+void SyntheticFrameSource::acquireFineSleep()
+{
+    // sleep_until waits on the Windows timer. 1 ms resolution lets an 8–12 ms
+    // frame interval wake on time. Held only while this source is running.
+    if (timeBeginPeriod(1) == TIMERR_NOERROR)
+    {
+        fineSleepHeld_ = true;
+    }
+}
+
+void SyntheticFrameSource::releaseFineSleep()
+{
+    if (fineSleepHeld_)
+    {
+        timeEndPeriod(1);
+        fineSleepHeld_ = false;
     }
 }
 
