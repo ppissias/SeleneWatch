@@ -1,15 +1,19 @@
 #pragma once
 
+#include "event_capture.h"
+#include "event_writer.h"
 #include "frame.h"
-#include "frame_ring_buffer.h"
 #include "synthetic_frame_source.h"
 #include "ui_mainwindow.h"
 
+#include <QtCore/QString>
+#include <QtGui/QImage>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QLabel>
-#include <memory>
+
 #include <atomic>
 #include <chrono>
+#include <memory>
 
 class QTimer;
 
@@ -25,6 +29,8 @@ private slots:
     void onStartClicked();
     void onStopClicked();
     void onTargetFpsChanged(int fps);
+    void onInjectFlashClicked();
+    void onEventWritten(const QString& path, const QString& error);
 
 private:
     void setupStatusBar();
@@ -32,12 +38,16 @@ private:
     void updateStreamReadout();
     void onFrameArrived(Frame& frame);
     void displayImage(QImage image);
+    void publishPreview(const Frame& frame);
+    void onCandidateStarted();
+    void onClipReady(EventClip clip);
+    void onSourceFailed(const QString& message);
 
     Ui::MainWindowClass ui;
+    std::unique_ptr<EventWriter> eventWriter_;
+    std::unique_ptr<EventCapture> capture_;
     std::unique_ptr<SyntheticFrameSource> frameSource_;
-    std::unique_ptr<FrameRingBuffer> ringBuffer_;
 
-    // Status bar indicator labels
     QLabel* statusLabel_{nullptr};
     QLabel* fpsLabel_{nullptr};
     QLabel* framesLabel_{nullptr};
@@ -52,4 +62,5 @@ private:
 
     // UI rendering backpressure guard
     std::atomic<bool> renderingFrame_{false};
+    bool sourceFailed_{false};
 };

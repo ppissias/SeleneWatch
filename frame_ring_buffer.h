@@ -35,6 +35,9 @@ public:
     // Returns an approximation of total RAM (in bytes) occupied by the buffer and its slots.
     [[nodiscard]] size_t memoryUsageBytes() const;
 
+    // Copies stored frames oldest-first. Holds the mutex for the copy.
+    [[nodiscard]] std::vector<Frame> copyStored() const;
+
 private:
     const size_t capacity_;
     mutable std::mutex mutex_;

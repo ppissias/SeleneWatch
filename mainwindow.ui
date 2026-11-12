@@ -50,6 +50,16 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="injectFlashButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Inject flash</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="Line" name="line">
         <property name="orientation">
          <enum>Qt::Vertical</enum>

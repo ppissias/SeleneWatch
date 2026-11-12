@@ -26,3 +26,9 @@ SeleneWatch is an open-source project licensed under the **BSD 2-Clause ("Simpli
 7. **Architecture and licensing flexibility.** Prefer solutions that preserve BSD-2-Clause licensing and modularity. If a dependency introduces significant licensing restrictions, report the trade-offs and propose alternatives rather than silently introducing it.
 
 These guidelines apply to all development agents and should be revisited when introducing new dependencies or preparing releases.
+
+## Feature Tracking and Documentation
+
+- **Explicit feature IDs:** Proposals and completed work are identified by explicit IDs (e.g., `Feature-2`, `Feature-3`, `Feature-4`).
+- **Preserve full detail in history:** When moving completed features from [`features.md`](features.md) to [`implemented features.md`](implemented%20features.md), do not condense, summarize, or remove details. Append the entire section—including specifications, review notes, decision rationales, and acceptance criteria. `implemented features.md` is an append-only historical record of what was built and why.
+

@@ -32,6 +32,25 @@ void FrameRingBuffer::push(Frame& frame)
     }
 }
 
+std::vector<Frame> FrameRingBuffer::copyStored() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<Frame> frames;
+    frames.reserve(count_);
+    if (count_ == 0)
+    {
+        return frames;
+    }
+
+    const size_t oldest = (head_ + capacity_ - count_) % capacity_;
+    for (size_t i = 0; i < count_; ++i)
+    {
+        frames.push_back(slots_[(oldest + i) % capacity_]);
+    }
+    return frames;
+}
+
 void FrameRingBuffer::clear()
 {
     std::lock_guard<std::mutex> lock(mutex_);
