@@ -24,12 +24,22 @@ set(PROJECT_SOURCES
     frame_pool.h
     frame_pool.cpp
     latest_frame_slot.h
+    stream_info.h
+    frame_source.h
+    fine_sleep.h
+    fine_sleep.cpp
     preview_image.h
     preview_image.cpp
     synthetic_scene.h
     synthetic_scene.cpp
     synthetic_frame_source.h
     synthetic_frame_source.cpp
+    ser_reader.h
+    ser_reader.cpp
+    recording_source.h
+    recording_source.cpp
+    session.h
+    session.cpp
     frame_ring_buffer.h
     frame_ring_buffer.cpp
     flash_detector.h
@@ -66,7 +76,12 @@ enable_testing()
 add_executable(SeleneWatchTests
     tests/core_tests.cpp
     frame_pool.cpp
+    fine_sleep.cpp
+    preview_image.cpp
     synthetic_scene.cpp
+    ser_reader.cpp
+    recording_source.cpp
+    session.cpp
     frame_ring_buffer.cpp
     flash_detector.cpp
     event_capture.cpp
@@ -82,6 +97,14 @@ target_link_libraries(SeleneWatchTests
         Qt6::Test
 )
 
+if(WIN32)
+    target_link_libraries(SeleneWatchTests PRIVATE winmm)
+endif()
+
 selenewatch_compile_options(SeleneWatchTests)
 
-add_test(NAME core COMMAND SeleneWatchTests)
+# On Windows, Qt Test's plain text goes to the debugger, not to stdout, when
+# the process has no console of its own, which is how CTest may start it.
+# TAP always goes to stdout, so failures show in CTest's log. Run by hand
+# from a console, the tests print plain text as usual.
+add_test(NAME core COMMAND SeleneWatchTests -o -,tap)

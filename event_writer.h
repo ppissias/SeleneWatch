@@ -5,15 +5,20 @@
 #include <QtCore/QObject>
 #include <QtCore/QString>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <thread>
 
 // What became of one clip handed to the writer.
+//
+// A result with neither a folder nor a reason is about the record alone: the
+// session_start line could not be written.
 struct ClipWriteResult
 {
     // The clip folder. Empty when the clip was not saved.
@@ -34,7 +39,9 @@ struct ClipWriteResult
 // that does not fit is dropped at once and logged as not saved.
 //
 // Every clip gets one line per candidate in <outputRoot>/candidates.txt,
-// saved or not. One clip that fails to write is one failed clip; the
+// saved or not. Each start of a stream gets a session_start line there
+// first, naming the source, so a candidate that was not saved still says
+// where it came from. One clip that fails to write is one failed clip; the
 // writer goes on to the next. Each result is reported through Finished on
 // the context object's thread.
 class EventWriter
@@ -52,14 +59,26 @@ public:
     // Any thread. Takes the clip, or drops its frames and logs it as not saved.
     void submit(EventClip clip);
 
+    // Any thread. Queues the session_start line for a stream that starts now.
+    // Only a failure to write it is reported.
+    void logSessionStart(const StreamInfo& stream);
+
     // Writes what is queued, then stops the thread.
     void shutdown();
 
 private:
-    // A clip waiting for the writer. A job with a reason has no frames; it
-    // only waits to be logged.
+    // The start of a stream, for its session_start line.
+    struct SessionStart
+    {
+        std::chrono::system_clock::time_point time;
+        StreamInfo stream;
+    };
+
+    // Work waiting for the writer: a session_start line, a clip, or a clip
+    // refused with a reason (it has no frames and only waits to be logged).
     struct Job
     {
+        std::optional<SessionStart> sessionStart;
         EventClip clip;
         QString notSavedReason;
     };
@@ -71,6 +90,8 @@ private:
 
     QString writeClip(const EventClip& clip, QString& error) const;
     bool appendCandidates(const EventClip& clip, const ClipWriteResult& result) const;
+    bool appendSessionStart(const SessionStart& start) const;
+    bool appendLog(const QString& lines) const;
 
     QObject* context_;
     const QString outputRoot_;

@@ -8,6 +8,9 @@ void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bo
     frame.width = width;
     frame.height = height;
     frame.format = PixelFormat::Mono8;
+    frame.significantBits = 8;
+    frame.alignment = BitAlignment::Low;
+    frame.bayer = BayerPattern::None;
     frame.frameIndex = index;
 
     const size_t targetSize = static_cast<size_t>(width * height);

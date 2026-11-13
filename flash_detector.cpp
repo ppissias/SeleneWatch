@@ -1,8 +1,57 @@
 #include "flash_detector.h"
-#include "synthetic_scene.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace {
+
+// One 8-bit value per pixel, as described in the class comment.
+void readValues(const Frame& frame, std::vector<uint8_t>& values)
+{
+    if (frame.width <= 0 || frame.height <= 0
+        || frame.data.size() != frameBytes(frame.width, frame.height, frame.format))
+    {
+        throw std::invalid_argument("frame " + std::to_string(frame.frameIndex)
+            + " holds data that does not match its size and format");
+    }
+
+    const size_t pixels = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
+    values.resize(pixels);
+    const uint8_t* data = frame.data.data();
+
+    switch (frame.format)
+    {
+    case PixelFormat::Mono8:
+        std::copy(data, data + pixels, values.begin());
+        break;
+
+    case PixelFormat::Mono16:
+    {
+        const int shift = shiftToEightBits(frame);
+        for (size_t i = 0; i < pixels; ++i)
+        {
+            const int sample = data[2 * i] | (data[2 * i + 1] << 8);
+            values[i] = static_cast<uint8_t>(std::min(sample >> shift, 255));
+        }
+        break;
+    }
+
+    case PixelFormat::RGB888:
+        for (size_t i = 0; i < pixels; ++i)
+        {
+            values[i] = static_cast<uint8_t>((data[3 * i] + data[3 * i + 1] + data[3 * i + 2]) / 3);
+        }
+        break;
+    }
+}
+
+} // namespace
 
 void FlashDetector::reset()
 {
+    values_.clear();
     reference_.clear();
     referenceWidth_ = 0;
     referenceHeight_ = 0;
@@ -14,14 +63,17 @@ void FlashDetector::reset()
 
 bool FlashDetector::observe(const Frame& frame)
 {
-    if (!hasReference_ || referenceWidth_ != frame.width || referenceHeight_ != frame.height
-        || reference_.size() != frame.data.size())
+    readValues(frame, values_);
+
+    if (!hasReference_ || referenceWidth_ != frame.width || referenceHeight_ != frame.height)
     {
-        remember(frame);
+        referenceWidth_ = frame.width;
+        referenceHeight_ = frame.height;
+        remember();
         return false;
     }
 
-    lastBrightCount_ = countRisingPixels(frame);
+    lastBrightCount_ = countRisingPixels();
     if (lastBrightCount_ >= kMinBrightPixels)
     {
         if (consecutive_ == 0)
@@ -32,7 +84,7 @@ bool FlashDetector::observe(const Frame& frame)
         return consecutive_ == kConsecutiveFrames;
     }
 
-    remember(frame);
+    remember();
     return false;
 }
 
@@ -51,37 +103,24 @@ uint64_t FlashDetector::onsetFrameIndex() const
     return onsetFrameIndex_;
 }
 
-void FlashDetector::remember(const Frame& frame)
+// The latest frame becomes the reference. The old reference's buffer is
+// kept for the next frame's values, so nothing is allocated per frame.
+void FlashDetector::remember()
 {
-    reference_ = frame.data;
-    referenceWidth_ = frame.width;
-    referenceHeight_ = frame.height;
+    std::swap(reference_, values_);
     hasReference_ = true;
     consecutive_ = 0;
     onsetFrameIndex_ = 0;
 }
 
-int FlashDetector::countRisingPixels(const Frame& frame) const
+int FlashDetector::countRisingPixels() const
 {
-    const LunarDisk disk = LunarDisk::centered(frame.width, frame.height);
-
     int rising = 0;
-    for (int y = 0; y < frame.height; ++y)
+    for (size_t i = 0; i < values_.size(); ++i)
     {
-        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(frame.width);
-        for (int x = 0; x < frame.width; ++x)
+        if (static_cast<int>(values_[i]) - static_cast<int>(reference_[i]) > kDeltaThreshold)
         {
-            if (!disk.contains(x, y))
-            {
-                continue;
-            }
-
-            const size_t index = row + static_cast<size_t>(x);
-            const int delta = static_cast<int>(frame.data[index]) - static_cast<int>(reference_[index]);
-            if (delta > kDeltaThreshold)
-            {
-                ++rising;
-            }
+            ++rising;
         }
     }
     return rising;

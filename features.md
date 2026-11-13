@@ -49,6 +49,8 @@ A recording is played in one of two ways, chosen before Start.
 - **What the observer's SER files show** (27 files, all written by FireCapture 2.x, which signs itself `LUCAM-RECORDER`, from a mono Point Grey Chameleon):
   - `LittleEndian` is 0 in every file, and the 16-bit samples are little-endian. This confirms the inverted use of the flag on real files.
   - The 16-bit file holds 12-bit data in the top bits: the low four bits are zero in every frame checked, and `PixelDepthPerPlane` is 16. So the reader cannot learn the significant bits from the header alone. It reads `PixelDepthPerPlane`, and when that is 16 it looks at the low bits of the first frames and records what it finds.
+  - *Corrected when Part A was built (13 November 2026).* Reading every sample of 21 frames spread through the file shows that the low four bits are not zero everywhere: 11 samples out of 26 million are a half-step (low bits `1000`), one in each of 11 of those frames. That is most likely the camera's defect-pixel correction averaging two neighbours. The reader records 13 significant bits for this file, because the data uses 13. The samples are stored unchanged either way.
+  - The same file (`2013.06.25 ISS\raw\Moon_202643.ser`) holds no lunar image. Its samples have a median of 1 and a maximum of 65 in 12-bit units, and a stretched frame is noise. It was probably a transit attempt on dark sky. It tests the 16-bit path, but it is no 16-bit lunar test case. The archive has none; one is needed before Feature-5 measures the stretch on the earthshine.
   - Every file has a full trailer, and the trailer times are UT. The header's "local" `DateTime` also holds UT in these files, so the reader takes its start time from `DateTime_UTC` and never from the local field.
   - The trailer intervals are not regular. One 18 fps file has intervals from 10 to 112 ms. These are the host's arrival times, with its jitter, and `StreamInfo` says so. Another file has intervals up to 653 ms, which is what dropped frames look like in a file with no counter.
 - **Still to check.** The archive has no file from SharpCap and none from the ZWO or QHY cameras. How those store 12-bit data is checked on the first such file, before the writer's convention is fixed, and the finding goes into the project description.
@@ -172,6 +174,49 @@ The synthetic source stays, and its fixed flash remains the check that the whole
 - **The writer's file conversion gains Mono16** as a 16-bit greyscale PNG while clips are PNG. Part D replaces it with the SER frame write.
 - **The directory split waits for Part D.** The project description expects `sources/` and `recording/` with this feature. Where the SER format knowledge sits is easier to decide when both the reader and the writer exist.
 - **Qt Test output** that does not reach the console (carried forward from Feature-7) is fixed in Part A, since Part A touches the tests.
+
+### Part A — built (13 November 2026)
+
+Part A is in the program. Done-when items 2, 3, 5, 10, 11, and 12 pass as tests. Items 1 and 8 pass for SER files by hand, except the comparison of orientation with SER Player, which is left to the observer.
+
+**What it added**
+
+- `FrameSource`, the one source type, with `FrameSourceListener`. `SyntheticFrameSource` and `RecordingSource` implement it.
+- `SerReader`, which reads only. `RecordingSource` plays a file through it: whole or looped, at real time or fast.
+- `StreamInfo`, the source's description of its stream, written at the top of `event.txt`.
+- `Session`, which holds the frame path that used to be `MainWindow::onFrameArrived`. It owns the source, the capture, the writer, and the preview slot.
+- `Frame` gains `Mono16`, `significantBits`, `alignment`, and `bayer`. The preview, the Feature-4 detector, and the writer's PNG conversion read them.
+- The window has a source selector (synthetic or recording file), **Open…**, a speed box, and **Loop first … s**. **Inject flash** works on the synthetic source only, until the blip (Part C).
+
+**Decisions made while building it**
+
+- **A source is opened, then started.** `open` reads the file and works out the `StreamInfo` on the window thread, before any worker exists. `start` runs the worker. The `Session` copies the `StreamInfo` before the first frame, so the source thread only ever reads it.
+- **A source reports to a listener.** `FrameSourceListener` has four calls: a frame, a discontinuity, the end, and a failure. The `Session` implements it, and the tests have a second, collecting listener. It replaces the synthetic source's frame and error callbacks.
+- **The window makes a new source at each Start**, from the controls. The file and the loop are read then. The speed and the synthetic frame rate can change while it runs.
+- **A late notification is ignored.** The window acts on "ended" or "failed" only when `Session::sourceFinished()` says the current run's source has finished, so a notification from an earlier run cannot stop a new one.
+- **A recording's monotonic time is when the frame was played.** Its UTC time is the file's.
+- **The 1 ms timer resolution** is a small class, `FineSleepResolution`, used by both sources.
+- **The `session_start` line** has quoted fields, `camera`, `playback`, and `source`, with the path last. Its time is the host's clock at Start; the candidate lines after it carry the frames' own times. A `ClipWriteResult` with neither a folder nor a reason reports a `session_start` line that could not be written.
+- **The Feature-4 detector throws** for a frame whose data does not match its size and format. That is a bug in a source, and the exception ends the source thread with a report.
+- **CTest runs the tests with `-o -,tap`.** On Windows, Qt Test's plain text goes to the debugger when the process has no console of its own, which is how CTest may start it. TAP always reaches stdout. Run by hand from a console, the tests print plain text. This was the cause of the Feature-7 note.
+
+**Tests**
+
+`SeleneWatchTests` has 51 tests in ten classes. New in Part A: the SER reader (10 tests, against files built byte by byte from the documented layout), the recording source (4), the session (4), the detector on Mono16 and RGB frames (2), the preview of 12-bit data (1), and the writer (3: the Mono16 PNG round trip, the stream lines in `event.txt`, and the `session_start` line). The suite passed three runs in a row.
+
+**By hand, 13 November 2026**
+
+The application was driven through Windows UI Automation on the development machine.
+
+- `2015.12.21 Moon 8 Newt\...\Moon_165104.ser`, 8-bit, FireCapture 2.4: 1296×964 Mono8, 714 frames, with a trailer. The first frame is at 15:51:04.505 UT and the file spans 38.899 s; the log says `Start(UT)=155104.516` and 38.945 s. The preview shows the Clavius region. Real time played the file in 39.3 to 39.9 s, fast in 4.1 s (about 175 fps with the detector, in a Debug build), and both ended with "Playback finished". The Feature-4 detector fired at frames 316 and 664 on every run. Both clips were written with the file, the camera, and the playback in `event.txt`. Played three times, the clips went to `…-746`, `…-746-2`, and `…-746-3`.
+- The same file looped over its first 5 s at fast speed for 8 s: 92 frames per lap, about 17 laps, 1558 frames, no candidate.
+- `2013.06.25 ISS\raw\Moon_202643.ser`, 16-bit: opens as 1296×964 Mono16 with 13 significant bits at the top, 1286 frames over 213.0 s, as its log says (1286 frames, 213 s). The preview is black because the file is (see the SER reader notes above).
+
+**Seen while testing, for later**
+
+- **Closing the window waits for the writer.** With two 180-frame PNG clips at 1296×964 queued, the Debug build took 55 s to close, and the window looked frozen. That is the Feature-7 rule: shutdown writes what is queued. SER clips (Part D) remove most of the cost. If it still matters then, the window can say what it is waiting for.
+- **A killed process loses the log lines of the clip it was writing.** The clip is left partial, without its completion marker, so Evidence rule 7 holds. But its candidates are not in `candidates.txt`, because the writer logs a candidate after its clip is written or refused (Feature-7). Rule 5 asks that every candidate be on record. Writing each candidate's line when it is queued, and the clip's outcome after, would close this. That is a change to the log format, to decide with the observer.
+- The status bar's message area is squeezed by the permanent labels, so a message like "Playback finished" is cut off at the left. Cosmetic.
 
 ---
 

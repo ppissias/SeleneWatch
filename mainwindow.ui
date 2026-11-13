@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>800</width>
-    <height>600</height>
+    <width>900</width>
+    <height>660</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -31,11 +31,59 @@
      <number>8</number>
     </property>
     <item>
+     <layout class="QHBoxLayout" name="sourceLayout">
+      <item>
+       <widget class="QLabel" name="sourceLabel">
+        <property name="text">
+         <string>Source:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="sourceComboBox">
+        <item>
+         <property name="text">
+          <string>Synthetic</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Recording file</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="openFileButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Open…</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="fileLabel">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>No recording chosen</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <layout class="QHBoxLayout" name="controlsLayout">
       <item>
        <widget class="QPushButton" name="startButton">
         <property name="text">
-         <string>Start Stream</string>
+         <string>Start</string>
         </property>
        </widget>
       </item>
@@ -45,7 +93,7 @@
          <bool>false</bool>
         </property>
         <property name="text">
-         <string>Stop Stream</string>
+         <string>Stop</string>
         </property>
        </widget>
       </item>
@@ -53,6 +101,9 @@
        <widget class="QPushButton" name="injectFlashButton">
         <property name="enabled">
          <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Paints the synthetic source's fixed flash for a few frames</string>
         </property>
         <property name="text">
          <string>Inject flash</string>
@@ -75,6 +126,9 @@
       </item>
       <item>
        <widget class="QSpinBox" name="targetFpsSpinBox">
+        <property name="toolTip">
+         <string>The synthetic source's frame rate, and the rate assumed for a recording that has no frame times</string>
+        </property>
         <property name="minimum">
          <number>1</number>
         </property>
@@ -86,6 +140,75 @@
         </property>
         <property name="suffix">
          <string> fps</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="Line" name="line2">
+        <property name="orientation">
+         <enum>Qt::Vertical</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="speedLabel">
+        <property name="text">
+         <string>Speed:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="speedComboBox">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Real time follows the recording's own frame times. Fast runs the detector over the file without waiting.</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Real time</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Fast</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="loopCheckBox">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Plays the first seconds of the recording again and again. Each lap restarts detection.</string>
+        </property>
+        <property name="text">
+         <string>Loop first</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QDoubleSpinBox" name="loopSecondsSpinBox">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.5</double>
+        </property>
+        <property name="maximum">
+         <double>3600.0</double>
+        </property>
+        <property name="value">
+         <double>10.0</double>
+        </property>
+        <property name="suffix">
+         <string> s</string>
         </property>
        </widget>
       </item>
@@ -122,7 +245,7 @@
        <string notr="true">background-color: #121212; border: 1px solid #333333;</string>
       </property>
       <property name="text">
-       <string>Click 'Start Stream' to begin live preview</string>
+       <string>Choose a source and press Start</string>
       </property>
       <property name="alignment">
        <set>Qt::AlignCenter</set>
@@ -136,7 +259,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>800</width>
+     <width>900</width>
      <height>21</height>
     </rect>
    </property>

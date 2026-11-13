@@ -19,10 +19,10 @@
 // open joins that clip. If the detector is still firing when a clip reaches
 // its cap, the next clip starts at once and overlaps the one just ended.
 //
-// The source thread calls onFrame. The window thread calls reset and
-// finishPartial only while the source thread is joined or has not started.
-// The buffer queries take the ring lock and may be called from the window
-// timer during streaming.
+// The Session calls onFrame, reset, and finishPartial: on the source thread
+// while the source runs, and on the window thread only while the source
+// thread is joined or has not started. The buffer queries take the ring lock
+// and may be called from the window timer during streaming.
 class EventCapture
 {
 public:

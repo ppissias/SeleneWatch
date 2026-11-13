@@ -103,6 +103,13 @@ Command Line Build (Manual)
 
   (Release uses --preset Release-x64 and out\build\release.)
 
+Running the Tests
+  ctest --test-dir out\build\debug --output-on-failure
+  CTest runs SeleneWatchTests with "-o -,tap". On Windows, Qt Test's plain text goes to the
+  debugger instead of stdout when the process has no console of its own (as under CTest or an
+  automation tool). TAP always reaches stdout. From a console window,
+  out\build\debug\SeleneWatchTests.exe prints plain text as usual; elsewhere add "-o -,tap".
+
 Running the Executable from the Command Line
   Ensure Qt runtime DLLs and plugins are accessible:
   set PATH=C:\dev\tools\Qt\6.12.0\msvc2022_64\bin;%PATH%

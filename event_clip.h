@@ -1,6 +1,7 @@
 #pragma once
 
 #include "frame.h"
+#include "stream_info.h"
 
 #include <chrono>
 #include <vector>
@@ -41,4 +42,8 @@ struct EventClip
     // Frames before and after the first trigger frame.
     int framesBefore{0};
     int framesAfter{0};
+
+    // What the source said about its stream. Added when the clip is handed
+    // to the writer.
+    StreamInfo stream;
 };

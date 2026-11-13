@@ -1,30 +1,30 @@
 #pragma once
 
-#include "event_capture.h"
 #include "event_writer.h"
 #include "frame.h"
-#include "latest_frame_slot.h"
-#include "synthetic_frame_source.h"
+#include "frame_source.h"
+#include "session.h"
 #include "ui_mainwindow.h"
 
 #include <QtCore/QString>
 #include <QtGui/QImage>
-#include <QtWidgets/QMainWindow>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QMainWindow>
 
-#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 
 class QTimer;
+class RecordingSource;
+class SyntheticFrameSource;
 
-// The window: preview, controls, and status.
+// The window: source selection, preview, controls, and status.
 //
-// It also wires the frame path together. onFrameArrived runs on the source
-// thread: it publishes the frame, offers it to the preview, and runs the
-// capture. Finished clips go from the capture straight to the writer. The
-// window is only told about candidates and write results; nothing on the
-// frame path waits for it.
+// The frame path lives in the Session. The window makes the selected source
+// at each Start, hands it to the Session, and is told about frames,
+// candidates, written clips, and the end of a recording. Nothing on the
+// frame path waits for the window.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -36,52 +36,62 @@ public:
 private slots:
     void onStartClicked();
     void onStopClicked();
+    void onOpenFileClicked();
+    void onSourceKindChanged();
     void onTargetFpsChanged(int fps);
+    void onSpeedChanged();
     void onInjectFlashClicked();
 
 private:
     void setupStatusBar();
+
+    // The source the controls describe. Null, with a message, when none can be made.
+    std::unique_ptr<FrameSource> makeSource();
+
+    // Stops the session after Stop, the end of a recording, or a failure.
+    void finishStream();
+
+    void updateControls();
     void updateBufferReadout();
     void updateStreamReadout();
     void updateCandidateReadout();
     void updateStatusLabel();
+    void updateFrameLabel(const Frame& frame);
 
-    // Source thread.
-    void onFrameArrived(std::shared_ptr<Frame> frame);
-
-    // GUI thread, queued from the source and writer threads.
+    // Session notifications, on the GUI thread.
     void showLatestFrame();
     void onCandidateStarted();
     void onClipWritten(const ClipWriteResult& result);
+    void onPlaybackEnded();
     void onSourceFailed(const QString& message);
 
     void displayImage(const QImage& image);
+    [[nodiscard]] bool recordingSelected() const;
 
     Ui::MainWindowClass ui;
-    std::unique_ptr<EventWriter> eventWriter_;
-    std::unique_ptr<EventCapture> capture_;
-    std::unique_ptr<SyntheticFrameSource> frameSource_;
+    std::unique_ptr<Session> session_;
+
+    // The current source, where it has controls of its own. Owned by the session.
+    SyntheticFrameSource* synthetic_{nullptr};
+    RecordingSource* recording_{nullptr};
+
+    QString recordingPath_;
 
     QLabel* statusLabel_{nullptr};
     QLabel* fpsLabel_{nullptr};
     QLabel* framesLabel_{nullptr};
     QLabel* candidatesLabel_{nullptr};
     QLabel* bufferLabel_{nullptr};
-    QLabel* resolutionLabel_{nullptr};
+    QLabel* frameLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
 
-    // Acquisition count. The source thread increments it; the UI timer reads it.
-    std::atomic<uint64_t> acquiredFrames_{0};
     uint64_t lastAcquiredSample_{0};
     std::chrono::steady_clock::time_point lastFpsSampleTime_{};
 
-    // Newest frame for the preview. The source thread puts, the GUI thread takes.
-    LatestFrameSlot previewSlot_;
-
-    // GUI thread only.
     int candidates_{0};
     int clipsNotSaved_{0};
     bool sourceFailed_{false};
+    bool playbackEnded_{false};
 
     // The session's record is broken. Shown until the stream is restarted.
     bool recordFailed_{false};

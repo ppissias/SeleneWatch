@@ -4,9 +4,17 @@
 
 #include <vector>
 
+// The Feature-4 trigger, kept until Feature-9 replaces it. Its thresholds
+// were chosen for the synthetic image and are not meant for real data.
+//
 // Compares each frame with a held reference. The reference stays on the
 // pre-flash image while a possible flash is in progress, so the second
 // bright frame is not compared with the first bright frame.
+//
+// It reads one 8-bit value per pixel across the whole frame: Mono8 as
+// stored, Mono16 as its top 8 significant bits, so that the threshold keeps
+// its meaning, and RGB888 as the mean of the three channels. A Bayer mosaic
+// is read as it is. The frame itself is never changed.
 //
 // A run is a stretch of consecutive rising frames. A run becomes a
 // candidate on its second frame, and it is one candidate however long it
@@ -22,7 +30,8 @@ public:
 
     // Call once for every frame. True on the one frame where a run becomes
     // a candidate: the second consecutive frame that rises enough against
-    // the pre-flash reference.
+    // the pre-flash reference. Throws std::invalid_argument for a frame
+    // whose data does not match its size and format.
     bool observe(const Frame& frame);
 
     // True while the latest frame belongs to a run that is a candidate.
@@ -34,9 +43,11 @@ public:
     [[nodiscard]] uint64_t onsetFrameIndex() const;
 
 private:
-    void remember(const Frame& frame);
-    [[nodiscard]] int countRisingPixels(const Frame& frame) const;
+    void remember();
+    [[nodiscard]] int countRisingPixels() const;
 
+    // The 8-bit values of the latest frame and of the reference.
+    std::vector<uint8_t> values_;
     std::vector<uint8_t> reference_;
     int referenceWidth_{0};
     int referenceHeight_{0};

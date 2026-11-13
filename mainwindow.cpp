@@ -1,24 +1,28 @@
 #include "mainwindow.h"
 
 #include "preview_image.h"
+#include "recording_source.h"
+#include "synthetic_frame_source.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
-#include <QtCore/QMetaObject>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
 #include <QtGui/QPixmap>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QStatusBar>
 
-#include <string>
+#include <filesystem>
 #include <utility>
 
 namespace {
 
-// Frames of history kept in the ring.
-constexpr size_t kRingFrames = 150;
+// Entries of the source and speed boxes, in the order of the form.
+constexpr int kSyntheticEntry = 0;
+constexpr int kFastEntry = 1;
 
-// Frames that may wait for the writer: two clips of the maximum length.
-constexpr size_t kMaxQueuedFrames = 2 * (kRingFrames + static_cast<size_t>(kMaxPostEventFrames));
+constexpr int kSyntheticWidth = 640;
+constexpr int kSyntheticHeight = 480;
 
 } // namespace
 
@@ -29,39 +33,31 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Clips are written next to the executable.
     const QString outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
-    eventWriter_ = std::make_unique<EventWriter>(this, outputRoot, kMaxQueuedFrames,
-        [this](const ClipWriteResult& result) { onClipWritten(result); });
 
-    // A finished clip goes straight from the capture to the writer, on the
-    // source thread. The window is not in between.
-    capture_ = std::make_unique<EventCapture>(
-        kRingFrames,
-        [this] {
-            QMetaObject::invokeMethod(this, [this] { onCandidateStarted(); }, Qt::QueuedConnection);
-        },
-        [writer = eventWriter_.get()](EventClip clip) { writer->submit(std::move(clip)); });
+    Session::Notifications notifications;
+    notifications.previewReady = [this] { showLatestFrame(); };
+    notifications.candidateStarted = [this] { onCandidateStarted(); };
+    notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
+    notifications.ended = [this] { onPlaybackEnded(); };
+    notifications.failed = [this](const QString& message) { onSourceFailed(message); };
+    session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
 
-    frameSource_ = std::make_unique<SyntheticFrameSource>(640, 480, ui.targetFpsSpinBox->value());
-    frameSource_->setFrameCallback([this](std::shared_ptr<Frame> frame) {
-        onFrameArrived(std::move(frame));
-    });
-    frameSource_->setErrorCallback([this](const std::string& message) {
-        const QString text = QString::fromStdString(message);
-        QMetaObject::invokeMethod(this, [this, text] {
-            onSourceFailed(text);
-        }, Qt::QueuedConnection);
-    });
-
     connect(ui.startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui.stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
+    connect(ui.openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
     connect(ui.injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
+    connect(ui.sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
+    connect(ui.speedComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSpeedChanged);
+    connect(ui.loopCheckBox, &QCheckBox::toggled, this, &MainWindow::updateControls);
     connect(ui.targetFpsSpinBox, &QSpinBox::valueChanged, this, &MainWindow::onTargetFpsChanged);
 
     bufferReadoutTimer_ = new QTimer(this);
     bufferReadoutTimer_->setInterval(1000);
     connect(bufferReadoutTimer_, &QTimer::timeout, this, &MainWindow::updateStreamReadout);
+
+    updateControls();
 }
 
 MainWindow::~MainWindow()
@@ -70,18 +66,8 @@ MainWindow::~MainWindow()
     {
         bufferReadoutTimer_->stop();
     }
-    if (frameSource_)
-    {
-        frameSource_->stop();
-    }
-    if (capture_)
-    {
-        capture_->finishPartial();
-    }
-    if (eventWriter_)
-    {
-        eventWriter_->shutdown();
-    }
+    // The session stops its source and writes what is queued.
+    session_.reset();
 }
 
 void MainWindow::setupStatusBar()
@@ -91,43 +77,63 @@ void MainWindow::setupStatusBar()
     framesLabel_ = new QLabel("Frames: 0", this);
     candidatesLabel_ = new QLabel(this);
     bufferLabel_ = new QLabel(this);
-    resolutionLabel_ = new QLabel("640 x 480 (Mono8)", this);
+    frameLabel_ = new QLabel("No frame yet", this);
 
     statusLabel_->setMinimumWidth(150);
     fpsLabel_->setMinimumWidth(80);
     framesLabel_->setMinimumWidth(100);
     candidatesLabel_->setMinimumWidth(110);
     bufferLabel_->setMinimumWidth(210);
-    resolutionLabel_->setMinimumWidth(120);
+    frameLabel_->setMinimumWidth(160);
 
     statusBar()->addPermanentWidget(statusLabel_);
     statusBar()->addPermanentWidget(fpsLabel_);
     statusBar()->addPermanentWidget(framesLabel_);
     statusBar()->addPermanentWidget(candidatesLabel_);
     statusBar()->addPermanentWidget(bufferLabel_);
-    statusBar()->addPermanentWidget(resolutionLabel_);
+    statusBar()->addPermanentWidget(frameLabel_);
 
     updateBufferReadout();
     updateCandidateReadout();
 }
 
+bool MainWindow::recordingSelected() const
+{
+    return ui.sourceComboBox->currentIndex() != kSyntheticEntry;
+}
+
+// Which controls can be used depends on the source and on whether it runs.
+void MainWindow::updateControls()
+{
+    const bool running = session_->isRunning();
+    const bool recording = recordingSelected();
+
+    ui.startButton->setEnabled(!running);
+    ui.stopButton->setEnabled(running);
+    ui.injectFlashButton->setEnabled(running && synthetic_ != nullptr);
+
+    ui.sourceComboBox->setEnabled(!running);
+    ui.openFileButton->setEnabled(!running && recording);
+    ui.loopCheckBox->setEnabled(!running && recording);
+    ui.loopSecondsSpinBox->setEnabled(!running && recording && ui.loopCheckBox->isChecked());
+
+    // The speed may change while a recording plays.
+    ui.speedComboBox->setEnabled(recording);
+}
+
 void MainWindow::updateBufferReadout()
 {
-    if (!capture_ || !bufferLabel_)
+    if (!bufferLabel_)
     {
         return;
     }
 
     // The memory is that of every live frame: the ring, clips being
     // collected or waiting for the writer, and buffers waiting for reuse.
-    const size_t stored = capture_->bufferSize();
-    const size_t cap = capture_->bufferCapacity();
-    const size_t liveBytes = frameSource_ ? frameSource_->liveFrameBytes() : 0;
-    const double mb = static_cast<double>(liveBytes) / 1'000'000.0;
-
+    const double mb = static_cast<double>(session_->liveFrameBytes()) / 1'000'000.0;
     bufferLabel_->setText(QString("Buffer: %1/%2 frames (%3 MB live)")
-        .arg(stored)
-        .arg(cap)
+        .arg(session_->bufferSize())
+        .arg(session_->bufferCapacity())
         .arg(mb, 0, 'f', 1));
 }
 
@@ -136,10 +142,10 @@ void MainWindow::updateStreamReadout()
     updateBufferReadout();
 
     const auto now = std::chrono::steady_clock::now();
-    const uint64_t acquired = acquiredFrames_.load(std::memory_order_relaxed);
+    const uint64_t acquired = session_->acquiredFrames();
     const double elapsed = std::chrono::duration<double>(now - lastFpsSampleTime_).count();
 
-    if (fpsLabel_ && elapsed > 0.0)
+    if (elapsed > 0.0)
     {
         const double fps = static_cast<double>(acquired - lastAcquiredSample_) / elapsed;
         fpsLabel_->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
@@ -147,11 +153,7 @@ void MainWindow::updateStreamReadout()
 
     lastAcquiredSample_ = acquired;
     lastFpsSampleTime_ = now;
-
-    if (framesLabel_)
-    {
-        framesLabel_->setText(QString("Frames: %1").arg(acquired));
-    }
+    framesLabel_->setText(QString("Frames: %1").arg(acquired));
 }
 
 void MainWindow::updateCandidateReadout()
@@ -168,8 +170,6 @@ void MainWindow::updateCandidateReadout()
 // notification cannot leave a stale text behind.
 void MainWindow::updateStatusLabel()
 {
-    const bool streaming = frameSource_ && frameSource_->isRunning();
-
     if (sourceFailed_)
     {
         statusLabel_->setText("Status: Source failed");
@@ -178,9 +178,13 @@ void MainWindow::updateStatusLabel()
     {
         statusLabel_->setText("Status: Recording failed");
     }
-    else if (streaming)
+    else if (session_->isRunning())
     {
-        statusLabel_->setText("Status: Streaming");
+        statusLabel_->setText(recording_ ? "Status: Playing" : "Status: Streaming");
+    }
+    else if (playbackEnded_)
+    {
+        statusLabel_->setText("Status: Playback finished");
     }
     else
     {
@@ -188,87 +192,158 @@ void MainWindow::updateStatusLabel()
     }
 }
 
+void MainWindow::updateFrameLabel(const Frame& frame)
+{
+    QString text = QString("%1 x %2 %3").arg(frame.width).arg(frame.height).arg(pixelFormatName(frame.format));
+    if (frame.format == PixelFormat::Mono16)
+    {
+        text += QString(", %1 bits %2").arg(frame.significantBits)
+            .arg(frame.alignment == BitAlignment::High ? "high" : "low");
+    }
+    if (frame.bayer != BayerPattern::None)
+    {
+        text += QString(", Bayer %1").arg(bayerPatternName(frame.bayer));
+    }
+    if (frameLabel_->text() != text)
+    {
+        frameLabel_->setText(text);
+    }
+}
+
+std::unique_ptr<FrameSource> MainWindow::makeSource()
+{
+    synthetic_ = nullptr;
+    recording_ = nullptr;
+    const int fps = ui.targetFpsSpinBox->value();
+
+    if (!recordingSelected())
+    {
+        auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
+        synthetic_ = source.get();
+        return source;
+    }
+
+    if (recordingPath_.isEmpty())
+    {
+        statusBar()->showMessage("Choose a recording file first");
+        return nullptr;
+    }
+
+    auto source = std::make_unique<RecordingSource>(std::filesystem::path(recordingPath_.toStdWString()));
+    source->setLoopSeconds(ui.loopCheckBox->isChecked() ? ui.loopSecondsSpinBox->value() : 0.0);
+    source->setNominalFps(fps);
+    source->setSpeed(ui.speedComboBox->currentIndex() == kFastEntry
+        ? RecordingSource::Speed::Fast : RecordingSource::Speed::RealTime);
+    recording_ = source.get();
+    return source;
+}
+
 void MainWindow::onStartClicked()
 {
+    std::unique_ptr<FrameSource> source = makeSource();
+    if (!source)
+    {
+        return;
+    }
+    session_->setSource(std::move(source));
+
+    QString error;
+    if (!session_->start(error))
+    {
+        synthetic_ = nullptr;
+        recording_ = nullptr;
+        statusBar()->showMessage(QString("Cannot start: %1").arg(error));
+        updateControls();
+        updateStatusLabel();
+        return;
+    }
+
     sourceFailed_ = false;
     recordFailed_ = false;
+    playbackEnded_ = false;
     candidates_ = 0;
     clipsNotSaved_ = 0;
-    acquiredFrames_.store(0, std::memory_order_relaxed);
     lastAcquiredSample_ = 0;
     lastFpsSampleTime_ = std::chrono::steady_clock::now();
     framesLabel_->setText("Frames: 0");
     fpsLabel_->setText("FPS: --");
     updateCandidateReadout();
-
-    capture_->reset();
     updateBufferReadout();
+    statusBar()->clearMessage();
 
-    frameSource_->setTargetFps(ui.targetFpsSpinBox->value());
-    frameSource_->start();
     bufferReadoutTimer_->start();
-
-    ui.startButton->setEnabled(false);
-    ui.stopButton->setEnabled(true);
-    ui.injectFlashButton->setEnabled(true);
+    updateControls();
     updateStatusLabel();
 }
 
 void MainWindow::onStopClicked()
 {
+    finishStream();
+}
+
+void MainWindow::finishStream()
+{
     bufferReadoutTimer_->stop();
-    frameSource_->stop();
-    capture_->finishPartial();
+    session_->stop();
 
-    ui.startButton->setEnabled(true);
-    ui.stopButton->setEnabled(false);
-    ui.injectFlashButton->setEnabled(false);
     fpsLabel_->setText("FPS: --");
-    framesLabel_->setText(QString("Frames: %1").arg(acquiredFrames_.load(std::memory_order_relaxed)));
-
+    framesLabel_->setText(QString("Frames: %1").arg(session_->acquiredFrames()));
+    updateControls();
     updateStatusLabel();
     updateBufferReadout();
 }
 
+void MainWindow::onOpenFileClicked()
+{
+    const QString startDir = recordingPath_.isEmpty() ? QString() : QFileInfo(recordingPath_).absolutePath();
+    const QString path = QFileDialog::getOpenFileName(this, "Open recording", startDir,
+        "SER recordings (*.ser);;All files (*)");
+    if (path.isEmpty())
+    {
+        return;
+    }
+
+    recordingPath_ = path;
+    ui.fileLabel->setText(QFileInfo(path).fileName());
+    ui.fileLabel->setToolTip(QDir::toNativeSeparators(path));
+}
+
+void MainWindow::onSourceKindChanged()
+{
+    updateControls();
+}
+
 void MainWindow::onInjectFlashClicked()
 {
-    if (frameSource_)
+    if (synthetic_)
     {
-        frameSource_->requestFlash();
+        synthetic_->requestFlash();
     }
 }
 
 void MainWindow::onTargetFpsChanged(int fps)
 {
-    if (frameSource_)
+    if (synthetic_)
     {
-        frameSource_->setTargetFps(fps);
+        synthetic_->setTargetFps(fps);
     }
 }
 
-// Source thread. From the moment the frame is held as a FramePtr it is
-// published: nobody writes it again.
-void MainWindow::onFrameArrived(std::shared_ptr<Frame> frame)
+void MainWindow::onSpeedChanged()
 {
-    acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
-
-    const FramePtr published = std::move(frame);
-
-    // The preview converts on the GUI thread. It is woken once per frame it
-    // has not yet taken, and skips frames when it falls behind.
-    if (previewSlot_.put(published))
+    if (recording_)
     {
-        QMetaObject::invokeMethod(this, [this] { showLatestFrame(); }, Qt::QueuedConnection);
+        recording_->setSpeed(ui.speedComboBox->currentIndex() == kFastEntry
+            ? RecordingSource::Speed::Fast : RecordingSource::Speed::RealTime);
     }
-
-    capture_->onFrame(published);
 }
 
 void MainWindow::showLatestFrame()
 {
-    const FramePtr frame = previewSlot_.take();
+    const FramePtr frame = session_->takePreviewFrame();
     if (frame)
     {
+        updateFrameLabel(*frame);
         displayImage(frameToPreviewImage(*frame));
     }
 }
@@ -287,13 +362,13 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
         recordFailed_ = true;
     }
 
-    if (result.folder.isEmpty())
+    if (!result.notSaved.isEmpty())
     {
         ++clipsNotSaved_;
         updateCandidateReadout();
         statusBar()->showMessage(QString("Clip not saved: %1").arg(result.notSaved));
     }
-    else
+    else if (!result.folder.isEmpty())
     {
         statusBar()->showMessage(result.folder);
     }
@@ -301,22 +376,27 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
     updateStatusLabel();
 }
 
+void MainWindow::onPlaybackEnded()
+{
+    // A notification from an earlier run is ignored.
+    if (!session_->isRunning() || !session_->sourceFinished())
+    {
+        return;
+    }
+    playbackEnded_ = true;
+    finishStream();
+    statusBar()->showMessage("Playback finished");
+}
+
 void MainWindow::onSourceFailed(const QString& message)
 {
-    sourceFailed_ = true;
-    if (bufferReadoutTimer_)
+    if (!session_->isRunning() || !session_->sourceFinished())
     {
-        bufferReadoutTimer_->stop();
+        return;
     }
-    frameSource_->stop();
-    capture_->finishPartial();
-
-    ui.startButton->setEnabled(true);
-    ui.stopButton->setEnabled(false);
-    ui.injectFlashButton->setEnabled(false);
+    sourceFailed_ = true;
+    finishStream();
     statusBar()->showMessage(message);
-    fpsLabel_->setText("FPS: --");
-    updateStatusLabel();
 }
 
 void MainWindow::displayImage(const QImage& image)

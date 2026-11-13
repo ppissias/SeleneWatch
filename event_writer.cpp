@@ -8,10 +8,15 @@
 #include <QtCore/QTimeZone>
 #include <QtGui/QImage>
 
+#include <bit>
 #include <exception>
 #include <utility>
 
 namespace {
+
+// Mono16 samples are stored little-endian. QImage's 16-bit formats hold
+// native-endian words, so the two agree only on a little-endian machine.
+static_assert(std::endian::native == std::endian::little);
 
 QDateTime utcDateTime(std::chrono::system_clock::time_point time)
 {
@@ -41,16 +46,18 @@ QString frameFileName(size_t index)
 // error, never a fallback to another format.
 QImage frameToFileImage(const Frame& frame, QString& error)
 {
-    int bytesPerPixel = 0;
     QImage::Format imageFormat = QImage::Format_Invalid;
     switch (frame.format)
     {
     case PixelFormat::Mono8:
-        bytesPerPixel = 1;
         imageFormat = QImage::Format_Grayscale8;
         break;
+    case PixelFormat::Mono16:
+        // The samples are written as they are, wherever their significant
+        // bits sit. A 12-bit sample in the top bits stays in the top bits.
+        imageFormat = QImage::Format_Grayscale16;
+        break;
     case PixelFormat::RGB888:
-        bytesPerPixel = 3;
         imageFormat = QImage::Format_RGB888;
         break;
     }
@@ -61,7 +68,7 @@ QImage frameToFileImage(const Frame& frame, QString& error)
         return {};
     }
 
-    const qsizetype bytesPerLine = static_cast<qsizetype>(frame.width) * bytesPerPixel;
+    const qsizetype bytesPerLine = static_cast<qsizetype>(frame.width) * bytesPerPixel(frame.format);
     const qsizetype expected = bytesPerLine * frame.height;
     if (frame.width <= 0 || frame.height <= 0 || static_cast<qsizetype>(frame.data.size()) != expected)
     {
@@ -99,6 +106,35 @@ QString createClipFolder(const QString& outputRoot, const QString& stamp, QStrin
 
     error = QString("could not create a folder for %1 in %2").arg(stamp, outputRoot);
     return {};
+}
+
+QString orUnknown(const std::string& text)
+{
+    return text.empty() ? QString("unknown") : QString::fromStdString(text);
+}
+
+// The stream and the frame layout, at the top of event.txt.
+void writeStreamLines(QTextStream& out, const EventClip& clip)
+{
+    out << "source: " << orUnknown(clip.stream.source) << "\n";
+    out << "camera: " << orUnknown(clip.stream.camera) << "\n";
+    out << "frame_time: " << orUnknown(clip.stream.frameTime) << "\n";
+    out << "frame_index: " << orUnknown(clip.stream.frameIndex) << "\n";
+    if (!clip.stream.playback.empty())
+    {
+        out << "playback: " << QString::fromStdString(clip.stream.playback) << "\n";
+    }
+
+    if (clip.frames.empty())
+    {
+        return;
+    }
+    const Frame& first = *clip.frames.front();
+    out << "frame_size: " << first.width << "x" << first.height << "\n";
+    out << "pixel_format: " << pixelFormatName(first.format) << "\n";
+    out << "significant_bits: " << first.significantBits << "\n";
+    out << "bit_alignment: " << (first.alignment == BitAlignment::High ? "high" : "low") << "\n";
+    out << "bayer_pattern: " << bayerPatternName(first.bayer) << "\n";
 }
 
 QString triggerFields(const ClipTrigger& trigger)
@@ -160,6 +196,31 @@ void EventWriter::submit(EventClip clip)
     {
         // Nothing can be written or logged any more. The window is told.
         deliver(ClipWriteResult{{}, "the writer has stopped", true});
+        return;
+    }
+    ready_.notify_one();
+}
+
+void EventWriter::logSessionStart(const StreamInfo& stream)
+{
+    bool ended = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (ended_)
+        {
+            ended = true;
+        }
+        else
+        {
+            Job job;
+            job.sessionStart = SessionStart{std::chrono::system_clock::now(), stream};
+            queue_.push_back(std::move(job));
+        }
+    }
+
+    if (ended)
+    {
+        deliver(ClipWriteResult{{}, {}, true});
         return;
     }
     ready_.notify_one();
@@ -245,13 +306,24 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             queuedFrames_ -= job.clip.frames.size();
         }
 
-        deliver(process(job));
+        // A session_start line is reported only when it could not be written.
+        const ClipWriteResult result = process(job);
+        if (!job.sessionStart || result.recordFailed)
+        {
+            deliver(result);
+        }
     }
 }
 
 ClipWriteResult EventWriter::process(Job& job)
 {
     ClipWriteResult result;
+
+    if (job.sessionStart)
+    {
+        result.recordFailed = !appendSessionStart(*job.sessionStart);
+        return result;
+    }
 
     if (!job.notSavedReason.isEmpty())
     {
@@ -317,6 +389,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
 
     {
         QTextStream out(&note);
+        writeStreamLines(out, clip);
         out << "triggers: " << clip.triggers.size() << "\n";
         for (const ClipTrigger& trigger : clip.triggers)
         {
@@ -372,6 +445,42 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
 // One line per candidate, saved or not. False when the log cannot be written.
 bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult& result) const
 {
+    // The outcome comes last on the line, because a reason can contain spaces.
+    const QString outcome = result.folder.isEmpty()
+        ? QString("not_saved=%1").arg(result.notSaved)
+        : QString("clip=%1").arg(QDir(result.folder).dirName());
+
+    QString lines;
+    QTextStream out(&lines);
+    for (const ClipTrigger& trigger : clip.triggers)
+    {
+        out << utcText(trigger.triggerTime) << " " << triggerFields(trigger)
+            << " delta_threshold=" << clip.deltaThreshold
+            << " min_bright_pixels=" << clip.minBrightPixels
+            << " " << outcome << "\n";
+    }
+    out.flush();
+    return appendLog(lines);
+}
+
+// The line that opens each stream's entries. Its time is the host's clock
+// at Start; the candidate lines that follow carry the frames' own times.
+// The values are quoted, since a path or a description holds spaces.
+bool EventWriter::appendSessionStart(const SessionStart& start) const
+{
+    QString line = utcText(start.time) + " session_start";
+    line += QString(" camera=\"%1\"").arg(orUnknown(start.stream.camera));
+    if (!start.stream.playback.empty())
+    {
+        line += QString(" playback=\"%1\"").arg(QString::fromStdString(start.stream.playback));
+    }
+    line += QString(" source=\"%1\"\n").arg(orUnknown(start.stream.source));
+    return appendLog(line);
+}
+
+// Appends to candidates.txt. False when the log cannot be written.
+bool EventWriter::appendLog(const QString& lines) const
+{
     if (!QDir().mkpath(outputRoot_))
     {
         return false;
@@ -383,19 +492,8 @@ bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult&
         return false;
     }
 
-    // The outcome comes last on the line, because a reason can contain spaces.
-    const QString outcome = result.folder.isEmpty()
-        ? QString("not_saved=%1").arg(result.notSaved)
-        : QString("clip=%1").arg(QDir(result.folder).dirName());
-
     QTextStream out(&log);
-    for (const ClipTrigger& trigger : clip.triggers)
-    {
-        out << utcText(trigger.triggerTime) << " " << triggerFields(trigger)
-            << " delta_threshold=" << clip.deltaThreshold
-            << " min_bright_pixels=" << clip.minBrightPixels
-            << " " << outcome << "\n";
-    }
+    out << lines;
     out.flush();
     return out.status() == QTextStream::Ok && log.flush();
 }
