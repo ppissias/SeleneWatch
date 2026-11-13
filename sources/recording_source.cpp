@@ -1,8 +1,8 @@
-#include "recording_source.h"
+#include "sources/recording_source.h"
 
-#include "avi_reader.h"
-#include "fine_sleep.h"
-#include "ser_reader.h"
+#include "recording/avi_reader.h"
+#include "sources/fine_sleep.h"
+#include "recording/ser_reader.h"
 
 #include <algorithm>
 #include <cctype>

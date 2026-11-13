@@ -1,8 +1,8 @@
 #pragma once
 
-#include "firecapture_log.h"
+#include "recording/firecapture_log.h"
 #include "frame.h"
-#include "recording_reader.h"
+#include "recording/recording_reader.h"
 
 #include <chrono>
 #include <cstdint>
@@ -80,6 +80,7 @@ private:
     BitAlignment alignment_{BitAlignment::Low};
     bool bigEndian_{false};
     bool bgr_{false};
+    bool testSource_{false};
 
     int frameCount_{0};
     int headerFrameCount_{0};

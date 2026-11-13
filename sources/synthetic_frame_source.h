@@ -2,7 +2,7 @@
 
 #include "frame.h"
 #include "frame_pool.h"
-#include "frame_source.h"
+#include "sources/frame_source.h"
 
 #include <atomic>
 #include <stop_token>

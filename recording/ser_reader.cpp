@@ -1,4 +1,4 @@
-#include "ser_reader.h"
+#include "recording/ser_reader.h"
 
 #include "stream_info.h"
 
@@ -87,6 +87,7 @@ std::chrono::system_clock::time_point serTicksToTime(int64_t ticks)
 bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std::string& error)
 {
     pathText_ = utf8Path(path);
+    testSource_ = false;
     fallbackFps_ = std::max(1.0, fallbackFps);
 
     std::error_code sizeError;
@@ -130,6 +131,7 @@ bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std:
     const int depth = readInt32(header + kPixelDepthAt);
     headerFrameCount_ = readInt32(header + kFrameCountAt);
     instrument_ = readText(header + kInstrumentAt, kTextFieldBytes);
+    testSource_ = readText(header + 42, kTextFieldBytes).starts_with("SeleneWatch TEST DATA");
     startTicks_ = readInt64(header + kDateTimeUtcAt);
 
     if (width_ <= 0 || height_ <= 0)
@@ -273,6 +275,7 @@ StreamInfo SerReader::describe() const
     {
         info.conversion = "none";
     }
+    if (testSource_) info.conversion += "; test data, marked by the originating SeleneWatch writer";
     return info;
 }
 
@@ -384,6 +387,7 @@ bool SerReader::readFrame(int index, Frame& frame, std::string& error)
     frame.bayer = bayer_;
     frame.blip.reset();
     frame.syntheticFlash = false;
+    frame.testSource = testSource_;
     return true;
 }
 

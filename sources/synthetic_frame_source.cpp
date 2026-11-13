@@ -1,7 +1,7 @@
-#include "synthetic_frame_source.h"
+#include "sources/synthetic_frame_source.h"
 
-#include "fine_sleep.h"
-#include "synthetic_scene.h"
+#include "sources/fine_sleep.h"
+#include "sources/synthetic_scene.h"
 
 #include <algorithm>
 #include <chrono>

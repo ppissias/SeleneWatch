@@ -3,11 +3,15 @@ project(SeleneWatch LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 set(CMAKE_NO_SYSTEM_FROM_IMPORTED TRUE)
-
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 qt_standard_project_setup()
+
+execute_process(COMMAND git describe --always --dirty WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE SELENEWATCH_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT SELENEWATCH_VERSION)
+    set(SELENEWATCH_VERSION "unknown")
+endif()
 
 function(selenewatch_compile_options target)
     if(MSVC)
@@ -15,132 +19,56 @@ function(selenewatch_compile_options target)
     endif()
 endfunction()
 
-set(PROJECT_SOURCES
-    main.cpp
-    mainwindow.ui
-    mainwindow.h
-    mainwindow.cpp
-    frame.h
-    blip.h
-    blip_injector.h
-    blip_injector.cpp
-    frame_pool.h
-    frame_pool.cpp
-    latest_frame_slot.h
-    stream_info.h
-    frame_source.h
-    fine_sleep.h
-    fine_sleep.cpp
-    preview_image.h
-    preview_image.cpp
-    preview_widget.h
-    preview_widget.cpp
-    synthetic_scene.h
-    synthetic_scene.cpp
-    synthetic_frame_source.h
-    synthetic_frame_source.cpp
-    recording_reader.h
-    firecapture_log.h
-    firecapture_log.cpp
-    ser_reader.h
-    ser_reader.cpp
-    avi_reader.h
-    avi_reader.cpp
-    recording_source.h
-    recording_source.cpp
-    session.h
-    session.cpp
-    frame_ring_buffer.h
-    frame_ring_buffer.cpp
-    flash_detector.h
-    flash_detector.cpp
-    event_clip.h
-    event_capture.h
-    event_capture.cpp
-    event_writer.h
-    event_writer.cpp
+# One processing library, shared by the application and tests. It has no
+# Widgets dependency; only the application and preview tests may use them.
+add_library(selenewatch_core STATIC
+    blip_injector.cpp frame_pool.cpp preview_image.cpp session.cpp
+    frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
+    sources/fine_sleep.cpp sources/synthetic_scene.cpp
+    sources/synthetic_frame_source.cpp sources/recording_source.cpp
+    recording/firecapture_log.cpp recording/ser_reader.cpp recording/ser_writer.cpp
+    recording/avi_reader.cpp recording/event_writer.cpp
 )
-
+target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(selenewatch_core PUBLIC Qt6::Core Qt6::Gui)
+target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_VERSION="${SELENEWATCH_VERSION}")
 if(WIN32)
-    list(APPEND PROJECT_SOURCES selenewatch.rc)
+    target_link_libraries(selenewatch_core PRIVATE winmm)
 endif()
+selenewatch_compile_options(selenewatch_core)
 
-qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
-
-# The window icon. The PNGs are rendered from icons/selenewatch.svg.
-qt_add_resources(${PROJECT_NAME} "icons"
-    PREFIX "/"
-    FILES
-        icons/selenewatch-16.png
-        icons/selenewatch-32.png
-        icons/selenewatch-48.png
-        icons/selenewatch-256.png
-)
-
-set_target_properties(${PROJECT_NAME}
-    PROPERTIES
-        WIN32_EXECUTABLE TRUE
-)
-
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Widgets
-)
-
-selenewatch_compile_options(${PROJECT_NAME})
-
+qt_add_executable(SeleneWatch main.cpp mainwindow.ui mainwindow.h mainwindow.cpp
+    preview_widget.h preview_widget.cpp)
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE winmm)
+    target_sources(SeleneWatch PRIVATE selenewatch.rc)
 endif()
+qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
+    icons/selenewatch-16.png icons/selenewatch-32.png
+    icons/selenewatch-48.png icons/selenewatch-256.png)
+set_target_properties(SeleneWatch PROPERTIES WIN32_EXECUTABLE TRUE)
+target_link_libraries(SeleneWatch PRIVATE selenewatch_core Qt6::Widgets)
+selenewatch_compile_options(SeleneWatch)
 
 enable_testing()
-
-add_executable(SeleneWatchTests
-    tests/core_tests.cpp
-    blip_injector.cpp
-    frame_pool.cpp
-    fine_sleep.cpp
-    preview_image.cpp
-    synthetic_scene.cpp
-    firecapture_log.cpp
-    ser_reader.cpp
-    avi_reader.cpp
-    recording_source.cpp
-    session.cpp
-    frame_ring_buffer.cpp
-    flash_detector.cpp
-    event_capture.cpp
-    event_writer.cpp
-)
-
-target_include_directories(SeleneWatchTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-target_link_libraries(SeleneWatchTests
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Test
-)
-
-if(WIN32)
-    target_link_libraries(SeleneWatchTests PRIVATE winmm)
-endif()
-
+add_executable(SeleneWatchTests tests/core_tests.cpp)
+target_link_libraries(SeleneWatchTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchTests)
-
-# On Windows, Qt Test's plain text goes to the debugger, not to stdout, when
-# the process has no console of its own, which is how CTest may start it.
-# TAP always goes to stdout, so failures show in CTest's log. Run by hand
-# from a console, the tests print plain text as usual.
+# TAP reaches stdout on Windows even when CTest starts without a console.
 add_test(NAME core COMMAND SeleneWatchTests -o -,tap)
 
-# The preview's coordinate mapping and screen-only selection are tested
-# separately, keeping QWidget out of the core test executable.
 qt_add_executable(SeleneWatchPreviewTests tests/preview_tests.cpp preview_widget.cpp preview_widget.h)
 target_include_directories(SeleneWatchPreviewTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(SeleneWatchPreviewTests PRIVATE Qt6::Widgets Qt6::Test)
 selenewatch_compile_options(SeleneWatchPreviewTests)
 add_test(NAME preview COMMAND SeleneWatchPreviewTests -o -,tap)
 set_tests_properties(preview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchSerTests tests/ser_writer_tests.cpp)
+target_link_libraries(SeleneWatchSerTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchSerTests)
+add_test(NAME ser COMMAND SeleneWatchSerTests -o -,tap)
+
+# Run by hand, with an explicit input and output path; never part of CTest.
+add_executable(SeleneWatchProbe tools/recording_probe.cpp)
+target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
+selenewatch_compile_options(SeleneWatchProbe)

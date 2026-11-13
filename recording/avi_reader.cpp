@@ -1,4 +1,4 @@
-#include "avi_reader.h"
+#include "recording/avi_reader.h"
 
 #include "stream_info.h"
 
@@ -729,5 +729,6 @@ bool AviReader::readFrame(int index, Frame& frame, std::string& error)
     frame.bayer = BayerPattern::None;
     frame.blip.reset();
     frame.syntheticFlash = false;
+    frame.testSource = false;
     return true;
 }

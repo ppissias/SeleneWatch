@@ -1,4 +1,6 @@
-#include "event_writer.h"
+#include "recording/event_writer.h"
+#include "preview_image.h"
+#include "recording/ser_writer.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -6,18 +8,15 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QTextStream>
 #include <QtCore/QTimeZone>
+#include <QtCore/QUuid>
 #include <QtGui/QImage>
+#include <QtGui/QPainter>
 
 #include <algorithm>
-#include <bit>
 #include <exception>
 #include <utility>
 
 namespace {
-
-// Mono16 samples are stored little-endian. QImage's 16-bit formats hold
-// native-endian words, so the two agree only on a little-endian machine.
-static_assert(std::endian::native == std::endian::little);
 
 QDateTime utcDateTime(std::chrono::system_clock::time_point time)
 {
@@ -38,47 +37,7 @@ QString utcText(std::chrono::system_clock::time_point time)
 
 QString frameFileName(size_t index)
 {
-    return QString("%1.png").arg(static_cast<int>(index), 4, 10, QChar('0'));
-}
-
-// The writer's own conversion, separate from the preview's. It wraps the
-// stored samples for the encoder without changing or copying them, so the
-// frame must outlive the image. A frame it cannot write exactly is an
-// error, never a fallback to another format.
-QImage frameToFileImage(const Frame& frame, QString& error)
-{
-    QImage::Format imageFormat = QImage::Format_Invalid;
-    switch (frame.format)
-    {
-    case PixelFormat::Mono8:
-        imageFormat = QImage::Format_Grayscale8;
-        break;
-    case PixelFormat::Mono16:
-        // The samples are written as they are, wherever their significant
-        // bits sit. A 12-bit sample in the top bits stays in the top bits.
-        imageFormat = QImage::Format_Grayscale16;
-        break;
-    case PixelFormat::RGB888:
-        imageFormat = QImage::Format_RGB888;
-        break;
-    }
-
-    if (imageFormat == QImage::Format_Invalid)
-    {
-        error = QString("frame %1 has a pixel format that cannot be written losslessly").arg(frame.frameIndex);
-        return {};
-    }
-
-    const qsizetype bytesPerLine = static_cast<qsizetype>(frame.width) * bytesPerPixel(frame.format);
-    const qsizetype expected = bytesPerLine * frame.height;
-    if (frame.width <= 0 || frame.height <= 0 || static_cast<qsizetype>(frame.data.size()) != expected)
-    {
-        error = QString("frame %1 is %2x%3 but holds %4 bytes")
-            .arg(frame.frameIndex).arg(frame.width).arg(frame.height).arg(frame.data.size());
-        return {};
-    }
-
-    return QImage(frame.data.data(), frame.width, frame.height, bytesPerLine, imageFormat);
+    return QString("%1").arg(static_cast<int>(index), 4, 10, QChar('0'));
 }
 
 // Makes a new folder for one clip. A folder is never reused: when the name
@@ -117,7 +76,7 @@ QString orUnknown(const std::string& text)
 bool containsTestSignal(const EventClip& clip)
 {
     return std::any_of(clip.frames.begin(), clip.frames.end(), [](const FramePtr& frame) {
-        return frame->blip.has_value() || frame->syntheticFlash;
+        return frame->blip.has_value() || frame->syntheticFlash || frame->testSource;
     });
 }
 
@@ -221,6 +180,7 @@ void EventWriter::submit(EventClip clip)
         {
             Job job;
             job.containsTestSignal = testSignal;
+            job.recordId = QUuid::createUuid().toString(QUuid::WithoutBraces);
             if (queuedFrames_ + clip.frames.size() > maxQueuedFrames_)
             {
                 job.notSavedReason = "writer busy";
@@ -365,6 +325,10 @@ ClipWriteResult EventWriter::process(Job& job)
         return result;
     }
 
+    // Flush discovery before touching clip data. A killed write leaves this
+    // pending record, with no outcome, rather than erasing the candidate.
+    result.recordFailed = !appendCandidates(job, result, true);
+
     if (!job.notSavedReason.isEmpty())
     {
         result.notSaved = job.notSavedReason;
@@ -398,7 +362,7 @@ ClipWriteResult EventWriter::process(Job& job)
     // The frames are not needed for the log line.
     job.clip.frames.clear();
 
-    if (!appendCandidates(job.clip, result, job.containsTestSignal))
+    if (!appendCandidates(job, result, false))
     {
         result.recordFailed = true;
     }
@@ -429,6 +393,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
 
     {
         QTextStream out(&note);
+        out << "software: SeleneWatch " << SELENEWATCH_VERSION << "\n";
         writeStreamLines(out, clip);
         writeTestSignalLines(out, clip);
         out << "triggers: " << clip.triggers.size() << "\n";
@@ -445,7 +410,8 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         for (size_t i = 0; i < clip.frames.size(); ++i)
         {
             const Frame& frame = *clip.frames[i];
-            out << frameFileName(i) << " " << frame.frameIndex << " " << utcText(frame.timestamp);
+            out << frameFileName(i) << " " << frame.frameIndex << " " << utcText(frame.timestamp)
+                << " ser_utc_ticks=" << timeToSerTicks(frame.timestamp);
             if (frame.blip)
             {
                 out << " test_blip=" << frame.blip->firstFrameIndex << " blip_frame=" << frame.blip->frameNumber;
@@ -454,26 +420,97 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
             {
                 out << " synthetic_flash";
             }
+            if (frame.testSource) out << " test_source";
             out << "\n";
+            if (i > 0 && frame.frameIndex > clip.frames[i - 1]->frameIndex + 1)
+            {
+                out << "gap: after=" << clip.frames[i - 1]->frameIndex << " before=" << frame.frameIndex
+                    << " missing=" << frame.frameIndex - clip.frames[i - 1]->frameIndex - 1 << "\n";
+            }
+        }
+        out.flush();
+        if (out.status() != QTextStream::Ok || !note.flush())
+        {
+            error = "could not write clip metadata";
+            return {};
         }
     }
     note.close();
 
-    for (size_t i = 0; i < clip.frames.size(); ++i)
+    if (clip.frames.empty())
     {
-        const QString path = dir.filePath(frameFileName(i));
-        const QImage image = frameToFileImage(*clip.frames[i], error);
-        if (image.isNull())
+        error = "the clip has no frames";
+        return {};
+    }
+    QFile evidence(dir.filePath("event.ser"));
+    if (!evidence.open(QIODevice::WriteOnly))
+    {
+        error = "could not open event.ser";
+        return {};
+    }
+    SerWriter ser(evidence);
+    if (!ser.start(*clip.frames.front(), clip.stream.camera, error, containsTestSignal(clip))) return {};
+    for (const FramePtr& frame : clip.frames)
+    {
+        if (!ser.append(*frame, error)) return {};
+    }
+    if (!ser.finish(error) || !evidence.flush())
+    {
+        if (error.isEmpty()) error = "could not flush event.ser";
+        return {};
+    }
+    evidence.close();
+
+    const uint64_t onset = clip.triggers.front().onsetFrameIndex;
+    FramePtr baseline;
+    for (const FramePtr& frame : clip.frames)
+    {
+        if (frame->frameIndex < onset) baseline = frame;
+    }
+    const auto peakTrigger = std::max_element(clip.triggers.begin(), clip.triggers.end(),
+        [](const ClipTrigger& a, const ClipTrigger& b) { return a.brightPixelCount < b.brightPixelCount; });
+    const auto peakFrame = std::find_if(clip.frames.begin(), clip.frames.end(), [&](const FramePtr& frame) {
+        return frame->frameIndex == peakTrigger->triggerFrameIndex;
+    });
+    const FramePtr peak = peakFrame == clip.frames.end() ? clip.frames.front() : *peakFrame;
+    QImage baselineImage;
+    if (baseline)
+    {
+        baselineImage = frameToPreviewImage(*baseline);
+    }
+    else
+    {
+        baselineImage = QImage(peak->width, peak->height, QImage::Format_RGB32);
+        baselineImage.fill(Qt::black);
+        QPainter painter(&baselineImage);
+        painter.setPen(Qt::yellow);
+        painter.drawText(baselineImage.rect(), Qt::AlignCenter, "No pre-onset baseline frame");
+    }
+    if (!baselineImage.save(dir.filePath("01_baseline.png"), "PNG")
+        || !frameToPreviewImage(*peak).save(dir.filePath("02_event_peak.png"), "PNG"))
+    {
+        error = "could not write clip preview images";
+        return {};
+    }
+
+    // Record precisely which frames the display previews represent.
+    if (!note.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        error = "could not finish clip metadata";
+        return {};
+    }
+    {
+        QTextStream out(&note);
+        out << "baseline_frame_index: " << (baseline ? QString::number(baseline->frameIndex) : "unavailable") << "\n";
+        out << "peak_preview_frame_index: " << peak->frameIndex << "\n";
+        out.flush();
+        if (out.status() != QTextStream::Ok || !note.flush())
         {
-            error = QString("%1 (clip left incomplete in %2)").arg(error, folder);
-            return {};
-        }
-        if (!image.save(path, "PNG"))
-        {
-            error = QString("could not write %1").arg(path);
+            error = "could not finish clip metadata";
             return {};
         }
     }
+    note.close();
 
     // The completion marker. A folder without it is a partial clip.
     if (!note.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
@@ -484,7 +521,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     QTextStream done(&note);
     done << "complete: yes\n";
     done.flush();
-    if (done.status() != QTextStream::Ok)
+    if (done.status() != QTextStream::Ok || !note.flush())
     {
         error = QString("could not finish event.txt in %1").arg(folder);
         return {};
@@ -493,8 +530,9 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
 }
 
 // One line per candidate, saved or not. False when the log cannot be written.
-bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult& result, bool containsTestSignal) const
+bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const
 {
+    const EventClip& clip = job.clip;
     // The outcome comes last on the line, because a reason can contain spaces.
     const QString outcome = result.folder.isEmpty()
         ? QString("not_saved=%1").arg(result.notSaved)
@@ -504,11 +542,15 @@ bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult&
     QTextStream out(&lines);
     for (const ClipTrigger& trigger : clip.triggers)
     {
-        out << utcText(trigger.triggerTime) << " " << triggerFields(trigger)
+        out << utcText(trigger.triggerTime) << " ";
+        if (pending) out << "candidate_pending ";
+        out << triggerFields(trigger)
             << " delta_threshold=" << clip.deltaThreshold
             << " min_bright_pixels=" << clip.minBrightPixels
-            << (containsTestSignal ? " contains_test_signal=yes" : "")
-            << " " << outcome << "\n";
+            << (job.containsTestSignal ? " contains_test_signal=yes" : "")
+            << " record_id=" << job.recordId;
+        if (!pending) out << " " << outcome;
+        out << "\n";
     }
     out.flush();
     return appendLog(lines);

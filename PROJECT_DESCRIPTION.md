@@ -229,7 +229,7 @@ Output goes next to the executable for now (a Feature-4 decision). A configurabl
 - The header is 178 bytes, followed by the frames and an optional trailer of one 64-bit time per frame.
 - Trailer times are UTC in 100 ns ticks since 0001-01-01 (the .NET epoch). This is not Windows `FILETIME`, which counts from 1601.
 - The header's `LittleEndian` field is used inverted in practice: capture software writes 0 for little-endian data, and SER Player, PIPP, and Siril read it that way, although the specification's wording says the opposite. SeleneWatch writes 0 for its little-endian data and reads files the way those tools do.
-- `PixelDepthPerPlane` is specified as the number of significant bits, but it cannot be relied on. The observer's FireCapture recordings store 12-bit data in the top bits of the word with `PixelDepthPerPlane` set to 16. The reader therefore inspects the low bits of the first frames of a 16-bit file and records what it finds. The writer's convention for 12-bit data is fixed after a SharpCap file and a file from each of the observer's cameras have been checked the same way (Evidence rule 2).
+- `PixelDepthPerPlane` is specified as the number of significant bits, but it cannot be relied on. The observer's FireCapture recordings store 12-bit data in the top bits of the word with `PixelDepthPerPlane` set to 16. The reader therefore inspects the low bits of the first frames of a 16-bit file and records what it finds. The writer preserves the word layout: low-aligned 9–15-bit samples name that depth; high-aligned samples name 16. Both use two bytes. Significant bits and alignment are also recorded in the sidecar. Both 12-bit layouts were checked in Siril. Camera-specific SharpCap/ZWO/QHY samples are checked when available, before those adapters are merged (Evidence rule 2).
 - Checked on the observer's own files (FireCapture 2.x, November 2026): `LittleEndian` is 0 and the data is little-endian, which confirms the inverted use; every file has a trailer in UT; and the header's local `DateTime` also holds UT, so only `DateTime_UTC` and the trailer are used for time.
 - "12-bit data in the top bits" is nearly but not exactly true of the observer's 16-bit file. In about half its frames one sample has bit 3 set, a half-step between two 12-bit levels, probably from the camera's defect-pixel correction. The reader therefore records 13 significant bits. It records the bits the data uses, never fewer, so no later step can drop a bit that carries data (Feature-6, Part A).
 - Every written file is checked by reading it back in the tests, and by opening it in SER Player, PIPP, or Siril before a release.
@@ -249,7 +249,7 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 ## 11. Code Organization
 
-The sources currently sit flat in the project root, with tests in `tests/`. That is appropriate for the present number of files.
+Acquisition and playback live in `sources/`; format readers, evidence writing, and session logs live in `recording/`. The remaining core and UI files sit at the root, with tests in `tests/`.
 
 A directory is introduced when several files share one job and the dependency direction is clear. The likely first split is `sources/` and `recording/` when Feature-6 adds the recording sources and the SER writer, followed by `cameras/` when Feature-10 adds the two camera adapters. A plausible later layout:
 
@@ -274,7 +274,7 @@ SeleneWatch/
 
 Dependencies point one way: `ui` depends on everything below it; nothing below depends on `ui` or on Qt GUI classes. `guiding` depends on `mounts` and `core`, and not on `capture` or `detection`; the detector and the capture do not know that a mount exists.
 
-When the first directory is split off, everything below `ui` becomes one static library that the application and the tests both link. The build then enforces the boundary, and the tests stop listing the core sources a second time.
+`selenewatch_core` is a static library that the application, core tests, SER tests, and manual recording probe link. It has no Qt Widgets dependency. The window and preview widget compile only into UI targets. Tests no longer list core sources a second time.
 
 ## 12. Development Stages
 
@@ -285,8 +285,8 @@ When the first directory is split off, everything below `ui` becomes one static 
 | 3 | RAM ring buffer and memory readout (the source interface was deferred until a second source existed) | Feature-3 | Done |
 | 4 | First detector and event capture | Feature-4 | Done |
 | 5 | **An evidence-safe core.** Shared frames, detection on every frame, a writer that owns its backlog, a candidate log, and a file conversion separate from the preview | Feature-7 | Done |
-| 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | In progress: playback and test injection done; SER writer next |
-| 7 | **A measured trigger.** Per-pixel noise, the sigma and size rules, and the faint limit measured on the observer's own recordings | Feature-9 | Proposed |
+| 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | Done |
+| 7 | **A measured trigger.** Per-pixel noise, the sigma and size rules, and the faint limit measured on the observer's own recordings | Feature-9 | In progress |
 | 8 | **Seeing the faint side.** Display stretch, debayering for display, and a ring sized in seconds under one RAM limit | Feature-5 | Proposed |
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Proposed |
 | 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Proposed |
@@ -312,7 +312,7 @@ What can move: Stage 8 moves ahead of Stage 7 if the recordings are too dark to 
 - **Guiding on real mounts:** whether the lock template needs refreshing over a session, whether pulses disturb the detector enough to justify tracking-rate offsets, and how to serve alt-azimuth mounts (Feature-8, Open decisions).
 - **Field shift in the detector:** whether the shift measured by the feature lock should align the detector's reference, or whether per-pixel noise already absorbs slow drift. Decided on recordings, with registration.
 - **Clip metadata format:** one machine-readable format that is still easy to read by eye (today `event.txt`; Feature-6 shows a proposed `event_summary.json`). Decided once, for all clips, before the full session record stage.
-- **12-bit data in SER output:** as delivered (top-aligned) with `PixelDepthPerPlane = 16`, or another convention. Settled in Feature-6 by inspecting the observer's own recordings from the common capture programs.
+- **Camera-specific 12-bit layouts:** SER output preserves the delivered words (Feature-6). SharpCap/ZWO/QHY sample files remain to be checked when their camera adapters are built.
 - **Storage location** once there is a settings page.
 
 ## 14. Architecture Is Deliberately Revisable

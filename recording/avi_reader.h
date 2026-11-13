@@ -1,7 +1,7 @@
 #pragma once
 
-#include "firecapture_log.h"
-#include "recording_reader.h"
+#include "recording/firecapture_log.h"
+#include "recording/recording_reader.h"
 
 #include <chrono>
 #include <cstdint>

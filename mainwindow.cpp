@@ -1,8 +1,8 @@
 #include "mainwindow.h"
 
 #include "preview_image.h"
-#include "recording_source.h"
-#include "synthetic_frame_source.h"
+#include "sources/recording_source.h"
+#include "sources/synthetic_frame_source.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>

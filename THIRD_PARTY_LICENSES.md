@@ -18,7 +18,7 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
   - `Qt6Core`
   - `Qt6Gui`
   - `Qt6Widgets`
-  - `Qt6Test` — linked only by the `SeleneWatchTests` target. The application does not link it, and a release of the app does not need `Qt6Test.dll`.
+  - `Qt6Test` — linked only by the test executables. The application does not link it, and a release of the app does not need `Qt6Test.dll`.
 - **Linkage / Integration:** **Dynamic linking** via shared libraries (`Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`). The test target also links `Qt6Test.dll`. SeleneWatch does not statically link Qt.
 - **Compliance Obligations:**
   - Provide attribution to the Qt Project and copyright holders.

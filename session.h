@@ -2,9 +2,9 @@
 
 #include "blip_injector.h"
 #include "event_capture.h"
-#include "event_writer.h"
+#include "recording/event_writer.h"
 #include "frame.h"
-#include "frame_source.h"
+#include "sources/frame_source.h"
 #include "latest_frame_slot.h"
 #include "stream_info.h"
 

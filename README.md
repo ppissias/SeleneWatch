@@ -108,8 +108,8 @@ To try a test flash, start a source, click the preview to select a pixel, set **
 | 3 | RAM ring buffer | Feature-3 | Done |
 | 4 | First detector and event capture | Feature-4 | Done |
 | 5 | An evidence-safe core: shared frames, detection on every frame, candidate log, lossless file path | Feature-7 | Done |
-| 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | In progress: playback and test injection done; SER writer next |
-| 7 | A measured trigger: per-pixel noise, faint limit measured on real recordings | Feature-9 | Proposed |
+| 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
+| 7 | A measured trigger: per-pixel noise, faint limit measured on real recordings | Feature-9 | In progress |
 | 8 | Seeing the faint side: display stretch, ring sized in seconds | Feature-5 | Proposed |
 | 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Proposed |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |

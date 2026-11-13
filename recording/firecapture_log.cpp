@@ -1,4 +1,4 @@
-#include "firecapture_log.h"
+#include "recording/firecapture_log.h"
 
 #include "stream_info.h"
 

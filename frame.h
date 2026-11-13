@@ -67,6 +67,10 @@ struct Frame
     // The synthetic source's original fixed flash, kept as a pipeline check.
     bool syntheticFlash{false};
 
+    // A replayed SER explicitly marked as test data by its writer. Its
+    // individual injection details remain in the original clip's sidecar.
+    bool testSource{false};
+
     // The samples as delivered, row by row from the top.
     std::vector<uint8_t> data;
 };

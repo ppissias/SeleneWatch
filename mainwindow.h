@@ -1,8 +1,8 @@
 #pragma once
 
-#include "event_writer.h"
+#include "recording/event_writer.h"
 #include "frame.h"
-#include "frame_source.h"
+#include "sources/frame_source.h"
 #include "session.h"
 #include "ui_mainwindow.h"
 

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "frame_pool.h"
-#include "frame_source.h"
-#include "recording_reader.h"
+#include "sources/frame_source.h"
+#include "recording/recording_reader.h"
 
 #include <atomic>
 #include <chrono>

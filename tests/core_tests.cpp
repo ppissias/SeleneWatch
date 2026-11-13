@@ -1,18 +1,18 @@
 #include "event_capture.h"
 #include "blip_injector.h"
-#include "event_writer.h"
+#include "recording/event_writer.h"
 #include "flash_detector.h"
 #include "frame_pool.h"
 #include "frame_ring_buffer.h"
-#include "avi_reader.h"
-#include "frame_source.h"
+#include "recording/avi_reader.h"
+#include "sources/frame_source.h"
 #include "latest_frame_slot.h"
 #include "preview_image.h"
-#include "recording_source.h"
-#include "ser_reader.h"
+#include "sources/recording_source.h"
+#include "recording/ser_reader.h"
 #include "session.h"
 #include "stream_info.h"
-#include "synthetic_scene.h"
+#include "sources/synthetic_scene.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDateTime>
@@ -134,7 +134,11 @@ QString readText(const QString& path)
 
 QStringList candidateLines(const QString& root)
 {
-    return readText(QDir(root).filePath("candidates.txt")).split('\n', Qt::SkipEmptyParts);
+    // Final outcomes and stream starts. Pending discoveries are checked
+    // separately, since they intentionally precede these lines.
+    QStringList lines = readText(QDir(root).filePath("candidates.txt")).split('\n', Qt::SkipEmptyParts);
+    lines.removeIf([](const QString& line) { return line.contains(" candidate_pending "); });
+    return lines;
 }
 
 QStringList clipFolders(const QString& root)
@@ -879,8 +883,8 @@ class EventWriterTest : public QObject
 
 private slots:
     void writesMetadataAndCandidateLog();
-    void pngRoundTripIsExact();
-    void mono16PngRoundTripIsExact();
+    void serRoundTripIsExact();
+    void mono16SerRoundTripIsExact();
     void eventTxtDescribesTheStream();
     void sessionStartLineNamesTheSource();
     void clipBeyondQueueLimitIsLoggedNotSaved();
@@ -1446,9 +1450,11 @@ void SerReaderTest::readsMono8FramesAndTrailerTimes()
         frame.data.resize(reader.frameBytes());
         frame.blip = BlipMark{};
         frame.syntheticFlash = true;
+        frame.testSource = true;
         QVERIFY2(reader.readFrame(i, frame, error), error.c_str());
         QVERIFY(!frame.blip);
         QVERIFY(!frame.syntheticFlash);
+        QVERIFY(!frame.testSource);
         QCOMPARE(frame.width, 4);
         QCOMPARE(frame.height, 2);
         QVERIFY(frame.format == PixelFormat::Mono8);
@@ -2472,28 +2478,35 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     QVERIFY(text.contains(" blip_frame=1\n"));
     QVERIFY(text.contains(" blip_frame=2\n"));
     QVERIFY(text.contains(" blip_frame=3\n"));
+    SerReader saved;
+    std::string readError;
+    QVERIFY2(saved.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, readError), readError.c_str());
     for (const QString& line : text.split('\n'))
     {
-        if (!line.contains(".png "))
+        bool isFrame = false;
+        const int position = line.section(' ', 0, 0).toInt(&isFrame);
+        if (!isFrame)
         {
             continue;
         }
-        QImage image(QDir(results[0].folder).filePath(line.section(' ', 0, 0)));
-        QVERIFY(!image.isNull());
+        Frame frame;
+        frame.data.resize(saved.frameBytes());
+        QVERIFY2(saved.readFrame(position, frame, readError), readError.c_str());
         const bool marked = line.contains(" test_blip=");
         if (kind == 1)
         {
             QVERIFY(text.contains("significant_bits: 12\n"));
             QVERIFY(text.contains("bayer_pattern: RGGB\n"));
-            QCOMPARE(reinterpret_cast<const quint16*>(image.constScanLine(32))[32],
+            QCOMPARE(reinterpret_cast<const quint16*>(frame.data.data())[32 * 64 + 32],
                 static_cast<quint16>((marked ? 3361 : 161) << 4));
-            QCOMPARE(reinterpret_cast<const quint16*>(image.constScanLine(0))[0], quint16{161 << 4});
+            QCOMPARE(reinterpret_cast<const quint16*>(frame.data.data())[0], quint16{161 << 4});
         }
         else
         {
-            QCOMPARE(qRed(image.pixel(32, 32)), marked ? 210 : 10);
-            QCOMPARE(qGreen(image.pixel(32, 32)), kind == 2 ? (marked ? 211 : 11) : (marked ? 210 : 10));
-            QCOMPARE(qRed(image.pixel(0, 0)), 10);
+            const int stride = kind == 2 ? 3 : 1;
+            QCOMPARE(frame.data[(32 * 64 + 32) * stride], marked ? 210 : 10);
+            if (kind == 2) QCOMPARE(frame.data[(32 * 64 + 32) * stride + 1], marked ? 211 : 11);
+            QCOMPARE(frame.data[0], 10);
         }
     }
     QVERIFY(candidateLines(root).back().contains("contains_test_signal=yes"));
@@ -2752,8 +2765,8 @@ void EventWriterTest::writesMetadataAndCandidateLog()
     QVERIFY(text.contains("delta_threshold: 60\n"));
     QVERIFY(text.contains("min_bright_pixels: 120\n"));
     QVERIFY(text.contains("frames_before: 1\n"));
-    QVERIFY(text.contains("0000.png 4 " + utcText(triggerTime - milliseconds{33}) + "\n"));
-    QVERIFY(text.contains("0001.png 5 " + utcText(triggerTime) + "\n"));
+    QVERIFY(text.contains("0000 4 " + utcText(triggerTime - milliseconds{33}) + " ser_utc_ticks="));
+    QVERIFY(text.contains("0001 5 " + utcText(triggerTime) + " ser_utc_ticks="));
     QVERIFY(text.trimmed().endsWith("complete: yes"));
     QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), static_cast<qsizetype>(2));
 
@@ -2762,9 +2775,15 @@ void EventWriterTest::writesMetadataAndCandidateLog()
     QVERIFY(lines[0].startsWith(utcText(triggerTime) + " onset_frame_index=4 trigger_frame_index=5 "));
     QVERIFY(lines[0].contains("delta_threshold=60 min_bright_pixels=120"));
     QVERIFY(lines[0].endsWith("clip=" + utcStamp(triggerTime)));
+    const QStringList journal = readText(QDir(root.path()).filePath("candidates.txt")).split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(journal.size(), qsizetype{2});
+    QVERIFY(journal[0].contains(" candidate_pending "));
+    const QString recordId = journal[0].section("record_id=", 1);
+    QVERIFY(!recordId.isEmpty());
+    QVERIFY(journal[1].contains("record_id=" + recordId + " "));
 }
 
-void EventWriterTest::pngRoundTripIsExact()
+void EventWriterTest::serRoundTripIsExact()
 {
     QTemporaryDir root;
     QVERIFY(root.isValid());
@@ -2791,19 +2810,16 @@ void EventWriterTest::pngRoundTripIsExact()
     QTRY_COMPARE_WITH_TIMEOUT(results.size(), static_cast<size_t>(1), 10000);
     QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
 
-    QImage image(QDir(results[0].folder).filePath("0000.png"));
-    QVERIFY(!image.isNull());
-    QCOMPARE(image.width(), width);
-    QCOMPARE(image.height(), height);
-    QCOMPARE(image.format(), QImage::Format_Grayscale8);
-    for (int y = 0; y < height; ++y)
-    {
-        const uchar* row = image.constScanLine(y);
-        for (int x = 0; x < width; ++x)
-        {
-            QCOMPARE(row[x], pixels[static_cast<size_t>(y * width + x)]);
-        }
-    }
+    SerReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, error), error.c_str());
+    Frame saved;
+    saved.data.resize(reader.frameBytes());
+    QVERIFY2(reader.readFrame(0, saved, error), error.c_str());
+    QCOMPARE(saved.width, width);
+    QCOMPARE(saved.height, height);
+    QCOMPARE(saved.data, pixels);
+    QVERIFY(reader.frameTime(0) == testTime(100));
 }
 
 void EventWriterTest::clipBeyondQueueLimitIsLoggedNotSaved()
@@ -2971,14 +2987,17 @@ void EventWriterTest::captureToWriterEndToEnd()
         QVERIFY2(result.notSaved.isEmpty(), qPrintable(result.notSaved));
         QVERIFY(readText(QDir(result.folder).filePath("event.txt")).trimmed().endsWith("complete: yes"));
     }
-    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(),
-        static_cast<qsizetype>(5 + 1 + 1 + kPostEventFrames));
+    SerReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, error), error.c_str());
+    QCOMPARE(reader.frameCount(), 5 + 1 + 1 + kPostEventFrames);
+    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), qsizetype{2});
     QCOMPARE(candidateLines(root.path()).size(), static_cast<qsizetype>(2));
 }
 
 // Feature-7's item 9 for Mono16: values above 255, with the low bits set,
-// come back from the PNG exactly.
-void EventWriterTest::mono16PngRoundTripIsExact()
+// come back from SER exactly.
+void EventWriterTest::mono16SerRoundTripIsExact()
 {
     QTemporaryDir root;
     QVERIFY(root.isValid());
@@ -3012,19 +3031,17 @@ void EventWriterTest::mono16PngRoundTripIsExact()
     QTRY_COMPARE_WITH_TIMEOUT(results.size(), static_cast<size_t>(1), 10000);
     QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
 
-    QImage image(QDir(results[0].folder).filePath("0000.png"));
-    QVERIFY(!image.isNull());
-    QCOMPARE(image.format(), QImage::Format_Grayscale16);
-    QCOMPARE(image.width(), width);
-    QCOMPARE(image.height(), height);
-    for (int y = 0; y < height; ++y)
-    {
-        const auto* row = reinterpret_cast<const quint16*>(image.constScanLine(y));
-        for (int x = 0; x < width; ++x)
-        {
-            QCOMPARE(row[x], samples[static_cast<size_t>(y * width + x)]);
-        }
-    }
+    SerReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, error), error.c_str());
+    Frame saved;
+    saved.data.resize(reader.frameBytes());
+    QVERIFY2(reader.readFrame(0, saved, error), error.c_str());
+    QVERIFY(saved.format == PixelFormat::Mono16);
+    QCOMPARE(saved.width, width);
+    QCOMPARE(saved.height, height);
+    QCOMPARE(saved.data, littleEndianSamples(samples));
+    QVERIFY(reader.frameTime(0) == testTime(150));
 }
 
 void EventWriterTest::eventTxtDescribesTheStream()
@@ -3072,7 +3089,8 @@ void EventWriterTest::eventTxtDescribesTheStream()
     QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
 
     const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
-    QVERIFY(text.startsWith("source: D:/space/Moon 1.ser\n"));
+    QVERIFY(text.startsWith("software: SeleneWatch "));
+    QVERIFY(text.contains("source: D:/space/Moon 1.ser\n"));
     QVERIFY(text.contains("camera: unknown\n"));
     QVERIFY(text.contains("exposure: 8.088ms\n"));
     QVERIFY(text.contains("gain: 510\n"));
@@ -3089,7 +3107,7 @@ void EventWriterTest::eventTxtDescribesTheStream()
     QVERIFY(text.trimmed().endsWith("complete: yes"));
 
     const QString liveText = readText(QDir(results[1].folder).filePath("event.txt"));
-    QVERIFY(liveText.startsWith("source: synthetic\n"));
+    QVERIFY(liveText.contains("source: synthetic\n"));
     QVERIFY(!liveText.contains("playback:"));
     QVERIFY(liveText.contains("pixel_format: Mono8\n"));
 }
@@ -3162,7 +3180,8 @@ void EventWriterTest::blipMetadataSurvivesAPartialClipAndRefusal()
     refused.submit(std::move(clip));
     QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{2}, 10000);
     QCOMPARE(results[1].notSaved, QString("writer busy"));
-    QVERIFY(candidateLines(refusedRoot).back().contains("contains_test_signal=yes not_saved=writer busy"));
+    QVERIFY(candidateLines(refusedRoot).back().contains("contains_test_signal=yes"));
+    QVERIFY(candidateLines(refusedRoot).back().endsWith("not_saved=writer busy"));
 }
 
 int main(int argc, char* argv[])
