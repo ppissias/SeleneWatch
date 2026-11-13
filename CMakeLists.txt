@@ -56,7 +56,21 @@ set(PROJECT_SOURCES
     event_writer.cpp
 )
 
+if(WIN32)
+    list(APPEND PROJECT_SOURCES selenewatch.rc)
+endif()
+
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+
+# The window icon. The PNGs are rendered from icons/selenewatch.svg.
+qt_add_resources(${PROJECT_NAME} "icons"
+    PREFIX "/"
+    FILES
+        icons/selenewatch-16.png
+        icons/selenewatch-32.png
+        icons/selenewatch-48.png
+        icons/selenewatch-256.png
+)
 
 set_target_properties(${PROJECT_NAME}
     PROPERTIES

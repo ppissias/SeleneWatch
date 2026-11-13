@@ -1,0 +1,3 @@
+// The executable's icon, shown by Windows in Explorer and on the taskbar.
+// icons/selenewatch.ico is rendered from icons/selenewatch.svg.
+IDI_ICON1 ICON "icons/selenewatch.ico"

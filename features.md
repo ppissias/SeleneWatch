@@ -177,7 +177,7 @@ The synthetic source stays, and its fixed flash remains the check that the whole
 
 ### Part A — built (13 November 2026)
 
-Part A is in the program. Done-when items 2, 3, 5, 10, 11, and 12 pass as tests. Items 1 and 8 pass for SER files by hand, except the comparison of orientation with SER Player, which is left to the observer.
+Part A is in the program. Done-when items 2, 3, 5, 10, 11, and 12 pass as tests. Items 1 and 8 pass for SER files by hand. The observer compared the orientation in SeleneWatch with another player on 13 November 2026 and confirmed it.
 
 **What it added**
 
@@ -220,7 +220,7 @@ The application was driven through Windows UI Automation on the development mach
 
 ### Part B — built (13 November 2026)
 
-Part B is in the program. Done-when item 7 passes as tests. Items 1 and 8 pass for AVI files by hand, except that the observer still compares orientation with another player (see below).
+Part B is in the program. Done-when item 7 passes as tests. Items 1 and 8 pass for AVI files by hand. The observer checked the AVI files' orientation on 13 November 2026 and confirmed it.
 
 **What it added**
 
