@@ -18,19 +18,33 @@ Several sources now do the same job, so one narrow source type is justified. It 
 
 The capture path does not care which source produced the frame. The ring, the detector, and the writer stay where they are. The Feature-4 trigger still runs in this step; on real recordings it will fire wrongly or not at all, and that is expected until Feature-9.
 
-**The frame path moves out of the window.** Today `MainWindow::onFrameArrived` is the frame path: it counts the frame, offers it to the preview, and calls the capture. With a selectable source, the blip, and trigger settings, that path would grow inside the UI class. A plain `Session` class takes it over. It owns the selected source, `EventCapture`, and the writer. On the source thread it publishes the frame, runs the capture, and offers the frame to the preview mailbox. Feature-9 adds the blip there, just before publication. The window owns the `Session`, sends it settings, and reads its counters. The need is real: a recording is this project's calibration tool, and a `Session` without a window lets a test, and later a command-line scan, run a recording through the whole path.
+**The frame path moves out of the window.** Today `MainWindow::onFrameArrived` is the frame path: it counts the frame, offers it to the preview, and calls the capture. With a selectable source, the blip, and trigger settings, that path would grow inside the UI class. A plain `Session` class takes it over. It owns the selected source, `EventCapture`, and the writer. On the source thread it publishes the frame, runs the capture, and offers the frame to the preview mailbox. Part C adds the blip there, just before publication. The window owns the `Session`, sends it settings, and reads its counters. The need is real: a recording is this project's calibration tool, and a `Session` without a window lets a test, and later a command-line scan, run a recording through the whole path.
 
 **The source describes its stream.** When it starts, a source reports a `StreamInfo` that holds for the run: what the source is (camera model and serial, or file path), exposure, gain, offset, binning, ROI, and frame-rate setting where it knows them, what its frame time means (Section 5 of the project description), and whether its frame index is a hardware counter. A value the source cannot give is marked unknown, not guessed. The writer copies `StreamInfo` into each clip (Evidence rule 8).
 
-Playback adds a speed control: real time, or as fast as the detector can run. The fast speed is how a recording is searched. The preview may drop frames, as it already does. The detector may not.
-
 `Frame` gains `PixelFormat::Mono16`, stored as little-endian `uint16_t` in the existing byte buffer. There is no separate 12-bit format. A frame also records its number of significant bits, whether they sit at the top or the bottom of the word, and its Bayer pattern if it is a raw colour mosaic. A 12-bit frame is stored exactly as its source delivers it, as Mono16 with 12 significant bits and its alignment recorded (Evidence rule 2). The preview reads those fields to pick a fixed shift so the image is visible. A Bayer mosaic is previewed as the grey mosaic it is; debayering for display comes with the stretch in Feature-5.
+
+### Playback
+
+A recording is played in one of two ways, chosen before Start.
+
+- **The whole file, once.** At the end the source reports that it has ended, the way it already reports a failure. On the source thread the `Session` hands off any clip still being collected, so the last candidate is kept. The window then stops the stream and shows "Playback finished". The window still touches the capture only while the source thread is joined.
+- **A loop over the first seconds of the file.** The observer sets a length in seconds. The source plays the frames in that span and starts again. A loop gives a steady stream while trigger settings are changed or a blip is placed by hand, which is how the trigger is tuned (Feature-9).
+
+**The jump at the end of a loop is not a change in the sky.** Over a few seconds the Moon drifts and the seeing changes, so the jump from the last frame back to the first looks to the detector like a large sudden change, and it would fire on every lap. The source therefore says that the next frame does not follow the previous one, and the `Session` restarts the capture there as if Start had been pressed: the open clip is handed off, and the ring and the detector start empty. A clip never spans the jump.
+
+**Frame index and time keep increasing across laps.** Lap n adds n times the loop's frame count to the index and n times the loop's length to the time. Every clip and every line of `candidates.txt` then stays distinct, and no folder name repeats. `StreamInfo` says that the playback is a loop and over which frames, so the position in the file can be worked out from the index. A loop is a test mode. Its times after the first lap are not the file's times, and the clip says so.
+
+**Speed.** Real time, or as fast as the detector can run. The fast speed is how a recording is searched. The preview may drop frames, as it already does. The detector may not. Real time follows the intervals between the file's own frame times, so it replays the original jitter and gaps. No single interval is waited for longer than one second, so a long gap in a file does not stall playback. The speed can be changed while the stream runs.
 
 ### SER reader
 
 - Mono and raw Bayer, 8 and 16 bits per sample, and 8-bit RGB and BGR. A file of another kind is reported as unsupported and does not start.
-- The frame time is the time in the file's trailer, not the time of playback. A file without a trailer gets times counted from the header's start time and the playback rate, and `StreamInfo` says the times are nominal.
+- The frame time is the time in the file's trailer, not the time of playback. A file without a trailer gets times counted from the header's start time and the playback rate, and `StreamInfo` says the times are nominal. SER has no frame-rate field, so that rate is the one set in the window's frame-rate box, and `StreamInfo` records it. When the header's `DateTime_UTC` is zero, the start time is unknown and the times count from zero.
 - The frame index is the position in the file.
+- **Significant bits.** For 16-bit data the reader combines (bitwise OR) the samples of the first frames. Bits at the bottom of the word that are zero in every sample are not significant: with `PixelDepthPerPlane` 16 and four such bits, the frames record 12 significant bits at the top of the word. With `PixelDepthPerPlane` between 9 and 15 and no sample wider than that, the bits sit at the bottom.
+- A file shorter than its header says plays the whole frames it holds, without a trailer. `StreamInfo` says how many of the header's frames are there.
+- 16-bit data in a file whose `LittleEndian` flag is 1 is read as big-endian, as SER Player, PIPP, and Siril read it, and is turned into little-endian samples.
 - The header fields that affect correctness are listed in the [project description](PROJECT_DESCRIPTION.md#ser-details-that-affect-correctness): the 178-byte header, the trailer epoch, and the `LittleEndian` flag that is used inverted in practice.
 - **What the observer's SER files show** (27 files, all written by FireCapture 2.x, which signs itself `LUCAM-RECORDER`, from a mono Point Grey Chameleon):
   - `LittleEndian` is 0 in every file, and the 16-bit samples are little-endian. This confirms the inverted use of the flag on real files.
@@ -91,6 +105,24 @@ The observer has many lunar recordings as AVI, so AVI is a real input and not a 
 - **AVI has no frame times.** The frame time is counted from a start time and the frame rate, and `StreamInfo` says the times are nominal.
 - **FireCapture's log, when it is there.** FireCapture writes a text file beside each recording (`Moon_180548.txt` beside `Moon_180548.avi`) with `key=value` lines. When the file exists, the reader takes the start time from `Date` and `Start(UT)`, and the camera, shutter, and gain for `StreamInfo`. Without it, the start time is unknown and the times count from zero.
 
+### Injected blip
+
+*Moved here from Feature-9 on 13 November 2026, with its text unchanged except where noted below. The observer wants to test with it as soon as recordings play, and Feature-9 then finds its calibration tool ready.*
+
+A blip is a small spot added to the live frames for a chosen number of frames. It is how a recording becomes a measurement. "Inject flash" on the synthetic source is the same idea with fixed numbers. The blip works on every source.
+
+The blip is a Gaussian added to the pixel values and clipped at the format's maximum. A real flash is a point of light spread by the optics and the seeing, and it adds to the surface under it. A hard-edged disk painted at one gray level has neither property, and a faint limit measured with it would be too optimistic.
+
+The user sets the centre by clicking the preview, and sets the width (FWHM in pixels), the peak amplitude in gray levels of the frame's own format, and the duration in frames. The status line shows that amplitude again as a multiple of the noise at the centre, so a value of 200 ADU on the bright limb and on the earthshine is not mistaken for the same event. *(The noise at the centre is measured by the trigger of Feature-9. Until then the status line shows the amplitude in gray levels only.)*
+
+The `Session` adds the blip before the frame is published, so the frames with the blip are what the detector sees and what the clip stores. Each such frame is marked (Evidence rule 6). `event.txt` records that the blip was injected and records its centre, width, amplitude, and duration. A clip from a blip is a test. A clip with no blip line is a candidate from the data.
+
+Added when the blip moved:
+
+- **The blip respects the frame's bit layout.** On a Mono16 frame whose significant bits sit at the top of the word, the amplitude is in units of those bits and is shifted into place. The unused low bits stay zero, and the frame is still a valid 12-bit frame.
+- **Clicking the preview needs a mapping from widget to frame coordinates.** It is added here, and the feature lock of Feature-8 reuses it.
+- **The Feature-4 detector will mostly ignore a realistic blip.** It needs about 120 pixels each rising by more than 60 gray levels, on two frames in a row. A Gaussian reaches that only at roughly 9 px FWHM at full brightness. That is the detector's limit, not the blip's, and Feature-9 removes it.
+
 ### Done when
 
 1. The window can run the synthetic source or a chosen recording through the same capture path. A file that cannot be read is reported and does not start.
@@ -102,10 +134,17 @@ The observer has many lunar recordings as AVI, so AVI is a real input and not a 
 7. An uncompressed AVI written by the test, split into two RIFF chunks the way OpenDML does, is read back with the same pixels, for 8-bit grey and for 24-bit. A compressed AVI is refused with its FourCC. A FireCapture log written by the test supplies the start time.
 8. By hand, from the observer's archive (the path is in [local environment.txt](local%20environment.txt)): one file of each kind in the table above opens and plays the right way up, among them an 8-bit FireCapture lunar AVI with its log, a multi-chunk AVI above 2 GB, a 24-bit FlyCapture AVI, the 16-bit SER, and an 8-bit SER. For each, the size, bit depth, frame count, and times agree with the capture program's log or with SER Player.
 9. By hand: an `event.ser` written from one of those recordings opens in SER Player, PIPP, or Siril with the right frame count, bit depth, and times.
+10. Played whole, a recording ends with "Playback finished", and a clip that was open at the end is saved.
+11. A test plays a loop for several laps: the capture restarts at each lap, the frame index and time keep increasing, and the jump back to the first frame fires no candidate.
+12. A Mono16 clip written to PNG and read back has the same values, above 255 and with the low bits set. This is the half of Feature-7's item 9 that waited for Mono16.
+13. While a recording plays, clicking the preview sets the blip centre. Width, amplitude, and duration are editable. Injecting the blip adds it for that many frames, those frames are marked, and `event.txt` records the blip. *(Item 1 of Feature-9, moved with the blip.)*
+14. A test adds a blip to a 12-bit frame stored in the top bits: the low bits stay zero, the values clip at the format's maximum, and the frames before and after the blip are unchanged.
+
+**Which part delivers which item.** Part A: 1 and 8 for SER files, 2, 3, 5, 10, 11, and 12. Part B: 1 and 8 for AVI files, and 7. Part C: 13 and 14. Part D: 4, 6, and 9.
 
 ### Out of this step
 
-- The new trigger and the injected blip. Those are Feature-9.
+- The new trigger. That is Feature-9.
 - Display stretch, debayering for display, and a duration-based ring. Those are Feature-5.
 - Cameras. Those are Feature-10.
 - Continuous recording to SER. The writer built here is the one it will use, but the recording mode, its controls, and its disk-rate display come with the session record stage.
@@ -114,17 +153,29 @@ The observer has many lunar recordings as AVI, so AVI is a real input and not a 
 
 ### Order
 
-The feature is built in three parts. Each one ends with the tests passing and the app usable.
+The feature is built in four parts. Each one ends with the tests passing and the app usable.
 
-- **Part A — sources.** The source type, `Session`, `StreamInfo`, the Mono16 frame with its significant bits, the SER reader, and the playback speed control. Clips are still PNG.
-- **Part B — SER clips.** The SER writer, the round-trip tests, and the new clip folder.
-- **Part C — AVI.** The AVI reader: 8-bit grey first, since that is most of the lunar archive, then 24- and 32-bit, then `Y800` and `YUY2`, and the FireCapture log.
+- **Part A — playback.** The source type, `Session`, `StreamInfo`, the Mono16 frame with its significant bits, the SER reader, and playback: the whole file or a loop, at real time or fast. Clips are still PNG.
+- **Part B — AVI.** The AVI reader: 8-bit grey first, since that is most of the lunar archive, then 24- and 32-bit, then `Y800` and `YUY2`, and the FireCapture log.
+- **Part C — the blip.** The injected blip, its controls, and the preview coordinate mapping.
+- **Part D — SER clips.** The SER writer, the round-trip tests, and the new clip folder.
 
 The synthetic source stays, and its fixed flash remains the check that the whole path still works.
 
+### Decisions taken before building (13 November 2026)
+
+- **The order changed.** The first plan had sources, then SER clips, then AVI, with the blip in Feature-9. The observer's best test recordings may be AVI, and the blip makes a played recording a test bench, so both come first. SER clips have to exist only before a camera is used (Feature-10), so they move to the end of this feature.
+- **The playback is written once.** Whole file or loop, the speed, and the end of the file sit in one recording source, with the file reader beneath it. In Part A the source uses the SER reader directly. The reader becomes an interface in Part B, when the AVI reader is its second implementation.
+- **The SER reader is tested against a file the test builds byte by byte** from the documented layout. That file does not come from SeleneWatch's writer, so a mistake made the same way in the reader and the writer (the inverted `LittleEndian` flag, the .NET epoch) is still caught. Part D adds the writer, its header-byte check, and the round trip. The observer's own FireCapture files remain the authority, checked by hand.
+- **The Feature-4 detector reads one value per pixel.** Mono8 as stored, Mono16 as its top 8 significant bits, so its 60-gray-level threshold keeps its meaning, and RGB888 as the mean of the three channels. It looks at the whole frame. The centred disk it used was a property of the painted image, not of a recording, and it made detection depend on the synthetic source. Its thresholds stay as they are until Feature-9.
+- **Clips name their source from Part A.** `StreamInfo` goes into `event.txt`. `candidates.txt` gets a `session_start` line at each Start that names the source and the playback, so a candidate that was not saved still says which recording it came from (Evidence rule 5).
+- **The writer's file conversion gains Mono16** as a 16-bit greyscale PNG while clips are PNG. Part D replaces it with the SER frame write.
+- **The directory split waits for Part D.** The project description expects `sources/` and `recording/` with this feature. Where the SER format knowledge sits is easier to decide when both the reader and the writer exist.
+- **Qt Test output** that does not reach the console (carried forward from Feature-7) is fixed in Part A, since Part A touches the tests.
+
 ---
 
-## Feature-9 — A measured trigger and an injected blip
+## Feature-9 — A measured trigger
 
 The detector today fires when two frames rise by more than 60 gray levels across 120 pixels of the synthetic disk. Those numbers match the painted test image. They do not match a recording or a camera: the Moon is not centred, the noise depends on gain and sky, and a published lunar impact flash is often one frame. The trigger has to be set from the frames being watched, and the same trigger has to run on the synthetic source, on a recording, and on a camera.
 
@@ -132,13 +183,9 @@ This is the step where the design is most likely to be wrong, because it is the 
 
 ### Injected blip
 
-A blip is a small spot added to the live frames for a chosen number of frames. It is how a recording becomes a measurement. "Inject flash" on the synthetic source is the same idea with fixed numbers. The blip works on every source.
+The blip moved to Feature-6, Part C, on 13 November 2026. Its full description is there. The observer can test with it as soon as recordings play, and this feature finds its calibration tool ready.
 
-The blip is a Gaussian added to the pixel values and clipped at the format's maximum. A real flash is a point of light spread by the optics and the seeing, and it adds to the surface under it. A hard-edged disk painted at one gray level has neither property, and a faint limit measured with it would be too optimistic.
-
-The user sets the centre by clicking the preview, and sets the width (FWHM in pixels), the peak amplitude in gray levels of the frame's own format, and the duration in frames. The status line shows that amplitude again as a multiple of the noise at the centre, so a value of 200 ADU on the bright limb and on the earthshine is not mistaken for the same event.
-
-The `Session` adds the blip before the frame is published, so the frames with the blip are what the detector sees and what the clip stores. Each such frame is marked (Evidence rule 6). `event.txt` records that the blip was injected and records its centre, width, amplitude, and duration. A clip from a blip is a test. A clip with no blip line is a candidate from the data.
+What this feature adds to it: the status line shows the blip's amplitude as a multiple of the noise at its centre, once the trigger below measures that noise.
 
 ### The trigger
 
@@ -182,7 +229,7 @@ The trigger works on one value per pixel. For an RGB frame it reads the mean of 
 
 ### Done when
 
-1. While a recording plays, clicking the preview sets the blip centre. Width, amplitude, and duration are editable. Injecting the blip adds it for that many frames, and those frames are marked.
+1. While a recording plays, the status line shows the blip's amplitude as a multiple of the noise at its centre. *(This item first described the blip's controls. Those moved to Feature-6 with the blip, as its item 13.)*
 2. With the blip off, a recording whose ordinary peaks sit under the trigger writes no folder. The same recording with a blip above the trigger writes one folder. `event.txt` names the sigma, the size limits, the measured peak, and the blip, and the folder holds the annotated difference image.
 3. Changing K or the size limits affects the next frame without a restart.
 4. Tests cover the sigma rule on a constructed noisy frame: a compact patch at the threshold fires, a patch just below it does not, a single hot pixel does not, and a change spread across the frame does not. On a frame with a quiet half and a noisy half, the same blip in gray levels fires on the quiet half only, and the same blip in units of noise fires on both.
@@ -198,7 +245,7 @@ The trigger works on one value per pixel. For an RGB frame it reads the mean of 
 
 ### Order
 
-After Feature-6, which supplies the recordings and the `Session` the blip lives in. Before Feature-10, so that the trigger has been through real data before a night at the telescope depends on it.
+After Feature-6, which supplies the recordings, the `Session`, and the blip. Before Feature-10, so that the trigger has been through real data before a night at the telescope depends on it.
 
 ---
 
@@ -419,7 +466,7 @@ Mount control was out of scope in Feature-4 and in the README. This feature reve
 
 ### Part A — lock and drift readout (no mount)
 
-**Lock.** The observer drags a rectangle on the preview, or clicks to get a default box. `FeatureLock` keeps that region as a template, with the position it was taken from. A large region is binned by a whole factor so the template is at most 96 pixels on its longer side. A Bayer mosaic is always binned by an even factor, at least 2×2, so the colour pattern does not enter the match. The preview needs a mapping from widget to frame coordinates; the blip of Feature-9 needs the same one.
+**Lock.** The observer drags a rectangle on the preview, or clicks to get a default box. `FeatureLock` keeps that region as a template, with the position it was taken from. A large region is binned by a whole factor so the template is at most 96 pixels on its longer side. A Bayer mosaic is always binned by an even factor, at least 2×2, so the colour pattern does not enter the match. The preview needs a mapping from widget to frame coordinates; the blip of Feature-6 adds it.
 
 **The region must be lockable.** A flat or saturated region has nothing to match. A straight piece of limb or terminator fixes the position across the edge and not along it. At lock time the gradients of the template are checked in both directions. A region with too little contrast, or with structure in only one direction, is refused with that reason.
 
@@ -537,4 +584,4 @@ A stop by rules 5 to 7 is not resumed automatically. The observer looks, and tur
 
 ### Order
 
-Part A needs the shared frames of Feature-7 and real recordings to try a lock on (Feature-6), and can start once those exist. It shares the preview coordinate mapping with the blip of Feature-9; whichever is built first adds it. Part B follows and needs no hardware. Part C needs the ASCOM Platform and is only meaningful with a camera (Feature-10). Parts A and B can run alongside Feature-9 and Feature-5.
+Part A needs the shared frames of Feature-7 and real recordings to try a lock on (Feature-6), and can start once those exist. It reuses the preview coordinate mapping that the blip of Feature-6 adds. Part B follows and needs no hardware. Part C needs the ASCOM Platform and is only meaningful with a camera (Feature-10). Parts A and B can run alongside Feature-9 and Feature-5.
