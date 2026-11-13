@@ -29,16 +29,16 @@ bool FlashDetector::observe(const Frame& frame)
             onsetFrameIndex_ = frame.frameIndex;
         }
         ++consecutive_;
-        return consecutive_ >= kConsecutiveFrames;
+        return consecutive_ == kConsecutiveFrames;
     }
 
     remember(frame);
     return false;
 }
 
-void FlashDetector::advanceReference(const Frame& frame)
+bool FlashDetector::firing() const
 {
-    remember(frame);
+    return consecutive_ >= kConsecutiveFrames;
 }
 
 int FlashDetector::lastBrightCount() const

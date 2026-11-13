@@ -30,6 +30,55 @@ Visual Studio & Toolchain
   MSVC default compiler:                   v14.51 (cl.exe 19.51.36260)
   Installed Windows SDKs:                  10.0.28000 and 10.0.26100
 
+Cameras and telescopes on hand
+  ZWO ASI120MM            mono,   1280x960, 3.75 um pixels, 8-bit or 12-bit (in 16), no GPS
+  QHY ALccd5L-II colour   colour (Bayer), 1280x960, 3.75 um pixels, 8-bit or 12-bit (in 16), no GPS
+                          (Astrolumina's name for the QHY5L-II-C; qhyccdcamdef.h lists DEVICETYPE_QHY5LII_C)
+  Telescopes seen in the archive folder names: Celestron C9.25 (2350 mm, 0.33 arcsec/pixel with these cameras)
+  and an 8-inch Newtonian. Mount driven through ASCOM (see Mount below).
+
+Camera SDKs (not part of the repository)
+  Root: C:\dev\tools\SDKs
+  ZWO ASI (ASICamera2):  C:\dev\tools\SDKs\ASI SDK
+    Header:  include\ASICamera2.h
+    x64 lib: lib\x64\ASICamera2.lib, ASICamera2.dll
+    License: license.txt in the SDK folder (permissive, MIT wording)
+    Docs:    doc\ASICamera2 Software Development Kit.pdf
+  QHYCCD (qhyccd):       C:\dev\tools\SDKs\QHY sdk
+    Header:  include\qhyccd.h (version 25.06.16 per include\config.h)
+    x64 lib: x64\qhyccd.lib, qhyccd.dll, plus ftd2xx.dll, tbb.dll, winusb.dll, msvcr90.dll, msvcp90.dll
+    License: none in the SDK folder; terms to be found before the adapter is merged
+  Both paths contain a space; quote them in CMake and on the command line.
+  The adapters are not built yet (Feature-10). When they are, the paths are given to CMake as
+  SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR.
+
+Recordings archive (the observer's own lunar and planetary videos; read-only test data, not part of the repository)
+  Root: D:\space\02_Planetary
+  Surveyed 2026-11-12 (headers only): 352 AVI and 27 SER files.
+    AVI: 101 x 8-bit grey DIB, 17 x Y800, 208 x 24-bit DIB, 4 x 32-bit DIB, 20 x YUY2,
+         1 x compressed (CRAM), 1 x not a RIFF file. 22 files continue in RIFF AVIX chunks.
+    SER: 26 x 8-bit mono, 1 x 16-bit mono (12-bit data in the top bits). All written by FireCapture 2.x.
+  Useful samples:
+    8-bit FireCapture lunar AVI with its .txt log:
+      D:\space\02_Planetary\2015.12.19 Moon C9.25\raw\videos and stacked\Moon_180548.avi
+    8-bit AVI above 2 GB (two RIFF chunks):
+      D:\space\02_Planetary\2015.10.26 Moon\raw\Moon_200059.avi
+    24-bit AVI, grey stored as colour (FlyCapture):
+      D:\space\02_Planetary\2019.09.15 moon\raw\moon_2019-09-15-011146-0000.avi
+    8-bit SER with trailer:
+      D:\space\02_Planetary\2015.12.21 Moon 8 Newt\raw\videos and stacked\Moon_165104.ser
+    16-bit SER (3.2 GB):
+      D:\space\02_Planetary\2013.06.25 ISS\raw\Moon_202643.ser
+  Never write into this folder. Tests that need these files are run by hand, not by CTest.
+
+Mount (ASCOM)
+  ASCOM Platform 7.1 Update 3 (7.1.3.4851).
+  Installed telescope drivers, all registered as out-of-process servers (LocalServer32):
+    EQMOD.Telescope (EQMOD ASCOM HEQ5/6), ASCOM.GS.Sky.Telescope (GS Sky),
+    ASCOM.DeviceHub.Telescope, ASCOM.JustAHub.Telescope, ASCOM.JustAHub64.Telescope,
+    and simulators: ASCOM.OmniSim.Telescope, ASCOM.Simulator.Telescope, EQMOD_SIM.Telescope, ScopeSim.Telescope
+  A 64-bit program can use all of them through COM. OmniSim is the first test target for Feature-8 part C.
+
 Source Control
   Git initialized on branch 'main'.
   Remote repository: https://github.com/ppissias/SeleneWatch.git

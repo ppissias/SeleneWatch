@@ -1,8 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
 #include <chrono>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 enum class PixelFormat
 {
@@ -23,3 +24,8 @@ struct Frame
 
     std::vector<uint8_t> data;
 };
+
+// A published frame. A source fills a frame while it is the only owner.
+// Once the frame is held as a FramePtr, nobody writes it again, so the
+// ring, the clips, and the preview can share it without copying pixels.
+using FramePtr = std::shared_ptr<const Frame>;

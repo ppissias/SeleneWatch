@@ -239,3 +239,117 @@ The structural pass those remarks scheduled with the tests is also in:
 - Event folders are written next to the executable. The rules file is `AGENTS.md`.
 
 The single-frame rule for real impact flashes remains a decision for the camera stage.
+
+---
+
+## Feature-7 — Evidence safety: shared frames, no blind detector, and a lossless file path
+
+Two faults in the Feature-4 code break evidence rules 3 and 5 of [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md#4-evidence-rules). Neither shows on the synthetic source today. Both would lose or damage real data. This step fixes them before Feature-6 brings recordings and 16-bit frames, and Feature-10 a camera.
+
+It also changes who owns a frame, and it does that first. Fixing the blind detector means clips that overlap and clips that wait for the writer. If each of them copies the ring, the fix is paid for in RAM and in a stall at every trigger. With shared frames it costs nothing, and the rules for the writer become simpler.
+
+### Step 1 — published frames are shared, not copied
+
+Today [`FrameRingBuffer::copyStored`](frame_ring_buffer.cpp#L35-L52) duplicates every stored pixel when a candidate fires and holds the ring lock while it does. The preview makes its own copy on the source thread in [`MainWindow::publishPreview`](mainwindow.cpp#L230-L242). At 640×480 both are cheap. At 1920×1080 Mono16 a 150-frame ring is about 620 MB, and one trigger doubles it and stalls acquisition for the length of the copy.
+
+- **A frame has one writer, then it is published.** The source takes a writable frame from a `FramePool`, fills it, and hands it on as the sole owner. Publication turns it into a `FramePtr` (`std::shared_ptr<const Frame>`). After publication nobody writes it. Feature-9 places the injected test signal just before publication; nothing else changes pixels (Evidence rules 1 and 6).
+- **The ring, a clip, and the preview hold pointers.** `FrameRingBuffer` stores `FramePtr`. A push drops the oldest pointer. `copyStored` becomes `stored()`: it copies the pointers, oldest first, under the lock, and copies no pixel. `EventClip::frames` is a list of `FramePtr`, so two clips that overlap share their frames.
+- **The pool recycles pixel buffers.** When the last pointer to a frame is dropped, on whichever thread, its buffer goes back to the pool. A warm stream still allocates no pixel buffer per frame. The pool keeps only a few spare buffers; when a written clip lets go of hundreds of frames at once, the rest are freed. The small reference-count block that `std::shared_ptr` allocates per frame is accepted. This replaces the `std::swap` recycling in `push`. The pool belongs to the source. A frame that outlives its pool is simply freed.
+- **The preview converts on the GUI thread.** The source thread puts the latest `FramePtr` in a one-slot mailbox; a newer frame replaces an unread one. The GUI thread takes it and converts it. This is what the threads table in the project description already says, and it keeps a later display stretch off the source thread.
+- **Memory is bounded by what holds frames.** Frames alive = the ring, plus the open clip, plus the clips waiting for the writer. The ring is fixed. The open clip is bounded by the clip length cap (Step 2). The waiting clips are bounded by the writer's queue limit (Step 3). The buffer readout shows the bytes of all live frames, not only the ring.
+
+**Why this and not protected ring slots.** The project description left the choice open, to be decided by measurement together with the SER writer. Shared frames are chosen now because Step 2 needs overlapping clips, and three readers (ring, clips, preview) already want the same frame; Feature-8 adds a fourth. The cost is a pool and a reference count in place of a swap. What stays open for measurement is the writer's speed at camera sizes, which decides how many frames wait in RAM (Feature-5).
+
+### Problem 1 — the detector is blind while a clip is busy
+
+[`EventCapture::onFrame`](event_capture.cpp#L21-L47) calls `observe` only when no clip is being collected and no write is in flight. Otherwise it calls `advanceReference`, which moves the reference and never tests the frame. The blind period is the post-event frames (30) plus the time the writer needs. At 640×480 that is about a second plus a few hundred milliseconds of PNG encoding. With a camera and a ring of several seconds it is several seconds per candidate. A second flash in that period is neither saved nor logged, and nothing records that the detector was not looking.
+
+The lockout also runs through the window. `writesInFlight_` is raised by the source thread and lowered by [`MainWindow::onEventWritten`](mainwindow.cpp#L184-L213) after a queued call, so the detector's state depends on the GUI event loop.
+
+### Step 2 — detect on every frame
+
+- The detector runs on every frame. The busy path no longer calls `advanceReference` in place of `observe`.
+- **A new candidate during collection joins the open clip.** A new candidate is a new onset after at least one quiet frame; frames that keep firing in the same run are the same candidate. The clip records each trigger (onset index, trigger index, time, measured values). The post-event count runs from the last frame on which the detector fired, not from the trigger frame: a clip ends after `kPostEventFrames` quiet frames in a row, so a long event is kept whole and the tail follows its end.
+- **A clip has a length cap.** After its first trigger a clip collects at most `kMaxPostEventFrames` frames (starting value 300, about 10 s at 30 fps). At the cap the clip is handed off. If the detector is still firing, a new clip starts at once from the ring. Its history overlaps the previous clip; the two share those frames.
+- **A candidate during a write starts a new clip.** The write lockout goes, and `writesInFlight_` and `onWriteFinished` go with it. `EventCapture` no longer knows how busy the writer is. It hands every finished clip to the writer, and the writer decides (Step 3).
+- **Every candidate is logged.** `events/candidates.txt` gets one line per trigger, saved or not: UTC time, onset and trigger index, measured values, and either the clip folder or the reason it was not saved. The writer thread appends the lines after it has written or refused the clip, so the folder or the reason is known. The source thread still never touches the disk.
+- `event.txt` lists every trigger in its clip.
+- **Inject flash** stays enabled while the stream runs, so two quick flashes can be tested by hand.
+
+### Step 3 — the writer owns its backlog and survives a bad clip
+
+Today one exception anywhere in [`EventWriter::run`](event_writer.cpp#L65-L110) ends the writer thread. The next clip is queued for a thread that no longer exists, and with the Feature-4 lockout the detector then stays blind for the rest of the session behind a single "Save failed" message.
+
+- **A bounded queue, counted in frames.** `submit` never blocks. A clip is accepted when the frames already waiting plus its own stay within `kMaxQueuedFrames` (starting value 900: two clips of the maximum length, 150 frames of history plus 300 after the trigger). A clip that does not fit is dropped at once, which releases its frames, and its triggers are logged as "not saved: writer busy". The limit becomes a number of bytes when Feature-5 adds the RAM limit.
+- **The window is told, not asked.** The writer reports each result to the window for the status bar. Nothing in the frame path waits for that report or depends on it.
+- **A failed clip is one failed clip.** An error or an exception while a clip is being written fails that clip. Its triggers are logged as "not saved" with the reason, its folder is left without the completion marker, and the writer goes on to the next clip.
+- **A failed record is a session state.** If `candidates.txt` itself cannot be written, or the writer thread ends for any other reason, the window shows "Recording failed" and keeps showing it until the stream is restarted. Detection continues and the candidate count on screen still rises (Evidence rule 5). A clip submitted to a writer that has ended is refused and counted, never queued.
+- **The output folder is given to the writer.** `EventWriter` takes the output root in its constructor. The window passes `events/` next to the executable, as decided in Feature-4. The tests pass a temporary folder and stop writing into the build tree.
+- **A folder is never reused.** If `events/<UTC stamp>/` already exists, the writer adds `-2`, `-3`, and so on (Evidence rule 7). Today this cannot happen. With Feature-6 it happens whenever the same recording is played twice, because a recording's frame times come from the file.
+
+### Problem 2 — files are written through the preview conversion
+
+`EventWriter` saves each frame with `frameToQImage`, the same function the window uses for the preview. For Mono8 and RGB888 the two needs happen to agree. Feature-6 adds Mono16 and says its preview is "a fixed shift so the image is visible". If that shift goes into the shared function, every saved clip silently becomes 8-bit.
+
+### Step 4 — two conversions, two contracts
+
+- `frameToQImage` is renamed `frameToPreviewImage` and belongs to the window. It may shift, stretch, or invert, and it returns an 8-bit image.
+- The writer gets its own conversion, next to the writer code, which returns the stored samples unchanged: Mono8 as `Format_Grayscale8`, RGB888 as `Format_RGB888`, and Mono16 as `Format_Grayscale16` once Feature-6 adds it. A format it cannot write losslessly is an error reported like any other write failure, never a fallback to 8 bits.
+- The two functions are nearly identical today. The duplication is intended: they have different contracts, and they diverge with Feature-6 (preview shift, SER) and Feature-5 (stretch).
+- When clips move to SER (Feature-6), the SER frame write takes over the writer's conversion. The few preview PNGs in the event folder may then use the preview conversion, because they are not evidence.
+
+### Done when
+
+1. A test fills the ring past its capacity and takes `stored()`: the result points at the same frame objects the ring holds, and the number of pixel buffers the pool has allocated stops growing once the ring is warm.
+2. A test keeps a clip alive while the ring wraps twice: the clip's pixels are unchanged, and its buffers return to the pool only when the clip is dropped.
+3. A test feeds two flashes ten frames apart: one clip with two triggers, and the quiet tail counted from the end of the second flash.
+4. A test feeds a flash while the previous clip is still waiting for the writer: a second clip is produced, and the frames the two clips have in common are the same objects.
+5. A test submits a clip larger than the writer's queue limit: a "not saved: writer busy" log line and no folder.
+6. A test with a trigger that never stops: the clip is handed off at the cap and a new clip starts.
+7. A test submits a clip the file conversion cannot write, then a good one: the first is logged as not saved with its reason, the second is written.
+8. A test writes two clips with the same trigger time: two folders.
+9. A Mono8 clip written to PNG and read back has the same pixel values, bit for bit. When Feature-6 adds Mono16, the same test runs on a Mono16 frame with values above 255 and with the low bits set.
+10. By hand: two quick presses of **Inject flash** while streaming are both saved, and `candidates.txt` lists both.
+
+### Out of this step
+
+- The writer's speed at camera sizes, and a queue limit in bytes. PNG encoding of large 16-bit frames is slow; that is settled with the SER writer (Feature-6) and measured in Feature-5.
+- Merging rules tuned for long transits.
+- An event browser.
+
+### Order
+
+Before Feature-6. Step 1 comes first inside this feature, because Steps 2 and 3 are written against shared frames. The conversion split must exist before the first Mono16 frame is written. The detection change must exist before a recording or a camera is monitored.
+### Close-out
+
+Feature-7 is in the program as specified above. Steps 1 to 4 are all built, and the ten "Done when" items pass.
+
+**Decisions made while building it**
+
+- **The quiet tail runs from the last firing frame.** The first draft counted post-event frames from the trigger. A long event would then have been cut off 30 frames after its trigger while it was still going on. The text above was corrected before this move.
+- **The detector fires once per run.** `FlashDetector::observe` is true on the one frame where a run becomes a candidate. `firing()` says whether the latest frame still belongs to that run. `advanceReference` had no caller left and was removed.
+- **A clip that carries on after the cap is not a new candidate.** Its trigger is marked `continues_previous_clip` in `event.txt` and in `candidates.txt`, and the window's candidate count does not rise for it.
+- **The pool keeps at most four spare frames** (`FramePool::kMaxSpareFrames`). The by-hand run showed why: after a 187-frame clip was written the readout stayed at 81 MB, because every returned buffer was kept for reuse. With the limit it returns to 47 MB.
+- **`FramePool::acquire` takes the frame's size in bytes.** The pool can then report the bytes it holds exactly. `SyntheticFrameSource` owns the pool and reports `liveFrameBytes()` for the buffer readout.
+- **The preview mailbox is a small class, `LatestFrameSlot`.** Feature-8 will use a second one for the guider.
+- **The writer reports a `ClipWriteResult`:** the folder, or the reason the clip was not saved, and whether the session's record is broken. The window shows `Candidates: N (M not saved)` and a `Recording failed` status that stays until the stream is restarted. The status label is worked out from the current state each time, so a late notification cannot leave a stale text.
+- **File formats.** `event.txt` has one `trigger:` line per candidate. `candidates.txt` has one line per candidate: the UTC time, the frame indices, the measured values, the settings, and last either `clip=<folder>` or `not_saved=<reason>`.
+- **Removed, because nothing calls them any more:** `EventCapture::writesInFlight`, `onWriteFinished`, and `memoryUsageBytes`; `FrameRingBuffer::memoryUsageBytes` and `copyStored`.
+- **Renamed:** `frame_image` to `preview_image`, and `tests/stage4_tests.cpp` to `tests/core_tests.cpp`. The CTest name is now `core`.
+
+**Tests**
+
+`SeleneWatchTests` has 27 tests in six classes: the pool, the ring, the mailbox, the detector, the capture, and the writer. Beyond the "Done when" list they cover a frame that outlives its pool, a clip submitted after the writer has stopped, an output folder that cannot be created (a record failure), and a run from the capture through the writer to the files on disk.
+
+**By hand (item 10), 13 November 2026**
+
+The application was started and its buttons pressed through Windows UI Automation, on the development machine.
+
+- Two presses of **Inject flash** 150 ms apart: both detected. They fell six frames apart, so they joined one clip with two triggers: 149 frames before, 37 after, 187 PNG files, the completion marker, and two lines in `candidates.txt`. **Inject flash** stayed enabled between the presses.
+- Two presses 1.5 s apart: two clips. The second started 46 frames after the first trigger, while the first clip was with the writer. Both are complete, and `candidates.txt` has both.
+- The stream held 30 fps throughout. The readout was 46.4 MB before the flashes and 47.3 MB after the clips were written.
+
+**Carried forward**
+
+- The Mono16 half of item 9 belongs to Feature-6, where clips become SER. Its round-trip test is item 4 of that feature.
+- Qt Test's text output does not reach the console or CTest's log on this machine; only the pass or fail result does. Running `SeleneWatchTests -o results.txt,txt` writes it to a file. Worth fixing when the tests are next touched.

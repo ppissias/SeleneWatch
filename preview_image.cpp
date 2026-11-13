@@ -1,6 +1,6 @@
-#include "frame_image.h"
+#include "preview_image.h"
 
-QImage frameToQImage(const Frame& frame)
+QImage frameToPreviewImage(const Frame& frame)
 {
     if (frame.width <= 0 || frame.height <= 0 || frame.data.empty())
     {

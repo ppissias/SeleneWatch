@@ -21,8 +21,11 @@ set(PROJECT_SOURCES
     mainwindow.h
     mainwindow.cpp
     frame.h
-    frame_image.h
-    frame_image.cpp
+    frame_pool.h
+    frame_pool.cpp
+    latest_frame_slot.h
+    preview_image.h
+    preview_image.cpp
     synthetic_scene.h
     synthetic_scene.cpp
     synthetic_frame_source.h
@@ -61,8 +64,8 @@ endif()
 enable_testing()
 
 add_executable(SeleneWatchTests
-    tests/stage4_tests.cpp
-    frame_image.cpp
+    tests/core_tests.cpp
+    frame_pool.cpp
     synthetic_scene.cpp
     frame_ring_buffer.cpp
     flash_detector.cpp
@@ -81,4 +84,4 @@ target_link_libraries(SeleneWatchTests
 
 selenewatch_compile_options(SeleneWatchTests)
 
-add_test(NAME stage4 COMMAND SeleneWatchTests)
+add_test(NAME core COMMAND SeleneWatchTests)

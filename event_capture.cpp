@@ -14,51 +14,75 @@ void EventCapture::reset()
     ring_.clear();
     detector_.reset();
     collecting_ = false;
-    postRemaining_ = 0;
+    quietFrames_ = 0;
     clip_ = {};
 }
 
-void EventCapture::onFrame(Frame& frame)
+void EventCapture::onFrame(const FramePtr& frame)
 {
-    const bool busy = collecting_ || writesInFlight_.load(std::memory_order_relaxed) > 0;
-    if (!busy)
+    // The ring takes the frame first, so a clip that starts on this frame
+    // finds it there as its newest.
+    ring_.push(frame);
+
+    const bool triggered = detector_.observe(*frame);
+    const bool firing = detector_.firing();
+
+    if (triggered)
     {
-        if (detector_.observe(frame))
-        {
-            const uint64_t onsetIndex = detector_.onsetFrameIndex();
-            const uint64_t triggerIndex = frame.frameIndex;
-            const auto triggerTime = frame.timestamp;
-            const int brightPixelCount = detector_.lastBrightCount();
-            ring_.push(frame);
-            beginCapture(onsetIndex, triggerIndex, triggerTime, brightPixelCount);
-            return;
-        }
-    }
-    else
-    {
-        detector_.advanceReference(frame);
+        const ClipTrigger trigger{detector_.onsetFrameIndex(), frame->frameIndex, frame->timestamp,
+            detector_.lastBrightCount(), false};
+
         if (collecting_)
         {
-            appendPostFrame(frame);
+            clip_.frames.push_back(frame);
+            ++clip_.framesAfter;
+            clip_.triggers.push_back(trigger);
+        }
+        else
+        {
+            beginClip(trigger);
+        }
+
+        if (onCandidate_)
+        {
+            onCandidate_();
         }
     }
+    else if (collecting_)
+    {
+        clip_.frames.push_back(frame);
+        ++clip_.framesAfter;
+    }
 
-    ring_.push(frame);
+    if (!collecting_)
+    {
+        return;
+    }
+
+    // The quiet count runs from the last frame on which the detector fired,
+    // so a long event is kept whole and the tail follows its end.
+    quietFrames_ = firing ? 0 : quietFrames_ + 1;
+
+    if (quietFrames_ >= kPostEventFrames)
+    {
+        handOff();
+        return;
+    }
+
+    if (clip_.framesAfter >= kMaxPostEventFrames)
+    {
+        handOff();
+        if (firing)
+        {
+            beginClip(ClipTrigger{detector_.onsetFrameIndex(), frame->frameIndex, frame->timestamp,
+                detector_.lastBrightCount(), true});
+        }
+    }
 }
 
 void EventCapture::finishPartial()
 {
     handOff();
-}
-
-int EventCapture::onWriteFinished()
-{
-    return writesInFlight_.fetch_sub(1, std::memory_order_relaxed) - 1;
-}
-
-int EventCapture::writesInFlight() const
-{
-    return writesInFlight_.load(std::memory_order_relaxed);
 }
 
 size_t EventCapture::bufferSize() const
@@ -71,42 +95,19 @@ size_t EventCapture::bufferCapacity() const
     return ring_.capacity();
 }
 
-size_t EventCapture::memoryUsageBytes() const
-{
-    return ring_.memoryUsageBytes();
-}
-
-void EventCapture::beginCapture(uint64_t onsetIndex, uint64_t triggerIndex,
-    std::chrono::system_clock::time_point triggerTime, int brightPixelCount)
+void EventCapture::beginClip(const ClipTrigger& trigger)
 {
     collecting_ = true;
+    quietFrames_ = 0;
     clip_ = {};
-    clip_.frames = ring_.copyStored();
-    clip_.onsetFrameIndex = onsetIndex;
-    clip_.triggerFrameIndex = triggerIndex;
-    clip_.triggerTime = triggerTime;
+
+    // Pointers to the frames in the ring: the history and the trigger frame.
+    clip_.frames = ring_.stored();
+    clip_.triggers.push_back(trigger);
     clip_.deltaThreshold = FlashDetector::kDeltaThreshold;
     clip_.minBrightPixels = FlashDetector::kMinBrightPixels;
-    clip_.brightPixelCount = brightPixelCount;
     clip_.framesBefore = clip_.frames.empty() ? 0 : static_cast<int>(clip_.frames.size()) - 1;
     clip_.framesAfter = 0;
-    postRemaining_ = kPostEventFrames;
-
-    if (onCandidate_)
-    {
-        onCandidate_();
-    }
-}
-
-void EventCapture::appendPostFrame(const Frame& frame)
-{
-    clip_.frames.push_back(frame);
-    ++clip_.framesAfter;
-    --postRemaining_;
-    if (postRemaining_ == 0)
-    {
-        handOff();
-    }
 }
 
 void EventCapture::handOff()
@@ -117,14 +118,11 @@ void EventCapture::handOff()
     }
 
     collecting_ = false;
-    postRemaining_ = 0;
+    quietFrames_ = 0;
     EventClip finished = std::move(clip_);
     clip_ = {};
-    if (!onClip_)
+    if (onClip_)
     {
-        return;
+        onClip_(std::move(finished));
     }
-
-    writesInFlight_.fetch_add(1, std::memory_order_relaxed);
-    onClip_(std::move(finished));
 }

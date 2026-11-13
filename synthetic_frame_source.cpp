@@ -113,6 +113,11 @@ void SyntheticFrameSource::requestFlash()
     flashFramesRemaining_.store(kFlashFrames);
 }
 
+size_t SyntheticFrameSource::liveFrameBytes() const
+{
+    return pool_.allocatedBytes();
+}
+
 void SyntheticFrameSource::run(std::stop_token stopToken)
 {
     try
@@ -120,8 +125,7 @@ void SyntheticFrameSource::run(std::stop_token stopToken)
         using clock = std::chrono::steady_clock;
         uint64_t frameIndex = 0;
         auto nextFrameTime = clock::now();
-
-        Frame currentFrame;
+        const size_t pixelBytes = static_cast<size_t>(width_) * static_cast<size_t>(height_);
 
         while (!stopToken.stop_requested() && isRunning_.load())
         {
@@ -129,11 +133,14 @@ void SyntheticFrameSource::run(std::stop_token stopToken)
             const auto frameInterval = std::chrono::duration_cast<clock::duration>(
                 std::chrono::duration<double>(1.0 / fps));
 
-            generateFrame(currentFrame, frameIndex++);
+            // A recycled buffer once the stream is warm. This thread is its
+            // only owner until the callback takes it.
+            std::shared_ptr<Frame> frame = pool_.acquire(pixelBytes);
+            generateFrame(*frame, frameIndex++);
 
             if (callback_)
             {
-                callback_(currentFrame);
+                callback_(std::move(frame));
             }
 
             nextFrameTime += frameInterval;

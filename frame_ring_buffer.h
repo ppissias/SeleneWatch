@@ -6,8 +6,8 @@
 #include <mutex>
 #include <vector>
 
-// Thread-safe bounded circular RAM buffer holding recent Frame history.
-// Pushing recycles pixel buffer storage via std::swap to eliminate runtime allocations.
+// Thread-safe bounded circular buffer holding the most recent published frames.
+// It holds pointers. Pushing drops the oldest pointer; it never copies pixels.
 class FrameRingBuffer
 {
 public:
@@ -19,29 +19,26 @@ public:
     FrameRingBuffer(FrameRingBuffer&&) = delete;
     FrameRingBuffer& operator=(FrameRingBuffer&&) = delete;
 
-    // Pushes the frame into the circular buffer and swaps out the slot's
-    // existing pixel buffer into 'frame.data' for reuse by the caller.
-    void push(Frame& frame);
+    // Stores the frame as the newest. When the buffer is full, the oldest
+    // frame is let go.
+    void push(FramePtr frame);
 
-    // Resets the buffer head and stored count.
+    // Lets go of every stored frame.
     void clear();
 
-    // Returns the number of valid frames currently stored.
+    // Returns the number of frames currently stored.
     [[nodiscard]] size_t size() const;
 
     // Returns the maximum number of frames the buffer can store.
     [[nodiscard]] size_t capacity() const;
 
-    // Returns an approximation of total RAM (in bytes) occupied by the buffer and its slots.
-    [[nodiscard]] size_t memoryUsageBytes() const;
-
-    // Copies stored frames oldest-first. Holds the mutex for the copy.
-    [[nodiscard]] std::vector<Frame> copyStored() const;
+    // The stored frames, oldest first. Copies pointers under the lock, not pixels.
+    [[nodiscard]] std::vector<FramePtr> stored() const;
 
 private:
     const size_t capacity_;
     mutable std::mutex mutex_;
-    std::vector<Frame> slots_;
+    std::vector<FramePtr> slots_;
     size_t head_{0};
     size_t count_{0};
 };

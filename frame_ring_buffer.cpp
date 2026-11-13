@@ -9,39 +9,29 @@ FrameRingBuffer::FrameRingBuffer(size_t capacity)
     slots_.resize(capacity_);
 }
 
-void FrameRingBuffer::push(Frame& frame)
+void FrameRingBuffer::push(FramePtr frame)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    Frame& slot = slots_[head_];
-    slot.width = frame.width;
-    slot.height = frame.height;
-    slot.format = frame.format;
-    slot.frameIndex = frame.frameIndex;
-    slot.timestamp = frame.timestamp;
-    slot.steadyTimestamp = frame.steadyTimestamp;
-
-    // The slot takes the new pixels. The caller gets the slot's previous buffer
-    // back, which may be empty until the ring has filled once.
-    std::swap(slot.data, frame.data);
-
-    head_ = (head_ + 1) % capacity_;
-    if (count_ < capacity_)
+    // The frame that leaves the ring is released after the lock is dropped,
+    // so returning its buffer to the pool does not happen under this mutex.
+    FramePtr leaving;
     {
-        ++count_;
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        leaving = std::exchange(slots_[head_], std::move(frame));
+        head_ = (head_ + 1) % capacity_;
+        if (count_ < capacity_)
+        {
+            ++count_;
+        }
     }
 }
 
-std::vector<Frame> FrameRingBuffer::copyStored() const
+std::vector<FramePtr> FrameRingBuffer::stored() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    std::vector<Frame> frames;
+    std::vector<FramePtr> frames;
     frames.reserve(count_);
-    if (count_ == 0)
-    {
-        return frames;
-    }
 
     const size_t oldest = (head_ + capacity_ - count_) % capacity_;
     for (size_t i = 0; i < count_; ++i)
@@ -53,9 +43,13 @@ std::vector<Frame> FrameRingBuffer::copyStored() const
 
 void FrameRingBuffer::clear()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    head_ = 0;
-    count_ = 0;
+    std::vector<FramePtr> leaving(capacity_);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        slots_.swap(leaving);
+        head_ = 0;
+        count_ = 0;
+    }
 }
 
 size_t FrameRingBuffer::size() const
@@ -67,17 +61,4 @@ size_t FrameRingBuffer::size() const
 size_t FrameRingBuffer::capacity() const
 {
     return capacity_;
-}
-
-size_t FrameRingBuffer::memoryUsageBytes() const
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    size_t total = sizeof(*this);
-    total += slots_.capacity() * sizeof(Frame);
-    for (const auto& slot : slots_)
-    {
-        total += slot.data.capacity();
-    }
-    return total;
 }
