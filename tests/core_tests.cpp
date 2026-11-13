@@ -58,6 +58,13 @@ FramePtr painted(uint64_t index, bool flash)
     return frame;
 }
 
+// Existing collection tests exercise the selectable two-frame rule; the
+// Feature-9 suite separately covers the default one-frame rule.
+EventCapture twoFrameCapture(size_t capacity, EventCapture::CandidateStarted candidate, EventCapture::ClipReady clip)
+{
+    return EventCapture(capacity, std::move(candidate), std::move(clip), {6, 8, 400, false});
+}
+
 void feed(EventCapture& capture, uint64_t& index, int count, bool flash)
 {
     for (int n = 0; n < count; ++n)
@@ -113,8 +120,6 @@ EventClip smallClip(system_clock::time_point triggerTime)
 {
     EventClip clip;
     clip.triggers.push_back(ClipTrigger{4, 5, triggerTime, 200, false});
-    clip.deltaThreshold = 60;
-    clip.minBrightPixels = 120;
     clip.framesBefore = 1;
     clip.framesAfter = 0;
     clip.frames.push_back(smallFrame(4, triggerTime - milliseconds{33}, {10, 10, 10, 10}));
@@ -1078,16 +1083,23 @@ void RingBufferTest::clearLetsGoOfStoredFrames()
 void LatestFrameSlotTest::newerFrameReplacesUnreadOne()
 {
     LatestFrameSlot slot;
-    QVERIFY(slot.take() == nullptr);
+    QVERIFY(slot.take().frame == nullptr);
 
     // Only the first put into an empty slot asks for a wake-up.
     QVERIFY(slot.put(tiny(1, 1)));
-    QVERIFY(!slot.put(tiny(2, 2)));
+    auto view = std::make_shared<DetectionView>();
+    view->summary.frameIndex = 2;
+    view->summary.peakSigma = 19;
+    QVERIFY(!slot.put(tiny(2, 2), view));
 
-    const FramePtr taken = slot.take();
+    const PreviewFrame packet = slot.take();
+    const FramePtr taken = packet.frame;
     QVERIFY(taken != nullptr);
     QCOMPARE(taken->frameIndex, static_cast<uint64_t>(2));
-    QVERIFY(slot.take() == nullptr);
+    QVERIFY(packet.detection);
+    QCOMPARE(packet.detection->summary.frameIndex, taken->frameIndex);
+    QCOMPARE(packet.detection->summary.peakSigma, 19.0);
+    QVERIFY(slot.take().frame == nullptr);
 
     QVERIFY(slot.put(tiny(3, 3)));
 }
@@ -1096,7 +1108,7 @@ void LatestFrameSlotTest::newerFrameReplacesUnreadOne()
 
 void FlashDetectorTest::markerAloneNeverFires()
 {
-    FlashDetector detector;
+    FlashDetector detector({6, 8, 400, false});
     int maxRising = 0;
     for (uint64_t index = 0; index < 200; ++index)
     {
@@ -1104,12 +1116,12 @@ void FlashDetectorTest::markerAloneNeverFires()
         QVERIFY(!detector.firing());
         maxRising = std::max(maxRising, detector.lastBrightCount());
     }
-    QVERIFY(maxRising < FlashDetector::kMinBrightPixels);
+    QVERIFY(maxRising < DetectionSettings{}.minPixels);
 }
 
 void FlashDetectorTest::runFiresOnceOnItsSecondFrame()
 {
-    FlashDetector detector;
+    FlashDetector detector({6, 8, 400, false});
     for (uint64_t index = 0; index < 4; ++index)
     {
         QVERIFY(!detector.observe(*painted(index, false)));
@@ -1117,7 +1129,7 @@ void FlashDetectorTest::runFiresOnceOnItsSecondFrame()
 
     QVERIFY(!detector.observe(*painted(4, true)));
     QVERIFY(!detector.firing());
-    QVERIFY(detector.lastBrightCount() >= FlashDetector::kMinBrightPixels);
+    QVERIFY(detector.lastBrightCount() >= DetectionSettings{}.minPixels);
     QCOMPARE(detector.onsetFrameIndex(), static_cast<uint64_t>(4));
 
     QVERIFY(detector.observe(*painted(5, true)));
@@ -1140,38 +1152,37 @@ void FlashDetectorTest::runFiresOnceOnItsSecondFrame()
 
 void FlashDetectorTest::oneFrameSpotDoesNotFire()
 {
-    FlashDetector detector;
+    FlashDetector detector({6, 8, 400, false});
     for (uint64_t index = 0; index < 2; ++index)
     {
         QVERIFY(!detector.observe(*painted(index, false)));
     }
 
     QVERIFY(!detector.observe(*painted(2, true)));
-    QVERIFY(detector.lastBrightCount() >= FlashDetector::kMinBrightPixels);
+    QVERIFY(detector.lastBrightCount() >= DetectionSettings{}.minPixels);
 
     QVERIFY(!detector.observe(*painted(3, false)));
     QVERIFY(!detector.firing());
 }
 
-// 12-bit data, at the top or the bottom of the word, is read as its top 8
-// bits, so the 60-level threshold means what it means for Mono8.
+// Equivalent flashes in the native Mono8 and Mono16 sample layouts fire
+// the same two-frame trigger without truncating the 16-bit samples.
 void FlashDetectorTest::mono16FramesFireLikeMono8()
 {
     for (const BitAlignment alignment : {BitAlignment::High, BitAlignment::Low})
     {
-        FlashDetector mono8;
-        FlashDetector mono16;
+        FlashDetector mono8({6, 8, 400, false});
+        FlashDetector mono16({6, 8, 400, false});
         for (uint64_t index = 0; index < 4; ++index)
         {
             QVERIFY(!mono8.observe(*painted(index, false)));
             QVERIFY(!mono16.observe(*paintedMono16(index, false, alignment)));
-            QCOMPARE(mono16.lastBrightCount(), mono8.lastBrightCount());
         }
 
         QVERIFY(!mono8.observe(*painted(4, true)));
         QVERIFY(!mono16.observe(*paintedMono16(4, true, alignment)));
         QCOMPARE(mono16.lastBrightCount(), mono8.lastBrightCount());
-        QVERIFY(mono16.lastBrightCount() >= FlashDetector::kMinBrightPixels);
+        QVERIFY(mono16.lastBrightCount() >= DetectionSettings{}.minPixels);
 
         QVERIFY(mono16.observe(*paintedMono16(5, true, alignment)));
         QVERIFY(mono16.firing());
@@ -1182,8 +1193,8 @@ void FlashDetectorTest::mono16FramesFireLikeMono8()
 // Grey stored as colour is read as the mean of its channels: the grey value.
 void FlashDetectorTest::rgbFramesFireLikeMono8()
 {
-    FlashDetector mono8;
-    FlashDetector rgb;
+    FlashDetector mono8({6, 8, 400, false});
+    FlashDetector rgb({6, 8, 400, false});
     for (uint64_t index = 0; index < 4; ++index)
     {
         QVERIFY(!mono8.observe(*painted(index, false)));
@@ -2235,6 +2246,7 @@ void SessionTest::serFileThroughSessionWritesAClip()
         notifications.candidateStarted = [&candidates] { ++candidates; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectionSettings({6, 8, 400, false});
 
         auto source = std::make_unique<RecordingSource>(fsPath(path));
         source->setSpeed(RecordingSource::Speed::Fast);
@@ -2289,6 +2301,7 @@ void SessionTest::endOfFileHandsOffTheOpenClip()
         notifications.ended = [&ended] { ended = true; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectionSettings({6, 8, 400, false});
 
         auto source = std::make_unique<RecordingSource>(fsPath(path));
         source->setSpeed(RecordingSource::Speed::Fast);
@@ -2332,17 +2345,8 @@ void SessionTest::loopJumpFiresNoCandidate()
     const QString path = writeSerFile(dir.path(), "darkening.ser", spec);
     const QString root = QDir(dir.path()).filePath("events");
 
-    // Without a restart at the jump, the capture fires on it.
-    {
-        int fired = 0;
-        EventCapture capture(50, [&fired] { ++fired; }, [](EventClip) {});
-        for (int k = 0; k < 20; ++k)
-        {
-            capture.onFrame(smallFrame(static_cast<uint64_t>(k), testTime(100 * k),
-                spec.frames[static_cast<size_t>(k % 10)], width, height));
-        }
-        QVERIFY(fired >= 1);
-    }
+    // Feature-9 rejects the broad jump itself. The restart is still needed
+    // so history and an open clip cannot span a playback discontinuity.
 
     QObject context;
     std::vector<ClipWriteResult> results;
@@ -2352,6 +2356,7 @@ void SessionTest::loopJumpFiresNoCandidate()
         notifications.candidateStarted = [&candidates] { ++candidates; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectionSettings({6, 8, 400, false});
 
         // A loop longer than the file loops the whole file.
         auto source = std::make_unique<RecordingSource>(fsPath(path));
@@ -2364,6 +2369,7 @@ void SessionTest::loopJumpFiresNoCandidate()
         QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames() >= 50, 10000);
         session.stop();
         QVERIFY(!session.sourceFinished());
+        QVERIFY(session.bufferSize() <= 10);
     }
     QTest::qWait(100);
 
@@ -2387,6 +2393,7 @@ void SessionTest::unreadableFileDoesNotStart()
 
     QObject context;
     Session session(&context, QDir(dir.path()).filePath("events"), {});
+    session.setDetectionSettings({6, 8, 400, false});
     session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
 
     QString error;
@@ -2445,10 +2452,10 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     bool ended = false;
     bool requested = false;
     Session* running = nullptr;
-    const BlipSettings settings{32, 32, 10.0, kind == 1 ? 3200.0 : 200.0, 3};
+    const BlipSettings settings{32, 32, 6.0, kind == 1 ? 3200.0 : 200.0, 3};
     Session::Notifications notifications;
     notifications.previewReady = [&] {
-        const FramePtr frame = running->takePreviewFrame();
+        const FramePtr frame = running->takePreview().frame;
         if (frame && !requested)
         {
             requested = running->requestBlip(settings);
@@ -2458,6 +2465,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     notifications.clipWritten = [&](const ClipWriteResult& result) { results.push_back(result); };
     {
         Session session(&context, root, std::move(notifications));
+        session.setDetectionSettings({6, 8, 400, false});
         running = &session;
         session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
         QString error;
@@ -2472,7 +2480,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
     QVERIFY(text.contains("contains_test_signal: yes\n"));
     QCOMPARE(text.count("\nblip: "), 1);
-    QVERIFY(text.contains("centre_x=32 centre_y=32 fwhm_px=10 amplitude_adu="));
+    QVERIFY(text.contains("centre_x=32 centre_y=32 fwhm_px=6 amplitude_adu="));
     QVERIFY(text.contains("duration_frames=3\n"));
     QCOMPARE(text.count(" test_blip="), 3);
     QVERIFY(text.contains(" blip_frame=1\n"));
@@ -2528,6 +2536,7 @@ void SessionTest::stopCancelsAnUnfinishedInjection()
     const QString path = writeSerFile(dir.path(), "quiet.ser", spec);
     QObject context;
     Session session(&context, QDir(dir.path()).filePath("events"), {});
+    session.setDetectionSettings({6, 8, 400, false});
     const BlipSettings settings{0, 0, 3, 100, 100};
     QVERIFY(!session.requestBlip(settings));
     session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
@@ -2538,7 +2547,7 @@ void SessionTest::stopCancelsAnUnfinishedInjection()
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         if (!observed || !observed->blip)
         {
-            observed = session.takePreviewFrame();
+            observed = session.takePreview().frame;
         }
         return observed && observed->blip.has_value();
     })(), 1000);
@@ -2551,7 +2560,7 @@ void SessionTest::stopCancelsAnUnfinishedInjection()
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         if (!observed)
         {
-            observed = session.takePreviewFrame();
+            observed = session.takePreview().frame;
         }
         return observed != nullptr;
     })(), 1000);
@@ -2567,7 +2576,7 @@ void EventCaptureTest::oneClipPerFlash()
 {
     std::vector<EventClip> clips;
     int candidates = 0;
-    EventCapture capture(50, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(50, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2583,9 +2592,9 @@ void EventCaptureTest::oneClipPerFlash()
     QCOMPARE(clip.triggers[0].onsetFrameIndex, static_cast<uint64_t>(4));
     QCOMPARE(clip.triggers[0].triggerFrameIndex, static_cast<uint64_t>(5));
     QVERIFY(!clip.triggers[0].continuesPreviousClip);
-    QVERIFY(clip.triggers[0].brightPixelCount >= FlashDetector::kMinBrightPixels);
-    QCOMPARE(clip.deltaThreshold, FlashDetector::kDeltaThreshold);
-    QCOMPARE(clip.minBrightPixels, FlashDetector::kMinBrightPixels);
+    QVERIFY(clip.triggers[0].brightPixelCount >= DetectionSettings{}.minPixels);
+    QCOMPARE(clip.triggers.front().settings.sigma, 6.0);
+    QCOMPARE(clip.triggers.front().settings.minPixels, DetectionSettings{}.minPixels);
 
     // Frames 0-4 come before the trigger frame. After it: the third flash
     // frame, then the quiet tail.
@@ -2602,7 +2611,7 @@ void EventCaptureTest::secondFlashJoinsTheOpenClip()
 {
     std::vector<EventClip> clips;
     int candidates = 0;
-    EventCapture capture(100, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(100, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2638,7 +2647,7 @@ void EventCaptureTest::flashWhilePreviousClipWaitsStartsNewClip()
 {
     // The clips collected here stand for clips waiting in the writer's queue.
     std::vector<EventClip> clips;
-    EventCapture capture(50, [] {}, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(50, [] {}, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2672,7 +2681,7 @@ void EventCaptureTest::endlessTriggerSplitsAtTheCap()
 {
     std::vector<EventClip> clips;
     int candidates = 0;
-    EventCapture capture(50, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(50, [&candidates] { ++candidates; }, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2708,7 +2717,7 @@ void EventCaptureTest::endlessTriggerSplitsAtTheCap()
 void EventCaptureTest::partialClipOnStop()
 {
     std::vector<EventClip> clips;
-    EventCapture capture(50, [] {}, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(50, [] {}, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2726,7 +2735,7 @@ void EventCaptureTest::partialClipOnStop()
 void EventCaptureTest::stopWhileIdleSavesNothing()
 {
     std::vector<EventClip> clips;
-    EventCapture capture(50, [] {}, [&clips](EventClip clip) {
+    auto capture = twoFrameCapture(50, [] {}, [&clips](EventClip clip) {
         clips.push_back(std::move(clip));
     });
 
@@ -2760,20 +2769,20 @@ void EventWriterTest::writesMetadataAndCandidateLog()
 
     const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
     QVERIFY(text.contains("triggers: 1\n"));
-    QVERIFY(text.contains("trigger: onset_frame_index=4 trigger_frame_index=5 bright_pixel_count=200 trigger_time="
-        + utcText(triggerTime) + "\n"));
-    QVERIFY(text.contains("delta_threshold: 60\n"));
-    QVERIFY(text.contains("min_bright_pixels: 120\n"));
+    QVERIFY(text.contains("trigger: onset_frame_index=4 trigger_frame_index=5 bright_pixel_count=200 "));
+    QVERIFY(text.contains("trigger_time=" + utcText(triggerTime) + "\n"));
+    QVERIFY(text.contains("detector: per-pixel sigma / compact patch\n"));
+    QVERIFY(text.contains("min_pixels=8 max_pixels=400"));
     QVERIFY(text.contains("frames_before: 1\n"));
     QVERIFY(text.contains("0000 4 " + utcText(triggerTime - milliseconds{33}) + " ser_utc_ticks="));
     QVERIFY(text.contains("0001 5 " + utcText(triggerTime) + " ser_utc_ticks="));
     QVERIFY(text.trimmed().endsWith("complete: yes"));
-    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), static_cast<qsizetype>(2));
+    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), static_cast<qsizetype>(3));
 
     const QStringList lines = candidateLines(root.path());
     QCOMPARE(lines.size(), static_cast<qsizetype>(1));
     QVERIFY(lines[0].startsWith(utcText(triggerTime) + " onset_frame_index=4 trigger_frame_index=5 "));
-    QVERIFY(lines[0].contains("delta_threshold=60 min_bright_pixels=120"));
+    QVERIFY(lines[0].contains("sigma=6 min_pixels=8 max_pixels=400"));
     QVERIFY(lines[0].endsWith("clip=" + utcStamp(triggerTime)));
     const QStringList journal = readText(QDir(root.path()).filePath("candidates.txt")).split('\n', Qt::SkipEmptyParts);
     QCOMPARE(journal.size(), qsizetype{2});
@@ -2971,7 +2980,7 @@ void EventWriterTest::captureToWriterEndToEnd()
     EventWriter writer(&context, root.path(), 1000, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
-    EventCapture capture(50, [] {}, [&writer](EventClip clip) {
+    auto capture = twoFrameCapture(50, [] {}, [&writer](EventClip clip) {
         writer.submit(std::move(clip));
     });
 
@@ -2991,7 +3000,7 @@ void EventWriterTest::captureToWriterEndToEnd()
     std::string error;
     QVERIFY2(reader.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, error), error.c_str());
     QCOMPARE(reader.frameCount(), 5 + 1 + 1 + kPostEventFrames);
-    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), qsizetype{2});
+    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), qsizetype{3});
     QCOMPARE(candidateLines(root.path()).size(), static_cast<qsizetype>(2));
 }
 

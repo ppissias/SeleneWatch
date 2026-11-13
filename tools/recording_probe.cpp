@@ -1,9 +1,9 @@
-#include "recording/avi_reader.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "session.h"
 #include "sources/recording_source.h"
+#include "tools/detection_probe.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -11,6 +11,7 @@
 #include <QtCore/QTextStream>
 #include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QFontDatabase>
 
 #include <filesystem>
 #include <memory>
@@ -21,14 +22,17 @@ int main(int argc, char** argv)
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
+    const int font = QFontDatabase::addApplicationFont(qEnvironmentVariable("WINDIR", "C:/Windows") + "/Fonts/segoeui.ttf");
+    if (font >= 0) app.setFont(QFont(QFontDatabase::applicationFontFamilies(font).front(), 9));
     QTextStream out(stdout), err(stderr);
     const QStringList args = app.arguments();
     if (args.size() < 3)
     {
-        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT\n";
+        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json\n";
         return 2;
     }
     const QString mode = args[1];
+    if (mode == "survey" || mode == "measure" || mode == "measure-batch") return runDetectionProbe(args);
     QObject context;
     if (mode == "capture" && args.size() == 4)
     {
@@ -49,8 +53,6 @@ int main(int argc, char** argv)
             if (!session.start(error)) { err << error << "\n"; return 1; }
             if (app.exec() != 0) return 1;
             frames = session.acquiredFrames();
-            QElapsedTimer shutdown;
-            shutdown.start();
             session.stop();
             out << "source_frames=" << frames << " source_and_collection_ms=" << timer.elapsed() << "\n";
         }
@@ -75,6 +77,7 @@ int main(int argc, char** argv)
         EventClip clip;
         clip.stream = reader.describe();
         clip.stream.source = args[2].toStdString();
+        clip.stream.playback = "TEST: six nonconsecutive format-check samples, not a detected event";
         for (int i = 0; i < 6; ++i)
         {
             const int position = i * (reader.frameCount() - 1) / 5;
@@ -83,6 +86,7 @@ int main(int argc, char** argv)
             if (!reader.readFrame(position, *frame, error)) return 1;
             frame->frameIndex = reader.frameNumber(position);
             frame->timestamp = reader.frameTime(position);
+            frame->testSource = true;
             clip.frames.push_back(frame);
         }
         clip.triggers.push_back({clip.frames[1]->frameIndex, clip.frames[2]->frameIndex,
@@ -96,6 +100,7 @@ int main(int argc, char** argv)
             EventClip clip;
             clip.stream.source = "constructed format check";
             clip.stream.camera = "none";
+            clip.stream.playback = "TEST: constructed format fixture, not a detected event";
             for (int n = 0; n < 3; ++n)
             {
                 auto frame = std::make_shared<Frame>();
@@ -105,6 +110,7 @@ int main(int argc, char** argv)
                 frame->alignment = kind == 3 ? BitAlignment::High : BitAlignment::Low;
                 frame->bayer = kind == 3 ? BayerPattern::RGGB : BayerPattern::None;
                 frame->frameIndex = static_cast<uint64_t>(n);
+                frame->testSource = true;
                 frame->timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1'700'000'000 + kind}
                     + std::chrono::milliseconds{n * 33};
                 for (int p = 0; p < 32 * 24; ++p)
@@ -132,9 +138,11 @@ int main(int argc, char** argv)
         frame->width = frame->height = 4096;
         frame->format = PixelFormat::Mono16;
         frame->significantBits = 16;
+        frame->testSource = true;
         frame->timestamp = std::chrono::system_clock::now();
         frame->data.resize(frameBytes(frame->width, frame->height, frame->format), 1);
         EventClip clip;
+        clip.stream.source = "TEST: constructed interrupted-write check";
         clip.frames.assign(64, frame); // 32 MB in RAM; long disk write for the kill check.
         clip.triggers.push_back({0, 0, frame->timestamp, 0, false});
         clips.push_back(std::move(clip));

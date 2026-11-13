@@ -1,6 +1,7 @@
 #include "recording/event_writer.h"
 #include "preview_image.h"
 #include "recording/ser_writer.h"
+#include "selenewatch_version.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -138,6 +139,11 @@ QString triggerFields(const ClipTrigger& trigger)
 {
     QString text = QString("onset_frame_index=%1 trigger_frame_index=%2 bright_pixel_count=%3")
         .arg(trigger.onsetFrameIndex).arg(trigger.triggerFrameIndex).arg(trigger.brightPixelCount);
+    text += QString(" sigma=%1 min_pixels=%2 max_pixels=%3 one_frame=%4 peak_sigma=%5 noise_floor_adu=%6 peak=(%7,%8) box=(%9,%10,%11,%12)")
+        .arg(trigger.settings.sigma, 0, 'g', 17).arg(trigger.settings.minPixels).arg(trigger.settings.maxPixels)
+        .arg(trigger.settings.oneFrame ? "yes" : "no").arg(trigger.peakSigma, 0, 'g', 17)
+        .arg(trigger.noiseFloor, 0, 'g', 17).arg(trigger.peakX).arg(trigger.peakY)
+        .arg(trigger.boxX).arg(trigger.boxY).arg(trigger.boxWidth).arg(trigger.boxHeight);
     if (trigger.continuesPreviousClip)
     {
         text += " continues_previous_clip";
@@ -168,6 +174,7 @@ void EventWriter::submit(EventClip clip)
     const bool testSignal = containsTestSignal(clip);
     // Frames of a refused clip are released after the lock is dropped.
     std::vector<FramePtr> dropped;
+    std::vector<float> droppedDifference;
     bool ended = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -185,6 +192,7 @@ void EventWriter::submit(EventClip clip)
             {
                 job.notSavedReason = "writer busy";
                 dropped.swap(clip.frames);
+                droppedDifference.swap(clip.peakDifference);
             }
             queuedFrames_ += clip.frames.size();
             job.clip = std::move(clip);
@@ -361,6 +369,7 @@ ClipWriteResult EventWriter::process(Job& job)
 
     // The frames are not needed for the log line.
     job.clip.frames.clear();
+    job.clip.peakDifference.clear();
 
     if (!appendCandidates(job, result, false))
     {
@@ -402,8 +411,9 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
             out << "trigger: " << triggerFields(trigger)
                 << " trigger_time=" << utcText(trigger.triggerTime) << "\n";
         }
-        out << "delta_threshold: " << clip.deltaThreshold << "\n";
-        out << "min_bright_pixels: " << clip.minBrightPixels << "\n";
+        out << "detector: per-pixel sigma / compact patch\n";
+        out << "reference_time_constant_seconds: " << kReferenceTimeConstantSeconds << "\n";
+        out << "max_patch_box_ratio: " << kMaxPatchBoxRatio << "\n";
         out << "frames_before: " << clip.framesBefore << "\n";
         out << "frames_after: " << clip.framesAfter << "\n";
         out << "frames:\n";
@@ -470,7 +480,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     const auto peakTrigger = std::max_element(clip.triggers.begin(), clip.triggers.end(),
         [](const ClipTrigger& a, const ClipTrigger& b) { return a.brightPixelCount < b.brightPixelCount; });
     const auto peakFrame = std::find_if(clip.frames.begin(), clip.frames.end(), [&](const FramePtr& frame) {
-        return frame->frameIndex == peakTrigger->triggerFrameIndex;
+        return frame->frameIndex == (clip.peakDifference.empty() ? peakTrigger->triggerFrameIndex : clip.peak.frameIndex);
     });
     const FramePtr peak = peakFrame == clip.frames.end() ? clip.frames.front() : *peakFrame;
     QImage baselineImage;
@@ -493,6 +503,39 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         return {};
     }
 
+    QImage difference(peak->width, peak->height, QImage::Format_RGB32);
+    difference.fill(Qt::black);
+    if (clip.peakDifference.size() == static_cast<size_t>(peak->width) * peak->height)
+    {
+        const float maximum = std::max(0.001f, *std::max_element(clip.peakDifference.begin(), clip.peakDifference.end()));
+        for (int y = 0; y < peak->height; ++y)
+        {
+            auto* row = reinterpret_cast<QRgb*>(difference.scanLine(y));
+            for (int x = 0; x < peak->width; ++x)
+            {
+                const int value = static_cast<int>(std::clamp(clip.peakDifference[static_cast<size_t>(y) * peak->width + x]
+                    * 255.0f / maximum, 0.0f, 255.0f));
+                row[x] = qRgb(value, value, value);
+            }
+        }
+        QPainter painter(&difference);
+        painter.setPen(QPen(Qt::red, 1));
+        painter.drawRect(QRect(clip.peak.boxX, clip.peak.boxY, clip.peak.boxWidth, clip.peak.boxHeight));
+        painter.drawText(8, 18, QString("Difference from held reference; peak %1 sigma; display scaled")
+            .arg(clip.peak.peakSigma, 0, 'f', 1));
+    }
+    else
+    {
+        QPainter painter(&difference);
+        painter.setPen(Qt::yellow);
+        painter.drawText(difference.rect(), Qt::AlignCenter, "No measured reference difference available");
+    }
+    if (!difference.save(dir.filePath("03_diff_annotated.png"), "PNG"))
+    {
+        error = "could not write annotated difference preview";
+        return {};
+    }
+
     // Record precisely which frames the display previews represent.
     if (!note.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
     {
@@ -503,6 +546,17 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         QTextStream out(&note);
         out << "baseline_frame_index: " << (baseline ? QString::number(baseline->frameIndex) : "unavailable") << "\n";
         out << "peak_preview_frame_index: " << peak->frameIndex << "\n";
+        if (!clip.peakDifference.empty())
+        {
+            out << "peak_sigma: " << QString::number(clip.peak.peakSigma, 'g', 17) << "\n";
+            out << "peak_delta_adu: " << QString::number(clip.peak.peakAdu, 'g', 17) << "\n";
+            out << "peak_patch: pixels=" << clip.peak.brightPixels << " peak=(" << clip.peak.peakX << "," << clip.peak.peakY
+                << ") box=(" << clip.peak.boxX << "," << clip.peak.boxY << "," << clip.peak.boxWidth << "," << clip.peak.boxHeight << ")\n";
+            out << "peak_settings: sigma=" << QString::number(clip.peak.settings.sigma, 'g', 17)
+                << " min_pixels=" << clip.peak.settings.minPixels << " max_pixels=" << clip.peak.settings.maxPixels
+                << " one_frame=" << (clip.peak.settings.oneFrame ? "yes" : "no") << "\n";
+            out << "difference_preview: positive native-ADU difference scaled to its maximum; annotations are display only\n";
+        }
         out.flush();
         if (out.status() != QTextStream::Ok || !note.flush())
         {
@@ -545,8 +599,6 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
         out << utcText(trigger.triggerTime) << " ";
         if (pending) out << "candidate_pending ";
         out << triggerFields(trigger)
-            << " delta_threshold=" << clip.deltaThreshold
-            << " min_bright_pixels=" << clip.minBrightPixels
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;
         if (!pending) out << " " << outcome;

@@ -29,13 +29,16 @@ public:
     using CandidateStarted = std::function<void()>;
     using ClipReady = std::function<void(EventClip clip)>;
 
-    EventCapture(size_t capacity, CandidateStarted onCandidate, ClipReady onClip);
+    EventCapture(size_t capacity, CandidateStarted onCandidate, ClipReady onClip, DetectionSettings settings = {});
 
     // Drops the ring, the detector state, and any clip still being collected.
     void reset();
 
     // Source thread. May call the candidate and clip callbacks before returning.
-    void onFrame(const FramePtr& frame);
+    void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {});
+    void setDetectionSettings(const DetectionSettings& settings);
+    [[nodiscard]] const DetectionSummary& detectionSummary() const;
+    [[nodiscard]] DetectionView detectionView() const;
 
     // Hands off a short clip when Stop interrupts collection.
     void finishPartial();
@@ -46,6 +49,7 @@ public:
 private:
     void beginClip(const ClipTrigger& trigger);
     void handOff();
+    [[nodiscard]] ClipTrigger currentTrigger(const Frame& frame, bool continuation) const;
 
     FrameRingBuffer ring_;
     CandidateStarted onCandidate_;

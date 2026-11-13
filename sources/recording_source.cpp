@@ -1,11 +1,8 @@
 #include "sources/recording_source.h"
 
-#include "recording/avi_reader.h"
 #include "sources/fine_sleep.h"
-#include "recording/ser_reader.h"
 
 #include <algorithm>
-#include <cctype>
 #include <condition_variable>
 #include <exception>
 #include <format>
@@ -16,37 +13,6 @@
 namespace {
 
 using namespace std::chrono;
-
-// The reader for the file's kind, chosen by its extension.
-std::unique_ptr<RecordingReader> openReader(const std::filesystem::path& path, double fallbackFps,
-    std::string& error)
-{
-    std::string extension = utf8Path(path.extension());
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    if (extension == ".ser")
-    {
-        auto reader = std::make_unique<SerReader>();
-        if (!reader->open(path, fallbackFps, error))
-        {
-            return nullptr;
-        }
-        return reader;
-    }
-    if (extension == ".avi")
-    {
-        auto reader = std::make_unique<AviReader>();
-        if (!reader->open(path, fallbackFps, error))
-        {
-            return nullptr;
-        }
-        return reader;
-    }
-
-    error = utf8Path(path) + " is neither a .ser nor an .avi file";
-    return nullptr;
-}
 
 // The longest single interval waited for at real-time speed, so that a long
 // gap in a file does not stall playback.
@@ -91,7 +57,7 @@ void RecordingSource::setSpeed(Speed speed)
 
 bool RecordingSource::open(std::string& error)
 {
-    reader_ = openReader(path_, nominalFps_, error);
+    reader_ = openRecordingReader(path_, nominalFps_, error);
     if (!reader_)
     {
         return false;

@@ -1,58 +1,57 @@
 #pragma once
 
 #include "frame.h"
+#include "detection_result.h"
 
+#include <deque>
 #include <vector>
 
-// The Feature-4 trigger, kept until Feature-9 replaces it. Its thresholds
-// were chosen for the synthetic image and are not meant for real data.
+// Feature-9: per-pixel running reference and variance, in native sample
+// units. A robust grid estimate supplies a noise floor. At least one compact
+// patch over K must satisfy the size limits; the strongest passing patch wins.
 //
-// Compares each frame with a held reference. The reference stays on the
-// pre-flash image while a possible flash is in progress, so the second
-// bright frame is not compared with the first bright frame.
-//
-// It reads one 8-bit value per pixel across the whole frame: Mono8 as
-// stored, Mono16 as its top 8 significant bits, so that the threshold keeps
-// its meaning, and RGB888 as the mean of the three channels. A Bayer mosaic
-// is read as it is. The frame itself is never changed.
-//
-// A run is a stretch of consecutive rising frames. A run becomes a
-// candidate on its second frame, and it is one candidate however long it
-// lasts. The next candidate needs a quiet frame first.
+// The source thread owns all state. Frames are read only. Reference and
+// variance freeze on a passing frame and while capture holds a clip open.
+// Display requests only produce derived data; they never change decisions.
 class FlashDetector
 {
 public:
-    static constexpr int kDeltaThreshold = 60;
-    static constexpr int kMinBrightPixels = 120;
-    static constexpr int kConsecutiveFrames = 2;
-
+    explicit FlashDetector(DetectionSettings settings = {});
     void reset();
+    void setSettings(const DetectionSettings& settings);
 
-    // Call once for every frame. True on the one frame where a run becomes
-    // a candidate: the second consecutive frame that rises enough against
-    // the pre-flash reference. Throws std::invalid_argument for a frame
-    // whose data does not match its size and format.
-    bool observe(const Frame& frame);
+    // True once per run: on its first passing frame, or its second when
+    // one-frame triggering is off. Invalid frame layouts throw.
+    bool observe(const Frame& frame, bool holdReference = false, DetectionDisplayRequest display = {});
 
-    // True while the latest frame belongs to a run that is a candidate.
     [[nodiscard]] bool firing() const;
-
     [[nodiscard]] int lastBrightCount() const;
-
-    // First frame of the current run. Meaningful while a run is in progress.
     [[nodiscard]] uint64_t onsetFrameIndex() const;
+    [[nodiscard]] const DetectionSummary& summary() const;
+    [[nodiscard]] DetectionView view() const;
+    [[nodiscard]] std::vector<float> difference(const Frame& frame) const;
 
 private:
-    void remember();
-    [[nodiscard]] int countRisingPixels() const;
-
-    // The 8-bit values of the latest frame and of the reference.
-    std::vector<uint8_t> values_;
-    std::vector<uint8_t> reference_;
-    int referenceWidth_{0};
-    int referenceHeight_{0};
-    bool hasReference_{false};
+    DetectionSettings settings_;
+    DetectionSummary summary_;
+    std::vector<float> mean_;
+    std::vector<float> variance_;
+    std::vector<float> grid_;
+    // Sparse 8-connected patch work space, reused between frames.
+    std::vector<size_t> thresholdPixels_;
+    std::vector<float> thresholdSigma_;
+    std::vector<uint8_t> visited_;
+    std::vector<size_t> pending_;
+    size_t learnedFrames_{0};
+    std::deque<DetectionHistoryPoint> history_;
+    std::shared_ptr<const DetectionMap> map_;
+    int width_{0}, height_{0};
+    PixelFormat format_{PixelFormat::Mono8};
+    int bits_{0};
+    BitAlignment alignment_{BitAlignment::Low};
+    BayerPattern bayer_{BayerPattern::None};
+    std::chrono::system_clock::time_point previousTime_{};
     int consecutive_{0};
-    int lastBrightCount_{0};
+    bool runTriggered_{false};
     uint64_t onsetFrameIndex_{0};
 };

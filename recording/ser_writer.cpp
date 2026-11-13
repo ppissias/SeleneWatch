@@ -9,6 +9,8 @@
 
 namespace {
 
+constexpr std::string_view kTestMark = "SeleneWatch TEST DATA";
+
 void put(QByteArray& bytes, qsizetype at, uint64_t value, int width)
 {
     for (int i = 0; i < width; ++i)
@@ -115,10 +117,10 @@ bool SerWriter::start(const Frame& layout, const std::string& camera, QString& e
     const int depth = format_ != PixelFormat::Mono16 ? 8
         : (alignment_ == BitAlignment::Low && bits_ >= 9 ? bits_ : 16);
     put(header, 34, static_cast<uint32_t>(depth), 4);
-    if (testSource)
+    testSource_ = testSource || layout.testSource || layout.syntheticFlash || layout.blip.has_value();
+    if (testSource_)
     {
-        constexpr std::string_view mark = "SeleneWatch TEST DATA";
-        std::copy(mark.begin(), mark.end(), header.data() + 42);
+        std::copy(kTestMark.begin(), kTestMark.end(), header.data() + 42);
     }
     std::copy_n(camera.data(), std::min(camera.size(), size_t{40}), header.data() + 82);
     // Local time is unknown. Only DateTime_UTC is populated.
@@ -143,6 +145,7 @@ bool SerWriter::append(const Frame& frame, QString& error)
         return false;
     }
     const int64_t time = timeToSerTicks(frame.timestamp);
+    testSource_ = testSource_ || frame.testSource || frame.syntheticFlash || frame.blip.has_value();
     if (!write(reinterpret_cast<const char*>(frame.data.data()), static_cast<qint64>(frame.data.size()), error))
     {
         return false;
@@ -165,6 +168,12 @@ bool SerWriter::finish(QString& error)
     }
     if (!write(trailer.constData(), trailer.size(), error)) return false;
     const qint64 end = output_.pos();
+    if (testSource_ && (!output_.seek(42) || !write(kTestMark.data(), static_cast<qint64>(kTestMark.size()), error)))
+    {
+        failed_ = true;
+        if (error.isEmpty()) error = "could not finalize the SER test mark";
+        return false;
+    }
     QByteArray count(4, '\0');
     put(count, 0, times_.size(), 4);
     if (!output_.seek(38) || !write(count.constData(), count.size(), error) || !output_.seek(end))

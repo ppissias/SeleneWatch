@@ -1,6 +1,6 @@
 # SeleneWatch — Project Description and Architecture
 
-> **Status:** Working architecture, revised November 2026 after Feature-4, after a design review that settled frame ownership and added mount guiding, and after Feature-7. It is not a frozen specification. Feature-level detail lives in [features.md](features.md) (open proposals) and [implemented features.md](implemented%20features.md) (history). This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down.
+> **Status:** Working architecture, revised November 2026 after Feature-6 and the Feature-9 implementation and recording measurements. Feature-9's observing calibration remains open. It is not a frozen specification. Feature-level detail lives in [features.md](features.md) (open proposals) and [implemented features.md](implemented%20features.md) (history). This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down.
 
 ## 1. Project Overview
 
@@ -144,6 +144,8 @@ SeleneWatch is meant to work with many cameras, not one vendor. Each camera fami
 
 Each piece of mutable state has one owner. `Session` touches `EventCapture` on the source thread, or while that thread is joined or not yet started. Threads meet through published read-only frames, the one-slot mailboxes for the preview and the guider, the test-blip request slot, and the writer's queue. Results travel to the window as notifications. Nothing on the frame path waits for the window or reads state the window keeps.
 
+`FlashDetector` owns its running mean and variance. It works in native sample units, uses a robust difference-noise floor, and selects a compact 8-connected patch above the observer's sigma threshold. Passing frames and open clips hold the reference. Settings travel through a mutex-protected request copied before each frame; each trigger keeps the values it used. At preview rate, the source sends the frame and its immutable measurements/map together in one packet. The GUI never reads mutable detector buffers. Noise/sigma maps and annotated differences are derived display data. The detector uses two float arrays per pixel, with optional map and peak-difference arrays; these are additional to the live-frame memory readout. A complete shared RAM budget remains Feature-5.
+
 ### Overload policy
 
 - The ring takes every frame.
@@ -190,7 +192,7 @@ The same table bounds continuous recording. The upper rows need an SSD. The writ
 
 Detection keeps running during a continuous recording. A candidate found during it is still written as a clip and also refers to the recording's frame index.
 
-Alongside the clips, `events/candidates.txt` keeps one line per candidate for the session, saved or not, with its time, frames, measured values, and either its clip folder or the reason it was not saved (Evidence rule 5). Clips can overlap in time; that is accepted, because losing frames is worse than storing some twice. In memory the overlapping frames are shared; on disk they are written twice.
+Alongside the clips, `events/candidates.txt` keeps each candidate's time, frames, and measured values (Evidence rule 5). When the writer consumes a finished clip job, it flushes a pending line before writing pixels and appends the saved/not-saved outcome afterwards, associated by a record ID. An interrupted write can leave a pending line without an outcome. An open clip and jobs still waiting in RAM can be lost in a crash; the journal is not an immediate durable record of the trigger. Clips can overlap in time; that is accepted, because losing frames is worse than storing some twice. In memory the overlapping frames are shared; on disk they are written twice.
 
 While a feature lock is held, `events/guiding.txt` keeps the measured field offset once a second and every guide pulse sent to the mount (Evidence rule 9).
 
@@ -251,7 +253,7 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 Acquisition and playback live in `sources/`; format readers, evidence writing, and session logs live in `recording/`. The remaining core and UI files sit at the root, with tests in `tests/`.
 
-A directory is introduced when several files share one job and the dependency direction is clear. The likely first split is `sources/` and `recording/` when Feature-6 adds the recording sources and the SER writer, followed by `cameras/` when Feature-10 adds the two camera adapters. A plausible later layout:
+A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. `cameras/` follows when Feature-10 adds the two camera adapters. A plausible later layout:
 
 ```text
 SeleneWatch/
@@ -272,9 +274,9 @@ SeleneWatch/
 └── docs/
 ```
 
-Dependencies point one way: `ui` depends on everything below it; nothing below depends on `ui` or on Qt GUI classes. `guiding` depends on `mounts` and `core`, and not on `capture` or `detection`; the detector and the capture do not know that a mount exists.
+Dependencies point one way: `ui` depends on everything below it; nothing below depends on the window or Qt Widgets. The current recording writer uses Qt Gui's image and painting classes for display previews. `guiding` depends on `mounts` and `core`, and not on `capture` or `detection`; the detector and the capture do not know that a mount exists.
 
-`selenewatch_core` is a static library that the application, core tests, SER tests, and manual recording probe link. It has no Qt Widgets dependency. The window and preview widget compile only into UI targets. Tests no longer list core sources a second time.
+`selenewatch_core` is a static library shared by the application, processing tests, and manual recording probe. It has no Qt Widgets dependency. `selenewatch_ui` contains the window, preview widget, and detection panel and is shared by the application and window tests. Qt itself remains dynamically linked. Tests no longer list core sources a second time.
 
 ## 12. Development Stages
 
@@ -286,7 +288,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | 4 | First detector and event capture | Feature-4 | Done |
 | 5 | **An evidence-safe core.** Shared frames, detection on every frame, a writer that owns its backlog, a candidate log, and a file conversion separate from the preview | Feature-7 | Done |
 | 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | Done |
-| 7 | **A measured trigger.** Per-pixel noise, the sigma and size rules, and the faint limit measured on the observer's own recordings | Feature-9 | In progress |
+| 7 | **A measured trigger.** Per-pixel noise, live controls, overlays, and measurements on the observer's recordings | Feature-9 | Implemented; field calibration partial |
 | 8 | **Seeing the faint side.** Display stretch, debayering for display, and a ring sized in seconds under one RAM limit | Feature-5 | Proposed |
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Proposed |
 | 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Proposed |
@@ -310,7 +312,7 @@ What can move: Stage 8 moves ahead of Stage 7 if the recordings are too dark to 
 - **Writer speed at camera scale:** frame ownership is decided (shared frames, Feature-7). How much RAM waiting clips may hold, and whether the SER writer keeps pace with the largest frames, is decided by measurement in Feature-5.
 - **QHY SDK terms and frame bookkeeping:** the installed QHY SDK carries no license text, and whether its live mode exposes a frame counter or a dropped-frame count is not yet established. Both are settled before the QHY adapter is merged (Feature-10).
 - **Guiding on real mounts:** whether the lock template needs refreshing over a session, whether pulses disturb the detector enough to justify tracking-rate offsets, and how to serve alt-azimuth mounts (Feature-8, Open decisions).
-- **Field shift in the detector:** whether the shift measured by the feature lock should align the detector's reference, or whether per-pixel noise already absorbs slow drift. Decided on recordings, with registration.
+- **Field shift in the detector:** Feature-9's bright-terrain differences show widespread rims/limb structure and substantial background candidate rates at K=6. Evaluate whole-frame registration before camera deployment; measure how much is global drift versus local seeing. Whether the feature lock's shift should align the detector's reference remains open. Earthshine data are still needed before deciding whether one K serves both halves of the Moon.
 - **Clip metadata format:** one machine-readable format that is still easy to read by eye (today `event.txt`; Feature-6 shows a proposed `event_summary.json`). Decided once, for all clips, before the full session record stage.
 - **Camera-specific 12-bit layouts:** SER output preserves the delivered words (Feature-6). SharpCap/ZWO/QHY sample files remain to be checked when their camera adapters are built.
 - **Storage location** once there is a settings page.

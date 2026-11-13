@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 // The frame path from a source to the capture, the writer, and the preview.
@@ -36,7 +37,8 @@ public:
     // Each one runs on the context object's thread, queued. Any may be empty.
     struct Notifications
     {
-        // A frame waits in the preview slot. Take it with takePreviewFrame.
+        // A frame and its detection snapshot wait in the preview slot.
+        // Take them together with takePreview().
         std::function<void()> previewReady;
         std::function<void()> candidateStarted;
         std::function<void(const ClipWriteResult&)> clipWritten;
@@ -76,6 +78,10 @@ public:
     bool requestBlip(const BlipSettings& settings);
     [[nodiscard]] bool blipBusy() const;
 
+    // Context thread. Copied by the source before the next frame.
+    void setDetectionSettings(const DetectionSettings& settings);
+    void setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY);
+
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
     [[nodiscard]] bool isRunning() const;
@@ -92,7 +98,7 @@ public:
     [[nodiscard]] size_t bufferSize() const;
     [[nodiscard]] size_t bufferCapacity() const;
     [[nodiscard]] size_t liveFrameBytes() const;
-    [[nodiscard]] FramePtr takePreviewFrame();
+    [[nodiscard]] PreviewFrame takePreview();
 
 private:
     // Source thread.
@@ -113,6 +119,10 @@ private:
     EventCapture capture_;
     LatestFrameSlot previewSlot_;
     BlipInjector blip_;
+    mutable std::mutex detectionMutex_;
+    DetectionSettings detectionSettings_;
+    DetectionDisplayRequest displayRequest_;
+    std::chrono::steady_clock::time_point lastPreviewTime_{};
     std::atomic<uint64_t> acquiredFrames_{0};
     std::atomic<bool> sourceFinished_{false};
     bool running_{false};

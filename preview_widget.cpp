@@ -27,7 +27,16 @@ void PreviewWidget::setImage(QImage image)
 void PreviewWidget::clear()
 {
     image_ = {};
+    overlay_ = {};
+    detectionBox_ = {};
     selected_.reset();
+    update();
+}
+
+void PreviewWidget::setDetectionOverlay(QImage image, QRect frameBox)
+{
+    overlay_ = std::move(image);
+    detectionBox_ = frameBox;
     update();
 }
 
@@ -75,6 +84,18 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
 
     const QRect image = imageRect();
     painter.drawImage(image, image_);
+    if (!overlay_.isNull())
+    {
+        painter.drawImage(image, overlay_);
+        if (!detectionBox_.isEmpty())
+        {
+            painter.setPen(QPen(QColor("#ffdd66"), 1));
+            painter.drawRect(QRectF(image.x() + detectionBox_.x() * image.width() / static_cast<double>(image_.width()),
+                image.y() + detectionBox_.y() * image.height() / static_cast<double>(image_.height()),
+                detectionBox_.width() * image.width() / static_cast<double>(image_.width()),
+                detectionBox_.height() * image.height() / static_cast<double>(image_.height())));
+        }
+    }
     if (selected_)
     {
         const QPointF centre(image.x() + (selected_->x() + 0.5) * image.width() / image_.width(),

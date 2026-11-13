@@ -43,6 +43,7 @@ private slots:
     void failureLeavesZeroFrameCount();
     void changedLayoutIsRefused();
     void testMarkSurvivesWithoutSidecar();
+    void aLaterTestFrameMarksTheWholeSource();
 };
 
 void SerWriterTest::exactPixelsHeaderAndTimes_data()
@@ -195,6 +196,31 @@ void SerWriterTest::testMarkSurvivesWithoutSidecar()
     QVERIFY(reader.readFrame(0, read, reason));
     QVERIFY(read.testSource);
     QVERIFY(!read.blip);
+}
+
+void SerWriterTest::aLaterTestFrameMarksTheWholeSource()
+{
+    QTemporaryDir directory;
+    const QString path = QDir(directory.path()).filePath("late-test.ser");
+    Frame frame;
+    frame.width = frame.height = 2; frame.data = {0, 1, 2, 3};
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadWrite));
+    SerWriter writer(file);
+    QString error;
+    QVERIFY(writer.start(frame, "camera", error));
+    QVERIFY(writer.append(frame, error));
+    frame.syntheticFlash = true;
+    QVERIFY(writer.append(frame, error));
+    QVERIFY(writer.finish(error));
+    QVERIFY(file.flush()); file.close();
+    SerReader reader;
+    std::string reason;
+    QVERIFY2(reader.open(std::filesystem::path(path.toStdWString()), 30, reason), reason.c_str());
+    Frame first;
+    first.data.resize(reader.frameBytes());
+    QVERIFY(reader.readFrame(0, first, reason));
+    QVERIFY(first.testSource);
 }
 
 QTEST_GUILESS_MAIN(SerWriterTest)

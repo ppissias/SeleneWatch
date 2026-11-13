@@ -6,6 +6,8 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    QCoreApplication::setOrganizationName("SeleneWatch");
+    QCoreApplication::setApplicationName("SeleneWatch");
 
     // The window icon, at the sizes the title bar and the task switcher use.
     QIcon icon;

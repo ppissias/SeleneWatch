@@ -2,8 +2,8 @@
 
 #include "frame.h"
 
-// Centre and radius of the synthetic lunar disk. The generator and the
-// detector both use centered(), so the region cannot drift between them.
+// Centre and radius of the painted lunar disk. Detection has no special
+// knowledge of this test scene and examines the whole frame.
 struct LunarDisk
 {
     float centerX{0};
@@ -28,7 +28,9 @@ struct LunarDisk
 };
 
 // Marker and flash painted onto that disk. Tests use the same numbers.
-inline constexpr int kMarkerRadius = 4;
+// Five pixels: below Feature-9's default minimum patch of eight. This is a
+// visible pacing marker, not a second flash in the synthetic calibration scene.
+inline constexpr int kMarkerRadius = 1;
 inline constexpr int kMarkerStepPx = 3;
 inline constexpr float kMarkerYFraction = 0.45f;
 inline constexpr int kFlashRadius = 8;

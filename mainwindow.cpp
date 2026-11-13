@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "ui_mainwindow.h"
+#include "detection_panel.h"
 
 #include "preview_image.h"
 #include "sources/recording_source.h"
@@ -8,7 +10,11 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
+#include <QtCore/QSettings>
+#include <QtWidgets/QDockWidget>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QMenu>
 #include <QtWidgets/QStatusBar>
 
 #include <filesystem>
@@ -25,13 +31,14 @@ constexpr int kSyntheticHeight = 480;
 
 } // namespace
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(QWidget *parent, QString outputRoot)
     : QMainWindow(parent)
+    , ui_(std::make_unique<Ui::MainWindowClass>())
 {
-    ui.setupUi(this);
+    ui_->setupUi(this);
 
     // Clips are written next to the executable.
-    const QString outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
+    if (outputRoot.isEmpty()) outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
 
     Session::Notifications notifications;
     notifications.previewReady = [this] { showLatestFrame(); };
@@ -42,20 +49,22 @@ MainWindow::MainWindow(QWidget *parent)
     session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
+    setupDetectionPanel();
 
-    connect(ui.startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
-    connect(ui.stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
-    connect(ui.openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
-    connect(ui.injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
-    connect(ui.injectBlipButton, &QPushButton::clicked, this, &MainWindow::onInjectBlipClicked);
-    connect(ui.previewWidget, &PreviewWidget::positionSelected, this, [this] {
+    connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
+    connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
+    connect(ui_->openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
+    connect(ui_->injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
+    connect(ui_->injectBlipButton, &QPushButton::clicked, this, &MainWindow::onInjectBlipClicked);
+    connect(ui_->previewWidget, &PreviewWidget::positionSelected, this, [this] {
+        updateDetectionDisplay();
         updateBlipReadout();
     });
-    connect(ui.blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
-    connect(ui.sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
-    connect(ui.speedComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSpeedChanged);
-    connect(ui.loopCheckBox, &QCheckBox::toggled, this, &MainWindow::updateControls);
-    connect(ui.targetFpsSpinBox, &QSpinBox::valueChanged, this, &MainWindow::onTargetFpsChanged);
+    connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
+    connect(ui_->sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
+    connect(ui_->speedComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSpeedChanged);
+    connect(ui_->loopCheckBox, &QCheckBox::toggled, this, &MainWindow::updateControls);
+    connect(ui_->targetFpsSpinBox, &QSpinBox::valueChanged, this, &MainWindow::onTargetFpsChanged);
 
     bufferReadoutTimer_ = new QTimer(this);
     bufferReadoutTimer_->setInterval(1000);
@@ -67,12 +76,63 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // QMainWindow may hide its docks while its base destructor runs, after
+    // this derived window and its members have ceased to exist.
+    if (detectionDock_) disconnect(detectionDock_, nullptr, this, nullptr);
+    if (detectionPanel_) disconnect(detectionPanel_, nullptr, this, nullptr);
+    saveDetectionSettings();
     if (bufferReadoutTimer_)
     {
         bufferReadoutTimer_->stop();
     }
     // The session stops its source and writes what is queued.
     session_.reset();
+}
+
+void MainWindow::setupDetectionPanel()
+{
+    detectionPanel_ = new DetectionPanel(this);
+    detectionDock_ = new QDockWidget("Detection", this);
+    detectionDock_->setObjectName("detectionDock");
+    detectionDock_->setWidget(detectionPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
+    auto* view = menuBar()->addMenu("View");
+    view->addAction(detectionDock_->toggleViewAction());
+    QSettings saved;
+    DetectionSettings settings;
+    settings.sigma = saved.value("detection/sigma", settings.sigma).toDouble();
+    settings.minPixels = saved.value("detection/minPixels", settings.minPixels).toInt();
+    settings.maxPixels = saved.value("detection/maxPixels", settings.maxPixels).toInt();
+    settings.oneFrame = saved.value("detection/oneFrame", settings.oneFrame).toBool();
+    detectionPanel_->setSettings(settings.valid() ? settings : DetectionSettings{});
+    session_->setDetectionSettings(detectionPanel_->settings());
+    connect(detectionPanel_, &DetectionPanel::settingsChanged, this, [this] {
+        session_->setDetectionSettings(detectionPanel_->settings());
+    });
+    connect(detectionPanel_, &DetectionPanel::displayChanged, this, &MainWindow::updateDetectionDisplay);
+    connect(detectionDock_, &QDockWidget::visibilityChanged, this, &MainWindow::updateDetectionDisplay);
+    updateDetectionDisplay();
+    resize(1340, 820);
+}
+
+void MainWindow::saveDetectionSettings()
+{
+    if (!detectionPanel_) return;
+    const auto values = detectionPanel_->settings();
+    QSettings saved;
+    saved.setValue("detection/sigma", values.sigma);
+    saved.setValue("detection/minPixels", values.minPixels);
+    saved.setValue("detection/maxPixels", values.maxPixels);
+    saved.setValue("detection/oneFrame", values.oneFrame);
+    saved.sync();
+}
+
+void MainWindow::updateDetectionDisplay()
+{
+    const auto position = ui_->previewWidget->selectedPosition();
+    const DetectionOverlay overlay = detectionDock_->isVisible() ? detectionPanel_->overlay() : DetectionOverlay::None;
+    session_->setDetectionDisplay(overlay, position ? position->x() : -1, position ? position->y() : -1);
+    ui_->previewWidget->setDetectionOverlay({}, {});
 }
 
 void MainWindow::setupStatusBar()
@@ -104,7 +164,7 @@ void MainWindow::setupStatusBar()
 
 bool MainWindow::recordingSelected() const
 {
-    return ui.sourceComboBox->currentIndex() != kSyntheticEntry;
+    return ui_->sourceComboBox->currentIndex() != kSyntheticEntry;
 }
 
 // Which controls can be used depends on the source and on whether it runs.
@@ -113,17 +173,17 @@ void MainWindow::updateControls()
     const bool running = session_->isRunning();
     const bool recording = recordingSelected();
 
-    ui.startButton->setEnabled(!running);
-    ui.stopButton->setEnabled(running);
-    ui.injectFlashButton->setEnabled(running && synthetic_ != nullptr);
+    ui_->startButton->setEnabled(!running);
+    ui_->stopButton->setEnabled(running);
+    ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
 
-    ui.sourceComboBox->setEnabled(!running);
-    ui.openFileButton->setEnabled(!running && recording);
-    ui.loopCheckBox->setEnabled(!running && recording);
-    ui.loopSecondsSpinBox->setEnabled(!running && recording && ui.loopCheckBox->isChecked());
+    ui_->sourceComboBox->setEnabled(!running);
+    ui_->openFileButton->setEnabled(!running && recording);
+    ui_->loopCheckBox->setEnabled(!running && recording);
+    ui_->loopSecondsSpinBox->setEnabled(!running && recording && ui_->loopCheckBox->isChecked());
 
     // The speed may change while a recording plays.
-    ui.speedComboBox->setEnabled(recording);
+    ui_->speedComboBox->setEnabled(recording);
 }
 
 void MainWindow::updateBufferReadout()
@@ -215,28 +275,36 @@ void MainWindow::updateFrameLabel(const Frame& frame)
         frameLabel_->setText(text);
     }
     const int maximum = frame.format == PixelFormat::Mono16 ? (1 << frame.significantBits) - 1 : 255;
-    ui.blipAmplitudeSpinBox->setMaximum(maximum);
+    ui_->blipAmplitudeSpinBox->setMaximum(maximum);
 }
 
 void MainWindow::updateBlipReadout()
 {
-    const auto centre = ui.previewWidget->selectedPosition();
+    const auto centre = ui_->previewWidget->selectedPosition();
     const bool busy = session_->blipBusy();
-    ui.injectBlipButton->setEnabled(session_->isRunning() && !session_->sourceFinished() && centre && !busy);
-    ui.blipPositionLabel->setText(centre
+    ui_->injectBlipButton->setEnabled(session_->isRunning() && !session_->sourceFinished() && centre && !busy);
+    ui_->blipPositionLabel->setText(centre
         ? QString("Centre: (%1, %2)").arg(centre->x()).arg(centre->y())
         : QString("Click the preview to place a flash"));
-    ui.blipStatusLabel->setText(QString("Next peak: %1 ADU. %2")
-        .arg(ui.blipAmplitudeSpinBox->value(), 0, 'f', 1)
+    ui_->blipStatusLabel->setText(QString("Next peak: %1 ADU. %2")
+        .arg(ui_->blipAmplitudeSpinBox->value(), 0, 'f', 1)
         .arg(busy ? "Injecting test frames; edits apply to the next flash."
                   : "Injected frames are marked as test data."));
+    if (centre && latestDetection_.probeX == centre->x() && latestDetection_.probeY == centre->y()
+        && latestDetection_.probeNoise > 0)
+    {
+        ui_->blipStatusLabel->setText(ui_->blipStatusLabel->text()
+            + QString("  %1 sigma at centre (noise %2 ADU).")
+                .arg(ui_->blipAmplitudeSpinBox->value() / latestDetection_.probeNoise, 0, 'f', 1)
+                .arg(latestDetection_.probeNoise, 0, 'f', 2));
+    }
 }
 
 std::unique_ptr<FrameSource> MainWindow::makeSource()
 {
     synthetic_ = nullptr;
     recording_ = nullptr;
-    const int fps = ui.targetFpsSpinBox->value();
+    const int fps = ui_->targetFpsSpinBox->value();
 
     if (!recordingSelected())
     {
@@ -252,9 +320,9 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     }
 
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(recordingPath_.toStdWString()));
-    source->setLoopSeconds(ui.loopCheckBox->isChecked() ? ui.loopSecondsSpinBox->value() : 0.0);
+    source->setLoopSeconds(ui_->loopCheckBox->isChecked() ? ui_->loopSecondsSpinBox->value() : 0.0);
     source->setNominalFps(fps);
-    source->setSpeed(ui.speedComboBox->currentIndex() == kFastEntry
+    source->setSpeed(ui_->speedComboBox->currentIndex() == kFastEntry
         ? RecordingSource::Speed::Fast : RecordingSource::Speed::RealTime);
     recording_ = source.get();
     return source;
@@ -268,7 +336,9 @@ void MainWindow::onStartClicked()
         return;
     }
     session_->setSource(std::move(source));
-    ui.previewWidget->clear();
+    ui_->previewWidget->clear();
+    latestDetection_ = {};
+    updateDetectionDisplay();
     updateBlipReadout();
 
     QString error;
@@ -310,6 +380,7 @@ void MainWindow::finishStream()
 {
     bufferReadoutTimer_->stop();
     session_->stop();
+    saveDetectionSettings();
 
     fpsLabel_->setText("FPS: --");
     framesLabel_->setText(QString("Frames: %1").arg(session_->acquiredFrames()));
@@ -330,8 +401,8 @@ void MainWindow::onOpenFileClicked()
     }
 
     recordingPath_ = path;
-    ui.fileLabel->setText(QFileInfo(path).fileName());
-    ui.fileLabel->setToolTip(QDir::toNativeSeparators(path));
+    ui_->fileLabel->setText(QFileInfo(path).fileName());
+    ui_->fileLabel->setToolTip(QDir::toNativeSeparators(path));
 }
 
 void MainWindow::onSourceKindChanged()
@@ -349,13 +420,13 @@ void MainWindow::onInjectFlashClicked()
 
 void MainWindow::onInjectBlipClicked()
 {
-    const auto centre = ui.previewWidget->selectedPosition();
+    const auto centre = ui_->previewWidget->selectedPosition();
     if (!centre)
     {
         return;
     }
-    const BlipSettings settings{centre->x(), centre->y(), ui.blipFwhmSpinBox->value(),
-        ui.blipAmplitudeSpinBox->value(), ui.blipFramesSpinBox->value()};
+    const BlipSettings settings{centre->x(), centre->y(), ui_->blipFwhmSpinBox->value(),
+        ui_->blipAmplitudeSpinBox->value(), ui_->blipFramesSpinBox->value()};
     if (session_->requestBlip(settings))
     {
         statusBar()->showMessage("Test flash requested");
@@ -375,18 +446,28 @@ void MainWindow::onSpeedChanged()
 {
     if (recording_)
     {
-        recording_->setSpeed(ui.speedComboBox->currentIndex() == kFastEntry
+        recording_->setSpeed(ui_->speedComboBox->currentIndex() == kFastEntry
             ? RecordingSource::Speed::Fast : RecordingSource::Speed::RealTime);
     }
 }
 
 void MainWindow::showLatestFrame()
 {
-    const FramePtr frame = session_->takePreviewFrame();
+    const PreviewFrame packet = session_->takePreview();
+    const FramePtr& frame = packet.frame;
     if (frame)
     {
         updateFrameLabel(*frame);
-        ui.previewWidget->setImage(frameToPreviewImage(*frame));
+        ui_->previewWidget->setImage(frameToPreviewImage(*frame));
+        if (packet.detection)
+        {
+            const auto& view = *packet.detection;
+            latestDetection_ = view.summary;
+            detectionPanel_->setView(view);
+            if (detectionDock_->isVisible())
+                ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
+                    {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});
+        }
         updateBlipReadout();
     }
 }

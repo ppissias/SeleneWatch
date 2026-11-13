@@ -4,7 +4,6 @@
 #include "frame.h"
 #include "sources/frame_source.h"
 #include "session.h"
-#include "ui_mainwindow.h"
 
 #include <QtCore/QString>
 #include <QtGui/QImage>
@@ -18,6 +17,9 @@
 class QTimer;
 class RecordingSource;
 class SyntheticFrameSource;
+class DetectionPanel;
+class QDockWidget;
+namespace Ui { class MainWindowClass; }
 
 // The window: source selection, preview, controls, and status.
 //
@@ -30,7 +32,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    // Empty outputRoot writes beside the executable. Tests supply an isolated directory.
+    explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {});
     ~MainWindow() override;
 
 private slots:
@@ -45,6 +48,9 @@ private slots:
 
 private:
     void setupStatusBar();
+    void setupDetectionPanel();
+    void updateDetectionDisplay();
+    void saveDetectionSettings();
 
     // The source the controls describe. Null, with a message, when none can be made.
     std::unique_ptr<FrameSource> makeSource();
@@ -69,8 +75,11 @@ private:
 
     [[nodiscard]] bool recordingSelected() const;
 
-    Ui::MainWindowClass ui;
+    std::unique_ptr<Ui::MainWindowClass> ui_;
     std::unique_ptr<Session> session_;
+    DetectionPanel* detectionPanel_{nullptr};
+    QDockWidget* detectionDock_{nullptr};
+    DetectionSummary latestDetection_;
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};

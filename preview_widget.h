@@ -19,6 +19,7 @@ public:
 
     void setImage(QImage image);
     void clear();
+    void setDetectionOverlay(QImage image, QRect frameBox);
     [[nodiscard]] std::optional<QPoint> selectedPosition() const;
     [[nodiscard]] std::optional<QPoint> framePosition(QPointF widgetPosition) const;
     [[nodiscard]] QRect imageRect() const;
@@ -32,5 +33,7 @@ protected:
 
 private:
     QImage image_;
+    QImage overlay_;
+    QRect detectionBox_;
     std::optional<QPoint> selected_;
 };

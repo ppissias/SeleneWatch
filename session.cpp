@@ -3,6 +3,7 @@
 #include <QtCore/QMetaObject>
 
 #include <utility>
+#include <stdexcept>
 
 Session::Session(QObject* context, QString outputRoot, Notifications notifications)
     : context_(context)
@@ -62,6 +63,7 @@ bool Session::start(QString& error)
     sourceFinished_.store(false);
     capture_.reset();
     blip_.reset();
+    lastPreviewTime_ = {};
     (void)previewSlot_.take();
 
     writer_.logSessionStart(streamInfo_);
@@ -127,9 +129,24 @@ size_t Session::liveFrameBytes() const
     return source_ ? source_->liveFrameBytes() : 0;
 }
 
-FramePtr Session::takePreviewFrame()
+PreviewFrame Session::takePreview()
 {
     return previewSlot_.take();
+}
+
+void Session::setDetectionSettings(const DetectionSettings& settings)
+{
+    if (!settings.valid()) throw std::invalid_argument("invalid detection settings");
+    std::lock_guard<std::mutex> lock(detectionMutex_);
+    detectionSettings_ = settings;
+}
+
+void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY)
+{
+    std::lock_guard<std::mutex> lock(detectionMutex_);
+    displayRequest_.overlay = overlay;
+    displayRequest_.probeX = probeX;
+    displayRequest_.probeY = probeY;
 }
 
 // From the moment the frame is held as a FramePtr it is published: nobody
@@ -141,14 +158,27 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);
 
+    DetectionSettings settings;
+    DetectionDisplayRequest display;
+    {
+        std::lock_guard<std::mutex> lock(detectionMutex_);
+        settings = detectionSettings_;
+        display = displayRequest_;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const bool previewDue = now - lastPreviewTime_ >= std::chrono::milliseconds{50};
+    display.makeMap = previewDue;
+    capture_.setDetectionSettings(settings);
+    capture_.onFrame(published, display);
+
     // The preview converts on the context thread. It is woken once per frame
     // it has not yet taken, and skips frames when it falls behind.
-    if (previewSlot_.put(published))
+    if (previewDue || capture_.detectionSummary().triggered)
     {
-        post(notifications_.previewReady);
+        lastPreviewTime_ = now;
+        auto view = std::make_shared<const DetectionView>(capture_.detectionView());
+        if (previewSlot_.put(published, std::move(view))) post(notifications_.previewReady);
     }
-
-    capture_.onFrame(published);
 }
 
 // The next frame is not the sky a moment later (a loop starting again). The

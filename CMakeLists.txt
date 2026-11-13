@@ -7,11 +7,12 @@ set(CMAKE_NO_SYSTEM_FROM_IMPORTED TRUE)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 qt_standard_project_setup()
 
-execute_process(COMMAND git describe --always --dirty WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    OUTPUT_VARIABLE SELENEWATCH_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(NOT SELENEWATCH_VERSION)
-    set(SELENEWATCH_VERSION "unknown")
-endif()
+add_custom_target(selenewatch_version
+    COMMAND ${CMAKE_COMMAND} "-DSELENEWATCH_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DSELENEWATCH_VERSION_HEADER=${CMAKE_CURRENT_BINARY_DIR}/selenewatch_version.h"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/write_version.cmake"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/selenewatch_version.h"
+    VERBATIM)
 
 function(selenewatch_compile_options target)
     if(MSVC)
@@ -20,25 +21,30 @@ function(selenewatch_compile_options target)
 endfunction()
 
 # One processing library, shared by the application and tests. It has no
-# Widgets dependency; only the application and preview tests may use them.
+# Widgets dependency; the UI library and its tests use Widgets separately.
 add_library(selenewatch_core STATIC
     blip_injector.cpp frame_pool.cpp preview_image.cpp session.cpp
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
     sources/fine_sleep.cpp sources/synthetic_scene.cpp
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
-    recording/firecapture_log.cpp recording/ser_reader.cpp recording/ser_writer.cpp
+    recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(selenewatch_core PUBLIC Qt6::Core Qt6::Gui)
-target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_VERSION="${SELENEWATCH_VERSION}")
+add_dependencies(selenewatch_core selenewatch_version)
 if(WIN32)
     target_link_libraries(selenewatch_core PRIVATE winmm)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
-qt_add_executable(SeleneWatch main.cpp mainwindow.ui mainwindow.h mainwindow.cpp
-    preview_widget.h preview_widget.cpp)
+add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
+    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp)
+target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
+selenewatch_compile_options(selenewatch_ui)
+qt_add_executable(SeleneWatch main.cpp)
 if(WIN32)
     target_sources(SeleneWatch PRIVATE selenewatch.rc)
 endif()
@@ -46,7 +52,7 @@ qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
     icons/selenewatch-16.png icons/selenewatch-32.png
     icons/selenewatch-48.png icons/selenewatch-256.png)
 set_target_properties(SeleneWatch PROPERTIES WIN32_EXECUTABLE TRUE)
-target_link_libraries(SeleneWatch PRIVATE selenewatch_core Qt6::Widgets)
+target_link_libraries(SeleneWatch PRIVATE selenewatch_ui)
 selenewatch_compile_options(SeleneWatch)
 
 enable_testing()
@@ -68,7 +74,19 @@ target_link_libraries(SeleneWatchSerTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchSerTests)
 add_test(NAME ser COMMAND SeleneWatchSerTests -o -,tap)
 
+add_executable(SeleneWatchDetectionTests tests/detection_tests.cpp)
+target_link_libraries(SeleneWatchDetectionTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchDetectionTests)
+add_test(NAME detection COMMAND SeleneWatchDetectionTests -o -,tap)
+
+add_executable(SeleneWatchUiTests tests/ui_tests.cpp)
+target_link_libraries(SeleneWatchUiTests PRIVATE selenewatch_ui Qt6::Test)
+target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_UI_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature9")
+selenewatch_compile_options(SeleneWatchUiTests)
+add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
+set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Run by hand, with an explicit input and output path; never part of CTest.
-add_executable(SeleneWatchProbe tools/recording_probe.cpp)
+add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)

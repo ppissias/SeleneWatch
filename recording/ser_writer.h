@@ -37,6 +37,7 @@ private:
     bool started_{false};
     bool failed_{false};
     bool finished_{false};
+    bool testSource_{false};
     std::vector<int64_t> times_;
 };
 

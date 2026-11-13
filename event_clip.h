@@ -2,6 +2,7 @@
 
 #include "frame.h"
 #include "stream_info.h"
+#include "detection_result.h"
 
 #include <chrono>
 #include <vector>
@@ -24,6 +25,12 @@ struct ClipTrigger
     // True when this is not a new candidate: the previous clip reached its
     // length cap while the detector was still firing, and this clip carries on.
     bool continuesPreviousClip{false};
+
+    DetectionSettings settings;
+    double peakSigma{0};
+    double noiseFloor{0.5};
+    int peakX{0}, peakY{0};
+    int boxX{0}, boxY{0}, boxWidth{0}, boxHeight{0};
 };
 
 // Frames kept around one or more candidates, oldest first.
@@ -35,9 +42,10 @@ struct EventClip
     // At least one. The first trigger names the clip.
     std::vector<ClipTrigger> triggers;
 
-    // Detector settings in force when the clip started.
-    int deltaThreshold{0};
-    int minBrightPixels{0};
+    // Strongest passing frame in this clip and its actual difference from
+    // the held running reference. This is derived data, never evidence pixels.
+    DetectionSummary peak;
+    std::vector<float> peakDifference;
 
     // Frames before and after the first trigger frame.
     int framesBefore{0};

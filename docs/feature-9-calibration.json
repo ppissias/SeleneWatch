@@ -1,0 +1,2257 @@
+{
+  "date": "2026-11-14",
+  "build": "Release MSVC, Qt 6.12.0; based on 948c9e6 with Feature-9 working changes",
+  "cpu": "AMD Ryzen 9 9955HX",
+  "archiveReadOnly": true,
+  "limitations": [
+    "Short prefixes include startup; rates are not long-session false-alarm estimates.",
+    "No suitable earthshine identified in first-frame survey.",
+    "Bright-limb and RGB recovery occurs after saturation; no unclipped faint limit.",
+    "Background candidates have no ground-truth classification."
+  ],
+  "thresholdTrials": [
+    {
+      "region": "crater_rim",
+      "input": "2015.12.21 Moon 8 Newt/raw/videos and stacked/Moon_165506.ser",
+      "frames": 240,
+      "streamSeconds": 13.0420053,
+      "sizeLimits": [
+        8,
+        400
+      ],
+      "oneFrame": true,
+      "results": [
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 6
+          },
+          "candidates": 21,
+          "backgroundCandidatesPerMinute": 96.61090998023134,
+          "candidatePositions": [
+            1,
+            7,
+            17,
+            30,
+            32,
+            34,
+            66,
+            70,
+            90,
+            94,
+            96,
+            98,
+            100,
+            102,
+            106,
+            112,
+            130,
+            140,
+            180,
+            185,
+            216
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 12
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 18
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 24
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 36
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 48
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 64
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        }
+      ]
+    },
+    {
+      "region": "largest_rgb",
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "frames": 136,
+      "streamSeconds": 13.5,
+      "sizeLimits": [
+        8,
+        400
+      ],
+      "oneFrame": true,
+      "results": [
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 6
+          },
+          "candidates": 2,
+          "backgroundCandidatesPerMinute": 8.88888888888889,
+          "candidatePositions": [
+            2,
+            111
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 12
+          },
+          "candidates": 15,
+          "backgroundCandidatesPerMinute": 66.66666666666667,
+          "candidatePositions": [
+            1,
+            9,
+            16,
+            21,
+            24,
+            39,
+            42,
+            49,
+            51,
+            53,
+            65,
+            73,
+            79,
+            81,
+            95
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 18
+          },
+          "candidates": 2,
+          "backgroundCandidatesPerMinute": 8.88888888888889,
+          "candidatePositions": [
+            1,
+            5
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 24
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 36
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 48
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 64
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        }
+      ]
+    },
+    {
+      "region": "mare",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_180548.avi",
+      "frames": 240,
+      "streamSeconds": 13.2777777,
+      "sizeLimits": [
+        8,
+        400
+      ],
+      "oneFrame": true,
+      "results": [
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 6
+          },
+          "candidates": 8,
+          "backgroundCandidatesPerMinute": 36.150627826823765,
+          "candidatePositions": [
+            2,
+            28,
+            34,
+            76,
+            83,
+            170,
+            223,
+            229
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 12
+          },
+          "candidates": 9,
+          "backgroundCandidatesPerMinute": 40.66945630517673,
+          "candidatePositions": [
+            1,
+            132,
+            158,
+            166,
+            169,
+            178,
+            180,
+            210,
+            214
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 18
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 24
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 36
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 48
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 64
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        }
+      ]
+    },
+    {
+      "region": "terminator",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "frames": 240,
+      "streamSeconds": 13.2777777,
+      "sizeLimits": [
+        8,
+        400
+      ],
+      "oneFrame": true,
+      "results": [
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 6
+          },
+          "candidates": 10,
+          "backgroundCandidatesPerMinute": 45.1882847835297,
+          "candidatePositions": [
+            2,
+            4,
+            37,
+            85,
+            117,
+            121,
+            195,
+            197,
+            199,
+            217
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 12
+          },
+          "candidates": 1,
+          "backgroundCandidatesPerMinute": 4.518828478352971,
+          "candidatePositions": [
+            1
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 18
+          },
+          "candidates": 40,
+          "backgroundCandidatesPerMinute": 180.7531391341188,
+          "candidatePositions": [
+            1,
+            8,
+            16,
+            19,
+            21,
+            31,
+            39,
+            43,
+            46,
+            48,
+            51,
+            54,
+            58,
+            65,
+            79,
+            82,
+            88,
+            92,
+            94,
+            98,
+            102,
+            107,
+            112,
+            121,
+            124,
+            127,
+            132,
+            134,
+            141,
+            146,
+            150,
+            161,
+            165,
+            172,
+            174,
+            176,
+            178,
+            181,
+            183,
+            187
+          ]
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 24
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 36
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 48
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        },
+        {
+          "settings": {
+            "maxPixels": 400,
+            "minPixels": 8,
+            "oneFrame": true,
+            "sigma": 64
+          },
+          "candidates": 0,
+          "backgroundCandidatesPerMinute": 0,
+          "candidatePositions": []
+        }
+      ]
+    }
+  ],
+  "sensitivityTrials": [
+    {
+      "region": "bright_limb",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "frames": 240,
+      "config": {
+        "sourceConfig": {
+          "frameLimit": 240,
+          "x": 900,
+          "y": 200,
+          "sigma": 24,
+          "fwhm": 5,
+          "atFrame": 180
+        },
+        "cases": [
+          {
+            "name": "baseline"
+          },
+          {
+            "name": "blip_1f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 1
+          },
+          {
+            "name": "blip_3f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 3
+          }
+        ]
+      },
+      "results": [
+        {
+          "caseName": "baseline",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 0,
+          "originalCentreAdu": 0,
+          "requestedAmplitudeAdu": 0,
+          "actualCentreAdditionAdu": 0,
+          "probeNoiseBeforeAdu": 0,
+          "probeNoiseDuringAdu": 0,
+          "selectedPeakSigmaDuringInjection": 0,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 211.1914096819222,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 23.372937408061183,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 263.98926210240273,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 26.50691032409668,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_36sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 316.7871145228833,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 26.50691032409668,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_48sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 422.3828193638444,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 32.68368148803711,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 633.5742290457666,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 32.68368148803711,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 32.68368148803711,
+              "peakX": 903,
+              "peakY": 200,
+              "pixels": 12,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 844.7656387276888,
+          "actualCentreAdditionAdu": 122,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 37.098392486572266,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 37.098392486572266,
+              "peakX": 904,
+              "peakY": 200,
+              "pixels": 13,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 211.1914096819222,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 32.507819071436494,
+          "selectedPeakSigmaDuringInjection": 23.372937408061183,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 263.98926210240273,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 32.507819071436494,
+          "selectedPeakSigmaDuringInjection": 26.50691032409668,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_36sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 316.7871145228833,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 32.507819071436494,
+          "selectedPeakSigmaDuringInjection": 26.50691032409668,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_48sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 422.3828193638444,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 32.507819071436494,
+          "selectedPeakSigmaDuringInjection": 32.68368148803711,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 633.5742290457666,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 32.68368148803711,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 32.68368148803711,
+              "peakX": 903,
+              "peakY": 200,
+              "pixels": 12,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 133,
+          "requestedAmplitudeAdu": 844.7656387276888,
+          "actualCentreAdditionAdu": 130,
+          "probeNoiseBeforeAdu": 8.799642070080091,
+          "probeNoiseDuringAdu": 9.367615907113352,
+          "selectedPeakSigmaDuringInjection": 37.098392486572266,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 37.098392486572266,
+              "peakX": 904,
+              "peakY": 200,
+              "pixels": 13,
+              "position": 180
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "region": "crater_rim",
+      "input": "2015.12.21 Moon 8 Newt/raw/videos and stacked/Moon_165506.ser",
+      "frames": 240,
+      "config": {
+        "sourceConfig": {
+          "frameLimit": 240,
+          "x": 310,
+          "y": 440,
+          "sigma": 12,
+          "fwhm": 5,
+          "atFrame": 180
+        },
+        "cases": [
+          {
+            "name": "baseline"
+          },
+          {
+            "name": "blip_1f_12sigma",
+            "amplitudeSigma": 12,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_15sigma",
+            "amplitudeSigma": 15.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_18sigma",
+            "amplitudeSigma": 18.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_36sigma",
+            "amplitudeSigma": 36,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 1
+          },
+          {
+            "name": "blip_3f_12sigma",
+            "amplitudeSigma": 12,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_15sigma",
+            "amplitudeSigma": 15.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_18sigma",
+            "amplitudeSigma": 18.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_36sigma",
+            "amplitudeSigma": 36,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 3
+          }
+        ]
+      },
+      "results": [
+        {
+          "caseName": "baseline",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 0,
+          "originalCentreAdu": 0,
+          "requestedAmplitudeAdu": 0,
+          "actualCentreAdditionAdu": 0,
+          "probeNoiseBeforeAdu": 0,
+          "probeNoiseDuringAdu": 0,
+          "selectedPeakSigmaDuringInjection": 0,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_12sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 105.2702141783898,
+          "actualCentreAdditionAdu": 105,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 11.587003546730433,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_15sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 131.58776772298725,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 14.705945014953613,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_18sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 157.90532126758472,
+          "actualCentreAdditionAdu": 158,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 17.70937156677246,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 17.70937156677246,
+              "peakX": 310,
+              "peakY": 440,
+              "pixels": 9,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_24sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 210.5404283567796,
+          "actualCentreAdditionAdu": 161,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.622695922851562,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.622695922851562,
+              "peakX": 310,
+              "peakY": 441,
+              "pixels": 20,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 315.81064253516945,
+          "actualCentreAdditionAdu": 161,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.622695922851562,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.622695922851562,
+              "peakX": 310,
+              "peakY": 441,
+              "pixels": 26,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_48sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 421.0808567135592,
+          "actualCentreAdditionAdu": 161,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.785470962524414,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.785470962524414,
+              "peakX": 312,
+              "peakY": 442,
+              "pixels": 37,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_12sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 105.2702141783898,
+          "actualCentreAdditionAdu": 105,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 23.484851905919456,
+          "selectedPeakSigmaDuringInjection": 11.587003546730433,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_15sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 131.58776772298725,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 29.213896028968925,
+          "selectedPeakSigmaDuringInjection": 14.705945014953613,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_18sigma",
+          "candidates": 2,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 157.90532126758472,
+          "actualCentreAdditionAdu": 158,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 17.70937156677246,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 17.70937156677246,
+              "peakX": 310,
+              "peakY": 440,
+              "pixels": 9,
+              "position": 180
+            },
+            {
+              "atBlip": true,
+              "peakSigma": 17.016273498535156,
+              "peakX": 310,
+              "peakY": 440,
+              "pixels": 9,
+              "position": 182
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_24sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 210.5404283567796,
+          "actualCentreAdditionAdu": 167,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.622695922851562,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.622695922851562,
+              "peakX": 310,
+              "peakY": 441,
+              "pixels": 20,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 315.81064253516945,
+          "actualCentreAdditionAdu": 167,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.622695922851562,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.622695922851562,
+              "peakX": 310,
+              "peakY": 441,
+              "pixels": 26,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_48sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 94,
+          "requestedAmplitudeAdu": 421.0808567135592,
+          "actualCentreAdditionAdu": 167,
+          "probeNoiseBeforeAdu": 8.77251784819915,
+          "probeNoiseDuringAdu": 8.656782333586408,
+          "selectedPeakSigmaDuringInjection": 18.785470962524414,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 18.785470962524414,
+              "peakX": 312,
+              "peakY": 442,
+              "pixels": 37,
+              "position": 180
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "region": "largest_rgb",
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "frames": 136,
+      "config": {
+        "sourceConfig": {
+          "frameLimit": 240,
+          "x": 640,
+          "y": 400,
+          "sigma": 24,
+          "fwhm": 5,
+          "atFrame": 80
+        },
+        "cases": [
+          {
+            "name": "baseline"
+          },
+          {
+            "name": "blip_1f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 1
+          },
+          {
+            "name": "blip_3f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 3
+          }
+        ]
+      },
+      "results": [
+        {
+          "caseName": "baseline",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 0,
+          "originalCentreAdu": 0,
+          "requestedAmplitudeAdu": 0,
+          "actualCentreAdditionAdu": 0,
+          "probeNoiseBeforeAdu": 0,
+          "probeNoiseDuringAdu": 0,
+          "selectedPeakSigmaDuringInjection": 0,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 117.33875450134278,
+          "actualCentreAdditionAdu": 117,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.177720791625976,
+          "selectedPeakSigmaDuringInjection": 21.290930760758215,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 146.67344312667848,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.178422094726562,
+          "selectedPeakSigmaDuringInjection": 24.529645919799805,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_36sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 176.00813175201415,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.178422094726562,
+          "selectedPeakSigmaDuringInjection": 24.529645919799805,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_48sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 234.67750900268555,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.181860742187499,
+          "selectedPeakSigmaDuringInjection": 24.53764533996582,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 352.0162635040283,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.182460243225098,
+          "selectedPeakSigmaDuringInjection": 24.51053237915039,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 24.51053237915039,
+              "peakX": 640,
+              "peakY": 401,
+              "pixels": 9,
+              "position": 80
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 469.3550180053711,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 5.182460243225098,
+          "selectedPeakSigmaDuringInjection": 24.735118865966797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 24.735118865966797,
+              "peakX": 637,
+              "peakY": 400,
+              "pixels": 17,
+              "position": 80
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 117.33875450134278,
+          "actualCentreAdditionAdu": 117,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 33.116268749051045,
+          "selectedPeakSigmaDuringInjection": 21.290930760758215,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 146.67344312667848,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 37.03002865865671,
+          "selectedPeakSigmaDuringInjection": 24.529645919799805,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_36sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 176.00813175201415,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 37.03002865865671,
+          "selectedPeakSigmaDuringInjection": 24.529645919799805,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_48sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 234.67750900268555,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 37.03002865865671,
+          "selectedPeakSigmaDuringInjection": 24.53764533996582,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 352.0162635040283,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 6.697116581726074,
+          "selectedPeakSigmaDuringInjection": 24.51053237915039,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 24.51053237915039,
+              "peakX": 640,
+              "peakY": 401,
+              "pixels": 9,
+              "position": 80
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 123,
+          "requestedAmplitudeAdu": 469.3550180053711,
+          "actualCentreAdditionAdu": 132,
+          "probeNoiseBeforeAdu": 4.889114770889282,
+          "probeNoiseDuringAdu": 6.697116581726074,
+          "selectedPeakSigmaDuringInjection": 24.735118865966797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 24.735118865966797,
+              "peakX": 637,
+              "peakY": 400,
+              "pixels": 17,
+              "position": 80
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "region": "mare",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_180548.avi",
+      "frames": 240,
+      "config": {
+        "sourceConfig": {
+          "frameLimit": 240,
+          "x": 800,
+          "y": 600,
+          "sigma": 18,
+          "fwhm": 5,
+          "atFrame": 180
+        },
+        "cases": [
+          {
+            "name": "baseline"
+          },
+          {
+            "name": "blip_1f_18sigma",
+            "amplitudeSigma": 18,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_22.5sigma",
+            "amplitudeSigma": 22.5,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_27sigma",
+            "amplitudeSigma": 27.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_36sigma",
+            "amplitudeSigma": 36,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_54sigma",
+            "amplitudeSigma": 54,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 1
+          },
+          {
+            "name": "blip_3f_18sigma",
+            "amplitudeSigma": 18,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_22.5sigma",
+            "amplitudeSigma": 22.5,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_27sigma",
+            "amplitudeSigma": 27.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_36sigma",
+            "amplitudeSigma": 36,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_54sigma",
+            "amplitudeSigma": 54,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 3
+          }
+        ]
+      },
+      "results": [
+        {
+          "caseName": "baseline",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 0,
+          "originalCentreAdu": 0,
+          "requestedAmplitudeAdu": 0,
+          "actualCentreAdditionAdu": 0,
+          "probeNoiseBeforeAdu": 0,
+          "probeNoiseDuringAdu": 0,
+          "selectedPeakSigmaDuringInjection": 0,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_18sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 28.80784598236084,
+          "actualCentreAdditionAdu": 29,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 18.374927520751953,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_22.5sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 36.00980747795105,
+          "actualCentreAdditionAdu": 36,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 22.66277313232422,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_27sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 43.21176897354126,
+          "actualCentreAdditionAdu": 43,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 27.11151695251465,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 27.11151695251465,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 11,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 57.61569196472168,
+          "actualCentreAdditionAdu": 58,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 36.64453887939453,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 36.64453887939453,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 21,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_54sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 86.42353794708252,
+          "actualCentreAdditionAdu": 86,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 54.439510345458984,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 54.439510345458984,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 35,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 115.23138392944335,
+          "actualCentreAdditionAdu": 115,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.573478136062622,
+          "selectedPeakSigmaDuringInjection": 72.8700180053711,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 72.8700180053711,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 38,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_18sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 28.80784598236084,
+          "actualCentreAdditionAdu": 29,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 6.765370705563104,
+          "selectedPeakSigmaDuringInjection": 18.374927520751953,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_22.5sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 36.00980747795105,
+          "actualCentreAdditionAdu": 36,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 8.315583768482194,
+          "selectedPeakSigmaDuringInjection": 22.66277313232422,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_27sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 43.21176897354126,
+          "actualCentreAdditionAdu": 43,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.6396028177261353,
+          "selectedPeakSigmaDuringInjection": 27.751041412353516,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 27.11151695251465,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 11,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 57.61569196472168,
+          "actualCentreAdditionAdu": 58,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.6396028177261353,
+          "selectedPeakSigmaDuringInjection": 37.285430908203125,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 36.64453887939453,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 21,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_54sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 86.42353794708252,
+          "actualCentreAdditionAdu": 86,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.6396028177261353,
+          "selectedPeakSigmaDuringInjection": 55.08296203613281,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 54.439510345458984,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 35,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 23,
+          "requestedAmplitudeAdu": 115.23138392944335,
+          "actualCentreAdditionAdu": 115,
+          "probeNoiseBeforeAdu": 1.6004358879089355,
+          "probeNoiseDuringAdu": 1.6396028177261353,
+          "selectedPeakSigmaDuringInjection": 73.51612091064453,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 72.8700180053711,
+              "peakX": 800,
+              "peakY": 600,
+              "pixels": 38,
+              "position": 180
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "region": "terminator",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "frames": 240,
+      "config": {
+        "sourceConfig": {
+          "frameLimit": 240,
+          "x": 700,
+          "y": 700,
+          "sigma": 24,
+          "fwhm": 5,
+          "atFrame": 180
+        },
+        "cases": [
+          {
+            "name": "baseline"
+          },
+          {
+            "name": "blip_1f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 1
+          },
+          {
+            "name": "blip_1f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 1
+          },
+          {
+            "name": "blip_3f_24sigma",
+            "amplitudeSigma": 24,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_30sigma",
+            "amplitudeSigma": 30.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_36sigma",
+            "amplitudeSigma": 36.0,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_48sigma",
+            "amplitudeSigma": 48,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_72sigma",
+            "amplitudeSigma": 72,
+            "duration": 3
+          },
+          {
+            "name": "blip_3f_96sigma",
+            "amplitudeSigma": 96,
+            "duration": 3
+          }
+        ]
+      },
+      "results": [
+        {
+          "caseName": "baseline",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 0,
+          "originalCentreAdu": 0,
+          "requestedAmplitudeAdu": 0,
+          "actualCentreAdditionAdu": 0,
+          "probeNoiseBeforeAdu": 0,
+          "probeNoiseDuringAdu": 0,
+          "selectedPeakSigmaDuringInjection": 0,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 120.78416878750087,
+          "actualCentreAdditionAdu": 121,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 24.42961311340332,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 150.9802109843761,
+          "actualCentreAdditionAdu": 151,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 30.473804473876953,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_1f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 181.17625318125133,
+          "actualCentreAdditionAdu": 181,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 36.51799392700195,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 36.51799392700195,
+              "peakX": 700,
+              "peakY": 700,
+              "pixels": 9,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_48sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 241.56833757500175,
+          "actualCentreAdditionAdu": 200,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 41.495033264160156,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 41.495033264160156,
+              "peakX": 700,
+              "peakY": 701,
+              "pixels": 17,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 362.35250636250265,
+          "actualCentreAdditionAdu": 200,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 46.90099334716797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 46.90099334716797,
+              "peakX": 701,
+              "peakY": 702,
+              "pixels": 30,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_1f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 1,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 483.1366751500035,
+          "actualCentreAdditionAdu": 200,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 46.90099334716797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 46.90099334716797,
+              "peakX": 701,
+              "peakY": 702,
+              "pixels": 38,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_24sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 120.78416878750087,
+          "actualCentreAdditionAdu": 121,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 27.279208426974996,
+          "selectedPeakSigmaDuringInjection": 24.42961311340332,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_30sigma",
+          "candidates": 0,
+          "backgroundCandidates": 0,
+          "recovered": false,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 150.9802109843761,
+          "actualCentreAdditionAdu": 151,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 33.9750364324446,
+          "selectedPeakSigmaDuringInjection": 30.473804473876953,
+          "candidatePatches": []
+        },
+        {
+          "caseName": "blip_3f_36sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 181.17625318125133,
+          "actualCentreAdditionAdu": 181,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 36.92094039916992,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 36.51799392700195,
+              "peakX": 700,
+              "peakY": 700,
+              "pixels": 9,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_48sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 241.56833757500175,
+          "actualCentreAdditionAdu": 205,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 41.495033264160156,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 41.495033264160156,
+              "peakX": 700,
+              "peakY": 701,
+              "pixels": 17,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_72sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 362.35250636250265,
+          "actualCentreAdditionAdu": 205,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 46.90099334716797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 46.90099334716797,
+              "peakX": 701,
+              "peakY": 702,
+              "pixels": 30,
+              "position": 180
+            }
+          ]
+        },
+        {
+          "caseName": "blip_3f_96sigma",
+          "candidates": 1,
+          "backgroundCandidates": 0,
+          "recovered": true,
+          "injectedFrames": 3,
+          "originalCentreAdu": 55,
+          "requestedAmplitudeAdu": 483.1366751500035,
+          "actualCentreAdditionAdu": 205,
+          "probeNoiseBeforeAdu": 5.032673699479203,
+          "probeNoiseDuringAdu": 4.963443057297245,
+          "selectedPeakSigmaDuringInjection": 46.90099334716797,
+          "candidatePatches": [
+            {
+              "atBlip": true,
+              "peakSigma": 46.90099334716797,
+              "peakX": 701,
+              "peakY": 702,
+              "pixels": 38,
+              "position": 180
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "performanceTrials": [
+    {
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "mapEvery": 1,
+      "frames": 240,
+      "width": 1296,
+      "height": 964,
+      "format": "Mono8",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "none",
+      "meanDetectorMs": 3.576669166666668,
+      "p95DetectorMs": 3.666,
+      "maxDetectorMs": 3.8799,
+      "meanCaptureMs": 3.5768662500000015,
+      "cacheBytes": 299842560
+    },
+    {
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "mapEvery": 1,
+      "frames": 240,
+      "width": 1296,
+      "height": 964,
+      "format": "Mono8",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "sigma",
+      "meanDetectorMs": 4.229851666666666,
+      "p95DetectorMs": 4.3126,
+      "maxDetectorMs": 4.4214,
+      "meanCaptureMs": 4.230167083333335,
+      "cacheBytes": 299842560
+    },
+    {
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "mapEvery": 1,
+      "frames": 240,
+      "width": 1296,
+      "height": 964,
+      "format": "Mono8",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "noise",
+      "meanDetectorMs": 4.276386666666669,
+      "p95DetectorMs": 4.5631,
+      "maxDetectorMs": 8.9313,
+      "meanCaptureMs": 4.276706250000002,
+      "cacheBytes": 299842560
+    },
+    {
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "mapEvery": 1,
+      "frames": 136,
+      "width": 1280,
+      "height": 1024,
+      "format": "RGB888",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "none",
+      "meanDetectorMs": 5.050113970588236,
+      "p95DetectorMs": 5.1297,
+      "maxDetectorMs": 6.8911,
+      "meanCaptureMs": 5.050561764705881,
+      "cacheBytes": 534773760
+    },
+    {
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "mapEvery": 1,
+      "frames": 136,
+      "width": 1280,
+      "height": 1024,
+      "format": "RGB888",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "sigma",
+      "meanDetectorMs": 5.666219852941177,
+      "p95DetectorMs": 5.8162,
+      "maxDetectorMs": 7.7465,
+      "meanCaptureMs": 5.666990441176468,
+      "cacheBytes": 534773760
+    },
+    {
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "mapEvery": 1,
+      "frames": 136,
+      "width": 1280,
+      "height": 1024,
+      "format": "RGB888",
+      "settings": {
+        "maxPixels": 400,
+        "minPixels": 8,
+        "oneFrame": true,
+        "sigma": 24
+      },
+      "overlay": "noise",
+      "meanDetectorMs": 5.634701470588235,
+      "p95DetectorMs": 5.7425,
+      "maxDetectorMs": 5.9977,
+      "meanCaptureMs": 5.635583823529409,
+      "cacheBytes": 534773760
+    }
+  ],
+  "savedControl": {
+    "withoutInjectionFolders": 0,
+    "withOneFrameInjectionFolders": 1,
+    "settings": {
+      "sigma": 18,
+      "minPixels": 8,
+      "maxPixels": 400,
+      "oneFrame": true
+    },
+    "injection": {
+      "x": 800,
+      "y": 600,
+      "fwhm": 5,
+      "amplitudeAdu": 43.21176897354126,
+      "position": 180
+    },
+    "siril": {
+      "reader": "Siril 1.4.4",
+      "frames": 180,
+      "width": 1296,
+      "height": 964,
+      "format": "Mono8",
+      "serTestMark": true,
+      "bytes": 224883538
+    }
+  }
+}

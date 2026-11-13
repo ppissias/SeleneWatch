@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <string>
 
 // A recording file read frame by frame: a SER or an AVI file. The reader
@@ -42,3 +44,8 @@ public:
     // bytes. False, with the reason, on a read error.
     virtual bool readFrame(int index, Frame& frame, std::string& error) = 0;
 };
+
+// Opens the supported format for the extension. Used by playback and the
+// manual calibration tool, so both interpret recordings the same way.
+[[nodiscard]] std::unique_ptr<RecordingReader> openRecordingReader(
+    const std::filesystem::path& path, double fallbackFps, std::string& error);
