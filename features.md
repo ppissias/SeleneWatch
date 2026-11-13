@@ -218,6 +218,46 @@ The application was driven through Windows UI Automation on the development mach
 - **A killed process loses the log lines of the clip it was writing.** The clip is left partial, without its completion marker, so Evidence rule 7 holds. But its candidates are not in `candidates.txt`, because the writer logs a candidate after its clip is written or refused (Feature-7). Rule 5 asks that every candidate be on record. Writing each candidate's line when it is queued, and the clip's outcome after, would close this. That is a change to the log format, to decide with the observer.
 - The status bar's message area is squeezed by the permanent labels, so a message like "Playback finished" is cut off at the left. Cosmetic.
 
+### Part B — built (13 November 2026)
+
+Part B is in the program. Done-when item 7 passes as tests. Items 1 and 8 pass for AVI files by hand, except that the observer still compares orientation with another player (see below).
+
+**What it added**
+
+- `RecordingReader`, the interface beneath the playback, now that it has two implementations: `SerReader` and `AviReader`. `RecordingSource` picks one by the file's extension and plays either the same way.
+- `AviReader`, for every kind in the table above. It reads only.
+- `FireCaptureLog`, the reader of FireCapture's text file beside a recording. Both readers use it.
+- `StreamInfo` gains `exposure`, `gain`, `frameRate`, and `conversion`, and `event.txt` writes them.
+
+**Decisions made while building it**
+
+- **Frames are found through the file's index.** The archive is on a USB hard disk. Walking an AVI chunk by chunk costs one seek per frame, so opening a 2 GB file would take tens of seconds. The reader uses the OpenDML index of a file in several RIFF parts, else the AVI 1.0 `idx1`, and walks the `movi` lists only when neither is usable. An `idx1` covers only the first RIFF part, so a file of several parts without an OpenDML index is walked.
+- **`idx1` offsets** count from the `movi` type field in most files and from the start of the file in some. The reader tries both against the first frame's chunk header.
+- **An empty frame chunk is a frame dropped during capture.** The plan did not foresee these. The first survey with the new reader found them in 20 files, all webcam and K3CCD captures from 2010 and 2011, five of them lunar. AVI timing is by position, so skipping such a chunk would shift every later frame's time. Instead the empty chunk keeps its number: the frames after it keep their numbers and times, and the gap shows in the frame index, which is how Evidence rule 4 records a dropped frame. `RecordingReader::frameNumber` carries this; for SER it is the position. A loop counts the gaps too.
+- **The UTC start from FireCapture's log.** `Date` and `Start` are local and `Start(UT)` is UT, so near midnight the local date is not the UT date. The reader takes the zone offset from the difference between `Start` and `Start(UT)` and subtracts it from the local date and time. A log without `Start(UT)` (FireCapture 2.2) gives no start, rather than a guessed zone. A log whose `Filename` names another file is ignored. Every log in the archive has `Date_format=ddMMyy`, and only that format is read.
+- **FireCapture's log is read beside SER files too.** It supplies the exposure and the gain. A SER file's times still come from its trailer.
+- **A frame's AVI time is its number at the header's rate**, from the log's start time or from zero.
+
+**Tests**
+
+`SeleneWatchTests` has 59 tests in eleven classes. New in Part B: the AVI reader (7 tests) and two recording-source tests. All of them use AVI files built byte by byte from the documented layout: one or two RIFF parts with an OpenDML index, `idx1` with relative or absolute offsets, or no index; padded and bottom-up DIB rows; BGR and BGRA; Y800 and YUY2; a colour palette and a compressed stream, both refused; FireCapture logs across midnight, without `Start(UT)`, and naming another file; and an empty chunk, which leaves gaps through all three ways of finding frames, whole and looped.
+
+**By hand, 13 November 2026**
+
+- **The whole archive.** The reader opened 350 of the 352 AVI files and read their first and last frames. The two it refuses are the ones the table above expects: the `CRAM` file and the file that is not RIFF. 142 files were found through their OpenDML index and 185 through `idx1`; opening took a median of 23 to 29 ms from the USB disk. Three files have no usable index. Two of them, `2011.01.16 moon\raw\dark_00017.AVI` and `dark_00024.AVI`, are dark frames whose capture stopped before writing an index, and opening them took 47 s and 12 s. Nothing is done about that now. 99 files took their start time from FireCapture's log.
+- `2015.12.19 Moon C9.25\...\Moon_180548.avi`, 8-bit FireCapture with its log: 500 frames, 1296×964 Mono8, first frame at 17:05:48.333 UT. The log says 500 frames and `Start(UT)=170548.333`. Camera, shutter, and gain match the log. The preview shows Archimedes, Autolycus, and Aristillus. The app played it whole at fast speed in 5.1 s.
+- `2015.10.26 Moon\raw\Moon_200059.avi`, above 2 GB in two RIFF parts: 1883 frames, as the log says. The last frame, from the second part, shows the limb cleanly.
+- `2019.09.15 moon\raw\moon_2019-09-15-011146-0000.avi`, 24-bit FlyCapture: 500 frames, 1280×960, 15 fps, no log, so the times count from zero.
+- `2012.05.02 moon\raw\ps3eye 5_2_2012 11_08_44 PM.avi`, 32-bit: 466 frames, colour kept.
+- `2011.01.16 moon\raw\K3CCD_0005.avi`, YUY2: 754 frames of Copernicus and its rays, no striping from the colour samples, marked derived.
+- `2010.08.18 jupiter\raw\video0001 10-08-18 00-22-35.avi`, Y800: 2679 frames numbered 0 to 2836, with the 158 dropped frames as gaps.
+- **Still for the observer:** compare orientation once with another player (SER Player does not read AVI; VirtualDub or VLC will). The DIB rule (bottom-up unless the height is negative) is certain. The Y800 and YUY2 files follow Microsoft's rule that YUV frames are stored top-down. Their images are coherent, but a mirrored crater still looks like a crater.
+
+**Seen while testing, for later**
+
+- **The header rate is not the real rate.** FireCapture writes 18.000 fps into the header, but its logs record the real duration: `Moon_180548` holds 500 frames in 27.602 s, and `Moon_200059` holds 1883 frames in 103.672 s. Timed at the header rate, the last frame of the second file is 0.9 s late. The times are marked nominal, so nothing is claimed wrongly. But the log's `Start(UT)` and `End(UT)` would give the mean rate, and with it nominal times within a frame or two everywhere. That is a small change, to decide with the observer: it needs only to be settled what FireCapture's `End` marks.
+- **Opening runs on the window thread.** For the two unindexed dark-frame files, the window waits 12 to 47 s at Start. Moving the open onto the worker thread, or showing that it is reading, would fix it if such files turn out to matter.
+
 ---
 
 ## Feature-9 — A measured trigger

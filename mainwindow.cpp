@@ -297,7 +297,7 @@ void MainWindow::onOpenFileClicked()
 {
     const QString startDir = recordingPath_.isEmpty() ? QString() : QFileInfo(recordingPath_).absolutePath();
     const QString path = QFileDialog::getOpenFileName(this, "Open recording", startDir,
-        "SER recordings (*.ser);;All files (*)");
+        "Recordings (*.ser *.avi);;SER (*.ser);;AVI (*.avi);;All files (*)");
     if (path.isEmpty())
     {
         return;

@@ -2,22 +2,23 @@
 
 #include "frame_pool.h"
 #include "frame_source.h"
-#include "ser_reader.h"
+#include "recording_reader.h"
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <stop_token>
 #include <thread>
 
 // Plays a recording as a frame source: the whole file once, or a loop over
-// its first seconds (Feature-6, Playback).
+// its first seconds (Feature-6, Playback). A .ser file is read by SerReader
+// and an .avi file by AviReader.
 //
-// Frame times are the file's own. A file without them gets nominal times
-// from its start time and a rate. The frame index is the position in the
-// file. In a loop both keep increasing across laps, and at each lap the
-// listener is told that the next frame does not follow the previous one.
-// A frame's monotonic time is when it was played.
+// Frame times are the reader's: stored in the file, or nominal. The frame
+// index is the position in the file. In a loop both keep increasing across
+// laps, and at each lap the listener is told that the next frame does not
+// follow the previous one. A frame's monotonic time is when it was played.
 //
 // At real-time speed the source waits out the intervals between the file's
 // frame times, never more than one second for a single interval. At fast
@@ -41,7 +42,9 @@ public:
     // the first loopSeconds of the file play again and again.
     void setLoopSeconds(double seconds);
 
-    // Before open(). The frame rate assumed for a file without frame times.
+    // Before open(). The frame rate assumed for a file that stores neither
+    // frame times nor a rate: a SER file without a trailer, or an AVI file
+    // whose header states no rate.
     void setNominalFps(double fps);
 
     // Any time, also while running.
@@ -56,7 +59,7 @@ public:
 private:
     void run(std::stop_token stopToken, FrameSourceListener& listener);
 
-    // The time of a frame in the first lap: the file's, or a nominal one.
+    // The time of a frame in the first lap.
     [[nodiscard]] std::chrono::system_clock::time_point fileTime(int position) const;
 
     [[nodiscard]] StreamInfo describe() const;
@@ -67,8 +70,11 @@ private:
     std::atomic<Speed> speed_{Speed::RealTime};
 
     // Set by open(), then read by the worker.
-    SerReader reader_;
+    std::unique_ptr<RecordingReader> reader_;
     int framesPerLap_{0};
+
+    // Frame numbers a lap spans, gaps included.
+    uint64_t numbersPerLap_{0};
     std::chrono::system_clock::duration lapLength_{};
     StreamInfo info_;
 

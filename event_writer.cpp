@@ -118,8 +118,12 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
 {
     out << "source: " << orUnknown(clip.stream.source) << "\n";
     out << "camera: " << orUnknown(clip.stream.camera) << "\n";
+    out << "exposure: " << orUnknown(clip.stream.exposure) << "\n";
+    out << "gain: " << orUnknown(clip.stream.gain) << "\n";
+    out << "frame_rate: " << orUnknown(clip.stream.frameRate) << "\n";
     out << "frame_time: " << orUnknown(clip.stream.frameTime) << "\n";
     out << "frame_index: " << orUnknown(clip.stream.frameIndex) << "\n";
+    out << "conversion: " << orUnknown(clip.stream.conversion) << "\n";
     if (!clip.stream.playback.empty())
     {
         out << "playback: " << QString::fromStdString(clip.stream.playback) << "\n";

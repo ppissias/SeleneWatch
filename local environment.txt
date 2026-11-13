@@ -70,6 +70,9 @@ Recordings archive (the observer's own lunar and planetary videos; read-only tes
     16-bit SER (3.2 GB):
       D:\space\02_Planetary\2013.06.25 ISS\raw\Moon_202643.ser
   Never write into this folder. Tests that need these files are run by hand, not by CTest.
+  Drive D: is a USB hard disk (WD My Book), so seeks are slow; the AVI reader follows each file's index.
+  Checked 2026-11-13 with SeleneWatch's readers: 350 of 352 AVI files open (the CRAM file and the
+  non-RIFF file are refused); 20 old webcam/K3CCD AVIs hold empty chunks (dropped frames).
 
 Mount (ASCOM)
   ASCOM Platform 7.1 Update 3 (7.1.3.4851).

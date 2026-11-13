@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <format>
 #include <utility>
 
 namespace {
@@ -83,9 +84,10 @@ std::chrono::system_clock::time_point serTicksToTime(int64_t ticks)
         std::chrono::duration_cast<std::chrono::system_clock::duration>(Ticks(ticks - kTicksAtUnixEpoch)));
 }
 
-bool SerReader::open(const std::filesystem::path& path, std::string& error)
+bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std::string& error)
 {
     pathText_ = utf8Path(path);
+    fallbackFps_ = std::max(1.0, fallbackFps);
 
     std::error_code sizeError;
     const uint64_t fileBytes = std::filesystem::file_size(path, sizeError);
@@ -225,7 +227,53 @@ bool SerReader::open(const std::filesystem::path& path, std::string& error)
         significantBits_ = format_ == PixelFormat::Mono8 ? depth : 8;
         alignment_ = BitAlignment::Low;
     }
+
+    log_ = readFireCaptureLog(path);
     return true;
+}
+
+StreamInfo SerReader::describe() const
+{
+    StreamInfo info;
+    info.camera = instrument_;
+    if (log_)
+    {
+        info.exposure = log_->shutter;
+        info.gain = log_->gain;
+    }
+    info.frameRate = "not stored in SER files";
+
+    if (hasFrameTimes())
+    {
+        info.frameTime = "UTC from the file's trailer, as the capture program wrote it";
+    }
+    else
+    {
+        info.frameTime = std::format("nominal, not measured: {} plus the frame's position at {:.3f} fps, "
+            "the rate set in the window",
+            startTime() ? "the header's start time" : "an unknown start time counted from zero", fallbackFps_);
+    }
+
+    info.frameIndex = "the position in the file, from 0";
+    if (frameCount_ < headerFrameCount_)
+    {
+        info.frameIndex += std::format("; the file holds {} of the {} frames its header names",
+            frameCount_, headerFrameCount_);
+    }
+
+    if (bgr_)
+    {
+        info.conversion = "BGR turned into RGB; no value changed";
+    }
+    else if (bigEndian_)
+    {
+        info.conversion = "big-endian samples turned little-endian; no value changed";
+    }
+    else
+    {
+        info.conversion = "none";
+    }
+    return info;
 }
 
 // PixelDepthPerPlane cannot be relied on for 16-bit data. FireCapture
@@ -287,6 +335,11 @@ size_t SerReader::frameBytes() const
     return frameBytes_;
 }
 
+uint64_t SerReader::frameNumber(int index) const
+{
+    return static_cast<uint64_t>(index);
+}
+
 bool SerReader::hasFrameTimes() const
 {
     return !trailer_.empty();
@@ -294,7 +347,13 @@ bool SerReader::hasFrameTimes() const
 
 std::chrono::system_clock::time_point SerReader::frameTime(int index) const
 {
-    return serTicksToTime(trailer_.at(static_cast<size_t>(index)));
+    if (hasFrameTimes())
+    {
+        return serTicksToTime(trailer_.at(static_cast<size_t>(index)));
+    }
+    const auto start = startTime().value_or(std::chrono::system_clock::time_point{});
+    return start + std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::duration<double>(index / fallbackFps_));
 }
 
 std::optional<std::chrono::system_clock::time_point> SerReader::startTime() const

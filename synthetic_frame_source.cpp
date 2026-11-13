@@ -47,8 +47,12 @@ StreamInfo SyntheticFrameSource::streamInfo() const
     StreamInfo info;
     info.source = "synthetic";
     info.camera = "none (painted test image)";
+    info.exposure = "none (painted test image)";
+    info.gain = "none (painted test image)";
+    info.frameRate = "the target rate set in the window, which may change while running";
     info.frameTime = "the host's UTC clock when the frame was painted";
     info.frameIndex = "a counter kept by the generator, from 0 at start";
+    info.conversion = "none";
     return info;
 }
 

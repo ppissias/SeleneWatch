@@ -3,6 +3,7 @@
 #include "flash_detector.h"
 #include "frame_pool.h"
 #include "frame_ring_buffer.h"
+#include "avi_reader.h"
 #include "frame_source.h"
 #include "latest_frame_slot.h"
 #include "preview_image.h"
@@ -316,6 +317,357 @@ FramePtr paintedRgb(uint64_t index, bool flash)
     return frame;
 }
 
+// ------------------------------------------------------------ AVI test files
+
+// Writes RIFF chunks and lists into one byte array. Offsets in the array
+// are file offsets, so index entries can be patched in afterwards.
+class RiffBuilder
+{
+public:
+    QByteArray bytes;
+
+    // Starts a RIFF or LIST. Returns where its type field is.
+    qsizetype beginList(const char* id, const char* type)
+    {
+        bytes.append(id, 4);
+        open_.push_back(bytes.size());
+        appendLittleEndian(bytes, 0, 4);
+        const qsizetype typeAt = bytes.size();
+        bytes.append(type, 4);
+        return typeAt;
+    }
+
+    void endList()
+    {
+        const qsizetype sizeAt = open_.back();
+        open_.pop_back();
+        patch(sizeAt, static_cast<uint64_t>(bytes.size() - sizeAt - 4), 4);
+    }
+
+    // Writes a chunk. Returns where its header starts.
+    qsizetype chunk(const char* id, const QByteArray& data)
+    {
+        const qsizetype headerAt = bytes.size();
+        bytes.append(id, 4);
+        appendLittleEndian(bytes, static_cast<uint64_t>(data.size()), 4);
+        bytes.append(data);
+        if (data.size() & 1)
+        {
+            bytes.append('\0');
+        }
+        return headerAt;
+    }
+
+    void patch(qsizetype at, uint64_t value, int width)
+    {
+        for (int i = 0; i < width; ++i)
+        {
+            bytes[at + i] = static_cast<char>((value >> (8 * i)) & 0xFF);
+        }
+    }
+
+private:
+    std::vector<qsizetype> open_;
+};
+
+uint32_t fourccValue(const char* text)
+{
+    return static_cast<uint32_t>(static_cast<uint8_t>(text[0])) | (static_cast<uint32_t>(static_cast<uint8_t>(text[1])) << 8)
+        | (static_cast<uint32_t>(static_cast<uint8_t>(text[2])) << 16) | (static_cast<uint32_t>(static_cast<uint8_t>(text[3])) << 24);
+}
+
+// An AVI file built from the documented layout: RIFF, the AVI headers, a
+// BITMAPINFOHEADER, and the AVI 1.0 or OpenDML index. It shares no code
+// with the program's reader.
+struct AviFileSpec
+{
+    enum class Kind { GreyDib, Bgr24, Bgra32, Y800, Yuy2, Compressed };
+    enum class Index { OpenDml, Idx1Relative, Idx1Absolute, None };
+
+    Kind kind = Kind::GreyDib;
+    Index index = Index::OpenDml;
+    int width = 5;
+    int height = 3;
+
+    // A DIB's rows are stored bottom-up unless this is false (a negative height).
+    bool bottomUp = true;
+
+    bool greyPalette = true;
+    uint32_t rate = 25;
+    uint32_t scale = 1;
+
+    // OpenDML: frames in the first RIFF part. The rest go into an AVIX part.
+    int framesInFirstPart = 2;
+
+    // Each frame as the program should read it: top-down rows of grey
+    // values, or of RGB triples for the colour kinds.
+    std::vector<std::vector<uint8_t>> frames;
+
+    // For Yuy2: the colour samples stored beside the luma. The reader drops them.
+    uint8_t chromaU = 17;
+    uint8_t chromaV = 230;
+
+    // An empty chunk, a frame dropped during capture, follows each of these frames.
+    std::vector<int> emptyChunkAfter;
+};
+
+int bitsPerPixel(AviFileSpec::Kind kind)
+{
+    switch (kind)
+    {
+    case AviFileSpec::Kind::GreyDib:
+    case AviFileSpec::Kind::Y800:
+        return 8;
+    case AviFileSpec::Kind::Bgr24:
+        return 24;
+    case AviFileSpec::Kind::Bgra32:
+        return 32;
+    case AviFileSpec::Kind::Yuy2:
+    case AviFileSpec::Kind::Compressed:
+        return 16;
+    }
+    return 8;
+}
+
+bool isDib(AviFileSpec::Kind kind)
+{
+    return kind == AviFileSpec::Kind::GreyDib || kind == AviFileSpec::Kind::Bgr24 || kind == AviFileSpec::Kind::Bgra32;
+}
+
+// One frame as it is stored: DIB rows padded to four bytes and bottom-up
+// unless told otherwise, BGR order, YUY2 as Y0 U Y1 V.
+QByteArray storedFrame(const AviFileSpec& spec, const std::vector<uint8_t>& pixels)
+{
+    const int bits = bitsPerPixel(spec.kind);
+    const int rowBytes = isDib(spec.kind) ? (spec.width * bits + 31) / 32 * 4 : spec.width * bits / 8;
+    QByteArray stored(static_cast<qsizetype>(rowBytes) * spec.height, '\0');
+    for (int y = 0; y < spec.height; ++y)
+    {
+        const int storedRow = isDib(spec.kind) && spec.bottomUp ? spec.height - 1 - y : y;
+        char* row = stored.data() + static_cast<qsizetype>(storedRow) * rowBytes;
+        for (int x = 0; x < spec.width; ++x)
+        {
+            const size_t grey = static_cast<size_t>(y * spec.width + x);
+            const size_t rgb = 3 * grey;
+            switch (spec.kind)
+            {
+            case AviFileSpec::Kind::GreyDib:
+            case AviFileSpec::Kind::Y800:
+                row[x] = static_cast<char>(pixels[grey]);
+                break;
+            case AviFileSpec::Kind::Bgr24:
+                row[3 * x] = static_cast<char>(pixels[rgb + 2]);
+                row[3 * x + 1] = static_cast<char>(pixels[rgb + 1]);
+                row[3 * x + 2] = static_cast<char>(pixels[rgb]);
+                break;
+            case AviFileSpec::Kind::Bgra32:
+                row[4 * x] = static_cast<char>(pixels[rgb + 2]);
+                row[4 * x + 1] = static_cast<char>(pixels[rgb + 1]);
+                row[4 * x + 2] = static_cast<char>(pixels[rgb]);
+                row[4 * x + 3] = static_cast<char>(0xFF);
+                break;
+            case AviFileSpec::Kind::Yuy2:
+            case AviFileSpec::Kind::Compressed:
+                row[2 * x] = static_cast<char>(pixels[grey]);
+                row[2 * x + 1] = static_cast<char>(x % 2 == 0 ? spec.chromaU : spec.chromaV);
+                break;
+            }
+        }
+    }
+    return stored;
+}
+
+QString writeAviFile(const QString& dir, const QString& name, const AviFileSpec& spec)
+{
+    const int bits = bitsPerPixel(spec.kind);
+    const uint32_t compression = spec.kind == AviFileSpec::Kind::Y800 ? fourccValue("Y800")
+        : spec.kind == AviFileSpec::Kind::Yuy2 ? fourccValue("YUY2")
+        : spec.kind == AviFileSpec::Kind::Compressed ? fourccValue("CRAM")
+        : 0;
+    const int frameCount = static_cast<int>(spec.frames.size());
+    const bool openDml = spec.index == AviFileSpec::Index::OpenDml;
+    const int firstPartFrames = openDml ? std::min(spec.framesInFirstPart, frameCount) : frameCount;
+    const int parts = openDml && firstPartFrames < frameCount ? 2 : 1;
+
+    QByteArray avih;
+    appendLittleEndian(avih, 1'000'000ull * spec.scale / spec.rate, 4);  // dwMicroSecPerFrame
+    appendLittleEndian(avih, 0, 4);                                       // dwMaxBytesPerSec
+    appendLittleEndian(avih, 0, 4);                                       // dwPaddingGranularity
+    appendLittleEndian(avih, 0x10, 4);                                    // dwFlags: has an index
+    appendLittleEndian(avih, static_cast<uint64_t>(firstPartFrames), 4);  // dwTotalFrames
+    appendLittleEndian(avih, 0, 4);                                       // dwInitialFrames
+    appendLittleEndian(avih, 1, 4);                                       // dwStreams
+    appendLittleEndian(avih, 0, 4);                                       // dwSuggestedBufferSize
+    appendLittleEndian(avih, static_cast<uint64_t>(spec.width), 4);
+    appendLittleEndian(avih, static_cast<uint64_t>(spec.height), 4);
+    avih.append(QByteArray(16, '\0'));                                    // dwReserved[4]
+
+    QByteArray strh;
+    strh.append("vids", 4);
+    appendLittleEndian(strh, compression, 4);                             // fccHandler
+    appendLittleEndian(strh, 0, 4);                                       // dwFlags
+    appendLittleEndian(strh, 0, 4);                                       // wPriority, wLanguage
+    appendLittleEndian(strh, 0, 4);                                       // dwInitialFrames
+    appendLittleEndian(strh, spec.scale, 4);
+    appendLittleEndian(strh, spec.rate, 4);
+    appendLittleEndian(strh, 0, 4);                                       // dwStart
+    appendLittleEndian(strh, static_cast<uint64_t>(frameCount), 4);       // dwLength
+    appendLittleEndian(strh, 0, 4);                                       // dwSuggestedBufferSize
+    appendLittleEndian(strh, 0xFFFFFFFFu, 4);                             // dwQuality
+    appendLittleEndian(strh, 0, 4);                                       // dwSampleSize
+    appendLittleEndian(strh, 0, 8);                                       // rcFrame
+
+    const bool negativeHeight = isDib(spec.kind) && !spec.bottomUp;
+    QByteArray strf;
+    appendLittleEndian(strf, 40, 4);                                      // biSize
+    appendLittleEndian(strf, static_cast<uint32_t>(spec.width), 4);
+    appendLittleEndian(strf, static_cast<uint32_t>(negativeHeight ? -spec.height : spec.height), 4);
+    appendLittleEndian(strf, 1, 2);                                       // biPlanes
+    appendLittleEndian(strf, static_cast<uint64_t>(bits), 2);             // biBitCount
+    appendLittleEndian(strf, compression, 4);
+    appendLittleEndian(strf, 0, 4);                                       // biSizeImage
+    appendLittleEndian(strf, 0, 8);                                       // resolution
+    appendLittleEndian(strf, spec.kind == AviFileSpec::Kind::GreyDib ? 256 : 0, 4);  // biClrUsed
+    appendLittleEndian(strf, 0, 4);                                       // biClrImportant
+    if (spec.kind == AviFileSpec::Kind::GreyDib)
+    {
+        for (int i = 0; i < 256; ++i)
+        {
+            const char grey = static_cast<char>(i);
+            const char blue = spec.greyPalette ? grey : static_cast<char>(255 - i);
+            strf.append(blue).append(grey).append(grey).append('\0');      // RGBQUAD: blue, green, red
+        }
+    }
+
+    // The OpenDML super index, patched once the standard indexes are written.
+    QByteArray indx;
+    appendLittleEndian(indx, 4, 2);                                       // wLongsPerEntry
+    indx.append('\0').append('\0');                                       // bIndexSubType, bIndexType: of indexes
+    appendLittleEndian(indx, static_cast<uint64_t>(parts), 4);            // nEntriesInUse
+    indx.append("00db", 4);                                               // dwChunkId
+    indx.append(QByteArray(12, '\0'));                                    // dwReserved[3]
+    indx.append(QByteArray(16 * parts, '\0'));                            // entries
+
+    RiffBuilder riff;
+    riff.beginList("RIFF", "AVI ");
+    riff.beginList("LIST", "hdrl");
+    riff.chunk("avih", avih);
+    riff.beginList("LIST", "strl");
+    riff.chunk("strh", strh);
+    riff.chunk("strf", strf);
+    const qsizetype indxEntriesAt = openDml ? riff.chunk("indx", indx) + 8 + 24 : 0;
+    riff.endList();
+    riff.endList();
+
+    struct StandardIndex
+    {
+        qsizetype at;
+        int frames;
+        int size;
+    };
+    std::vector<StandardIndex> standardIndexes;
+    std::vector<std::pair<qsizetype, int>> idx1Entries;
+
+    int next = 0;
+    for (int part = 0; part < parts; ++part)
+    {
+        if (part > 0)
+        {
+            riff.endList();  // the previous RIFF part
+            riff.beginList("RIFF", "AVIX");
+        }
+        const qsizetype moviTypeAt = riff.beginList("LIST", "movi");
+        const int partEnd = part == 0 ? firstPartFrames : frameCount;
+        std::vector<std::pair<qsizetype, int>> partFrames;
+        for (; next < partEnd; ++next)
+        {
+            const QByteArray stored = storedFrame(spec, spec.frames[static_cast<size_t>(next)]);
+            const qsizetype headerAt = riff.chunk("00db", stored);
+            partFrames.emplace_back(headerAt, static_cast<int>(stored.size()));
+            idx1Entries.emplace_back(headerAt, static_cast<int>(stored.size()));
+
+            if (std::find(spec.emptyChunkAfter.begin(), spec.emptyChunkAfter.end(), next) != spec.emptyChunkAfter.end())
+            {
+                const qsizetype emptyAt = riff.chunk("00db", QByteArray());
+                partFrames.emplace_back(emptyAt, 0);
+                idx1Entries.emplace_back(emptyAt, 0);
+            }
+        }
+        if (openDml)
+        {
+            // A standard index: data offsets from a base, here the movi list.
+            QByteArray ix;
+            appendLittleEndian(ix, 2, 2);                                 // wLongsPerEntry
+            ix.append('\0').append('\1');                                 // bIndexSubType, bIndexType: of chunks
+            appendLittleEndian(ix, partFrames.size(), 4);
+            ix.append("00db", 4);
+            appendLittleEndian(ix, static_cast<uint64_t>(moviTypeAt), 8); // qwBaseOffset
+            appendLittleEndian(ix, 0, 4);                                 // dwReserved
+            for (const auto& [headerAt, size] : partFrames)
+            {
+                appendLittleEndian(ix, static_cast<uint64_t>(headerAt + 8 - moviTypeAt), 4);
+                appendLittleEndian(ix, static_cast<uint64_t>(size), 4);
+            }
+            const qsizetype ixAt = riff.chunk("ix00", ix);
+            standardIndexes.push_back({ixAt, static_cast<int>(partFrames.size()), static_cast<int>(ix.size() + 8)});
+        }
+        riff.endList();  // movi
+
+        if (part == 0 && (spec.index == AviFileSpec::Index::Idx1Relative || spec.index == AviFileSpec::Index::Idx1Absolute))
+        {
+            QByteArray idx1;
+            for (const auto& [headerAt, size] : idx1Entries)
+            {
+                idx1.append("00db", 4);
+                appendLittleEndian(idx1, 0x10, 4);                        // AVIIF_KEYFRAME
+                const qsizetype offset = spec.index == AviFileSpec::Index::Idx1Relative ? headerAt - moviTypeAt : headerAt;
+                appendLittleEndian(idx1, static_cast<uint64_t>(offset), 4);
+                appendLittleEndian(idx1, static_cast<uint64_t>(size), 4);
+            }
+            riff.chunk("idx1", idx1);
+        }
+    }
+    riff.endList();  // the last RIFF part
+
+    for (size_t i = 0; i < standardIndexes.size(); ++i)
+    {
+        const qsizetype entry = indxEntriesAt + static_cast<qsizetype>(16 * i);
+        riff.patch(entry, static_cast<uint64_t>(standardIndexes[i].at), 8);
+        riff.patch(entry + 8, static_cast<uint64_t>(standardIndexes[i].size), 4);
+        riff.patch(entry + 12, static_cast<uint64_t>(standardIndexes[i].frames), 4);
+    }
+
+    const QString path = QDir(dir).filePath(name);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(riff.bytes) != riff.bytes.size())
+    {
+        return {};
+    }
+    return path;
+}
+
+// Frames of distinct values: frame f, sample i holds (f * 37 + i * 11) % 256.
+std::vector<std::vector<uint8_t>> patternFrames(int frames, size_t samples)
+{
+    std::vector<std::vector<uint8_t>> result;
+    for (int f = 0; f < frames; ++f)
+    {
+        std::vector<uint8_t> frame(samples);
+        for (size_t i = 0; i < samples; ++i)
+        {
+            frame[i] = static_cast<uint8_t>((static_cast<size_t>(f) * 37 + i * 11) % 256);
+        }
+        result.push_back(std::move(frame));
+    }
+    return result;
+}
+
+bool writeTextFile(const QString& path, const QString& text)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Text) && file.write(text.toUtf8()) >= 0;
+}
+
 // Keeps what a source delivers. Its methods run on the source thread.
 class CollectingListener final : public FrameSourceListener
 {
@@ -452,11 +804,27 @@ private slots:
     void refusesWhatItCannotPlay();
 };
 
+class AviReaderTest : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void readsGreyDibSplitIntoTwoRiffParts();
+    void readsBgr24SplitIntoTwoRiffParts();
+    void readsThroughIdx1RelativeAndAbsolute();
+    void walksAFileWithoutIndex();
+    void refusesWhatItCannotPlay();
+    void fireCaptureLogSuppliesStartAndSettings();
+    void ignoresLogsThatCannotGiveTheStart();
+};
+
 class RecordingSourceTest : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void aviPlaysThroughTheSameSource();
+    void droppedFramesLeaveGapsInIndexAndTime();
     void wholeFilePlaysEveryFrameThenEnds();
     void loopRestartsAndKeepsCounting();
     void realTimeFollowsTheFileIntervals();
@@ -864,7 +1232,7 @@ void SerReaderTest::readsMono8FramesAndTrailerTimes()
 
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
     QCOMPARE(reader.frameCount(), 3);
     QCOMPARE(reader.headerFrameCount(), 3);
     QCOMPARE(reader.frameBytes(), static_cast<size_t>(8));
@@ -907,7 +1275,7 @@ void SerReaderTest::findsTwelveBitsAtTheTop()
 
         SerReader reader;
         std::string error;
-        QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
         Frame frame;
         frame.data.resize(reader.frameBytes());
         QVERIFY2(reader.readFrame(1, frame, error), error.c_str());
@@ -931,7 +1299,7 @@ void SerReaderTest::findsTwelveBitsAtTheBottom()
 
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
     Frame frame;
     frame.data.resize(reader.frameBytes());
     QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
@@ -953,7 +1321,7 @@ void SerReaderTest::keepsSixteenBitsWhenTheLowBitsAreUsed()
 
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
     Frame frame;
     frame.data.resize(reader.frameBytes());
     QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
@@ -976,7 +1344,7 @@ void SerReaderTest::readsBigEndianSamplesWhenTheFlagIsOne()
 
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
     Frame frame;
     frame.data.resize(reader.frameBytes());
     QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
@@ -999,7 +1367,7 @@ void SerReaderTest::turnsBgrIntoRgb()
 
         SerReader reader;
         std::string error;
-        QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
         Frame frame;
         frame.data.resize(reader.frameBytes());
         QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
@@ -1028,7 +1396,7 @@ void SerReaderTest::recordsTheBayerPattern()
 
         SerReader reader;
         std::string error;
-        QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
         Frame frame;
         frame.data.resize(reader.frameBytes());
         QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
@@ -1048,14 +1416,14 @@ void SerReaderTest::fileWithoutTrailerHasNoFrameTimes()
     spec.frames = {std::vector<uint8_t>(8, 1), std::vector<uint8_t>(8, 2)};
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(writeSerFile(dir.path(), "dated.ser", spec)), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(writeSerFile(dir.path(), "dated.ser", spec)), 30.0, error), error.c_str());
     QVERIFY(!reader.hasFrameTimes());
     QVERIFY(reader.startTime().has_value());
     QVERIFY(*reader.startTime() == testTime(0));
 
     spec.dateTimeUtcTicks = 0;
     SerReader undated;
-    QVERIFY2(undated.open(fsPath(writeSerFile(dir.path(), "undated.ser", spec)), error), error.c_str());
+    QVERIFY2(undated.open(fsPath(writeSerFile(dir.path(), "undated.ser", spec)), 30.0, error), error.c_str());
     QVERIFY(!undated.startTime().has_value());
 }
 
@@ -1074,7 +1442,7 @@ void SerReaderTest::shortFilePlaysTheWholeFramesItHolds()
 
     SerReader reader;
     std::string error;
-    QVERIFY2(reader.open(fsPath(path), error), error.c_str());
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
     QCOMPARE(reader.frameCount(), 2);
     QCOMPARE(reader.headerFrameCount(), 5);
     QVERIFY(!reader.hasFrameTimes());
@@ -1125,12 +1493,384 @@ void SerReaderTest::refusesWhatItCannotPlay()
     {
         SerReader reader;
         std::string error;
-        QVERIFY(!reader.open(fsPath(path), error));
+        QVERIFY(!reader.open(fsPath(path), 30.0, error));
         QVERIFY2(error.find(reason) != std::string::npos, error.c_str());
     }
 }
 
+// --------------------------------------------------------------- AviReader
+
+namespace {
+
+// Opens an AVI and reads every frame. Fails the calling test on an error.
+std::vector<Frame> readAllAviFrames(AviReader& reader)
+{
+    std::vector<Frame> frames;
+    for (int i = 0; i < reader.frameCount(); ++i)
+    {
+        Frame frame;
+        frame.data.resize(reader.frameBytes());
+        std::string error;
+        if (!reader.readFrame(i, frame, error))
+        {
+            qWarning("%s", error.c_str());
+            return {};
+        }
+        frames.push_back(std::move(frame));
+    }
+    return frames;
+}
+
+} // namespace
+
+// An OpenDML file of two RIFF parts. A width of 5 pads each stored row to 8
+// bytes, and the rows are stored bottom-up.
+void AviReaderTest::readsGreyDibSplitIntoTwoRiffParts()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.kind = AviFileSpec::Kind::GreyDib;
+    spec.width = 5;
+    spec.height = 3;
+    spec.framesInFirstPart = 2;
+    spec.frames = patternFrames(5, 15);
+    const QString path = writeAviFile(dir.path(), "grey.avi", spec);
+    QVERIFY(!path.isEmpty());
+
+    AviReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+    QCOMPARE(QString::fromStdString(reader.indexUsed()), QString("OpenDML index"));
+    QCOMPARE(reader.frameCount(), 5);
+    QCOMPARE(reader.frameBytes(), static_cast<size_t>(15));
+
+    const std::vector<Frame> frames = readAllAviFrames(reader);
+    QCOMPARE(frames.size(), static_cast<size_t>(5));
+    for (size_t i = 0; i < frames.size(); ++i)
+    {
+        QCOMPARE(frames[i].width, 5);
+        QCOMPARE(frames[i].height, 3);
+        QVERIFY(frames[i].format == PixelFormat::Mono8);
+        QCOMPARE(frames[i].data, spec.frames[i]);
+    }
+    QCOMPARE(QString::fromStdString(reader.describe().conversion), QString("rows turned the right way up; no value changed"));
+}
+
+// A width of 3 makes 9-byte rows, padded to 12.
+void AviReaderTest::readsBgr24SplitIntoTwoRiffParts()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.kind = AviFileSpec::Kind::Bgr24;
+    spec.width = 3;
+    spec.height = 2;
+    spec.framesInFirstPart = 1;
+    spec.frames = patternFrames(3, 18);
+    const QString path = writeAviFile(dir.path(), "colour.avi", spec);
+
+    AviReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+    QCOMPARE(QString::fromStdString(reader.indexUsed()), QString("OpenDML index"));
+    QCOMPARE(reader.frameCount(), 3);
+
+    const std::vector<Frame> frames = readAllAviFrames(reader);
+    QCOMPARE(frames.size(), static_cast<size_t>(3));
+    for (size_t i = 0; i < frames.size(); ++i)
+    {
+        QVERIFY(frames[i].format == PixelFormat::RGB888);
+        QCOMPARE(frames[i].data, spec.frames[i]);
+    }
+    QVERIFY(QString::fromStdString(reader.describe().conversion).contains("BGR turned into RGB"));
+}
+
+// idx1 offsets count from the 'movi' type field in most files and from the
+// file start in some. A negative height stores the rows top-down.
+void AviReaderTest::readsThroughIdx1RelativeAndAbsolute()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    for (const auto index : {AviFileSpec::Index::Idx1Relative, AviFileSpec::Index::Idx1Absolute})
+    {
+        AviFileSpec spec;
+        spec.kind = AviFileSpec::Kind::Bgra32;
+        spec.index = index;
+        spec.width = 2;
+        spec.height = 2;
+        spec.bottomUp = false;
+        spec.frames = patternFrames(3, 12);
+        const QString name = index == AviFileSpec::Index::Idx1Relative ? "relative.avi" : "absolute.avi";
+        const QString path = writeAviFile(dir.path(), name, spec);
+
+        AviReader reader;
+        std::string error;
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+        QCOMPARE(QString::fromStdString(reader.indexUsed()), QString("idx1"));
+
+        const std::vector<Frame> frames = readAllAviFrames(reader);
+        QCOMPARE(frames.size(), static_cast<size_t>(3));
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            QCOMPARE(frames[i].data, spec.frames[i]);
+        }
+        const QString conversion = QString::fromStdString(reader.describe().conversion);
+        QVERIFY(!conversion.contains("rows turned"));
+        QVERIFY(conversion.contains("fourth byte dropped"));
+    }
+}
+
+// Y800 is kept as stored. YUY2 keeps only its luma, and says the pixels are derived.
+void AviReaderTest::walksAFileWithoutIndex()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    for (const auto kind : {AviFileSpec::Kind::Y800, AviFileSpec::Kind::Yuy2})
+    {
+        AviFileSpec spec;
+        spec.kind = kind;
+        spec.index = AviFileSpec::Index::None;
+        spec.width = 4;
+        spec.height = 3;
+        spec.frames = patternFrames(4, 12);
+        const QString path = writeAviFile(dir.path(), kind == AviFileSpec::Kind::Y800 ? "y800.avi" : "yuy2.avi", spec);
+
+        AviReader reader;
+        std::string error;
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+        QCOMPARE(QString::fromStdString(reader.indexUsed()), QString("movi walk"));
+
+        const std::vector<Frame> frames = readAllAviFrames(reader);
+        QCOMPARE(frames.size(), static_cast<size_t>(4));
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            QVERIFY(frames[i].format == PixelFormat::Mono8);
+            QCOMPARE(frames[i].data, spec.frames[i]);
+        }
+
+        const QString conversion = QString::fromStdString(reader.describe().conversion);
+        if (kind == AviFileSpec::Kind::Y800)
+        {
+            QCOMPARE(conversion, QString("none"));
+        }
+        else
+        {
+            QVERIFY(conversion.startsWith("derived"));
+        }
+    }
+}
+
+void AviReaderTest::refusesWhatItCannotPlay()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec compressed;
+    compressed.kind = AviFileSpec::Kind::Compressed;
+    compressed.width = 4;
+    compressed.frames = patternFrames(2, 12);
+
+    AviFileSpec colourPalette;
+    colourPalette.greyPalette = false;
+    colourPalette.frames = patternFrames(2, 15);
+
+    AviFileSpec noFrames;
+
+    const QString text = QDir(dir.path()).filePath("text.avi");
+    QVERIFY(writeTextFile(text, QString(300, QChar('x'))));
+
+    const std::vector<std::pair<QString, std::string>> cases = {
+        {writeAviFile(dir.path(), "cram.avi", compressed), "'CRAM'"},
+        {writeAviFile(dir.path(), "palette.avi", colourPalette), "not a grey ramp"},
+        {writeAviFile(dir.path(), "empty.avi", noFrames), "no complete video frame"},
+        {text, "not an AVI file"},
+        {QDir(dir.path()).filePath("missing.avi"), "cannot"},
+    };
+
+    for (const auto& [path, reason] : cases)
+    {
+        AviReader reader;
+        std::string error;
+        QVERIFY(!reader.open(fsPath(path), 30.0, error));
+        QVERIFY2(error.find(reason) != std::string::npos, error.c_str());
+    }
+}
+
+// The capture started at 00:30 local time on 1 January 2016, which was
+// 23:30 UT on 31 December 2015. The local date is not the UT date.
+void AviReaderTest::fireCaptureLogSuppliesStartAndSettings()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.rate = 25;
+    spec.frames = patternFrames(3, 15);
+    const QString path = writeAviFile(dir.path(), "night.avi", spec);
+    QVERIFY(writeTextFile(QDir(dir.path()).filePath("night.txt"),
+        "FireCapture v2.4  Settings\n"
+        "------------------------------------\n"
+        "Camera=Chameleon CMLN-13S2M\n"
+        "Filename=night.avi\n"
+        "Date=010116\n"
+        "Start=003000.250\n"
+        "Start(UT)=233000.250\n"
+        "Date_format=ddMMyy\n"
+        "Shutter=8.088ms\n"
+        "Gain=510\n"));
+
+    AviReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+
+    const sys_days lastDay = year{2015} / December / day{31};
+    const system_clock::time_point start = lastDay + hours{23} + minutes{30} + milliseconds{250};
+    QVERIFY(reader.frameTime(0) == start);
+    QVERIFY(reader.frameTime(2) == start + milliseconds{80});
+
+    const StreamInfo info = reader.describe();
+    QCOMPARE(QString::fromStdString(info.camera), QString("Chameleon CMLN-13S2M"));
+    QCOMPARE(QString::fromStdString(info.exposure), QString("8.088ms"));
+    QCOMPARE(QString::fromStdString(info.gain), QString("510"));
+    QCOMPARE(QString::fromStdString(info.frameRate), QString("25.000 fps, from the AVI header"));
+    QVERIFY(QString::fromStdString(info.frameTime).contains("FireCapture's log night.txt"));
+}
+
+// FireCapture 2.2 gives only the local start. A log that names another file
+// is another recording's.
+void AviReaderTest::ignoresLogsThatCannotGiveTheStart()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.frames = patternFrames(2, 15);
+
+    const QString oldPath = writeAviFile(dir.path(), "old.avi", spec);
+    QVERIFY(writeTextFile(QDir(dir.path()).filePath("old.txt"),
+        "FireCapture v2.2 Settings\n-----------------------------\nCamera=Chameleon\nFilename=old.avi\n"
+        "Date=250613\nStart=202643\nShutter=0.763ms\nGain=611\n"));
+
+    AviReader old;
+    std::string error;
+    QVERIFY2(old.open(fsPath(oldPath), 30.0, error), error.c_str());
+    QVERIFY(old.frameTime(0) == system_clock::time_point{});
+    QVERIFY(QString::fromStdString(old.describe().frameTime).contains("unknown start time"));
+    QCOMPARE(QString::fromStdString(old.describe().gain), QString("611"));
+
+    const QString otherPath = writeAviFile(dir.path(), "this.avi", spec);
+    QVERIFY(writeTextFile(QDir(dir.path()).filePath("this.txt"),
+        "FireCapture v2.4  Settings\nCamera=Elsewhere\nFilename=that.avi\nDate=010116\nStart=003000\n"
+        "Start(UT)=233000\n"));
+
+    AviReader other;
+    QVERIFY2(other.open(fsPath(otherPath), 30.0, error), error.c_str());
+    QVERIFY(other.frameTime(0) == system_clock::time_point{});
+    QVERIFY(other.describe().camera.empty());
+}
+
 // --------------------------------------------------------- RecordingSource
+
+void RecordingSourceTest::aviPlaysThroughTheSameSource()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.rate = 30000;
+    spec.scale = 1001;
+    spec.frames = patternFrames(4, 15);
+    const QString path = writeAviFile(dir.path(), "played.AVI", spec);
+
+    RecordingSource source(fsPath(path));
+    source.setSpeed(RecordingSource::Speed::Fast);
+    std::string error;
+    QVERIFY2(source.open(error), error.c_str());
+    const StreamInfo info = source.streamInfo();
+    QCOMPARE(QString::fromStdString(info.source), path);
+    QCOMPARE(QString::fromStdString(info.playback), QString("whole file once, frames 0 to 3"));
+    QVERIFY(QString::fromStdString(info.frameRate).startsWith("29.970 fps"));
+
+    CollectingListener listener;
+    source.start(listener);
+    QTRY_VERIFY_WITH_TIMEOUT(listener.ended(), 10000);
+    source.stop();
+
+    const std::vector<FramePtr> frames = listener.frames();
+    QCOMPARE(frames.size(), static_cast<size_t>(4));
+    for (size_t i = 0; i < frames.size(); ++i)
+    {
+        QCOMPARE(frames[i]->frameIndex, static_cast<uint64_t>(i));
+        QCOMPARE(frames[i]->data, spec.frames[i]);
+        const auto expected = duration_cast<system_clock::duration>(duration<double>(static_cast<double>(i) * 1001.0 / 30000.0));
+        const auto offset = frames[i]->timestamp.time_since_epoch() - expected;
+        QVERIFY(offset < microseconds{1} && offset > -microseconds{1});
+    }
+}
+
+// Four frames at 25 fps, with an empty chunk after frame 1: the frames are
+// numbered 0, 1, 3, 4 and timed at 0, 40, 120, 160 ms, through every index.
+// Looped, the next lap continues at 5, 6, 8, 9.
+void RecordingSourceTest::droppedFramesLeaveGapsInIndexAndTime()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    for (const auto index : {AviFileSpec::Index::OpenDml, AviFileSpec::Index::Idx1Relative, AviFileSpec::Index::None})
+    {
+        AviFileSpec spec;
+        spec.index = index;
+        spec.framesInFirstPart = 2;
+        spec.frames = patternFrames(4, 15);
+        spec.emptyChunkAfter = {1};
+        const QString path = writeAviFile(dir.path(), QString("dropped%1.avi").arg(static_cast<int>(index)), spec);
+
+        AviReader reader;
+        std::string error;
+        QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+        QCOMPARE(reader.frameCount(), 4);
+        QVERIFY(QString::fromStdString(reader.describe().frameIndex).contains("1 empty chunks"));
+
+        for (const double loopSeconds : {0.0, 100.0})
+        {
+            RecordingSource source(fsPath(path));
+            source.setLoopSeconds(loopSeconds);
+            source.setSpeed(RecordingSource::Speed::Fast);
+            QVERIFY2(source.open(error), error.c_str());
+
+            CollectingListener listener;
+            source.start(listener);
+            if (loopSeconds > 0.0)
+            {
+                QTRY_VERIFY_WITH_TIMEOUT(listener.frameCount() >= 8, 10000);
+            }
+            else
+            {
+                QTRY_VERIFY_WITH_TIMEOUT(listener.ended(), 10000);
+            }
+            source.stop();
+
+            const std::vector<uint64_t> expected = {0, 1, 3, 4, 5, 6, 8, 9};
+            const std::vector<FramePtr> frames = listener.frames();
+            const size_t checked = loopSeconds > 0.0 ? 8 : 4;
+            QVERIFY(frames.size() >= checked);
+            for (size_t k = 0; k < checked; ++k)
+            {
+                QCOMPARE(frames[k]->frameIndex, expected[k]);
+                QCOMPARE(frames[k]->data, spec.frames[k % 4]);
+                const auto time = milliseconds{40} * static_cast<int64_t>(expected[k]);
+                const auto offset = frames[k]->timestamp.time_since_epoch() - time;
+                QVERIFY2(offset < microseconds{1} && offset > -microseconds{1},
+                    qPrintable(QString("frame %1 is %2 us off").arg(k).arg(duration_cast<microseconds>(offset).count())));
+            }
+        }
+    }
+}
 
 void RecordingSourceTest::wholeFilePlaysEveryFrameThenEnds()
 {
@@ -1949,8 +2689,12 @@ void EventWriterTest::eventTxtDescribesTheStream()
     played.triggers.push_back(ClipTrigger{4, 5, testTime(800), 200, false});
     played.frames = {mono16(4, testTime(767)), mono16(5, testTime(800))};
     played.stream.source = "D:/space/Moon 1.ser";
+    played.stream.exposure = "8.088ms";
+    played.stream.gain = "510";
+    played.stream.frameRate = "not stored in SER files";
     played.stream.frameTime = "UTC from the file's trailer";
     played.stream.frameIndex = "the position in the file, from 0";
+    played.stream.conversion = "none";
     played.stream.playback = "whole file once, frames 0 to 9";
 
     // A live source has no playback line.
@@ -1970,6 +2714,10 @@ void EventWriterTest::eventTxtDescribesTheStream()
     const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
     QVERIFY(text.startsWith("source: D:/space/Moon 1.ser\n"));
     QVERIFY(text.contains("camera: unknown\n"));
+    QVERIFY(text.contains("exposure: 8.088ms\n"));
+    QVERIFY(text.contains("gain: 510\n"));
+    QVERIFY(text.contains("frame_rate: not stored in SER files\n"));
+    QVERIFY(text.contains("conversion: none\n"));
     QVERIFY(text.contains("frame_time: UTC from the file's trailer\n"));
     QVERIFY(text.contains("frame_index: the position in the file, from 0\n"));
     QVERIFY(text.contains("playback: whole file once, frames 0 to 9\n"));
@@ -2049,6 +2797,10 @@ int main(int argc, char* argv[])
     }
     {
         SerReaderTest tests;
+        status |= QTest::qExec(&tests, argc, argv);
+    }
+    {
+        AviReaderTest tests;
         status |= QTest::qExec(&tests, argc, argv);
     }
     {

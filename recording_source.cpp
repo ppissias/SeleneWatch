@@ -1,8 +1,11 @@
 #include "recording_source.h"
 
+#include "avi_reader.h"
 #include "fine_sleep.h"
+#include "ser_reader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <condition_variable>
 #include <exception>
 #include <format>
@@ -13,6 +16,37 @@
 namespace {
 
 using namespace std::chrono;
+
+// The reader for the file's kind, chosen by its extension.
+std::unique_ptr<RecordingReader> openReader(const std::filesystem::path& path, double fallbackFps,
+    std::string& error)
+{
+    std::string extension = utf8Path(path.extension());
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (extension == ".ser")
+    {
+        auto reader = std::make_unique<SerReader>();
+        if (!reader->open(path, fallbackFps, error))
+        {
+            return nullptr;
+        }
+        return reader;
+    }
+    if (extension == ".avi")
+    {
+        auto reader = std::make_unique<AviReader>();
+        if (!reader->open(path, fallbackFps, error))
+        {
+            return nullptr;
+        }
+        return reader;
+    }
+
+    error = utf8Path(path) + " is neither a .ser nor an .avi file";
+    return nullptr;
+}
 
 // The longest single interval waited for at real-time speed, so that a long
 // gap in a file does not stall playback.
@@ -57,13 +91,13 @@ void RecordingSource::setSpeed(Speed speed)
 
 bool RecordingSource::open(std::string& error)
 {
-    reader_ = SerReader{};
-    if (!reader_.open(path_, error))
+    reader_ = openReader(path_, nominalFps_, error);
+    if (!reader_)
     {
         return false;
     }
 
-    const int count = reader_.frameCount();
+    const int count = reader_->frameCount();
     framesPerLap_ = count;
     if (loopSeconds_ > 0.0)
     {
@@ -76,60 +110,47 @@ bool RecordingSource::open(std::string& error)
         // A lap of one frame would restart the detector on every frame.
         framesPerLap_ = std::max(frames, std::min(count, 2));
     }
+    numbersPerLap_ = reader_->frameNumber(framesPerLap_ - 1) + 1;
 
-    // A lap lasts its span plus one mean interval, so the times of the next
-    // lap continue smoothly from the last frame of this one.
+    // A lap lasts as many mean intervals as it spans frame numbers, so the
+    // times of the next lap continue smoothly from the last frame of this
+    // one. Frame numbers count the gaps of dropped frames, so the mean
+    // interval is per number.
     const auto nominalInterval = duration_cast<system_clock::duration>(duration<double>(1.0 / nominalFps_));
     const auto span = fileTime(framesPerLap_ - 1) - fileTime(0);
-    lapLength_ = framesPerLap_ > 1 ? span + span / (framesPerLap_ - 1) : nominalInterval;
+    const auto numberSpan = static_cast<int64_t>(numbersPerLap_ - 1 - reader_->frameNumber(0));
+    lapLength_ = numberSpan > 0
+        ? span + span * static_cast<int64_t>(numbersPerLap_ - static_cast<uint64_t>(numberSpan)) / numberSpan
+        : nominalInterval * static_cast<int64_t>(numbersPerLap_);
     if (lapLength_ <= system_clock::duration::zero())
     {
         // Frame times that do not increase. Count the lap at the nominal rate.
-        lapLength_ = nominalInterval * framesPerLap_;
+        lapLength_ = nominalInterval * static_cast<int64_t>(numbersPerLap_);
     }
 
     info_ = describe();
     return true;
 }
 
+// The reader describes the file. The source adds where it is and how it plays.
 StreamInfo RecordingSource::describe() const
 {
-    const bool looping = loopSeconds_ > 0.0;
-    const double lapSeconds = duration<double>(lapLength_).count();
+    const int count = reader_->frameCount();
 
-    StreamInfo info;
+    StreamInfo info = reader_->describe();
     info.source = utf8Path(path_);
-    info.camera = reader_.instrument();
 
-    if (reader_.hasFrameTimes())
-    {
-        info.frameTime = "UTC from the file's trailer, as the capture program wrote it";
-    }
-    else
-    {
-        info.frameTime = std::format("nominal, not measured: {} plus the frame number at {:.3f} fps",
-            reader_.startTime() ? "the header's start time" : "an unknown start time counted from zero",
-            nominalFps_);
-    }
-
-    info.frameIndex = "the position in the file, from 0";
-    if (reader_.frameCount() < reader_.headerFrameCount())
-    {
-        info.frameIndex += std::format("; the file holds {} of the {} frames its header names",
-            reader_.frameCount(), reader_.headerFrameCount());
-    }
-
-    if (looping)
+    if (loopSeconds_ > 0.0)
     {
         info.playback = std::format("loop over frames 0 to {} of {} (the first {:.3f} s); "
             "each later lap adds {} to the frame index and {:.6f} s to the frame time",
-            framesPerLap_ - 1, reader_.frameCount(), loopSeconds_, framesPerLap_, lapSeconds);
+            numbersPerLap_ - 1, count, loopSeconds_, numbersPerLap_, duration<double>(lapLength_).count());
         info.frameTime += "; shifted in later laps of the loop";
         info.frameIndex += "; shifted in later laps of the loop";
     }
     else
     {
-        info.playback = std::format("whole file once, frames 0 to {}", reader_.frameCount() - 1);
+        info.playback = std::format("whole file once, frames 0 to {}", reader_->frameNumber(count - 1));
     }
     return info;
 }
@@ -166,12 +187,7 @@ size_t RecordingSource::liveFrameBytes() const
 
 system_clock::time_point RecordingSource::fileTime(int position) const
 {
-    if (reader_.hasFrameTimes())
-    {
-        return reader_.frameTime(position);
-    }
-    const system_clock::time_point start = reader_.startTime().value_or(system_clock::time_point{});
-    return start + duration_cast<system_clock::duration>(duration<double>(position / nominalFps_));
+    return reader_->frameTime(position);
 }
 
 void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listener)
@@ -234,13 +250,12 @@ void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listen
 
             // A recycled buffer once the stream is warm. This thread is its
             // only owner until the listener takes it.
-            std::shared_ptr<Frame> frame = pool_.acquire(reader_.frameBytes());
-            if (!reader_.readFrame(position, *frame, error))
+            std::shared_ptr<Frame> frame = pool_.acquire(reader_->frameBytes());
+            if (!reader_->readFrame(position, *frame, error))
             {
                 throw std::runtime_error(error);
             }
-            frame->frameIndex = static_cast<uint64_t>(lap) * static_cast<uint64_t>(framesPerLap_)
-                + static_cast<uint64_t>(position);
+            frame->frameIndex = static_cast<uint64_t>(lap) * numbersPerLap_ + reader_->frameNumber(position);
             frame->timestamp = time;
             frame->steadyTimestamp = steady_clock::now();
             listener.onFrame(std::move(frame));

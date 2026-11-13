@@ -34,8 +34,13 @@ set(PROJECT_SOURCES
     synthetic_scene.cpp
     synthetic_frame_source.h
     synthetic_frame_source.cpp
+    recording_reader.h
+    firecapture_log.h
+    firecapture_log.cpp
     ser_reader.h
     ser_reader.cpp
+    avi_reader.h
+    avi_reader.cpp
     recording_source.h
     recording_source.cpp
     session.h
@@ -79,7 +84,9 @@ add_executable(SeleneWatchTests
     fine_sleep.cpp
     preview_image.cpp
     synthetic_scene.cpp
+    firecapture_log.cpp
     ser_reader.cpp
+    avi_reader.cpp
     recording_source.cpp
     session.cpp
     frame_ring_buffer.cpp
