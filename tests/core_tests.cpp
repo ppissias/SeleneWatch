@@ -1,4 +1,5 @@
 #include "event_capture.h"
+#include "blip_injector.h"
 #include "event_writer.h"
 #include "flash_detector.h"
 #include "frame_pool.h"
@@ -28,6 +29,7 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -787,6 +789,19 @@ private slots:
     void twelveBitsAreVisibleAtTopAndBottom();
 };
 
+class BlipInjectorTest : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void gaussianIsAdditiveAndHasRequestedWidth();
+    void mono16KeepsBitLayoutAndSaturates();
+    void durationAndSettingsAreFixedAtRequest();
+    void edgeAndRgbSamplesAreHandled();
+    void invalidRequestsAndReset();
+    void recycledSyntheticFramesLoseOldMarks();
+};
+
 class SerReaderTest : public QObject
 {
     Q_OBJECT
@@ -840,6 +855,9 @@ private slots:
     void endOfFileHandsOffTheOpenClip();
     void loopJumpFiresNoCandidate();
     void unreadableFileDoesNotStart();
+    void injectedRecordingWritesMarkedPixels_data();
+    void injectedRecordingWritesMarkedPixels();
+    void stopCancelsAnUnfinishedInjection();
 };
 
 class EventCaptureTest : public QObject
@@ -871,6 +889,7 @@ private slots:
     void unwritableRootIsARecordFailure();
     void submitAfterShutdownIsRefused();
     void captureToWriterEndToEnd();
+    void blipMetadataSurvivesAPartialClipAndRefusal();
 };
 
 // ---------------------------------------------------------------- FramePool
@@ -1211,6 +1230,184 @@ void PreviewImageTest::twelveBitsAreVisibleAtTopAndBottom()
     }
 }
 
+// ------------------------------------------------------------ BlipInjector
+
+void BlipInjectorTest::gaussianIsAdditiveAndHasRequestedWidth()
+{
+    Frame frame;
+    frame.width = frame.height = 21;
+    frame.data.assign(21 * 21, 10);
+    frame.frameIndex = 17;
+    frame.timestamp = testTime(123);
+    frame.steadyTimestamp = steady_clock::time_point{} + seconds{5};
+    const Frame before = frame;
+    BlipInjector injector;
+    injector.apply(frame);
+    QCOMPARE(frame.data, before.data);
+    QVERIFY(!frame.blip);
+
+    QVERIFY(injector.request({10, 10, 4.0, 100.0, 1}));
+    injector.apply(frame);
+    QCOMPARE(frame.data[10 * 21 + 10], uint8_t{110});
+    // Half the peak at half the FWHM, in each direction, above the baseline.
+    QCOMPARE(frame.data[10 * 21 + 8], uint8_t{60});
+    QCOMPARE(frame.data[10 * 21 + 12], uint8_t{60});
+    QCOMPARE(frame.data[8 * 21 + 10], uint8_t{60});
+    QCOMPARE(frame.data[12 * 21 + 10], uint8_t{60});
+    QCOMPARE(frame.data.front(), uint8_t{10});
+    QCOMPARE(frame.data.back(), uint8_t{10});
+    QVERIFY(frame.timestamp == before.timestamp);
+    QVERIFY(frame.steadyTimestamp == before.steadyTimestamp);
+    QCOMPARE(frame.frameIndex, before.frameIndex);
+    QVERIFY(frame.blip);
+    QCOMPARE(frame.blip->firstFrameIndex, uint64_t{17});
+    QCOMPARE(frame.blip->frameNumber, 1);
+    QVERIFY(!injector.busy());
+}
+
+void BlipInjectorTest::mono16KeepsBitLayoutAndSaturates()
+{
+    for (const int bits : {12, 16})
+    {
+        for (const BitAlignment alignment : {BitAlignment::Low, BitAlignment::High})
+        {
+            Frame frame;
+            frame.width = frame.height = 9;
+            frame.format = PixelFormat::Mono16;
+            frame.significantBits = bits;
+            frame.alignment = alignment;
+            frame.bayer = BayerPattern::RGGB;
+            const int shift = alignment == BitAlignment::High ? 16 - bits : 0;
+            const uint16_t maximum = static_cast<uint16_t>(((1u << bits) - 1u) << shift);
+            const uint16_t baseline = static_cast<uint16_t>(1000 << shift);
+            frame.data.resize(9 * 9 * 2);
+            for (size_t i = 0; i < frame.data.size(); i += 2)
+            {
+                frame.data[i] = static_cast<uint8_t>(baseline & 0xFF);
+                frame.data[i + 1] = static_cast<uint8_t>(baseline >> 8);
+            }
+            const auto sample = [&frame](int x, int y) {
+                const size_t offset = static_cast<size_t>(y * frame.width + x) * 2;
+                return frame.data[offset] | (frame.data[offset + 1] << 8);
+            };
+            BlipInjector injector;
+            QVERIFY(injector.request({4, 4, 2.0, 200.0, 1}));
+            injector.apply(frame);
+            QCOMPARE(sample(4, 4), 1200 << shift);
+            QCOMPARE(sample(3, 4), 1100 << shift);
+            QCOMPARE(sample(0, 0), static_cast<int>(baseline));
+            QVERIFY(frame.bayer == BayerPattern::RGGB);
+            QCOMPARE(frame.significantBits, bits);
+            QVERIFY(frame.alignment == alignment);
+            for (size_t i = 0; i < frame.data.size(); i += 2)
+            {
+                QCOMPARE((frame.data[i] | (frame.data[i + 1] << 8)) & ((1 << shift) - 1), 0);
+            }
+
+            // The next injection clips at the declared sample maximum.
+            QVERIFY(injector.request({4, 4, 2.0, 65535.0, 1}));
+            injector.apply(frame);
+            QCOMPARE(sample(4, 4), static_cast<int>(maximum));
+        }
+    }
+}
+
+void BlipInjectorTest::durationAndSettingsAreFixedAtRequest()
+{
+    BlipInjector injector;
+    BlipSettings settings{2, 2, 2.0, 100.0, 3};
+    QVERIFY(injector.request(settings));
+    settings.amplitude = 200;
+    settings.frames = 1;
+    QVERIFY(!injector.request(settings));
+    Frame frame;
+    frame.width = frame.height = 5;
+    for (int i = 0; i < 5; ++i)
+    {
+        frame.frameIndex = static_cast<uint64_t>(10 + i * 2); // Gaps do not consume duration.
+        frame.data.assign(25, 10);
+        injector.apply(frame);
+        if (i < 3)
+        {
+            QVERIFY(frame.blip);
+            QCOMPARE(frame.blip->frameNumber, i + 1);
+            QCOMPARE(frame.blip->firstFrameIndex, uint64_t{10});
+            QCOMPARE(frame.blip->settings.amplitude, 100.0);
+            QCOMPARE(frame.blip->settings.frames, 3);
+            QCOMPARE(frame.data[12], uint8_t{110});
+        }
+        else
+        {
+            QVERIFY(!frame.blip);
+            QCOMPARE(frame.data, std::vector<uint8_t>(25, 10));
+        }
+        QCOMPARE(injector.busy(), i < 2);
+    }
+    QVERIFY(injector.request(settings));
+}
+
+void BlipInjectorTest::edgeAndRgbSamplesAreHandled()
+{
+    Frame frame;
+    frame.width = frame.height = 5;
+    frame.format = PixelFormat::RGB888;
+    for (int i = 0; i < 25; ++i)
+    {
+        frame.data.insert(frame.data.end(), {10, 200, 250});
+    }
+    BlipInjector injector;
+    QVERIFY(injector.request({0, 0, 2.0, 100.0, 1}));
+    injector.apply(frame);
+    QCOMPARE(frame.data[0], uint8_t{110});
+    QCOMPARE(frame.data[1], uint8_t{255});
+    QCOMPARE(frame.data[2], uint8_t{255});
+    QCOMPARE(frame.data[3], uint8_t{60});
+    QCOMPARE(frame.data[4], uint8_t{250});
+    QCOMPARE(frame.data[5], uint8_t{255});
+    QCOMPARE(frame.data[72], uint8_t{10});
+    QCOMPARE(frame.data[73], uint8_t{200});
+    QCOMPARE(frame.data[74], uint8_t{250});
+}
+
+void BlipInjectorTest::invalidRequestsAndReset()
+{
+    BlipInjector injector;
+    QVERIFY(!injector.request({-1, 0, 3.0, 100.0, 1}));
+    QVERIFY(!injector.request({0, 0, 0.0, 100.0, 1}));
+    QVERIFY(!injector.request({0, 0, std::numeric_limits<double>::infinity(), 100.0, 1}));
+    QVERIFY(!injector.request({0, 0, 3.0, std::numeric_limits<double>::quiet_NaN(), 1}));
+    QVERIFY(!injector.request({0, 0, 3.0, 100.0, 0}));
+    QVERIFY(!injector.busy());
+    QVERIFY(injector.request({0, 0, 3.0, 100.0, 3}));
+    injector.reset();
+    Frame frame;
+    frame.width = frame.height = 1;
+    frame.data = {10};
+    injector.apply(frame);
+    QCOMPARE(frame.data[0], uint8_t{10});
+    QVERIFY(!frame.blip);
+    QVERIFY(injector.request({0, 0, 3.0, 100.0, 3}));
+    injector.apply(frame);
+    QVERIFY(frame.blip);
+    injector.reset();
+    frame.data = {10};
+    injector.apply(frame);
+    QVERIFY(!frame.blip);
+    QCOMPARE(frame.data[0], uint8_t{10});
+}
+
+void BlipInjectorTest::recycledSyntheticFramesLoseOldMarks()
+{
+    Frame frame;
+    frame.blip = BlipMark{};
+    paintSyntheticFrame(frame, 64, 48, 0, true);
+    QVERIFY(!frame.blip);
+    QVERIFY(frame.syntheticFlash);
+    paintSyntheticFrame(frame, 64, 48, 1, false);
+    QVERIFY(!frame.blip);
+    QVERIFY(!frame.syntheticFlash);
+}
+
 // --------------------------------------------------------------- SerReader
 
 void SerReaderTest::readsMono8FramesAndTrailerTimes()
@@ -1247,7 +1444,11 @@ void SerReaderTest::readsMono8FramesAndTrailerTimes()
 
         Frame frame;
         frame.data.resize(reader.frameBytes());
+        frame.blip = BlipMark{};
+        frame.syntheticFlash = true;
         QVERIFY2(reader.readFrame(i, frame, error), error.c_str());
+        QVERIFY(!frame.blip);
+        QVERIFY(!frame.syntheticFlash);
         QCOMPARE(frame.width, 4);
         QCOMPARE(frame.height, 2);
         QVERIFY(frame.format == PixelFormat::Mono8);
@@ -2188,6 +2389,165 @@ void SessionTest::unreadableFileDoesNotStart()
     QVERIFY(!session.isRunning());
 }
 
+void SessionTest::injectedRecordingWritesMarkedPixels_data()
+{
+    QTest::addColumn<int>("kind");
+    QTest::newRow("mono8") << 0;
+    QTest::newRow("mono16-bayer-high12") << 1;
+    QTest::newRow("rgb") << 2;
+}
+
+void SessionTest::injectedRecordingWritesMarkedPixels()
+{
+    QFETCH(int, kind);
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    SerFileSpec spec;
+    spec.width = spec.height = 64;
+    spec.pixelDepth = kind == 1 ? 16 : 8;
+    spec.colorId = kind == 1 ? 8 : (kind == 2 ? 100 : 0);
+    std::vector<uint8_t> pixels;
+    for (int i = 0; i < 64 * 64; ++i)
+    {
+        if (kind == 1)
+        {
+            // 161 ADU in the high 12 bits; bit 4 establishes the alignment.
+            pixels.insert(pixels.end(), {0x10, 0x0A});
+        }
+        else if (kind == 2)
+        {
+            pixels.insert(pixels.end(), {10, 11, 12});
+        }
+        else
+        {
+            pixels.push_back(10);
+        }
+    }
+    for (int i = 0; i < 40; ++i)
+    {
+        spec.frames.push_back(pixels);
+        spec.trailer.push_back(serTicks(testTime(i * 33)));
+    }
+    const QString path = writeSerFile(dir.path(), "quiet.ser", spec);
+    QFile original(path);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = original.readAll();
+    original.close();
+    const QString root = QDir(dir.path()).filePath("events");
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    bool ended = false;
+    bool requested = false;
+    Session* running = nullptr;
+    const BlipSettings settings{32, 32, 10.0, kind == 1 ? 3200.0 : 200.0, 3};
+    Session::Notifications notifications;
+    notifications.previewReady = [&] {
+        const FramePtr frame = running->takePreviewFrame();
+        if (frame && !requested)
+        {
+            requested = running->requestBlip(settings);
+        }
+    };
+    notifications.ended = [&] { ended = true; };
+    notifications.clipWritten = [&](const ClipWriteResult& result) { results.push_back(result); };
+    {
+        Session session(&context, root, std::move(notifications));
+        running = &session;
+        session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
+        QString error;
+        QVERIFY2(session.start(error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(ended, 10000);
+        QVERIFY(requested);
+        QVERIFY(!session.blipBusy());
+        session.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 10000);
+    }
+    QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
+    const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
+    QVERIFY(text.contains("contains_test_signal: yes\n"));
+    QCOMPARE(text.count("\nblip: "), 1);
+    QVERIFY(text.contains("centre_x=32 centre_y=32 fwhm_px=10 amplitude_adu="));
+    QVERIFY(text.contains("duration_frames=3\n"));
+    QCOMPARE(text.count(" test_blip="), 3);
+    QVERIFY(text.contains(" blip_frame=1\n"));
+    QVERIFY(text.contains(" blip_frame=2\n"));
+    QVERIFY(text.contains(" blip_frame=3\n"));
+    for (const QString& line : text.split('\n'))
+    {
+        if (!line.contains(".png "))
+        {
+            continue;
+        }
+        QImage image(QDir(results[0].folder).filePath(line.section(' ', 0, 0)));
+        QVERIFY(!image.isNull());
+        const bool marked = line.contains(" test_blip=");
+        if (kind == 1)
+        {
+            QVERIFY(text.contains("significant_bits: 12\n"));
+            QVERIFY(text.contains("bayer_pattern: RGGB\n"));
+            QCOMPARE(reinterpret_cast<const quint16*>(image.constScanLine(32))[32],
+                static_cast<quint16>((marked ? 3361 : 161) << 4));
+            QCOMPARE(reinterpret_cast<const quint16*>(image.constScanLine(0))[0], quint16{161 << 4});
+        }
+        else
+        {
+            QCOMPARE(qRed(image.pixel(32, 32)), marked ? 210 : 10);
+            QCOMPARE(qGreen(image.pixel(32, 32)), kind == 2 ? (marked ? 211 : 11) : (marked ? 210 : 10));
+            QCOMPARE(qRed(image.pixel(0, 0)), 10);
+        }
+    }
+    QVERIFY(candidateLines(root).back().contains("contains_test_signal=yes"));
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), originalBytes);
+}
+
+void SessionTest::stopCancelsAnUnfinishedInjection()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    SerFileSpec spec;
+    spec.width = spec.height = 1;
+    for (int i = 0; i < 4; ++i)
+    {
+        spec.frames.push_back({10});
+        spec.trailer.push_back(serTicks(testTime(i * 100)));
+    }
+    const QString path = writeSerFile(dir.path(), "quiet.ser", spec);
+    QObject context;
+    Session session(&context, QDir(dir.path()).filePath("events"), {});
+    const BlipSettings settings{0, 0, 3, 100, 100};
+    QVERIFY(!session.requestBlip(settings));
+    session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
+    QString error;
+    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY(session.requestBlip(settings));
+    FramePtr observed;
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        if (!observed || !observed->blip)
+        {
+            observed = session.takePreviewFrame();
+        }
+        return observed && observed->blip.has_value();
+    })(), 1000);
+    QVERIFY(session.blipBusy());
+    session.stop();
+    QVERIFY(!session.blipBusy());
+    QVERIFY(!session.requestBlip(settings));
+    QVERIFY2(session.start(error), qPrintable(error));
+    observed.reset();
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        if (!observed)
+        {
+            observed = session.takePreviewFrame();
+        }
+        return observed != nullptr;
+    })(), 1000);
+    QVERIFY(observed);
+    QVERIFY(!observed->blip);
+    QCOMPARE(observed->data[0], uint8_t{10});
+    session.stop();
+}
+
 // ------------------------------------------------------------ EventCapture
 
 void EventCaptureTest::oneClipPerFlash()
@@ -2771,6 +3131,40 @@ void EventWriterTest::sessionStartLineNamesTheSource()
     QVERIFY2(lines[2].endsWith(" session_start camera=\"unknown\" source=\"synthetic\""), qPrintable(lines[2]));
 }
 
+void EventWriterTest::blipMetadataSurvivesAPartialClipAndRefusal()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    EventClip clip = smallClip(testTime(900));
+    auto first = std::make_shared<Frame>(*clip.frames[0]);
+    first->blip = BlipMark{{1, 0, 2.5, 80.5, 3}, 3, 2}; // First injected frame is outside this clip.
+    first->syntheticFlash = true;
+    clip.frames[0] = first;
+    auto second = std::make_shared<Frame>(*clip.frames[1]);
+    second->blip = BlipMark{{0, 1, 4, 90, 1}, 5, 1};
+    clip.frames[1] = second;
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    EventWriter writer(&context, root.path(), 100, [&](const ClipWriteResult& result) { results.push_back(result); });
+    writer.submit(clip);
+    QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 10000);
+    QVERIFY(results[0].notSaved.isEmpty());
+    const QString text = readText(QDir(results[0].folder).filePath("event.txt"));
+    QVERIFY(text.contains("contains_test_signal: yes\n"));
+    QVERIFY(text.contains("blip: first_frame_index=3 centre_x=1 centre_y=0 fwhm_px=2.5 amplitude_adu=80.5 duration_frames=3\n"));
+    QVERIFY(text.contains("blip: first_frame_index=5 centre_x=0 centre_y=1 fwhm_px=4 amplitude_adu=90 duration_frames=1\n"));
+    QVERIFY(text.contains(" test_blip=3 blip_frame=2 synthetic_flash\n"));
+    QVERIFY(text.contains(" test_blip=5 blip_frame=1\n"));
+    QVERIFY(candidateLines(root.path()).back().contains("contains_test_signal=yes"));
+
+    const QString refusedRoot = QDir(root.path()).filePath("refused");
+    EventWriter refused(&context, refusedRoot, 1, [&](const ClipWriteResult& result) { results.push_back(result); });
+    refused.submit(std::move(clip));
+    QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{2}, 10000);
+    QCOMPARE(results[1].notSaved, QString("writer busy"));
+    QVERIFY(candidateLines(refusedRoot).back().contains("contains_test_signal=yes not_saved=writer busy"));
+}
+
 int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
@@ -2793,6 +3187,10 @@ int main(int argc, char* argv[])
     }
     {
         PreviewImageTest tests;
+        status |= QTest::qExec(&tests, argc, argv);
+    }
+    {
+        BlipInjectorTest tests;
         status |= QTest::qExec(&tests, argc, argv);
     }
     {

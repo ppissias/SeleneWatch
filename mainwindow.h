@@ -41,6 +41,7 @@ private slots:
     void onTargetFpsChanged(int fps);
     void onSpeedChanged();
     void onInjectFlashClicked();
+    void onInjectBlipClicked();
 
 private:
     void setupStatusBar();
@@ -57,6 +58,7 @@ private:
     void updateCandidateReadout();
     void updateStatusLabel();
     void updateFrameLabel(const Frame& frame);
+    void updateBlipReadout();
 
     // Session notifications, on the GUI thread.
     void showLatestFrame();
@@ -65,7 +67,6 @@ private:
     void onPlaybackEnded();
     void onSourceFailed(const QString& message);
 
-    void displayImage(const QImage& image);
     [[nodiscard]] bool recordingSelected() const;
 
     Ui::MainWindowClass ui;

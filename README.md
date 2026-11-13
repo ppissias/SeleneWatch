@@ -97,6 +97,8 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 
 Camera SDKs are not part of the repository. Each camera adapter is built only when its SDK is installed and enabled in CMake. Without any SDK, the app still builds and runs on synthetic and recorded sources.
 
+To try a test flash, start a source, click the preview to select a pixel, set **FWHM**, **Peak**, and **Duration** under **Test flash**, then press **Inject blip**. Peak is an addition in native sample units (ADU), including for 12-bit data stored in a 16-bit word. A saved clip marks the injected frames and records the settings in `event.txt`. The synthetic source's **Fixed flash** remains available as a capture check. Today's detector often ignores small or faint blips; measured sensitivity comes with Feature-9.
+
 ## Roadmap
 
 | Stage | Content | Feature | State |
@@ -106,7 +108,7 @@ Camera SDKs are not part of the repository. Each camera adapter is built only wh
 | 3 | RAM ring buffer | Feature-3 | Done |
 | 4 | First detector and event capture | Feature-4 | Done |
 | 5 | An evidence-safe core: shared frames, detection on every frame, candidate log, lossless file path | Feature-7 | Done |
-| 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | In progress: SER and AVI playback done |
+| 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | In progress: playback and test injection done; SER writer next |
 | 7 | A measured trigger: per-pixel noise, faint limit measured on real recordings | Feature-9 | Proposed |
 | 8 | Seeing the faint side: display stretch, ring sized in seconds | Feature-5 | Proposed |
 | 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Proposed |

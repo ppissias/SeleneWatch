@@ -12,6 +12,8 @@ void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bo
     frame.alignment = BitAlignment::Low;
     frame.bayer = BayerPattern::None;
     frame.frameIndex = index;
+    frame.blip.reset();
+    frame.syntheticFlash = flash;
 
     const size_t targetSize = static_cast<size_t>(width * height);
     if (frame.data.size() != targetSize)

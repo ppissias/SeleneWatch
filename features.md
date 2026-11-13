@@ -258,6 +258,37 @@ Part B is in the program. Done-when item 7 passes as tests. Items 1 and 8 pass f
 - **The header rate is not the real rate.** FireCapture writes 18.000 fps into the header, but its logs record the real duration: `Moon_180548` holds 500 frames in 27.602 s, and `Moon_200059` holds 1883 frames in 103.672 s. Timed at the header rate, the last frame of the second file is 0.9 s late. The times are marked nominal, so nothing is claimed wrongly. But the log's `Start(UT)` and `End(UT)` would give the mean rate, and with it nominal times within a frame or two everywhere. That is a small change, to decide with the observer: it needs only to be settled what FireCapture's `End` marks.
 - **Opening runs on the window thread.** For the two unindexed dark-frame files, the window waits 12 to 47 s at Start. Moving the open onto the worker thread, or showing that it is reading, would fix it if such files turn out to matter.
 
+### Part C — built (13 November 2026)
+
+Part C is in the program. Done-when items 13 and 14 are covered by automated checks. Feature-6 remains open until Part D supplies SER clips and the independent-player check.
+
+**What it added**
+
+- `BlipInjector`, owned by `Session`. It adds a Gaussian to the writable source frame immediately before publication. Preview, detection, ring, and writer then share that same marked, read-only frame.
+- A **Test flash** group with width (FWHM in original frame pixels), peak amplitude (native ADU), duration (delivered frames), and **Inject blip**. Clicking the image selects the centre. The readout repeats the amplitude in ADU; the noise-unit readout still waits for Feature-9.
+- `PreviewWidget`, which fits the image and maps clicks through the same rectangle it paints. It ignores margins, keeps the selected frame pixel through a resize, and clears the selection for a new run or image size. Its screen-only marker leaves the centre clear so it does not hide a small blip. Feature-8 can reuse the coordinate mapping.
+- `BlipSettings` and `BlipMark`: every affected frame records the settings, the first injected frame's index, and its ordinal within the injection. `event.txt` says `contains_test_signal: yes`, lists each injection's full settings, and marks the individual frame lines. The settings are still available when the start of an injection is outside the clip.
+- The original synthetic flash remains as **Fixed flash**. Its frames now carry a separate `synthetic_flash` mark. SER and AVI readers and the synthetic painter clear stale test marks when reusing a frame.
+- `candidates.txt` adds `contains_test_signal=yes` for candidates whose clip contains injected frames or the fixed synthetic flash. A refused clip keeps that flag after its pixels have been released.
+
+**Decisions made while building it**
+
+- **One injection at a time.** The request slot and the busy flag are protected by a short lock. The source thread owns the active injection and does the pixel work outside the lock. A second request is refused until the current one ends. Editing controls changes the next request, not the settings already in flight.
+- **The Gaussian is additive and rounded to native ADU.** For a high-aligned 12-bit frame, the rounded addition is shifted into the high bits, and saturation is at the aligned 12-bit maximum. Previously zero low bits stay zero. Low-aligned data stays low-aligned. RGB receives the same addition in each channel, with independent saturation; Bayer samples are changed in place without debayering or changing the pattern. No source file is modified.
+- **There is no arbitrary spatial cutoff.** Only pixels for which the Gaussian can round to at least half an ADU are visited. A requested frame is marked even if saturation or rounding leaves its samples unchanged, so it cannot be mistaken for untreated data.
+- **Duration counts delivered frames.** Index gaps do not use up frames of the injection. An injection may continue over a playback-loop boundary; the capture still resets there and no clip spans the jump. Stop cancels pending and unfinished injections, and a new run starts without one.
+- **The existing detector stays unchanged.** A small realistic blip can be correctly injected without firing the Feature-4 trigger. The button's tooltip explains this. Broad, bright multi-frame blips exercise today's complete capture path; faint and single-frame sensitivity is Feature-9's work.
+- **Clip logging order stays unchanged.** The known process-kill gap documented under Part A still belongs with the writer/logging follow-up. The added test flag does not change when a candidate line is written.
+
+**Tests and verification**
+
+- Debug and Release configure, build, and CTest runs passed: 75 test cases across the core and preview executables, excluding Qt Test's lifecycle entries. No dependency was added.
+- Six injector tests cover the additive peak and half-maximum width, unchanged timing and indices, high- and low-aligned 12- and 16-bit samples, saturation, preserved Bayer pattern, RGB channel saturation and an image-edge centre, exact duration across index gaps, settings snapshots, stale marks, rejected requests, and cancellation.
+- The end-to-end recording test has Mono8, high-aligned 12-bit Bayer, and RGB cases. A quiet SER recording plays through a real `Session`; a requested three-frame blip fires the existing detector. The saved PNG pixels, per-frame marks, full settings, and candidate-log test flag are checked, and the input file remains byte-for-byte unchanged. A separate stop/restart test verifies that an unfinished injection cannot leak into the next run.
+- A writer test checks two injections in one clip, an injection whose first frame is outside the clip, the fixed synthetic mark, and retention of the test flag when the writer refuses a clip.
+- Four widget tests cover edge pixels, margins, left/right clicks, resizing, selection lifetime, and a marker that changes neither the supplied image nor its centre pixel.
+- The actual `MainWindow` was also exercised and rendered in a temporary offscreen Qt harness: Start, choose a pixel, inject one frame, resize, and Stop. The layout was inspected at 900×679 and 1280×900. Native desktop automation could not connect to its helper, so no live desktop smoke check is claimed.
+
 ---
 
 ## Feature-9 — A measured trigger

@@ -8,7 +8,6 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
-#include <QtGui/QPixmap>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QStatusBar>
 
@@ -48,6 +47,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui.stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
     connect(ui.openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
     connect(ui.injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
+    connect(ui.injectBlipButton, &QPushButton::clicked, this, &MainWindow::onInjectBlipClicked);
+    connect(ui.previewWidget, &PreviewWidget::positionSelected, this, [this] {
+        updateBlipReadout();
+    });
+    connect(ui.blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
     connect(ui.sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
     connect(ui.speedComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSpeedChanged);
     connect(ui.loopCheckBox, &QCheckBox::toggled, this, &MainWindow::updateControls);
@@ -58,6 +62,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(bufferReadoutTimer_, &QTimer::timeout, this, &MainWindow::updateStreamReadout);
 
     updateControls();
+    updateBlipReadout();
 }
 
 MainWindow::~MainWindow()
@@ -140,6 +145,7 @@ void MainWindow::updateBufferReadout()
 void MainWindow::updateStreamReadout()
 {
     updateBufferReadout();
+    updateBlipReadout();
 
     const auto now = std::chrono::steady_clock::now();
     const uint64_t acquired = session_->acquiredFrames();
@@ -208,6 +214,22 @@ void MainWindow::updateFrameLabel(const Frame& frame)
     {
         frameLabel_->setText(text);
     }
+    const int maximum = frame.format == PixelFormat::Mono16 ? (1 << frame.significantBits) - 1 : 255;
+    ui.blipAmplitudeSpinBox->setMaximum(maximum);
+}
+
+void MainWindow::updateBlipReadout()
+{
+    const auto centre = ui.previewWidget->selectedPosition();
+    const bool busy = session_->blipBusy();
+    ui.injectBlipButton->setEnabled(session_->isRunning() && !session_->sourceFinished() && centre && !busy);
+    ui.blipPositionLabel->setText(centre
+        ? QString("Centre: (%1, %2)").arg(centre->x()).arg(centre->y())
+        : QString("Click the preview to place a flash"));
+    ui.blipStatusLabel->setText(QString("Next peak: %1 ADU. %2")
+        .arg(ui.blipAmplitudeSpinBox->value(), 0, 'f', 1)
+        .arg(busy ? "Injecting test frames; edits apply to the next flash."
+                  : "Injected frames are marked as test data."));
 }
 
 std::unique_ptr<FrameSource> MainWindow::makeSource()
@@ -246,6 +268,8 @@ void MainWindow::onStartClicked()
         return;
     }
     session_->setSource(std::move(source));
+    ui.previewWidget->clear();
+    updateBlipReadout();
 
     QString error;
     if (!session_->start(error))
@@ -274,6 +298,7 @@ void MainWindow::onStartClicked()
     bufferReadoutTimer_->start();
     updateControls();
     updateStatusLabel();
+    updateBlipReadout();
 }
 
 void MainWindow::onStopClicked()
@@ -291,6 +316,7 @@ void MainWindow::finishStream()
     updateControls();
     updateStatusLabel();
     updateBufferReadout();
+    updateBlipReadout();
 }
 
 void MainWindow::onOpenFileClicked()
@@ -321,6 +347,22 @@ void MainWindow::onInjectFlashClicked()
     }
 }
 
+void MainWindow::onInjectBlipClicked()
+{
+    const auto centre = ui.previewWidget->selectedPosition();
+    if (!centre)
+    {
+        return;
+    }
+    const BlipSettings settings{centre->x(), centre->y(), ui.blipFwhmSpinBox->value(),
+        ui.blipAmplitudeSpinBox->value(), ui.blipFramesSpinBox->value()};
+    if (session_->requestBlip(settings))
+    {
+        statusBar()->showMessage("Test flash requested");
+    }
+    updateBlipReadout();
+}
+
 void MainWindow::onTargetFpsChanged(int fps)
 {
     if (synthetic_)
@@ -344,7 +386,8 @@ void MainWindow::showLatestFrame()
     if (frame)
     {
         updateFrameLabel(*frame);
-        displayImage(frameToPreviewImage(*frame));
+        ui.previewWidget->setImage(frameToPreviewImage(*frame));
+        updateBlipReadout();
     }
 }
 
@@ -397,15 +440,4 @@ void MainWindow::onSourceFailed(const QString& message)
     sourceFailed_ = true;
     finishStream();
     statusBar()->showMessage(message);
-}
-
-void MainWindow::displayImage(const QImage& image)
-{
-    if (!image.isNull())
-    {
-        const QSize targetSize = ui.viewportLabel->size();
-        const QPixmap pixmap = QPixmap::fromImage(image).scaled(
-            targetSize, Qt::KeepAspectRatio, Qt::FastTransformation);
-        ui.viewportLabel->setPixmap(pixmap);
-    }
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "blip_injector.h"
 #include "event_capture.h"
 #include "event_writer.h"
 #include "frame.h"
@@ -19,10 +20,10 @@
 // The frame path from a source to the capture, the writer, and the preview.
 //
 // Owns the selected source, the capture, and the writer. On the source
-// thread it publishes each frame, offers it to the preview slot, and runs
-// the capture. When the source says the next frame does not follow the
-// previous one, it restarts the capture as Start would. When a recording
-// ends, it hands off the clip still being collected.
+// thread it adds a requested test blip, publishes each frame, offers it to
+// the preview slot, and runs the capture. When the source says the next
+// frame does not follow the previous one, it restarts the capture as Start
+// would. When a recording ends, it hands off the clip still being collected.
 //
 // The window owns the Session, gives it a source, starts and stops it, and
 // reads its counters. It hears about events through Notifications. A test
@@ -70,6 +71,11 @@ public:
     // Stops the source and hands off a clip still being collected. Safe when stopped.
     void stop();
 
+    // Context thread. One request at a time, while running only. Settings
+    // are copied; later control edits do not change an active injection.
+    bool requestBlip(const BlipSettings& settings);
+    [[nodiscard]] bool blipBusy() const;
+
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
     [[nodiscard]] bool isRunning() const;
@@ -106,6 +112,7 @@ private:
     EventWriter writer_;
     EventCapture capture_;
     LatestFrameSlot previewSlot_;
+    BlipInjector blip_;
     std::atomic<uint64_t> acquiredFrames_{0};
     std::atomic<bool> sourceFinished_{false};
     bool running_{false};

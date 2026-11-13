@@ -8,6 +8,7 @@
 #include <QtCore/QTimeZone>
 #include <QtGui/QImage>
 
+#include <algorithm>
 #include <bit>
 #include <exception>
 #include <utility>
@@ -113,6 +114,39 @@ QString orUnknown(const std::string& text)
     return text.empty() ? QString("unknown") : QString::fromStdString(text);
 }
 
+bool containsTestSignal(const EventClip& clip)
+{
+    return std::any_of(clip.frames.begin(), clip.frames.end(), [](const FramePtr& frame) {
+        return frame->blip.has_value() || frame->syntheticFlash;
+    });
+}
+
+// Per-injection settings and per-frame marks live beside the evidence. A
+// clip may start halfway through an injection, or hold several injections.
+void writeTestSignalLines(QTextStream& out, const EventClip& clip)
+{
+    out << "contains_test_signal: " << (containsTestSignal(clip) ? "yes" : "no") << "\n";
+    std::vector<uint64_t> written;
+    for (const FramePtr& frame : clip.frames)
+    {
+        if (!frame->blip)
+        {
+            continue;
+        }
+        const BlipMark& mark = *frame->blip;
+        if (std::find(written.begin(), written.end(), mark.firstFrameIndex) != written.end())
+        {
+            continue;
+        }
+        written.push_back(mark.firstFrameIndex);
+        out << "blip: first_frame_index=" << mark.firstFrameIndex
+            << " centre_x=" << mark.settings.x << " centre_y=" << mark.settings.y
+            << " fwhm_px=" << QString::number(mark.settings.fwhm, 'g', 17)
+            << " amplitude_adu=" << QString::number(mark.settings.amplitude, 'g', 17)
+            << " duration_frames=" << mark.settings.frames << "\n";
+    }
+}
+
 // The stream and the frame layout, at the top of event.txt.
 void writeStreamLines(QTextStream& out, const EventClip& clip)
 {
@@ -172,6 +206,7 @@ EventWriter::~EventWriter()
 
 void EventWriter::submit(EventClip clip)
 {
+    const bool testSignal = containsTestSignal(clip);
     // Frames of a refused clip are released after the lock is dropped.
     std::vector<FramePtr> dropped;
     bool ended = false;
@@ -185,6 +220,7 @@ void EventWriter::submit(EventClip clip)
         else
         {
             Job job;
+            job.containsTestSignal = testSignal;
             if (queuedFrames_ + clip.frames.size() > maxQueuedFrames_)
             {
                 job.notSavedReason = "writer busy";
@@ -362,7 +398,7 @@ ClipWriteResult EventWriter::process(Job& job)
     // The frames are not needed for the log line.
     job.clip.frames.clear();
 
-    if (!appendCandidates(job.clip, result))
+    if (!appendCandidates(job.clip, result, job.containsTestSignal))
     {
         result.recordFailed = true;
     }
@@ -394,6 +430,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     {
         QTextStream out(&note);
         writeStreamLines(out, clip);
+        writeTestSignalLines(out, clip);
         out << "triggers: " << clip.triggers.size() << "\n";
         for (const ClipTrigger& trigger : clip.triggers)
         {
@@ -407,8 +444,17 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         out << "frames:\n";
         for (size_t i = 0; i < clip.frames.size(); ++i)
         {
-            out << frameFileName(i) << " " << clip.frames[i]->frameIndex << " "
-                << utcText(clip.frames[i]->timestamp) << "\n";
+            const Frame& frame = *clip.frames[i];
+            out << frameFileName(i) << " " << frame.frameIndex << " " << utcText(frame.timestamp);
+            if (frame.blip)
+            {
+                out << " test_blip=" << frame.blip->firstFrameIndex << " blip_frame=" << frame.blip->frameNumber;
+            }
+            if (frame.syntheticFlash)
+            {
+                out << " synthetic_flash";
+            }
+            out << "\n";
         }
     }
     note.close();
@@ -447,7 +493,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
 }
 
 // One line per candidate, saved or not. False when the log cannot be written.
-bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult& result) const
+bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult& result, bool containsTestSignal) const
 {
     // The outcome comes last on the line, because a reason can contain spaces.
     const QString outcome = result.folder.isEmpty()
@@ -461,6 +507,7 @@ bool EventWriter::appendCandidates(const EventClip& clip, const ClipWriteResult&
         out << utcText(trigger.triggerTime) << " " << triggerFields(trigger)
             << " delta_threshold=" << clip.deltaThreshold
             << " min_bright_pixels=" << clip.minBrightPixels
+            << (containsTestSignal ? " contains_test_signal=yes" : "")
             << " " << outcome << "\n";
     }
     out.flush();

@@ -61,6 +61,7 @@ bool Session::start(QString& error)
     acquiredFrames_.store(0, std::memory_order_relaxed);
     sourceFinished_.store(false);
     capture_.reset();
+    blip_.reset();
     (void)previewSlot_.take();
 
     writer_.logSessionStart(streamInfo_);
@@ -77,7 +78,18 @@ void Session::stop()
     }
     source_->stop();
     capture_.finishPartial();
+    blip_.reset();
     running_ = false;
+}
+
+bool Session::requestBlip(const BlipSettings& settings)
+{
+    return running_ && !sourceFinished_.load() && blip_.request(settings);
+}
+
+bool Session::blipBusy() const
+{
+    return blip_.busy();
 }
 
 bool Session::isRunning() const
@@ -121,11 +133,12 @@ FramePtr Session::takePreviewFrame()
 }
 
 // From the moment the frame is held as a FramePtr it is published: nobody
-// writes it again. Part C adds the blip just before this point.
+// writes it again. Test injection is the last write before publication.
 void Session::onFrame(std::shared_ptr<Frame> frame)
 {
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
 
+    blip_.apply(*frame);
     const FramePtr published = std::move(frame);
 
     // The preview converts on the context thread. It is woken once per frame

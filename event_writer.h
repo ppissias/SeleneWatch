@@ -81,6 +81,7 @@ private:
         std::optional<SessionStart> sessionStart;
         EventClip clip;
         QString notSavedReason;
+        bool containsTestSignal{false}; // Kept even when a refused clip drops its frames.
     };
 
     void run(std::stop_token stopToken);
@@ -89,7 +90,7 @@ private:
     void deliver(const ClipWriteResult& result);
 
     QString writeClip(const EventClip& clip, QString& error) const;
-    bool appendCandidates(const EventClip& clip, const ClipWriteResult& result) const;
+    bool appendCandidates(const EventClip& clip, const ClipWriteResult& result, bool containsTestSignal) const;
     bool appendSessionStart(const SessionStart& start) const;
     bool appendLog(const QString& lines) const;
 

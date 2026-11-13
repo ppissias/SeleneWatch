@@ -21,6 +21,9 @@ set(PROJECT_SOURCES
     mainwindow.h
     mainwindow.cpp
     frame.h
+    blip.h
+    blip_injector.h
+    blip_injector.cpp
     frame_pool.h
     frame_pool.cpp
     latest_frame_slot.h
@@ -30,6 +33,8 @@ set(PROJECT_SOURCES
     fine_sleep.cpp
     preview_image.h
     preview_image.cpp
+    preview_widget.h
+    preview_widget.cpp
     synthetic_scene.h
     synthetic_scene.cpp
     synthetic_frame_source.h
@@ -94,6 +99,7 @@ enable_testing()
 
 add_executable(SeleneWatchTests
     tests/core_tests.cpp
+    blip_injector.cpp
     frame_pool.cpp
     fine_sleep.cpp
     preview_image.cpp
@@ -129,3 +135,12 @@ selenewatch_compile_options(SeleneWatchTests)
 # TAP always goes to stdout, so failures show in CTest's log. Run by hand
 # from a console, the tests print plain text as usual.
 add_test(NAME core COMMAND SeleneWatchTests -o -,tap)
+
+# The preview's coordinate mapping and screen-only selection are tested
+# separately, keeping QWidget out of the core test executable.
+qt_add_executable(SeleneWatchPreviewTests tests/preview_tests.cpp preview_widget.cpp preview_widget.h)
+target_include_directories(SeleneWatchPreviewTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(SeleneWatchPreviewTests PRIVATE Qt6::Widgets Qt6::Test)
+selenewatch_compile_options(SeleneWatchPreviewTests)
+add_test(NAME preview COMMAND SeleneWatchPreviewTests -o -,tap)
+set_tests_properties(preview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -1,8 +1,11 @@
 #pragma once
 
+#include "blip.h"
+
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 enum class PixelFormat
@@ -57,6 +60,12 @@ struct Frame
 
     std::chrono::system_clock::time_point timestamp{};
     std::chrono::steady_clock::time_point steadyTimestamp{};
+
+    // Present only on frames to which the Session applied a test blip.
+    std::optional<BlipMark> blip;
+
+    // The synthetic source's original fixed flash, kept as a pipeline check.
+    bool syntheticFlash{false};
 
     // The samples as delivered, row by row from the top.
     std::vector<uint8_t> data;

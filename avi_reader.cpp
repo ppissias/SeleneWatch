@@ -727,5 +727,7 @@ bool AviReader::readFrame(int index, Frame& frame, std::string& error)
     frame.significantBits = 8;
     frame.alignment = BitAlignment::Low;
     frame.bayer = BayerPattern::None;
+    frame.blip.reset();
+    frame.syntheticFlash = false;
     return true;
 }

@@ -382,6 +382,8 @@ bool SerReader::readFrame(int index, Frame& frame, std::string& error)
     frame.significantBits = significantBits_;
     frame.alignment = alignment_;
     frame.bayer = bayer_;
+    frame.blip.reset();
+    frame.syntheticFlash = false;
     return true;
 }
 

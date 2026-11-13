@@ -109,7 +109,7 @@ The application is a **processing core** with a **Qt Widgets interface**. The co
        frames
 ```
 
-Until Feature-6 introduces `Session`, `MainWindow` plays that part: its frame callback publishes the frame and calls the capture.
+`Session` owns the frame path. It applies a requested test blip before publication, then gives the same read-only frame to the preview and the capture. The window selects the source, sends requests, and reads notifications and counters.
 
 ### Frame ownership
 
@@ -142,7 +142,7 @@ SeleneWatch is meant to work with many cameras, not one vendor. Each camera fami
 | GUI thread | Preview conversion, controls, status | Sit on the frame path; the preview takes the latest frame and skips the rest |
 | Guide thread (Feature-8) | The lock template, shift measurements, the guiding decision, and the mount connection | Sit on the frame path; it takes the latest frame and skips the rest |
 
-Each piece of mutable state has one owner. `EventCapture` is touched by the window only while the source thread is joined or not yet started. Threads meet in three places only: published frames, which are read-only; the one-slot mailboxes for the preview and the guider; and the writer's queue. Results travel to the window as notifications. Nothing on the frame path waits for the window or reads state the window keeps.
+Each piece of mutable state has one owner. `Session` touches `EventCapture` on the source thread, or while that thread is joined or not yet started. Threads meet through published read-only frames, the one-slot mailboxes for the preview and the guider, the test-blip request slot, and the writer's queue. Results travel to the window as notifications. Nothing on the frame path waits for the window or reads state the window keeps.
 
 ### Overload policy
 
@@ -285,7 +285,7 @@ When the first directory is split off, everything below `ui` becomes one static 
 | 3 | RAM ring buffer and memory readout (the source interface was deferred until a second source existed) | Feature-3 | Done |
 | 4 | First detector and event capture | Feature-4 | Done |
 | 5 | **An evidence-safe core.** Shared frames, detection on every frame, a writer that owns its backlog, a candidate log, and a file conversion separate from the preview | Feature-7 | Done |
-| 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | In progress |
+| 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | In progress: playback and test injection done; SER writer next |
 | 7 | **A measured trigger.** Per-pixel noise, the sigma and size rules, and the faint limit measured on the observer's own recordings | Feature-9 | Proposed |
 | 8 | **Seeing the faint side.** Display stretch, debayering for display, and a ring sized in seconds under one RAM limit | Feature-5 | Proposed |
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Proposed |
