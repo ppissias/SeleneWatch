@@ -8,7 +8,7 @@ The main motivation is to help observers detect and document **lunar transient p
 
 > **Project status: ZWO acquisition and manual save implemented; QHY and observing acceptance remain open.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO ASI cameras use the same detector, time-based history, shared image/analysis memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The connected ASI120MM Mini has passed RAW8/RAW16 bench checks; see [ZWO validation](docs/zwo-validation.md). Feature-9's [observing calibration](docs/feature-9-validation.md) and Feature-5's [earthshine display check](docs/feature-5-validation.md) remain partial. Mount guiding follows.
 
-The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Nine test suites cover the processing, evidence and window paths without requiring camera hardware. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
+The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Ten test suites cover the processing, evidence, diagnostics and window paths without requiring camera hardware. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
 
 ## What SeleneWatch aims to do
 
@@ -98,6 +98,8 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
 
 Camera SDKs are not part of the repository. Each camera adapter is built only when its SDK is installed and enabled in CMake. Without any SDK, the app still builds and runs on synthetic and recorded sources.
+
+The manual [camera soak tool](docs/camera-soak.md) saves periodic clips, flushes progress/memory/drop diagnostics, and stops at configured storage thresholds. The Mini completed [30 minutes in each raw format](docs/zwo-soak-validation.md), with zero SDK drops/refusals and all 420 sampled pixel hashes matched. These are bench checks; lunar observing acceptance remains open.
 
 For ZWO on Windows x64, configure a separate build after loading the MSVC/Qt environment:
 

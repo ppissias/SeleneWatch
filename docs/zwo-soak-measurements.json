@@ -1,0 +1,1106 @@
+{
+  "feature": "Feature-10 ZWO soak",
+  "date": "2026-11-14",
+  "manifest": {
+    "commit": "46eff8e",
+    "startedUtc": "2026-11-14T17:24:50.480327+00:00",
+    "executableSha256": "34181489e05bc5ac11ef5fc8a2e494f9ec2a99ee96d4c0482038350d3e694ec6",
+    "workload": "Concurrent software development/build/test load; not a controlled idle-machine throughput benchmark",
+    "cases": [
+      "raw8-30min",
+      "raw16-30min"
+    ]
+  },
+  "limitations": [
+    "Two 30-minute bench runs, not a one-hour lunar observing session.",
+    "Software builds/tests ran concurrently; this is not controlled idle-machine throughput.",
+    "Illumination and sensor temperature were not controlled. No observing sensitivity or false-positive claim.",
+    "Only periodic clips were saved. All acquired frames were analysed, and sampled native byte checks are not exhaustive.",
+    "Process memory was sampled every ten seconds and may miss brief collection/writer peaks; charged peak is tracked independently.",
+    "Buffered SER write times are not durable disk throughput. Full serial, clips, logs and progress remain under ignored out/qa-soak."
+  ],
+  "cases": [
+    {
+      "acquiredFrames": 50417,
+      "arrivalFpsFromSavedTimes": null,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 3997315094,
+      "bufferedSerSecondsAtStop": 1.0734492,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "gain": 0,
+        "id": 0,
+        "manualIntervalSeconds": 120,
+        "maximumOutputBytes": 8589934592,
+        "minimumFreeBytes": 4294967296,
+        "offset": 9,
+        "raw16": false,
+        "sampleIntervalSeconds": 10,
+        "seconds": 1800,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 28.00943755101065,
+      "detectorTimingSamples": 25207,
+      "elapsedSeconds": 1800.000443,
+      "failure": "",
+      "finalOutputBytes": 4006018717,
+      "frameRatePolicy": "acquiredFrames / elapsedSeconds includes startup; saved clips are periodic and do not measure full-run fps",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "manualIntervalSeconds": 120,
+      "matchedPreviewHashes": 210,
+      "maximumOutputBytes": 8589934592,
+      "memoryPeakBytes": 292470805,
+      "memoryRefusals": 0,
+      "mode": "soak",
+      "newCandidates": 0,
+      "outputLimitPolicy": "checked once per second; pending and final partial clips finish, so the final size can exceed this stop threshold",
+      "outputs": [
+        {
+          "folder": "raw8-30min/events/20261114-172452-072",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-172652-059",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-172852-047",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-173052-070",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-173252-093",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-173452-081",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-173652-068",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-173852-091",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-174052-114",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-174252-102",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-174452-125",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-174652-149",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-174852-136",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-175052-160",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw8-30min/events/20261114-175252-147",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 210,
+      "previewSampledDetectorMeanMs": 4.634138667830382,
+      "previewSampledDetectorP95Ms": 5.9322,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 8,
+      "recordedGapLinesIncludingOverlap": 0,
+      "sampledPeakPrivateBytes": 218324992,
+      "sampledPeakWorkingSetBytes": 227106816,
+      "savedAlignment": "low",
+      "savedFramesIncludingOverlap": 3253,
+      "savedSampleBits": 8,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 1683.2159932,
+      "stopReason": "duration",
+      "uniqueSavedTimestamps": 3253,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "raw8-30min",
+      "progressSummary": {
+        "sampleCount": 182,
+        "warmupSeconds": 60,
+        "postWarmupFps": 28.01981248969518,
+        "postWarmupPrivateMinBytes": 206360576,
+        "postWarmupPrivateMaxBytes": 218324992,
+        "postWarmupPrivateChangeBytes": 4513792,
+        "maximumSampledWriterClips": 0,
+        "checkpointsColumns": [
+          "elapsedSeconds",
+          "acquiredFrames",
+          "sdkDrops",
+          "chargedBytes",
+          "privateBytes",
+          "writerOutstandingClips",
+          "outputBytes"
+        ],
+        "minuteCheckpoints": [
+          [
+            0.639379,
+            0,
+            null,
+            0,
+            19595264,
+            0,
+            0
+          ],
+          [
+            60.6664425,
+            1680,
+            0,
+            185565184,
+            206393344,
+            0,
+            109921561
+          ],
+          [
+            120.6852707,
+            3362,
+            0,
+            185565184,
+            206360576,
+            0,
+            109921561
+          ],
+          [
+            180.7044197,
+            5044,
+            0,
+            189251584,
+            210591744,
+            0,
+            388209355
+          ],
+          [
+            240.7230888,
+            6725,
+            0,
+            189251584,
+            210591744,
+            0,
+            388209355
+          ],
+          [
+            300.7362088,
+            8407,
+            0,
+            189251584,
+            210833408,
+            0,
+            666498717
+          ],
+          [
+            360.7550417,
+            10089,
+            0,
+            189251584,
+            210833408,
+            0,
+            666498717
+          ],
+          [
+            420.7737212,
+            11770,
+            0,
+            189251584,
+            210837504,
+            0,
+            944786470
+          ],
+          [
+            480.7935922,
+            13452,
+            0,
+            189251584,
+            210841600,
+            0,
+            944786470
+          ],
+          [
+            540.805403,
+            15134,
+            0,
+            189251584,
+            210857984,
+            0,
+            1223073752
+          ],
+          [
+            600.8249523,
+            16815,
+            0,
+            189251605,
+            210862080,
+            0,
+            1223073752
+          ],
+          [
+            660.8502689,
+            18497,
+            0,
+            189251605,
+            210882560,
+            0,
+            1501384365
+          ],
+          [
+            720.8840156,
+            20179,
+            0,
+            189251605,
+            210808832,
+            0,
+            1501384365
+          ],
+          [
+            780.9241069,
+            21862,
+            0,
+            189251605,
+            210841600,
+            0,
+            1779672471
+          ],
+          [
+            840.9430736,
+            23543,
+            0,
+            189251605,
+            210857984,
+            0,
+            1779672471
+          ],
+          [
+            900.9553451,
+            25225,
+            0,
+            189251605,
+            210980864,
+            0,
+            2057959386
+          ],
+          [
+            960.9744759,
+            26907,
+            0,
+            189251605,
+            210997248,
+            0,
+            2057959386
+          ],
+          [
+            1021.0142992,
+            28589,
+            0,
+            189251605,
+            210767872,
+            0,
+            2336248369
+          ],
+          [
+            1081.0338785,
+            30271,
+            0,
+            190480405,
+            212205568,
+            0,
+            2336248369
+          ],
+          [
+            1141.0462326,
+            31952,
+            0,
+            189251605,
+            210980864,
+            0,
+            2614536786
+          ],
+          [
+            1201.0652653,
+            33634,
+            0,
+            191709205,
+            213450752,
+            0,
+            2614536786
+          ],
+          [
+            1261.0975384,
+            35316,
+            0,
+            189251605,
+            211001344,
+            0,
+            2892826564
+          ],
+          [
+            1321.1245291,
+            36998,
+            0,
+            192938005,
+            214659072,
+            0,
+            2892826564
+          ],
+          [
+            1381.1437274,
+            38680,
+            0,
+            189251605,
+            210935808,
+            0,
+            3171113881
+          ],
+          [
+            1441.162575,
+            40361,
+            0,
+            194166805,
+            215879680,
+            0,
+            3171113881
+          ],
+          [
+            1501.1821758,
+            42043,
+            0,
+            189251605,
+            210882560,
+            0,
+            3449400314
+          ],
+          [
+            1561.1943732,
+            43724,
+            0,
+            194166805,
+            216043520,
+            0,
+            3449434764
+          ],
+          [
+            1621.2135441,
+            45406,
+            0,
+            189251605,
+            210911232,
+            0,
+            3727723778
+          ],
+          [
+            1681.2330214,
+            47088,
+            0,
+            196624405,
+            218324992,
+            0,
+            3727723778
+          ],
+          [
+            1741.2452709,
+            48769,
+            0,
+            189251605,
+            210907136,
+            0,
+            4006018717
+          ],
+          [
+            1800.0797291,
+            50417,
+            0,
+            189251605,
+            195112960,
+            0,
+            4006018717
+          ]
+        ]
+      }
+    },
+    {
+      "acquiredFrames": 25192,
+      "arrivalFpsFromSavedTimes": null,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 4013276534,
+      "bufferedSerSecondsAtStop": 1.1603227,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "gain": 0,
+        "id": 0,
+        "manualIntervalSeconds": 120,
+        "maximumOutputBytes": 8589934592,
+        "minimumFreeBytes": 4294967296,
+        "offset": 9,
+        "raw16": true,
+        "sampleIntervalSeconds": 10,
+        "seconds": 1800,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 13.995505308581386,
+      "detectorTimingSamples": 25190,
+      "elapsedSeconds": 1800.0064624,
+      "failure": "",
+      "finalOutputBytes": 4021582011,
+      "frameRatePolicy": "acquiredFrames / elapsedSeconds includes startup; saved clips are periodic and do not measure full-run fps",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "manualIntervalSeconds": 120,
+      "matchedPreviewHashes": 210,
+      "maximumOutputBytes": 8589934592,
+      "memoryPeakBytes": 296157317,
+      "memoryRefusals": 0,
+      "mode": "soak",
+      "nativeWordMax": 3024,
+      "nativeWordMin": 2096,
+      "nativeWordOr": 3056,
+      "newCandidates": 0,
+      "outputLimitPolicy": "checked once per second; pending and final partial clips finish, so the final size can exceed this stop threshold",
+      "outputs": [
+        {
+          "folder": "raw16-30min/events/20261114-175500-506",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-175700-575",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-175900-572",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-180100-569",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-180300-566",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-180500-562",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-180700-559",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-180900-556",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-181100-554",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-181300-621",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-181500-619",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-181700-616",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-181900-613",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-182100-610",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "raw16-30min/events/20261114-182300-607",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 210,
+      "previewSampledDetectorMeanMs": 5.42036279475984,
+      "previewSampledDetectorP95Ms": 8.525400000000001,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "recordedGapLinesIncludingOverlap": 0,
+      "sampledPeakPrivateBytes": 216162304,
+      "sampledPeakWorkingSetBytes": 230617088,
+      "savedAlignment": "low",
+      "savedFramesIncludingOverlap": 1633,
+      "savedSampleBits": 16,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 1683.2432304,
+      "stopReason": "duration",
+      "uniqueSavedTimestamps": 1633,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "raw16-30min",
+      "progressSummary": {
+        "sampleCount": 182,
+        "warmupSeconds": 60,
+        "postWarmupFps": 14.000486819502926,
+        "postWarmupPrivateMinBytes": 208560128,
+        "postWarmupPrivateMaxBytes": 216162304,
+        "postWarmupPrivateChangeBytes": 5607424,
+        "maximumSampledWriterClips": 0,
+        "checkpointsColumns": [
+          "elapsedSeconds",
+          "acquiredFrames",
+          "sdkDrops",
+          "chargedBytes",
+          "privateBytes",
+          "writerOutstandingClips",
+          "outputBytes"
+        ],
+        "minuteCheckpoints": [
+          [
+            0.6318689,
+            0,
+            null,
+            0,
+            19668992,
+            0,
+            0
+          ],
+          [
+            60.6655814,
+            840,
+            0,
+            188022909,
+            208560128,
+            0,
+            113593781
+          ],
+          [
+            120.6780771,
+            1680,
+            0,
+            188022909,
+            208576512,
+            0,
+            113593781
+          ],
+          [
+            180.6968807,
+            2520,
+            0,
+            192938109,
+            213704704,
+            0,
+            394313290
+          ],
+          [
+            240.7228781,
+            3361,
+            0,
+            192938109,
+            214183936,
+            0,
+            394313290
+          ],
+          [
+            300.7352439,
+            4201,
+            0,
+            192938109,
+            214237184,
+            0,
+            672571980
+          ],
+          [
+            360.74713,
+            5041,
+            0,
+            192938109,
+            214237184,
+            0,
+            672571980
+          ],
+          [
+            420.766737,
+            5881,
+            0,
+            192938109,
+            213344256,
+            0,
+            950830337
+          ],
+          [
+            480.7858895,
+            6722,
+            0,
+            192938109,
+            213532672,
+            0,
+            950830337
+          ],
+          [
+            540.7979971,
+            7562,
+            0,
+            192938117,
+            213536768,
+            0,
+            1229090311
+          ],
+          [
+            600.8172503,
+            8402,
+            0,
+            192938117,
+            213602304,
+            0,
+            1229090311
+          ],
+          [
+            660.8571403,
+            9243,
+            0,
+            192938117,
+            213729280,
+            0,
+            1507348375
+          ],
+          [
+            720.8763501,
+            10083,
+            0,
+            192938117,
+            213577728,
+            0,
+            1507348375
+          ],
+          [
+            780.8955808,
+            10923,
+            0,
+            192938117,
+            213803008,
+            0,
+            1788093131
+          ],
+          [
+            840.9209742,
+            11764,
+            0,
+            192938117,
+            213803008,
+            0,
+            1788093131
+          ],
+          [
+            900.9479908,
+            12604,
+            0,
+            192938117,
+            213712896,
+            0,
+            2066352472
+          ],
+          [
+            960.9669832,
+            13444,
+            0,
+            192938117,
+            213868544,
+            0,
+            2066352472
+          ],
+          [
+            1020.9834889,
+            14285,
+            0,
+            192938117,
+            213860352,
+            0,
+            2344612352
+          ],
+          [
+            1080.9988833,
+            15125,
+            0,
+            192938117,
+            213860352,
+            0,
+            2344612352
+          ],
+          [
+            1141.0249129,
+            15965,
+            0,
+            192938117,
+            213610496,
+            0,
+            2625329695
+          ],
+          [
+            1201.0456513,
+            16806,
+            0,
+            192938117,
+            213610496,
+            0,
+            2625329695
+          ],
+          [
+            1261.0770253,
+            17646,
+            0,
+            192938117,
+            213635072,
+            0,
+            2903589509
+          ],
+          [
+            1321.0956645,
+            18486,
+            0,
+            192938117,
+            213700608,
+            0,
+            2903589509
+          ],
+          [
+            1381.1154896,
+            19327,
+            0,
+            192938117,
+            214192128,
+            0,
+            3181872553
+          ],
+          [
+            1441.1276467,
+            20167,
+            0,
+            192938117,
+            213721088,
+            0,
+            3181872553
+          ],
+          [
+            1501.1468904,
+            21007,
+            0,
+            192938117,
+            213696512,
+            0,
+            3462590187
+          ],
+          [
+            1561.1661654,
+            21847,
+            0,
+            192938117,
+            213778432,
+            0,
+            3462590187
+          ],
+          [
+            1621.1788044,
+            22688,
+            0,
+            192938117,
+            213774336,
+            0,
+            3743308773
+          ],
+          [
+            1681.206953,
+            23528,
+            0,
+            195395717,
+            216162304,
+            0,
+            3743308773
+          ],
+          [
+            1741.2445559,
+            24369,
+            0,
+            192938117,
+            213696512,
+            0,
+            4021566641
+          ],
+          [
+            1800.1066275,
+            25192,
+            0,
+            192938117,
+            199774208,
+            0,
+            4021582011
+          ]
+        ]
+      }
+    }
+  ],
+  "mainValidation": [
+    {
+      "configuration": "debug",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 38.43
+    },
+    {
+      "configuration": "release",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 24.76
+    },
+    {
+      "configuration": "zwo-debug",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 38.38
+    },
+    {
+      "configuration": "zwo-release",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 24.54
+    }
+  ],
+  "independentReader": {
+    "reader": "Siril 1.4.4",
+    "cases": [
+      {
+        "case": "raw8-30min",
+        "position": "first",
+        "frames": 89,
+        "storageBits": 8,
+        "utcTrailerMatchesSidecar": true,
+        "nativeFileUnchanged": true,
+        "sirilReadEveryFrame": true
+      },
+      {
+        "case": "raw8-30min",
+        "position": "last",
+        "frames": 226,
+        "storageBits": 8,
+        "utcTrailerMatchesSidecar": true,
+        "nativeFileUnchanged": true,
+        "sirilReadEveryFrame": true
+      },
+      {
+        "case": "raw16-30min",
+        "position": "first",
+        "frames": 46,
+        "storageBits": 16,
+        "utcTrailerMatchesSidecar": true,
+        "nativeFileUnchanged": true,
+        "sirilReadEveryFrame": true
+      },
+      {
+        "case": "raw16-30min",
+        "position": "last",
+        "frames": 113,
+        "storageBits": 16,
+        "utcTrailerMatchesSidecar": true,
+        "nativeFileUnchanged": true,
+        "sirilReadEveryFrame": true
+      }
+    ]
+  },
+  "restoration": {
+    "camera": "ZWO ASI120MM Mini",
+    "restoredInitialCaptureSettings": true,
+    "captureStarted": false,
+    "rawBits": 8,
+    "width": 1280,
+    "height": 960,
+    "bin": 1,
+    "controls": [
+      {
+        "automatic": false,
+        "maximum": 100,
+        "minimum": 0,
+        "name": "Gain",
+        "value": 0,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 2000000000,
+        "minimum": 64,
+        "name": "Exposure",
+        "value": 1000,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 20,
+        "minimum": 0,
+        "name": "Offset",
+        "value": 9,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 100,
+        "minimum": 40,
+        "name": "BandWidth",
+        "value": 40,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 3,
+        "minimum": 0,
+        "name": "Flip",
+        "value": 0,
+        "writable": true
+      }
+    ],
+    "verifiedBeforeClose": true,
+    "closedAfterVerification": true,
+    "note": "Settings were read back before close. A fresh SDK initialization can choose defaults again (bandwidth 80 observed)."
+  }
+}

@@ -104,7 +104,7 @@ private slots:
     {
         QTemporaryDir dir; QObject context; auto api=std::make_shared<FakeZwoApi>(); auto config=shortRun();
         config["seconds"]=3;
-        QTimer::singleShot(200,&context,[&] { QFile stop(dir.path()+"/result/stop.request"); stop.open(QIODevice::WriteOnly); });
+        QTimer::singleShot(200,&context,[&] { QFile stop(dir.path()+"/result/stop.request"); QVERIFY(stop.open(QIODevice::WriteOnly)); });
         QCOMPARE(run(dir.path(),config,api),0);
         const auto result=readJson(dir.path()+"/result/bench.json");
         QCOMPARE(result["stopReason"].toString(),"requested-stop"); QVERIFY(result["elapsedSeconds"].toDouble()<2.5);
