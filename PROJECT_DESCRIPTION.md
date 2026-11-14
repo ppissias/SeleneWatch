@@ -137,6 +137,8 @@ The ZWO adapter is implemented in `cameras/`. Only `zwo_sdk.cpp` includes the SD
 
 The ASI SDK provides cumulative losses but no per-exposure frame ID. Published indices are delivery ordinal plus the last observed SDK drop count; gap placement is approximate because of SDK buffering. Each frame records that cumulative count, UTC immediately after `ASIGetVideoData`, and the accompanying host steady time. A telemetry error or counter reset preserves the received frame with unknown loss telemetry, then ends acquisition visibly. Actual unplug and hour-long lunar acceptance remain open. [ZWO validation](docs/zwo-validation.md) records the Mini's bench rates, injection recovery and deliberately induced SDK losses.
 
+This development branch also contains `QhySource` and a private SDK binding, with its [review and qualification gates](docs/qhy-development.md). SDK-sized buffers remain charged while only checked native image pixels are published. QHY IDs are separate from unknown serials, loss counts remain unknown, and host arrival time is distinct from exposure timing. Bin 1 is explicitly commanded because an independent bin getter was not established. The settings editor, Bayer-phase helper and diagnostic runner are shared with ASI; each source retains its own lifecycle/read/telemetry policy. SDK terms and physical behavior remain unverified, so the draft is not merged into the usable main checkout and does not bundle vendor files.
+
 ### Threads and ownership
 
 | Thread | Owns and runs | Must never |
@@ -260,7 +262,7 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. The remaining core and UI files sit at the root, with tests in `tests/`.
 
-A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO SDK boundary and frame source; QHY follows when implemented. A plausible later layout:
+A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO SDK boundary and frame source; this branch adds the QHY development boundary/source and shared raw-layout helper. A plausible later layout:
 
 ```text
 SeleneWatch/
@@ -297,7 +299,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | Done |
 | 7 | **A measured trigger.** Per-pixel noise, live controls, overlays, and measurements on the observer's recordings | Feature-9 | Implemented; field calibration partial |
 | 8 | **Seeing the faint side.** Display stretch, Bayer colour, source-time windows and a shared image/analysis byte ceiling | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | ZWO and manual save implemented; QHY and observing acceptance pending |
+| 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | ZWO/manual save implemented; QHY development draft; SDK/hardware/observing acceptance pending |
 | 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Proposed |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | To be written | Planned |
 | 12 | **Later.** More camera families as observers bring the hardware; registration, transit detection, event browser, export | To be written | Planned |
