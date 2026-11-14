@@ -8,7 +8,7 @@ The main motivation is to help observers detect and document **lunar transient p
 
 > **Project status: ZWO acquisition and manual save implemented; QHY and observing acceptance remain open.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO ASI cameras use the same detector, time-based history, shared image/analysis memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The connected ASI120MM Mini has passed RAW8/RAW16 bench checks; see [ZWO validation](docs/zwo-validation.md). Feature-9's [observing calibration](docs/feature-9-validation.md) and Feature-5's [earthshine display check](docs/feature-5-validation.md) remain partial. Mount guiding follows.
 
-The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Ten test suites cover the processing, evidence, diagnostics and window paths without requiring camera hardware. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
+The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. This development branch has eleven test suites, including QHY software preparation. The [QHY draft review](docs/qhy-development.md) records unresolved SDK terms and hardware checks; main remains the usable ZWO checkpoint. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
 
 ## What SeleneWatch aims to do
 
@@ -133,7 +133,7 @@ The **Display and capture** tab offers Linear, Black/white levels, and Auto-stre
 | 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
 | 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
 | 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | ZWO and manual save implemented; QHY and observing acceptance pending |
+| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | ZWO/manual save implemented; QHY development draft; SDK/hardware/observing checks pending |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |
 | 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |
 | 12 | More camera families; registration, transit detection, event browser, export | — | Planned |
