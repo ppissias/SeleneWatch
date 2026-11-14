@@ -1,16 +1,24 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "tools/camera_probe.h"
 #include "cameras/zwo_source.h"
 #include "session.h"
 #include "recording/ser_reader.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
+#include <QtCore/QDateTime>
+#include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QTextStream>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
+#include <QtCore/QStorageInfo>
 #include <QtGui/QGuiApplication>
 #include <algorithm>
 #include <set>
@@ -18,8 +26,43 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#ifdef _WIN32
+#include <Windows.h>
+#include <Psapi.h>
+#endif
 
 namespace {
+QJsonObject processUsage()
+{
+    QJsonObject result;
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
+    {
+        result["workingSetBytes"]=static_cast<double>(memory.WorkingSetSize);
+        result["privateBytes"]=static_cast<double>(memory.PrivateUsage);
+    }
+#endif
+    return result; // Unknown on other platforms; never substitute charged payload.
+}
+uint64_t directoryBytes(const QDir& directory)
+{
+    uint64_t total=0;
+    QDirIterator files(directory.absolutePath(), QDir::Files|QDir::Hidden, QDirIterator::Subdirectories);
+    while (files.hasNext())
+    {
+        files.next();
+        if (!files.fileInfo().isSymLink()) total+=static_cast<uint64_t>(files.fileInfo().size());
+    }
+    return total;
+}
+double number(const QJsonObject& config, const char* key, double fallback, double minimum, double maximum)
+{
+    const double value=config.value(key).toDouble(fallback);
+    if ((config.contains(key) && !config.value(key).isDouble()) || !std::isfinite(value) || value<minimum || value>maximum)
+        throw std::invalid_argument(std::string("Invalid camera probe setting: ")+key);
+    return value;
+}
 // Manual QA only: make the consumer fall behind without altering camera data.
 // The normal source and SDK wrapper have no artificial throttling path.
 class DelayedCamera final : public ZwoApi
@@ -70,32 +113,42 @@ QJsonObject profileJson(const ZwoProfile& p)
         {"rawBits",p.current.format==PixelFormat::Mono16?16:8},{"controls",controls}};
 }
 }
-int main(int argc,char** argv)
+int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_ptr<ZwoApi> api)
 {
-    qputenv("QT_QPA_PLATFORM","offscreen"); QGuiApplication app(argc,argv);
-    const auto args=app.arguments();
     try
     {
-        auto api=makeZwoApi(); if (!api) throw std::runtime_error("This build has no ZWO SDK; configure SELENEWATCH_ZWO_SDK_DIR");
+        if (!api) throw std::runtime_error("This build has no ZWO SDK; configure SELENEWATCH_ZWO_SDK_DIR");
         if (args.size()==3 && args[1]=="inspect")
         {
             QJsonArray list; for (const auto& c:api->cameras()) list.append(profileJson(ZwoSource::inspect(api,c.id)));
             return write(args[2],{{"sdk",QString::fromStdString(api->version())},{"cameras",list}})?0:1;
         }
-        if (args.size()!=4 || args[1]!="bench")
-        { QTextStream(stderr)<<"Usage: SeleneWatchCameraProbe inspect OUTPUT.json | bench NEW_OUTPUT_DIRECTORY CONFIG.json\n"; return 2; }
+        if (args.size()!=4 || (args[1]!="bench" && args[1]!="soak"))
+        { QTextStream(stderr)<<"Usage: SeleneWatchCameraProbe inspect OUTPUT.json | bench/soak NEW_OUTPUT_DIRECTORY CONFIG.json\n"; return 2; }
+        const bool soak=args[1]=="soak";
         const QDir root(args[2]);
         if (root.exists() && !root.entryList(QDir::AllEntries|QDir::NoDotAndDotDot).empty())
             throw std::runtime_error("Choose an unused camera bench output directory");
         QFile configFile(args[3]); if (!configFile.open(QIODevice::ReadOnly)) return 1;
         const auto document=QJsonDocument::fromJson(configFile.readAll()); if (!document.isObject()) return 1;
         const auto config=document.object();
+        const double duration=number(config,"seconds",soak?3600:15,.05,3600);
+        const auto frameLimit=static_cast<uint64_t>(number(config,"frames",soak?1'000'000'000:100,1,1'000'000'000));
+        const double manualInterval=number(config,"manualIntervalSeconds",soak?120:0,0,3600);
+        const double sampleInterval=number(config,"sampleIntervalSeconds",10,.01,3600);
+        const auto outputLimit=static_cast<uint64_t>(number(config,"maximumOutputBytes",8.0*1024*1024*1024,1,1e12));
+        const auto minimumFree=static_cast<qint64>(number(config,"minimumFreeBytes",4.0*1024*1024*1024,0,1e12));
+        CaptureSettings capture;
+        capture.historySeconds=number(config,"historySeconds",capture.historySeconds,0,600);
+        capture.postSeconds=number(config,"postSeconds",capture.postSeconds,.001,3600);
+        capture.maxPostSeconds=number(config,"maxPostSeconds",capture.maxPostSeconds,capture.postSeconds,3600);
         const int readDelayMs=config.value("readDelayMs").toInt();
         if (readDelayMs<0 || readDelayMs>1000) throw std::invalid_argument("QA read delay must be 0 to 1000 ms");
         if (readDelayMs) api=std::make_shared<DelayedCamera>(api,readDelayMs);
-        if (config.value("frames").toInt(100)<=0 || !std::isfinite(config.value("seconds").toDouble(15))
-            || config.value("seconds").toDouble(15)<=0 || config.value("seconds").toDouble(15)>3600)
-            throw std::invalid_argument("Bench frame count/duration must be positive; duration at most one hour");
+        if (soak && manualInterval<=0) throw std::invalid_argument("Soak manual interval must be positive");
+        if (!QDir().mkpath(root.absolutePath())) throw std::runtime_error("Could not create camera probe output directory");
+        QFile progress(root.filePath("progress.jsonl"));
+        if (soak && !progress.open(QIODevice::WriteOnly|QIODevice::NewOnly)) throw std::runtime_error("Could not create soak progress log");
         auto profile=ZwoSource::inspect(api,config.value("id").toInt(0)); auto settings=profile.current;
         settings.width=config.value("width").toInt(profile.camera.width); settings.height=config.value("height").toInt(profile.camera.height);
         settings.bin=config.value("bin").toInt(1); settings.x=config.value("x").toInt(0); settings.y=config.value("y").toInt(0);
@@ -113,20 +166,30 @@ int main(int argc,char** argv)
         std::vector<double> detectorTimes;
         QJsonObject report; QString failure; uint64_t acquired=0; MemoryUsage memory; WriterUsage usage;
         double elapsed=0; int candidates=0; bool injectionRequested=false;
+        QString stopReason="duration";
+        double sampleUntil=0;
+        uint64_t peakWorkingSet=0, peakPrivate=0;
+        const auto started=std::chrono::steady_clock::now();
+        const auto seconds=[&] { return std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count(); };
         Session* active=nullptr; // Outlives queued preview callbacks drained after Session destruction.
         {
-            const auto started=std::chrono::steady_clock::now();
             Session::Notifications notices;
             notices.previewReady=[&] {
                 if (!active) return;
                 auto preview=active->takePreview();
-                if (preview.frame && samples.size()<20) samples.push_back({preview.frame->timestamp,hash(*preview.frame)});
+                const bool sample=soak?(seconds()<=sampleUntil && samples.size()<4096):samples.size()<20;
+                if (preview.frame && sample) samples.push_back({preview.frame->timestamp,hash(*preview.frame)});
                 if (preview.detection && preview.detection->summary.ready) detectorTimes.push_back(preview.detection->summary.processingMs);
             };
-            notices.clipWritten=[&](const auto& result){written.push_back(result);};
+            notices.clipWritten=[&](const auto& result){
+                written.push_back(result);
+                if (!result.notSaved.isEmpty() || result.recordFailed)
+                { failure="Evidence writer failed or refused a clip"; stopReason="writer-failed"; app.quit(); }
+            };
             notices.candidateStarted=[&]{++candidates;};
-            notices.failed=[&](const QString& error){failure=error;app.quit();};
+            notices.failed=[&](const QString& error){failure=error;stopReason="source-failed";app.quit();};
             Session session(&context,root.filePath("events"),std::move(notices)); active=&session;
+            session.setCaptureSettings(capture);
             session.setDetectionSettings({config.value("sigma").toDouble(1000),8,400,true});
             auto source=std::make_unique<ZwoSource>(api,profile,settings); auto* camera=source.get();
             session.setSource(std::move(source)); QString error;
@@ -135,15 +198,53 @@ int main(int argc,char** argv)
             settings=camera->actualProfile().current;
             QTimer tick; tick.setInterval(10);
             uint64_t lastManual=0;
+            double lastManualTime=-manualInterval, lastSample=-sampleInterval, lastResource=-1;
+            uint64_t outputBytes=0;
+            const auto snapshot=[&](const char* phase) {
+                const auto payload=session.memoryUsage(); const auto writer=session.writerUsage();
+                auto row=processUsage();
+                peakWorkingSet=std::max(peakWorkingSet,static_cast<uint64_t>(row.value("workingSetBytes").toDouble()));
+                peakPrivate=std::max(peakPrivate,static_cast<uint64_t>(row.value("privateBytes").toDouble()));
+                row["phase"]=phase; row["hostUtc"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+                row["elapsedSeconds"]=seconds(); row["acquiredFrames"]=static_cast<double>(session.acquiredFrames());
+                const auto drops=session.droppedFrames(); row["sdkDrops"]=drops?QJsonValue(static_cast<double>(*drops)):QJsonValue();
+                row["chargedBytes"]=static_cast<double>(payload.used); row["chargedPeakBytes"]=static_cast<double>(payload.peak);
+                row["memoryRefusals"]=static_cast<double>(payload.refused);
+                row["writerRetainedBytes"]=static_cast<double>(writer.retainedBytes);
+                row["writerOutstandingClips"]=static_cast<double>(writer.outstandingClips);
+                row["bufferedSerBytes"]=static_cast<double>(writer.writtenBytes);
+                row["outputBytes"]=static_cast<double>(outputBytes); row["newCandidates"]=candidates;
+                const auto bytes=QJsonDocument(row).toJson(QJsonDocument::Compact)+'\n';
+                if (progress.write(bytes)!=bytes.size() || !progress.flush())
+                { failure="Could not flush soak progress log"; stopReason="progress-failed"; app.quit(); }
+            };
             QObject::connect(&tick,&QTimer::timeout,&context,[&] {
                 const auto n=session.acquiredFrames();
-                if (n>=3 && (lastManual==0 || n-lastManual>=10) && session.requestManualSave()) lastManual=n;
+                elapsed=seconds();
+                if (soak && elapsed-lastResource>=1)
+                {
+                    lastResource=elapsed; outputBytes=directoryBytes(root);
+                    QStorageInfo storage(root.absolutePath()); storage.refresh();
+                    if (outputBytes>=outputLimit)
+                    { failure="Soak output budget reached"; stopReason="output-limit"; app.quit(); return; }
+                    if (!storage.isValid() || storage.bytesAvailable()<minimumFree)
+                    { failure="Soak free-space reserve reached or unavailable"; stopReason="disk-space"; app.quit(); return; }
+                }
+                if (n>=3 && (manualInterval>0 ? elapsed-lastManualTime>=manualInterval : lastManual==0 || n-lastManual>=10)
+                    && session.requestManualSave())
+                {
+                    lastManual=n; lastManualTime=elapsed;
+                    sampleUntil=elapsed+std::min(1.0,capture.postSeconds/2);
+                }
                 if (config.value("inject").toBool() && !injectionRequested && n>=10)
                     injectionRequested=session.requestBlip({settings.width/2,settings.height/2,4,config.value("amplitude").toDouble(8192),1});
-                elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
-                if (n>=static_cast<uint64_t>(config.value("frames").toInt(100)) || elapsed>=config.value("seconds").toDouble(15)) app.quit();
+                if (soak && elapsed-lastSample>=sampleInterval) { lastSample=elapsed; snapshot("streaming"); }
+                if (n>=frameLimit || elapsed>=duration)
+                { stopReason=n>=frameLimit?"frame-limit":"duration"; app.quit(); }
             });
-            tick.start(); app.exec(); tick.stop(); session.stop("camera bench ended");
+            if (soak) snapshot("starting");
+            tick.start(); if (failure.isEmpty()) app.exec(); tick.stop();
+            session.stop((soak?"camera soak ended: ":"camera bench ended: ")+stopReason.toStdString());
             acquired=session.acquiredFrames(); memory=session.memoryUsage(); usage=session.writerUsage();
             report["sdkDrops"]=session.droppedFrames()?QJsonValue(static_cast<double>(*session.droppedFrames())):QJsonValue();
             const auto drainStarted=std::chrono::steady_clock::now();
@@ -152,7 +253,10 @@ int main(int argc,char** argv)
                 QCoreApplication::processEvents(); std::this_thread::sleep_for(std::chrono::milliseconds{10});
                 if (std::chrono::steady_clock::now()-drainStarted>std::chrono::seconds{60}) break;
             }
-            usage=session.writerUsage(); active=nullptr;
+            usage=session.writerUsage();
+            if (usage.outstandingClips>0) { failure="Evidence writer did not drain within 60 seconds"; stopReason="writer-drain-timeout"; }
+            if (soak) { outputBytes=directoryBytes(root); snapshot("stopped"); }
+            active=nullptr;
         }
         QCoreApplication::processEvents();
         uint32_t wordOr=0; uint32_t minimum=65535,maximum=0; uint64_t savedFrames=0; int injectionFrames=0;
@@ -203,14 +307,27 @@ int main(int argc,char** argv)
             }
         }
         const int matched=static_cast<int>(std::count_if(samples.begin(),samples.end(),[](const auto& s){return s.matched;}));
+        if ((samples.empty() || matched!=static_cast<int>(samples.size())) && failure.isEmpty())
+        { failure="Missing native-byte verification samples in saved evidence"; stopReason="verification-failed"; }
         report["purpose"]="Connected-camera bench validation; no astronomical event claim"; report["config"]=config;
+        report["mode"]=soak?"soak":"bench"; report["stopReason"]=stopReason;
+        if (soak)
+        {
+            report["sampledPeakWorkingSetBytes"]=peakWorkingSet?QJsonValue(static_cast<double>(peakWorkingSet)):QJsonValue();
+            report["sampledPeakPrivateBytes"]=peakPrivate?QJsonValue(static_cast<double>(peakPrivate)):QJsonValue();
+            report["finalOutputBytes"]=static_cast<double>(directoryBytes(root));
+            report["maximumOutputBytes"]=static_cast<double>(outputLimit);
+            report["outputLimitPolicy"]="checked once per second; pending and final partial clips finish, so the final size can exceed this stop threshold";
+            report["manualIntervalSeconds"]=manualInterval;
+        }
         report["acquiredFrames"]=static_cast<double>(acquired); report["elapsedSeconds"]=elapsed;
         report["savedSampleBits"]=settings.format==PixelFormat::Mono16?16:8;
         report["savedAlignment"]="low"; report["recordedGapLinesIncludingOverlap"]=static_cast<double>(recordedGaps);
         report["deliveredFps"]=elapsed>0?acquired/elapsed:0; report["savedFramesIncludingOverlap"]=static_cast<double>(savedFrames);
         const double sourceSpan=times.size()>1?std::chrono::duration<double>(*times.rbegin()-*times.begin()).count():0;
         report["uniqueSavedTimestamps"]=static_cast<double>(times.size()); report["sourceSpanSeconds"]=sourceSpan;
-        report["arrivalFpsFromSavedTimes"]=sourceSpan>0?(times.size()-1)/sourceSpan:0;
+        report["arrivalFpsFromSavedTimes"]=soak?QJsonValue():QJsonValue(sourceSpan>0?(times.size()-1)/sourceSpan:0);
+        if (soak) report["frameRatePolicy"]="acquiredFrames / elapsedSeconds includes startup; saved clips are periodic and do not measure full-run fps";
         report["previewHashes"]=static_cast<int>(samples.size()); report["matchedPreviewHashes"]=matched;
         report["nativeWordOr"]=static_cast<double>(wordOr); report["nativeWordMin"]=static_cast<double>(minimum); report["nativeWordMax"]=static_cast<double>(maximum);
         report["memoryPeakBytes"]=static_cast<double>(memory.peak); report["memoryRefusals"]=static_cast<double>(memory.refused);
