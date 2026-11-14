@@ -41,6 +41,15 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ---
 
+## QHY SDK development evaluation (not approved for distribution)
+
+- **Installed version:** Windows x64 25.6.16.15, confirmed from the file/header and a runtime version-only query.
+- **Vendor sources reviewed:** [SDK documentation and demos](https://www.qhyccd.com/sdk-demo-and-sample-project/), [downloads](https://www.qhyccd.com/download/). A [historical SDK repository](https://github.com/qhyccd-lzr/QHYCCD_Linux) was also checked for context, without establishing this Windows package's terms.
+- **Terms:** No SDK-wide grant accompanies the installed folder; a Windows redistribution grant remains unverified. Its compatibility header's copyright/license reference does not grant QHY DLL rights. Use/redistribution permission, exact file scope and required notices need vendor clarification before a distributable integration is merged.
+- **Draft integration:** Explicitly configured development-machine binding only, on `feature-10-qhy-development`. SDK files remain outside the repository and are not copied into the build output. The installed DLL is loaded by absolute path only when used. No import library or SDK runtime is shipped with SeleneWatch. Do not package the QHY-enabled development build while terms remain unresolved.
+- **Dependency inventory:** The inspected `qhyccd.dll` imports Windows components only. The SDK also contains FTDI/TBB/legacy Microsoft/USB DLLs, which are not copied or redistributed by this draft; any later required component needs its own terms recorded. SeleneWatch's original wrapper/source/UI/test code remains BSD-2-Clause. No vendor/demo implementation is incorporated.
+- **Evidence and remaining checks:** [QHY development review](docs/qhy-development.md). Physical camera qualification is pending.
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

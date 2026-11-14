@@ -27,7 +27,7 @@ add_library(selenewatch_core STATIC
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
     sources/fine_sleep.cpp sources/synthetic_scene.cpp
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
-    cameras/zwo_source.cpp cameras/zwo_sdk.cpp
+    cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp
 )
@@ -61,8 +61,25 @@ if(SELENEWATCH_ZWO_SDK_DIR)
     add_dependencies(selenewatch_core selenewatch_zwo_runtime)
 endif()
 
+set(SELENEWATCH_QHY_SDK_DIR "" CACHE PATH "Development-only QHY SDK root; redistribution terms remain unverified")
+if(SELENEWATCH_QHY_SDK_DIR)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "The QHY development binding requires Windows x64")
+    endif()
+    foreach(part include/qhyccd.h x64/qhyccd.dll)
+        if(NOT EXISTS "${SELENEWATCH_QHY_SDK_DIR}/${part}")
+            message(FATAL_ERROR "QHY SDK component missing: ${SELENEWATCH_QHY_SDK_DIR}/${part}")
+        endif()
+    endforeach()
+    target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_WITH_QHY=1
+        SELENEWATCH_QHY_HEADER="${SELENEWATCH_QHY_SDK_DIR}/include/qhyccd.h"
+        SELENEWATCH_QHY_DLL="${SELENEWATCH_QHY_SDK_DIR}/x64/qhyccd.dll")
+    message(STATUS "QHY development binding uses the installed DLL in place. SDK files are not copied or packaged; license review is pending.")
+endif()
+
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
-    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp)
+    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
+    camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
 selenewatch_compile_options(selenewatch_ui)
@@ -131,12 +148,17 @@ target_link_libraries(SeleneWatchZwoTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchZwoTests)
 add_test(NAME zwo COMMAND SeleneWatchZwoTests -o -,tap)
 
+add_executable(SeleneWatchQhyTests tests/qhy_tests.cpp)
+target_link_libraries(SeleneWatchQhyTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchQhyTests)
+add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
+
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 
-add_library(selenewatch_camera_probe STATIC tools/camera_probe.cpp)
+add_library(selenewatch_camera_probe STATIC tools/camera_probe.cpp tools/qhy_probe.cpp)
 target_link_libraries(selenewatch_camera_probe PUBLIC selenewatch_core)
 if(WIN32)
     target_link_libraries(selenewatch_camera_probe PRIVATE psapi)
@@ -145,6 +167,9 @@ selenewatch_compile_options(selenewatch_camera_probe)
 add_executable(SeleneWatchCameraProbe tools/camera_probe_main.cpp)
 target_link_libraries(SeleneWatchCameraProbe PRIVATE selenewatch_camera_probe)
 selenewatch_compile_options(SeleneWatchCameraProbe)
+add_executable(SeleneWatchQhyProbe tools/qhy_probe_main.cpp)
+target_link_libraries(SeleneWatchQhyProbe PRIVATE selenewatch_camera_probe)
+selenewatch_compile_options(SeleneWatchQhyProbe)
 
 add_executable(SeleneWatchCameraProbeTests tests/camera_probe_tests.cpp)
 target_link_libraries(SeleneWatchCameraProbeTests PRIVATE selenewatch_camera_probe Qt6::Test)

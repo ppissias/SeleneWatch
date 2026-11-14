@@ -2,6 +2,8 @@
 #include "display_panel.h"
 #include "camera_panel.h"
 #include "tests/fake_zwo_api.h"
+#include "tests/fake_qhy_api.h"
+#include "qhy_camera_panel.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "recording/ser_reader.h"
@@ -44,7 +46,63 @@ private slots:
     void stretchARecordingWhileCapturingThenRestoreSettings();
     void saveARecordingManuallyThroughTheWindow();
     void cameraReadbacksRestartAndDisconnectKeepSeparateEvidence();
+    void qhyReadbacksBayerEvidenceAndUnknownDrops();
 };
+
+void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
+{
+    QTemporaryDir dir;auto api=std::make_shared<FakeQhyApi>();
+    for (auto& c:api->state.controls) if (c.kind==QhyControl::Gain) { c.minimum=.25;c.step=.5;c.value=12.25; }
+    MainWindow window(nullptr,dir.path(),{},api);window.show();
+    QCOMPARE(api->opened.load(),0);
+    auto* source=window.findChild<QComboBox*>("sourceComboBox");
+    const int qhyIndex=source->findData("qhy");QVERIFY(qhyIndex>=2);source->setCurrentIndex(qhyIndex);
+    auto* panel=window.findChild<QhyCameraPanel*>();QVERIFY(panel);QVERIFY(panel->hasCamera());
+    QVERIFY(!window.findChild<QSpinBox*>("targetFpsSpinBox")->isEnabled());
+    QCOMPARE(panel->findChild<QComboBox*>("cameraBin")->count(),1);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),12.25);
+    auto* start=window.findChild<QPushButton*>("startButton");
+    auto* stop=window.findChild<QPushButton*>("stopButton");
+    auto* save=window.findChild<QPushButton*>("saveNowButton");
+    start->click();QTRY_VERIFY_WITH_TIMEOUT(api->delivered>=3,3000);save->click();
+    QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(13.37);
+    auto* format=panel->findChild<QComboBox*>("cameraFormat");
+    format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono16)));
+    panel->findChild<QSpinBox*>("cameraWidth")->setValue(64);panel->findChild<QSpinBox*>("cameraHeight")->setValue(32);
+    panel->findChild<QSpinBox*>("cameraX")->setValue(1);panel->findChild<QSpinBox*>("cameraY")->setValue(1);
+    panel->findChild<QPushButton*>("applyQhyCamera")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(api->starts>=2,3000);
+    QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),13.25);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: unknown"),3000);
+    save->click();QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    window.findChild<QDockWidget*>("qhyCameraDock")->raise();
+    window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
+    QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
+    QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/qhy-window.png"));
+    api->connected=false;QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(),3000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        int complete=0;
+        for(const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+            complete+=text(dir.path()+"/"+folder+"/event.txt").contains("complete: yes");
+        return complete>=2;
+    })(),5000);
+    int before=0,after=0;
+    for(const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    {
+        const auto note=text(dir.path()+"/"+folder+"/event.txt");
+        if(note.contains("pixel_format: Mono8")) { QVERIFY(note.contains("gain: 12.25\n"));QVERIFY(note.contains("camera settings changed"));++before; }
+        if(note.contains("pixel_format: Mono16"))
+        {
+            QVERIFY(note.contains("gain: 13.25\n"));QVERIFY(note.contains("source failure: TEST QHY disconnected"));
+            QVERIFY(note.contains("bayer_pattern: BGGR\n"));++after;
+        }
+        QVERIFY(note.contains("sdk_dropped_frames=unknown"));QVERIFY(!note.contains("sdk_dropped_frames=0"));
+        QVERIFY(note.contains("kind=manual"));QVERIFY(note.contains("camera_serial: unknown"));
+    }
+    QCOMPARE(before,1);QCOMPARE(after,1);QCOMPARE(api->opened.load(),api->closed.load());
+}
 
 void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
 {

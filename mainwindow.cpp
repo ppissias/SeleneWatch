@@ -3,6 +3,7 @@
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "camera_panel.h"
+#include "qhy_camera_panel.h"
 
 #include "preview_image.h"
 #include "sources/recording_source.h"
@@ -34,11 +35,13 @@ constexpr int kSyntheticHeight = 480;
 
 } // namespace
 
-MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoApi> cameraApi)
+MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoApi> cameraApi,std::shared_ptr<QhyApi> qhyApi)
     : QMainWindow(parent)
     , ui_(std::make_unique<Ui::MainWindowClass>())
 {
     ui_->setupUi(this);
+    ui_->sourceComboBox->setItemData(0,"synthetic");
+    ui_->sourceComboBox->setItemData(1,"recording");
 
     // Clips are written next to the executable.
     if (outputRoot.isEmpty()) outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
@@ -62,12 +65,22 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
     if (cameraApi_)
     {
-        ui_->sourceComboBox->addItem("ZWO ASI camera");
+        ui_->sourceComboBox->addItem("ZWO ASI camera","zwo");
         cameraPanel_=new CameraPanel(cameraApi_,this);
         cameraDock_=new QDockWidget("Camera",this); cameraDock_->setObjectName("cameraDock");
         cameraDock_->setWidget(cameraPanel_); addDockWidget(Qt::RightDockWidgetArea,cameraDock_);
         tabifyDockWidget(displayDock_,cameraDock_); displayDock_->raise();
         connect(cameraPanel_,&CameraPanel::applyRequested,this,&MainWindow::onApplyCamera);
+    }
+    qhyApi_=qhyApi?std::move(qhyApi):makeQhyApi();
+    if (qhyApi_)
+    {
+        ui_->sourceComboBox->addItem("QHY camera","qhy");
+        qhyPanel_=new QhyCameraPanel(qhyApi_,this);
+        qhyDock_=new QDockWidget("QHY camera",this);qhyDock_->setObjectName("qhyCameraDock");
+        qhyDock_->setWidget(qhyPanel_);addDockWidget(Qt::RightDockWidgetArea,qhyDock_);
+        tabifyDockWidget(displayDock_,qhyDock_);displayDock_->raise();
+        connect(qhyPanel_,&QhyCameraPanel::applyRequested,this,&MainWindow::onApplyCamera);
     }
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
@@ -241,9 +254,11 @@ void MainWindow::setupStatusBar()
 
 bool MainWindow::recordingSelected() const
 {
-    return ui_->sourceComboBox->currentIndex() == 1;
+    return ui_->sourceComboBox->currentData().toString()=="recording";
 }
-bool MainWindow::cameraSelected() const { return ui_->sourceComboBox->currentIndex()==2 && cameraPanel_; }
+bool MainWindow::cameraSelected() const { return ui_->sourceComboBox->currentData().toString()=="zwo" && cameraPanel_; }
+bool MainWindow::qhySelected() const { return ui_->sourceComboBox->currentData().toString()=="qhy" && qhyPanel_; }
+bool MainWindow::anyCameraSelected() const { return cameraSelected() || qhySelected(); }
 
 // Which controls can be used depends on the source and on whether it runs.
 void MainWindow::updateControls()
@@ -263,12 +278,16 @@ void MainWindow::updateControls()
 
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);
-    ui_->targetFpsSpinBox->setEnabled(!cameraSelected());
-    if (displayPanel_) displayPanel_->setRunning(running, recording || cameraSelected());
+    ui_->targetFpsSpinBox->setEnabled(!anyCameraSelected());
+    if (displayPanel_) displayPanel_->setRunning(running, recording || anyCameraSelected());
     if (cameraPanel_)
     {
         cameraDock_->setEnabled(cameraSelected());
         cameraPanel_->setRunning(running && cameraSelected());
+    }
+    if (qhyPanel_)
+    {
+        qhyDock_->setEnabled(qhySelected());qhyPanel_->setRunning(running && qhySelected());
     }
 }
 
@@ -308,7 +327,7 @@ void MainWindow::updateStreamReadout()
     lastAcquiredSample_ = acquired;
     lastFpsSampleTime_ = now;
     framesLabel_->setText(QString("Frames: %1").arg(acquired));
-    if (camera_)
+    if (camera_ || qhyCamera_)
     {
         const auto drops=session_->droppedFrames();
         framesLabel_->setText(framesLabel_->text()+QString(" | SDK drops: %1").arg(drops?QString::number(*drops):"unknown"));
@@ -358,7 +377,7 @@ void MainWindow::updateFrameLabel(const Frame& frame)
     QString text = QString("%1 x %2 %3").arg(frame.width).arg(frame.height).arg(pixelFormatName(frame.format));
     if (frame.format == PixelFormat::Mono16)
     {
-        if (camera_) text += ", delivered 16-bit words";
+        if (camera_ || qhyCamera_) text += ", delivered 16-bit words";
         else text += QString(", %1 bits %2").arg(frame.significantBits)
             .arg(frame.alignment == BitAlignment::High ? "high" : "low");
     }
@@ -402,7 +421,15 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     synthetic_ = nullptr;
     recording_ = nullptr;
     camera_ = nullptr;
+    qhyCamera_ = nullptr;
     const int fps = ui_->targetFpsSpinBox->value();
+
+    if (qhySelected())
+    {
+        if (!qhyPanel_->hasCamera()) { statusBar()->showMessage("Connect a QHY camera and refresh its list");return {}; }
+        auto source=std::make_unique<QhySource>(qhyApi_,qhyPanel_->profile(),qhyPanel_->settings());
+        qhyCamera_=source.get();return source;
+    }
 
     if (cameraSelected())
     {
@@ -458,6 +485,7 @@ void MainWindow::onStartClicked()
         synthetic_ = nullptr;
         recording_ = nullptr;
         camera_ = nullptr;
+        qhyCamera_ = nullptr;
         statusBar()->showMessage(QString("Cannot start: %1").arg(error));
         updateControls();
         updateStatusLabel();
@@ -466,6 +494,7 @@ void MainWindow::onStartClicked()
 
     sourceFailed_ = false;
     if (camera_) cameraPanel_->showActual(camera_->actualProfile());
+    if (qhyCamera_) qhyPanel_->showActual(qhyCamera_->actualProfile());
     recordFailed_ = false;
     playbackEnded_ = false;
     candidates_ = 0;
@@ -537,24 +566,38 @@ void MainWindow::onSourceKindChanged()
         cameraPanel_->refresh();
         ui_->fileLabel->setText("ASI camera selected");
     }
+    if (qhySelected() && !session_->isRunning())
+    {
+        qhyDock_->raise();qhyPanel_->refresh();ui_->fileLabel->setText("QHY camera selected");
+    }
     updateControls();
 }
 
 void MainWindow::onApplyCamera()
 {
-    if (!cameraSelected() || !cameraPanel_->hasCamera()) return;
-    try { ZwoSource::validateSettings(cameraPanel_->profile().camera,cameraPanel_->settings()); }
+    if ((!cameraSelected() || !cameraPanel_->hasCamera()) && (!qhySelected() || !qhyPanel_->hasCamera())) return;
+    try
+    {
+        if (qhySelected()) QhySource::validateSettings(qhyPanel_->profile().camera,qhyPanel_->settings());
+        else ZwoSource::validateSettings(cameraPanel_->profile().camera,cameraPanel_->settings());
+    }
     catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); return; }
     if (session_->isRunning())
     {
         bufferReadoutTimer_->stop(); session_->stop("camera settings changed");
         onStartClicked();
     }
-    else
+    else if (cameraSelected())
     {
         ZwoSource source(cameraApi_,cameraPanel_->profile(),cameraPanel_->settings());
         std::string error;
         if (source.open(error)) { cameraPanel_->showActual(source.actualProfile()); statusBar()->showMessage("Camera settings read back; ready to Start",5000); }
+        else statusBar()->showMessage(QString::fromStdString(error));
+    }
+    else
+    {
+        QhySource source(qhyApi_,qhyPanel_->profile(),qhyPanel_->settings());std::string error;
+        if (source.open(error)) { qhyPanel_->showActual(source.actualProfile());statusBar()->showMessage("QHY settings read back; ready to Start",5000); }
         else statusBar()->showMessage(QString::fromStdString(error));
     }
     updateControls();

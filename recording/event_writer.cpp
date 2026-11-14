@@ -116,6 +116,8 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
     out << "gain: " << orUnknown(clip.stream.gain) << "\n";
     out << "camera_serial: " << orUnknown(clip.stream.serial) << "\n";
     out << "camera_sdk_version: " << orUnknown(clip.stream.sdkVersion) << "\n";
+    out << "camera_device_id: " << orUnknown(clip.stream.deviceId) << "\n";
+    out << "transfer_speed: " << orUnknown(clip.stream.transferSpeed) << "\n";
     out << "offset: " << orUnknown(clip.stream.offset) << "\n";
     out << "binning: " << orUnknown(clip.stream.binning) << "\n";
     out << "roi: " << orUnknown(clip.stream.roi) << "\n";
@@ -691,6 +693,8 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
     line += QString(" camera=\"%1\"").arg(orUnknown(start.stream.camera));
     if (!start.stream.sdkVersion.empty())
     {
+        line+=QString(" device_id=\"%1\" transfer_speed=\"%2\" sensor_adc_bits=\"%3\"")
+            .arg(orUnknown(start.stream.deviceId),orUnknown(start.stream.transferSpeed),orUnknown(start.stream.sensorBits));
         line += QString(" sdk=\"%1\" serial=\"%2\" exposure=\"%3\" gain=\"%4\" offset=\"%5\" binning=\"%6\" roi=\"%7\" sample_layout=\"%8\" usb_bandwidth=\"%9\" high_speed=\"%10\" frame_time=\"%11\" frame_index=\"%12\"")
             .arg(orUnknown(start.stream.sdkVersion),orUnknown(start.stream.serial),orUnknown(start.stream.exposure),orUnknown(start.stream.gain),orUnknown(start.stream.offset),
                 orUnknown(start.stream.binning),orUnknown(start.stream.roi),orUnknown(start.stream.sampleLayout),orUnknown(start.stream.usbBandwidth),orUnknown(start.stream.highSpeed),

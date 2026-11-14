@@ -3,6 +3,7 @@
 #endif
 #include "tools/camera_probe.h"
 #include "cameras/zwo_source.h"
+#include "cameras/raw_camera_layout.h"
 #include "session.h"
 #include "recording/ser_reader.h"
 
@@ -113,18 +114,13 @@ QJsonObject profileJson(const ZwoProfile& p)
         {"rawBits",p.current.format==PixelFormat::Mono16?16:8},{"controls",controls}};
 }
 }
-int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_ptr<ZwoApi> api)
+int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
+    const std::function<CameraProbeInput(const QJsonObject&)>& makeInput)
 {
     try
     {
-        if (!api) throw std::runtime_error("This build has no ZWO SDK; configure SELENEWATCH_ZWO_SDK_DIR");
-        if (args.size()==3 && args[1]=="inspect")
-        {
-            QJsonArray list; for (const auto& c:api->cameras()) list.append(profileJson(ZwoSource::inspect(api,c.id)));
-            return write(args[2],{{"sdk",QString::fromStdString(api->version())},{"cameras",list}})?0:1;
-        }
         if (args.size()!=4 || (args[1]!="bench" && args[1]!="soak"))
-        { QTextStream(stderr)<<"Usage: SeleneWatchCameraProbe inspect OUTPUT.json | bench/soak NEW_OUTPUT_DIRECTORY CONFIG.json\n"; return 2; }
+        { QTextStream(stderr)<<"Usage: "<<args.value(0)<<" bench/soak NEW_OUTPUT_DIRECTORY CONFIG.json\n"; return 2; }
         const bool soak=args[1]=="soak";
         const QDir root(args[2]);
         if (root.exists() && !root.entryList(QDir::AllEntries|QDir::NoDotAndDotDot).empty())
@@ -132,6 +128,15 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
         QFile configFile(args[3]); if (!configFile.open(QIODevice::ReadOnly)) return 1;
         const auto document=QJsonDocument::fromJson(configFile.readAll()); if (!document.isObject()) return 1;
         const auto config=document.object();
+        for (const auto* key:{"raw16","inject"})
+            if (config.contains(key) && !config.value(key).isBool()) throw std::invalid_argument(std::string("Expected a boolean setting: ")+key);
+        for (const auto* key:{"width","height","x","y","bin","frames","readDelayMs"})
+        {
+            if (!config.contains(key)) continue;
+            const auto value=number(config,key,0,0,1'000'000'000);
+            if (value!=std::floor(value)) throw std::invalid_argument(std::string("Expected an integer setting: ")+key);
+        }
+        const double sigma=number(config,"sigma",1000,.001,1'000'000);
         const double duration=number(config,"seconds",soak?3600:15,.05,3600);
         const auto frameLimit=static_cast<uint64_t>(number(config,"frames",soak?1'000'000'000:100,1,1'000'000'000));
         const double manualInterval=number(config,"manualIntervalSeconds",soak?120:0,0,3600);
@@ -144,22 +149,12 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
         capture.maxPostSeconds=number(config,"maxPostSeconds",capture.maxPostSeconds,capture.postSeconds,3600);
         const int readDelayMs=config.value("readDelayMs").toInt();
         if (readDelayMs<0 || readDelayMs>1000) throw std::invalid_argument("QA read delay must be 0 to 1000 ms");
-        if (readDelayMs) api=std::make_shared<DelayedCamera>(api,readDelayMs);
         if (soak && manualInterval<=0) throw std::invalid_argument("Soak manual interval must be positive");
         if (!QDir().mkpath(root.absolutePath())) throw std::runtime_error("Could not create camera probe output directory");
         QFile progress(root.filePath("progress.jsonl"));
         if (soak && !progress.open(QIODevice::WriteOnly|QIODevice::NewOnly)) throw std::runtime_error("Could not create soak progress log");
-        auto profile=ZwoSource::inspect(api,config.value("id").toInt(0)); auto settings=profile.current;
-        settings.width=config.value("width").toInt(profile.camera.width); settings.height=config.value("height").toInt(profile.camera.height);
-        settings.bin=config.value("bin").toInt(1); settings.x=config.value("x").toInt(0); settings.y=config.value("y").toInt(0);
-        settings.format=config.value("raw16").toBool()?PixelFormat::Mono16:PixelFormat::Mono8;
-        const auto control=[&](const char* key,ZwoControl kind) {
-            if (!config.contains(key)) return;
-            const double value=config.value(key).toDouble();
-            if (!std::isfinite(value) || value<std::numeric_limits<long>::min() || value>std::numeric_limits<long>::max()) throw std::invalid_argument("Bench control exceeds the SDK integer range");
-            settings.controls[kind]=static_cast<int64_t>(value);
-        };
-        control("exposureUs",ZwoControl::Exposure); control("gain",ZwoControl::Gain); control("offset",ZwoControl::Offset); control("bandwidth",ZwoControl::Bandwidth);
+        auto input=makeInput(config);
+        CameraProbeReadback layout;
         QObject context; std::vector<ClipWriteResult> written;
         struct Sample { std::chrono::system_clock::time_point time; QByteArray hash; bool matched{false}; };
         std::vector<Sample> samples;
@@ -187,15 +182,18 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
                 { failure="Evidence writer failed or refused a clip"; stopReason="writer-failed"; app.quit(); }
             };
             notices.candidateStarted=[&]{++candidates;};
+            notices.manualSaveHandled=[&](bool saved) {
+                if (soak && saved) sampleUntil=seconds()+std::min(1.0,capture.postSeconds/2);
+            };
             notices.failed=[&](const QString& error){failure=error;stopReason="source-failed";app.quit();};
             Session session(&context,root.filePath("events"),std::move(notices)); active=&session;
             session.setCaptureSettings(capture);
-            session.setDetectionSettings({config.value("sigma").toDouble(1000),8,400,true});
-            auto source=std::make_unique<ZwoSource>(api,profile,settings); auto* camera=source.get();
-            session.setSource(std::move(source)); QString error;
+            session.setDetectionSettings({sigma,8,400,true});
+            session.setSource(std::move(input.source)); QString error;
             if (!session.start(error)) throw std::runtime_error(error.toStdString());
-            report=profileJson(camera->actualProfile());
-            settings=camera->actualProfile().current;
+            layout=input.readback();report=layout.metadata;
+            if (layout.width<=0 || layout.height<=0 || (layout.format!=PixelFormat::Mono8 && layout.format!=PixelFormat::Mono16))
+                throw std::runtime_error("Camera probe received an invalid raw readback layout");
             QTimer tick; tick.setInterval(10);
             uint64_t lastManual=0;
             double lastManualTime=-manualInterval, lastSample=-sampleInterval, lastResource=-1;
@@ -236,10 +234,9 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
                     && session.requestManualSave())
                 {
                     lastManual=n; lastManualTime=elapsed;
-                    sampleUntil=elapsed+std::min(1.0,capture.postSeconds/2);
                 }
                 if (config.value("inject").toBool() && !injectionRequested && n>=10)
-                    injectionRequested=session.requestBlip({settings.width/2,settings.height/2,4,config.value("amplitude").toDouble(8192),1});
+                    injectionRequested=session.requestBlip({layout.width/2,layout.height/2,4,config.value("amplitude").toDouble(8192),1});
                 if (soak && elapsed-lastSample>=sampleInterval) { lastSample=elapsed; snapshot("streaming"); }
                 if (n>=frameLimit || elapsed>=duration)
                 { stopReason=n>=frameLimit?"frame-limit":"duration"; app.quit(); }
@@ -288,13 +285,15 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
             for (int i=0;i<reader.frameCount();++i)
             {
                 if (!reader.readFrame(i,f,error)) throw std::runtime_error(error);
-                if (f.significantBits!=(settings.format==PixelFormat::Mono16?16:8) || f.alignment!=BitAlignment::Low)
+                if (f.width!=layout.width || f.height!=layout.height || f.format!=layout.format || f.bayer!=layout.bayer)
+                    throw std::runtime_error("Saved camera geometry, format or Bayer pattern changed on replay");
+                if (f.significantBits!=(layout.format==PixelFormat::Mono16?16:8) || f.alignment!=BitAlignment::Low)
                     throw std::runtime_error("Saved camera sample interpretation changed on replay");
                 times.insert(reader.frameTime(i));
                 if (injected.contains(i)) for (const auto& c:triggers)
                 {
                     if (c.index!=indices[i] || c.x>=f.width || c.y>=f.height) continue;
-                    const double dx=(c.x-settings.width/2)/4.0,dy=(c.y-settings.height/2)/4.0;
+                    const double dx=(c.x-layout.width/2)/4.0,dy=(c.y-layout.height/2)/4.0;
                     const double addition=config.value("amplitude").toDouble(8192)*std::exp(-4*std::log(2.0)*(dx*dx+dy*dy));
                     const size_t p=static_cast<size_t>(c.y)*f.width+c.x;
                     const int value=f.format==PixelFormat::Mono16?(f.data[2*p]|(f.data[2*p+1]<<8)):f.data[p];
@@ -311,7 +310,7 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
         const int matched=static_cast<int>(std::count_if(samples.begin(),samples.end(),[](const auto& s){return s.matched;}));
         if ((samples.empty() || matched!=static_cast<int>(samples.size())) && failure.isEmpty())
         { failure="Missing native-byte verification samples in saved evidence"; stopReason="verification-failed"; }
-        report["purpose"]="Connected-camera bench validation; no astronomical event claim"; report["config"]=config;
+        report["purpose"]="Camera pipeline validation; source and TEST marks identify provenance; no astronomical event claim"; report["config"]=config;
         report["mode"]=soak?"soak":"bench"; report["stopReason"]=stopReason;
         if (soak)
         {
@@ -323,7 +322,7 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
             report["manualIntervalSeconds"]=manualInterval;
         }
         report["acquiredFrames"]=static_cast<double>(acquired); report["elapsedSeconds"]=elapsed;
-        report["savedSampleBits"]=settings.format==PixelFormat::Mono16?16:8;
+        report["savedSampleBits"]=layout.format==PixelFormat::Mono16?16:8;
         report["savedAlignment"]="low"; report["recordedGapLinesIncludingOverlap"]=static_cast<double>(recordedGaps);
         report["deliveredFps"]=elapsed>0?acquired/elapsed:0; report["savedFramesIncludingOverlap"]=static_cast<double>(savedFrames);
         const double sourceSpan=times.size()>1?std::chrono::duration<double>(*times.rbegin()-*times.begin()).count():0;
@@ -350,4 +349,38 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
             && std::all_of(written.begin(),written.end(),[](const auto& r){return r.notSaved.isEmpty() && !r.recordFailed;})?0:1;
     }
     catch (const std::exception& ex) { QTextStream(stderr)<<ex.what()<<'\n'; return 1; }
+}
+
+int runCameraProbe(QCoreApplication& app,const QStringList& args,std::shared_ptr<ZwoApi> api)
+{
+    try
+    {
+        if (!api) throw std::runtime_error("This build has no ZWO SDK; configure SELENEWATCH_ZWO_SDK_DIR");
+        if (args.size()==3 && args[1]=="inspect")
+        {
+            QJsonArray list;for (const auto& c:api->cameras()) list.append(profileJson(ZwoSource::inspect(api,c.id)));
+            return write(args[2],{{"sdk",QString::fromStdString(api->version())},{"cameras",list}})?0:1;
+        }
+        return runCameraProbeCommand(app,args,[api](const QJsonObject& config) {
+            std::shared_ptr<ZwoApi> cameraApi=api;
+            const int delay=config.value("readDelayMs").toInt();
+            if (delay) cameraApi=std::make_shared<DelayedCamera>(cameraApi,delay);
+            auto profile=ZwoSource::inspect(cameraApi,config.value("id").toInt(0));auto settings=profile.current;
+            settings.width=config.value("width").toInt(profile.camera.width);settings.height=config.value("height").toInt(profile.camera.height);
+            settings.bin=config.value("bin").toInt(1);settings.x=config.value("x").toInt(0);settings.y=config.value("y").toInt(0);
+            settings.format=config.value("raw16").toBool()?PixelFormat::Mono16:PixelFormat::Mono8;
+            const auto control=[&](const char* key,ZwoControl kind) {
+                if (!config.contains(key)) return;
+                const double value=number(config,key,0,std::numeric_limits<long>::min(),std::numeric_limits<long>::max());
+                settings.controls[kind]=static_cast<int64_t>(value);
+            };
+            control("exposureUs",ZwoControl::Exposure);control("gain",ZwoControl::Gain);control("offset",ZwoControl::Offset);control("bandwidth",ZwoControl::Bandwidth);
+            auto source=std::make_unique<ZwoSource>(cameraApi,profile,settings);auto* camera=source.get();
+            return CameraProbeInput{std::move(source),[camera] {
+                const auto& p=camera->actualProfile();return CameraProbeReadback{profileJson(p),p.current.width,p.current.height,p.current.format,
+                    roiBayerPattern(p.camera.bayer,p.current.x,p.current.y)};
+            }};
+        });
+    }
+    catch (const std::exception& ex) { QTextStream(stderr)<<ex.what()<<'\n';return 1; }
 }

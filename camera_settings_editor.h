@@ -1,0 +1,37 @@
+#pragma once
+#include "frame.h"
+#include <QtWidgets/QWidget>
+#include <map>
+#include <vector>
+class QComboBox;
+class QSpinBox;
+class QDoubleSpinBox;
+class QFormLayout;
+struct CameraGeometry
+{
+    int width{0},height{0},x{0},y{0},bin{1};
+    PixelFormat format{PixelFormat::Mono8};
+};
+// Shared ASI/QHY form. Owns requested widget values; vendor panels retain
+// their separate actual SDK readbacks. Exposure scale is native units per UI unit.
+class CameraSettingsEditor final : public QWidget
+{
+public:
+    CameraSettingsEditor(int widthStep,int heightStep,QWidget* parent);
+    void showGeometry(int sensorWidth,int sensorHeight,const std::vector<PixelFormat>& formats,
+        const std::vector<int>& bins,const CameraGeometry& geometry);
+    CameraGeometry requestedGeometry() const;
+    void clearControls();
+    void addControl(int id,const QString& name,double minimum,double maximum,double step,double value,
+        double nativeUnitsPerDisplayUnit,const QString& suffix,bool writable=true);
+    std::map<int,double> controlValues() const;
+private:
+    void updateBounds();
+    int sensorWidth_{0},sensorHeight_{0},widthStep_,heightStep_;
+    bool updating_{false};
+    QComboBox *format_,*bin_;
+    QSpinBox *width_,*height_,*x_,*y_;
+    QFormLayout* controlForm_;
+    struct Control { QDoubleSpinBox* widget; double scale; };
+    std::map<int,Control> controls_;
+};
