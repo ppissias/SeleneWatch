@@ -20,7 +20,11 @@ class FlashDetector
 {
 public:
     explicit FlashDetector(DetectionSettings settings = {}, MemoryBudget budget = {});
-    void reset();
+    // Repeated settling frames reuse charged arrays instead of reallocating
+    // full images. A normal reset releases them for a new run/layout.
+    void reset(bool releaseBuffers = true);
+    // Retain the learned reference, but confirm patches again after arming.
+    void rearm();
     void setSettings(const DetectionSettings& settings);
 
     // Source thread, in this order for each frame: analyze, inspect/copy derived

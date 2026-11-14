@@ -3,8 +3,9 @@
 #include <filesystem>
 #include <string>
 
-// What a source says about its stream. It holds from start to stop and is
-// copied into every clip (Evidence rule 8). A field the source cannot fill
+// What a source says about its stream. It is fixed throughout Monitoring and
+// copied into every clip (Evidence rule 8). Live Preview readbacks may change;
+// their association with buffered frames is unknown. A field the source cannot fill
 // is left empty and written as "unknown"; it is never guessed.
 //
 // The text is UTF-8.

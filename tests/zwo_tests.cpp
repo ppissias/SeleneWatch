@@ -18,19 +18,93 @@ class Receiver : public FrameSourceListener
 public:
     void onFrame(std::shared_ptr<Frame> f) override { std::lock_guard lock(mutex); frames.push_back(std::move(f)); }
     void onDiscontinuity() override {}
+    void onSettingsChanged(const StreamInfo& info,std::chrono::duration<double> duration) override
+    {
+        std::lock_guard lock(mutex); settings=info; settling=duration.count(); ++settingsChanges;
+    }
     void onEnded() override {}
     void onFailed(const std::string& e) override { std::lock_guard lock(mutex); failure=e; }
     size_t count() { std::lock_guard lock(mutex); return frames.size(); }
     bool failed() { std::lock_guard lock(mutex); return !failure.empty(); }
+    int changes() { std::lock_guard lock(mutex); return settingsChanges; }
     std::vector<FramePtr> frames; std::string failure; std::mutex mutex;
+    StreamInfo settings; int settingsChanges{0}; double settling{0};
 };
-QString text(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly)?QString::fromUtf8(f.readAll()):QString{}; }
+QString text(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly|QIODevice::Text)?QString::fromUtf8(f.readAll()):QString{}; }
 }
 
 class ZwoTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void monitoringCanStopDuringALongExposureWithoutRestartingAcquisition()
+    {
+        QTemporaryDir dir; QObject context;
+        auto api=std::make_shared<FakeZwoApi>(); const auto p=ZwoSource::inspect(api,0);
+        Session session(&context,dir.path(),{}); session.setSource(std::make_unique<ZwoSource>(api,p,p.current));
+        QString error; QVERIFY(session.start(error,Session::Mode::Monitoring));
+        QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames()>=2,3000);
+        api->timeouts=true;
+        QVERIFY(session.requestMonitoring(false));
+        QTRY_COMPARE_WITH_TIMEOUT(session.mode(),Session::Mode::Preview,1000);
+        QVERIFY(!session.modeChangePending()); QVERIFY(session.isRunning());
+        QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
+        session.stop(); QCOMPARE(api->closed.load(),api->opened.load());
+    }
+    void everySupportedNativeControlChangesOnTheWorkerWithoutRestarting()
+    {
+        auto api=std::make_shared<FakeZwoApi>();
+        api->caps.push_back({ZwoControl::HighSpeed,"High speed",0,1,0,true,false});
+        const auto p=ZwoSource::inspect(api,0); ZwoSource source(api,p,p.current);
+        std::string error; QVERIFY(source.open(error)); Receiver sink;
+        source.start(sink); QTRY_VERIFY_WITH_TIMEOUT(sink.count()>=2,3000);
+        auto controls=p.current.controls;
+        controls[ZwoControl::Exposure]=2000; controls[ZwoControl::Gain]=13;
+        controls[ZwoControl::Offset]=12; controls[ZwoControl::Bandwidth]=60; controls[ZwoControl::HighSpeed]=1;
+        source.requestLiveControls(controls);
+        QTRY_COMPARE_WITH_TIMEOUT(sink.changes(),1,3000);
+        const auto actual=source.actualProfile();
+        QCOMPARE(actual.current.controls.at(ZwoControl::Exposure),int64_t{2000});
+        QCOMPARE(actual.current.controls.at(ZwoControl::Gain),int64_t{12});
+        QCOMPARE(actual.current.controls.at(ZwoControl::Offset),int64_t{12});
+        QCOMPARE(actual.current.controls.at(ZwoControl::Bandwidth),int64_t{60});
+        QCOMPARE(actual.current.controls.at(ZwoControl::HighSpeed),int64_t{1});
+        QCOMPARE(source.streamInfo().gain,std::string("12"));
+        auto bad=controls; bad[ZwoControl::Flip]=1;
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument,source.requestLiveControls(bad));
+        bad=controls; bad[ZwoControl::Gain]=1000;
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument,source.requestLiveControls(bad));
+        QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
+        QCOMPARE(api->opened.load(),2); // One inspection and one acquisition open.
+        source.stop(); QVERIFY(sink.failure.empty());
+        QCOMPARE(api->liveControlThread,api->readThread);
+        QVERIFY(api->liveControlThread!=std::this_thread::get_id());
+        QCOMPARE(sink.settings.exposure,std::string("2000 us")); QVERIFY(sink.settling>=1);
+        QCOMPARE(api->closed.load(),api->opened.load());
+    }
+    void aCameraChangeOutsidePreviewStopsBeforeMislabelledEvidenceCanArrive()
+    {
+        QTemporaryDir dir; QObject context; std::vector<ClipWriteResult> results;
+        auto api=std::make_shared<FakeZwoApi>(); const auto p=ZwoSource::inspect(api,0);
+        {
+            Session::Notifications notices; notices.clipWritten=[&](const auto& r){results.push_back(r);};
+            Session session(&context,dir.path(),std::move(notices));
+            auto source=std::make_unique<ZwoSource>(api,p,p.current); auto* camera=source.get();
+            session.setSource(std::move(source)); QString error;
+            QVERIFY(session.start(error,Session::Mode::Monitoring));
+            QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames()>=2,3000);
+            QVERIFY(session.requestManualSave()); QTRY_VERIFY_WITH_TIMEOUT(!session.manualSavePending(),3000);
+            auto changed=p.current.controls; changed[ZwoControl::Gain]=14;
+            camera->requestLiveControls(changed);
+            QTRY_VERIFY_WITH_TIMEOUT(session.sourceFinished(),3000);
+            QCOMPARE(session.streamInfo().gain,std::string("10")); session.stop();
+        }
+        QCoreApplication::processEvents(); QCOMPARE(results.size(),size_t{1}); QVERIFY(results[0].notSaved.isEmpty());
+        const auto note=text(results[0].folder+"/event.txt");
+        QVERIFY(note.contains("gain: 10\n")); QVERIFY(!note.contains("gain: 14\n"));
+        QVERIFY(note.contains("source failure: camera settings changed outside Preview"));
+        QCOMPARE(api->closed.load(),api->opened.load());
+    }
     void replayKeepsTheDeclaredWordInterpretationAndDecisions()
     {
         QTemporaryDir dir; QFile output(dir.path()+"/word-range.ser"); QVERIFY(output.open(QIODevice::ReadWrite));
@@ -145,7 +219,7 @@ private slots:
             Session::Notifications notices; notices.clipWritten=[&](const auto& r){results.push_back(r);};
             Session session(&context,dir.path(),std::move(notices));
             session.setSource(std::make_unique<ZwoSource>(api,p,settings));
-            QString error; QVERIFY2(session.start(error),qPrintable(error));
+            QString error; QVERIFY2(session.start(error, Session::Mode::Monitoring),qPrintable(error));
             QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames()>=2,3000); QVERIFY(session.requestManualSave());
             QTRY_VERIFY_WITH_TIMEOUT(!session.manualSavePending(),3000);
             QVERIFY(session.droppedFrames()==uint64_t{0}); session.stop("camera settings changed");

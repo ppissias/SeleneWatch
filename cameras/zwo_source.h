@@ -4,6 +4,8 @@
 #include "sources/frame_source.h"
 
 #include <thread>
+#include <mutex>
+#include <optional>
 
 // Owns one ASI connection: stopped inspection/configuration on the caller's
 // thread, then all SDK calls on its worker until stop joins it. Pixels go
@@ -19,14 +21,25 @@ public:
     StreamInfo streamInfo() const override;
     void start(FrameSourceListener& listener) override;
     void stop() override;
-    [[nodiscard]] const ZwoProfile& actualProfile() const;
+    [[nodiscard]] ZwoProfile actualProfile() const;
+    // Context thread, Preview only. The worker coalesces requests and applies
+    // every writable native control between bounded SDK reads. ROI/format/bin
+    // require a new open. Readbacks are snapshots, never per-frame guarantees.
+    void requestLiveControls(std::map<ZwoControl,int64_t> controls);
 private:
     void run(std::stop_token stop,FrameSourceListener& listener);
     void release() noexcept;
+    void updateInfo();
+    void publishProfile();
+    std::optional<double> applyLiveControls(FrameSourceListener& listener);
     std::shared_ptr<ZwoApi> api_;
     ZwoProfile selected_, actual_;
     ZwoSettings requested_;
     StreamInfo info_;
+    mutable std::mutex settingsMutex_;
+    ZwoProfile profileSnapshot_;
+    StreamInfo infoSnapshot_;
+    std::optional<std::map<ZwoControl,int64_t>> liveRequest_;
     bool opened_{false}, capturing_{false};
     std::jthread worker_;
 };

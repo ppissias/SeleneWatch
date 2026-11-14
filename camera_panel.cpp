@@ -1,6 +1,7 @@
 #include "camera_panel.h"
 
 #include <QtCore/QSignalBlocker>
+#include <QtCore/QTimer>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
@@ -31,8 +32,12 @@ CameraPanel::CameraPanel(std::shared_ptr<ZwoApi> api,QWidget* parent):QWidget(pa
     apply_=new QPushButton("Apply settings",this); apply_->setObjectName("applyCamera"); layout->addWidget(apply_);
     readback_=new QLabel("Select the camera source and refresh to discover ASI devices.",this);
     readback_->setWordWrap(true); readback_->setObjectName("cameraReadback"); layout->addWidget(readback_);
-    auto* hint=new QLabel("Settings are read back on Apply or Start. Applying while running restarts acquisition and completes the current clip. RAW16 keeps every delivered word; ADC packing is recorded separately.",this);
+    auto* hint=new QLabel("In Preview, native controls apply live after an edit. Readbacks below show actual values. Format, binning and ROI use Apply and restart Preview. Monitoring fixes camera settings; stop monitoring to tune again. RAW16 keeps every delivered word.",this);
     hint->setWordWrap(true); layout->addWidget(hint); layout->addStretch();
+    liveTimer_=new QTimer(this); liveTimer_->setSingleShot(true); liveTimer_->setInterval(180);
+    connect(liveTimer_,&QTimer::timeout,this,[this] {
+        if (running_ && !monitoring_) emit liveControlsRequested();
+    });
     connect(refresh_,&QPushButton::clicked,this,&CameraPanel::refresh);
     connect(cameras_,&QComboBox::currentIndexChanged,this,&CameraPanel::inspectSelected);
     connect(apply_,&QPushButton::clicked,this,&CameraPanel::applyRequested);
@@ -71,7 +76,13 @@ ZwoSettings CameraPanel::settings() const
     for (const auto& [kind,widget]:values_) s.controls[kind]=static_cast<int64_t>(std::llround(widget->value()*(kind==ZwoControl::Exposure?1000:1)));
     return s;
 }
-void CameraPanel::showActual(const ZwoProfile& p) { profile_=p; showProfile(); setRunning(running_); }
+void CameraPanel::showActual(const ZwoProfile& p) { liveTimer_->stop(); profile_=p; showProfile(); setRunning(running_,monitoring_); }
+void CameraPanel::showLiveActual(const ZwoProfile& p)
+{
+    // Do not replace widgets or overwrite edits newer than this readback.
+    profile_=p;
+    updateReadback();
+}
 void CameraPanel::showProfile()
 {
     updating_=true;
@@ -96,13 +107,29 @@ void CameraPanel::showProfile()
         widget->setDecimals(exposure?3:0); widget->setRange(c.minimum/divisor,c.maximum/divisor);
         widget->setValue(c.value/divisor); widget->setEnabled(c.writable);
         widget->setSuffix(exposure?" ms":""); widget->setSingleStep(exposure?.1:1);
+        widget->setKeyboardTracking(false);
+        connect(widget,&QDoubleSpinBox::valueChanged,this,[this] {
+            if (!updating_ && running_ && !monitoring_) liveTimer_->start();
+        });
         controlForm_->addRow(QString::fromStdString(c.name),widget); values_[c.kind]=widget;
     }
+    updateReadback();
+    updating_=false; updateBounds();
+}
+void CameraPanel::updateReadback()
+{
+    const auto& p=*profile_; const auto& s=p.current;
     readback_->setText(QString("Read back: %1 × %2, %3, bin %4, origin (%5, %6).\nSensor ADC: %7 bits. SDK %8. Serial: %9.\n%10")
         .arg(s.width).arg(s.height).arg(s.format==PixelFormat::Mono16?"RAW16":s.format==PixelFormat::Mono8?"RAW8":"processed SDK mode; choose RAW").arg(s.bin).arg(s.x).arg(s.y)
         .arg(p.camera.sensorBits).arg(QString::fromStdString(p.sdkVersion),p.serial.empty()?"unknown":QString::fromStdString(p.serial),
             !p.camera.usb3 && p.camera.name.find("ASI120")!=std::string::npos?"USB2 ASI120: ROI pixel count must be a multiple of 1024.":"ROI dimensions are output pixels after binning."));
-    updating_=false; updateBounds();
+    QStringList values;
+    for (const auto& c:p.controls)
+        if (c.kind!=ZwoControl::Flip)
+            values << QString("%1: %2%3").arg(QString::fromStdString(c.name))
+                .arg(c.kind==ZwoControl::Exposure?c.value/1000.0:static_cast<double>(c.value),0,'g',10)
+                .arg(c.kind==ZwoControl::Exposure?" ms":"");
+    readback_->setText(readback_->text()+"\nActual controls: "+values.join(", "));
 }
 void CameraPanel::updateBounds()
 {
@@ -113,9 +140,11 @@ void CameraPanel::updateBounds()
     x_->setRange(0,std::max(0,profile_->camera.width/bin-width_->value())); y_->setRange(0,std::max(0,profile_->camera.height/bin-height_->value()));
     updating_=false;
 }
-void CameraPanel::setRunning(bool running)
+void CameraPanel::setRunning(bool running,bool monitoring)
 {
-    running_=running; refresh_->setEnabled(!running); cameras_->setEnabled(!running);
-    controls_->setEnabled(hasCamera()); apply_->setEnabled(hasCamera());
-    apply_->setText(running?"Apply and restart":"Apply settings");
+    running_=running; monitoring_=monitoring;
+    if (!running || monitoring) liveTimer_->stop();
+    refresh_->setEnabled(!running); cameras_->setEnabled(!running);
+    controls_->setEnabled(hasCamera() && !monitoring); apply_->setEnabled(hasCamera() && !monitoring);
+    apply_->setText(running?"Apply format / ROI and restart Preview":"Apply settings");
 }

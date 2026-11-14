@@ -193,7 +193,7 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
             session.setDetectionSettings({config.value("sigma").toDouble(1000),8,400,true});
             auto source=std::make_unique<ZwoSource>(api,profile,settings); auto* camera=source.get();
             session.setSource(std::move(source)); QString error;
-            if (!session.start(error)) throw std::runtime_error(error.toStdString());
+            if (!session.start(error, Session::Mode::Monitoring)) throw std::runtime_error(error.toStdString());
             report=profileJson(camera->actualProfile());
             settings=camera->actualProfile().current;
             QTimer tick; tick.setInterval(10);

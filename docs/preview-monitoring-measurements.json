@@ -1,0 +1,71 @@
+{
+  "camera": "ZWO ASI120MM Mini",
+  "checks": [
+    {
+      "bandwidth": 60,
+      "bits": 8,
+      "collection_end": "monitoring stopped",
+      "disarm_kept_stream_running": true,
+      "exposure_us": 2000,
+      "gain": 2,
+      "live_edits_without_restart": true,
+      "native_hashes_matched": 7,
+      "offset": 10,
+      "preview_frames": 38,
+      "preview_no_candidate_record": true,
+      "saved_frames": 7,
+      "settling_then_live_metrics_verified": true,
+      "width": 1280,
+      "height": 960,
+      "ser_size_and_depth_verified": true
+    },
+    {
+      "bandwidth": 50,
+      "bits": 16,
+      "collection_end": "monitoring stopped",
+      "disarm_kept_stream_running": true,
+      "exposure_us": 3000,
+      "gain": 4,
+      "live_edits_without_restart": true,
+      "native_hashes_matched": 3,
+      "offset": 11,
+      "preview_frames": 23,
+      "preview_no_candidate_record": true,
+      "saved_frames": 3,
+      "settling_then_live_metrics_verified": true,
+      "width": 1280,
+      "height": 960,
+      "ser_size_and_depth_verified": true
+    }
+  ],
+  "closes": 7,
+  "opens": 7,
+  "passed": true,
+  "restored_before_close": true,
+  "sdk": "1, 41, 0, 0",
+  "video_starts": 4,
+  "video_stops": 4,
+  "scope": "Automated offscreen MainWindow with the real ASI SDK; short workflow/evidence checks, not lunar calibration or a throughput benchmark.",
+  "software": "SeleneWatch 4040b5a-dirty; Feature-10 Preview/Monitoring implementation",
+  "restore": {
+    "format": "RAW8",
+    "width": 1280,
+    "height": 960,
+    "bin": 1,
+    "x": 0,
+    "y": 0,
+    "exposure_us": 1000,
+    "gain": 0,
+    "offset": 9,
+    "bandwidth": 40,
+    "flip": 0,
+    "verification": "Actual readbacks compared before close; settings may be reinitialised by a later SDK open."
+  },
+  "limitations": [
+    "Uncontrolled indoor illumination; no observing sensitivity result.",
+    "High-speed is absent on this Mini; covered with the deterministic SDK boundary.",
+    "Native payloads verified for all saved frames; no new independent-reader check.",
+    "Physical unplug, manual desktop observing, QHY hardware and lunar acceptance remain open."
+  ],
+  "qa_harness_sha256": "500d73e0f4bd78b8cdbbc21715bf95d457cea9ff3e5d023f47081abf86fb3cdc"
+}

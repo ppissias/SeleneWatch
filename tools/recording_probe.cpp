@@ -56,7 +56,7 @@ int main(int argc, char** argv)
             source->setSpeed(RecordingSource::Speed::Fast);
             session.setSource(std::move(source));
             QString error;
-            if (!session.start(error)) { err << error << "\n"; return 1; }
+            if (!session.start(error, Session::Mode::Monitoring)) { err << error << "\n"; return 1; }
             if (app.exec() != 0) return 1;
             frames = session.acquiredFrames();
             session.stop();

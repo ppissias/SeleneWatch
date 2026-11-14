@@ -459,7 +459,7 @@ void DetectionTest::aOneFrameBlipThroughSessionIsSaved()
     Session session(&context, QDir(directory.path()).filePath("events"), std::move(notices));
     running = &session;
     session.setSource(std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString())));
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     QTRY_VERIFY_WITH_TIMEOUT(ended, 5000);
     QVERIFY(requested);
     session.stop();
@@ -496,7 +496,7 @@ void DetectionTest::aLoopFlushesTheClipAtItsBoundary()
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
     source->setLoopSeconds(1);
     session.setSource(std::move(source));
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     QTRY_VERIFY_WITH_TIMEOUT(candidates >= 3, 5000);
     session.stop();
     QTRY_VERIFY_WITH_TIMEOUT(results.size() >= 3, 5000);

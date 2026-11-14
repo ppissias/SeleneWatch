@@ -45,8 +45,9 @@ void Session::setCaptureSettings(CaptureSettings settings)
     captureSettings_ = settings;
 }
 
-bool Session::start(QString& error)
+bool Session::start(QString& error, Mode mode)
 {
+    if (mode == Mode::Stopped) throw std::invalid_argument("start in Preview or Monitoring");
     if (running_)
     {
         return true;
@@ -73,17 +74,20 @@ bool Session::start(QString& error)
         return false;
     }
 
-    streamInfo_ = source_->streamInfo();
+    { std::lock_guard lock(requestMutex_); streamInfo_ = source_->streamInfo(); }
     acquiredFrames_.store(0, std::memory_order_relaxed);
     droppedFrames_.store(0); dropsKnown_.store(false);
     sourceFinished_.store(false);
-    { std::lock_guard<std::mutex> lock(requestMutex_); manualRequest_.reset(); }
+    { std::lock_guard lock(requestMutex_); manualRequest_.reset(); monitoringRequest_.reset(); cameraTuned_ = false; }
     capture_.reset();
+    capture_.setMonitoring(mode == Mode::Monitoring);
+    mode_.store(mode);
+    settlingUntil_ = {};
     blip_.reset();
     lastPreviewTime_ = {};
     (void)previewSlot_.take();
 
-    writer_.logSessionStart(streamInfo_);
+    if (mode == Mode::Monitoring) writer_.logSessionStart(streamInfo_);
     source_->start(*this);
     running_ = true;
     return true;
@@ -100,6 +104,49 @@ void Session::stop(std::string reason)
     capture_.finishPartial(std::move(reason));
     blip_.reset();
     running_ = false;
+    mode_.store(Mode::Stopped);
+    { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
+}
+
+bool Session::requestMonitoring(bool monitoring)
+{
+    std::lock_guard lock(requestMutex_);
+    if (!running_ || sourceFinished_.load() || monitoringRequest_ || (monitoring && cameraTuned_)) return false;
+    monitoringRequest_ = monitoring;
+    return true;
+}
+
+Session::Mode Session::mode() const { return mode_.load(); }
+bool Session::modeChangePending() const
+{
+    std::lock_guard lock(requestMutex_);
+    return monitoringRequest_.has_value();
+}
+
+void Session::applyModeRequest()
+{
+    // Keep the request pending until capture has crossed the boundary, so
+    // the context cannot enable camera edits while an old clip is open.
+    std::optional<bool> request;
+    {
+        std::lock_guard lock(requestMutex_);
+        request = monitoringRequest_;
+        // A queued camera change can arrive after the context requests arming.
+        // Recheck at the actual frame boundary as well as at request time.
+        if (request && *request && cameraTuned_)
+        {
+            monitoringRequest_.reset();
+            post(notifications_.modeChanged);
+            return;
+        }
+    }
+    if (!request) return;
+    applyManualSave();
+    capture_.setMonitoring(*request);
+    if (*request && mode_.load() != Mode::Monitoring) writer_.logSessionStart(streamInfo_);
+    mode_.store(*request ? Mode::Monitoring : Mode::Preview);
+    { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
+    post(notifications_.modeChanged);
 }
 
 bool Session::requestBlip(const BlipSettings& settings)
@@ -115,7 +162,7 @@ bool Session::blipBusy() const
 bool Session::requestManualSave()
 {
     std::lock_guard<std::mutex> lock(requestMutex_);
-    if (!running_ || sourceFinished_.load() || manualRequest_) return false;
+    if (!running_ || sourceFinished_.load() || mode_.load() != Mode::Monitoring || monitoringRequest_ || manualRequest_) return false;
     manualRequest_=std::chrono::system_clock::now();
     return true;
 }
@@ -146,8 +193,9 @@ bool Session::sourceFinished() const
     return sourceFinished_.load();
 }
 
-const StreamInfo& Session::streamInfo() const
+StreamInfo Session::streamInfo() const
 {
+    std::lock_guard lock(requestMutex_);
     return streamInfo_;
 }
 
@@ -195,6 +243,7 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
 // writes it again. Test injection is the last write before publication.
 void Session::onFrame(std::shared_ptr<Frame> frame)
 {
+    applyModeRequest();
     if (!budgetPrepared_)
     {
         // Reserve for mean/variance, two maps/differences, GUI/writer images,
@@ -226,6 +275,10 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         display = displayRequest_;
     }
     const auto now = std::chrono::steady_clock::now();
+    const bool settling = now < settlingUntil_;
+    // Analyse every delivered tuning frame, but do not let a delayed SDK
+    // brightness step hold a patch reference through the settling interval.
+    if (settling) capture_.reset(false);
     const bool previewDue = now - lastPreviewTime_ >= std::chrono::milliseconds{50};
     display.makeMap = previewDue;
     capture_.setDetectionSettings(settings);
@@ -237,7 +290,10 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     if (previewDue || capture_.detectionSummary().triggered)
     {
         lastPreviewTime_ = now;
-        auto view = std::make_shared<const DetectionView>(capture_.detectionView());
+        auto snapshot = capture_.detectionView();
+        snapshot.monitoring = mode_.load() == Mode::Monitoring;
+        snapshot.settling = settling;
+        auto view = std::make_shared<const DetectionView>(std::move(snapshot));
         if (previewSlot_.put(published, std::move(view))) post(notifications_.previewReady);
     }
 }
@@ -250,6 +306,22 @@ void Session::onDiscontinuity()
     capture_.finishPartial("playback loop boundary");
     capture_.reset();
 }
+
+void Session::onSettingsChanged(const StreamInfo& info, std::chrono::duration<double> settling)
+{
+    if (mode_.load() != Mode::Preview)
+        throw std::logic_error("camera settings changed outside Preview; stopping to preserve clip metadata");
+    capture_.reset();
+    blip_.reset();
+    (void)previewSlot_.take();
+    lastPreviewTime_ = {};
+    settlingUntil_ = std::chrono::steady_clock::now()
+        + std::chrono::duration_cast<std::chrono::steady_clock::duration>(settling);
+    { std::lock_guard lock(requestMutex_); streamInfo_ = info; cameraTuned_ = true; }
+    post(notifications_.cameraSettingsChanged);
+}
+
+void Session::onIdle() { applyModeRequest(); }
 
 void Session::onEnded()
 {

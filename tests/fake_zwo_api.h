@@ -31,6 +31,8 @@ public:
     std::atomic<bool> connected{true}, timeouts{false};
     std::atomic<int> disconnectAt{-1}, telemetryFailureAt{-1};
     std::vector<std::string> calls;
+    // Read after stop/join: verifies that live writes and reads share a worker.
+    std::thread::id liveControlThread, readThread;
     std::string version() const override { return "TEST SDK 1"; }
     std::vector<ZwoCameraInfo> cameras() override { call("cameras"); return connected?std::vector{camera}:std::vector<ZwoCameraInfo>{}; }
     void open(int) override { call("open"); ++opened; }
@@ -41,6 +43,7 @@ public:
     void setControl(int,ZwoControl kind,int64_t value) override
     {
         call("setControl");
+        if (starts.load()>stops.load()) liveControlThread=std::this_thread::get_id();
         for (auto& c:caps) if (c.kind==kind) { c.value=kind==ZwoControl::Gain?value/2*2:value; c.automatic=false; }
     }
     ZwoSettings roi(int) override { call("roi"); return settings; }
@@ -52,6 +55,7 @@ public:
     bool read(int,std::span<uint8_t> bytes,int waitMs) override
     {
         ++reads;
+        readThread=std::this_thread::get_id();
         if (waitMs<1 || waitMs>100) throw std::runtime_error("Unbounded SDK wait");
         std::this_thread::sleep_for(std::chrono::milliseconds{2});
         if (!connected || (disconnectAt>=0 && delivered>=disconnectAt)) throw std::runtime_error("TEST camera disconnected");

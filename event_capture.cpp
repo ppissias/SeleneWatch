@@ -18,11 +18,20 @@ void EventCapture::configure(CaptureSettings capture, size_t clipBytes, size_t h
     ring_.configure(historyBytes, capture.historySeconds);
 }
 
-void EventCapture::reset()
+void EventCapture::reset(bool releaseDetectorBuffers)
 {
-    ring_.clear(); detector_.reset(); collecting_ = false; lastFiringTime_ = {};
+    ring_.clear(); detector_.reset(releaseDetectorBuffers); collecting_ = false; lastFiringTime_ = {};
     clip_ = {};
     manualTail_.reset();
+}
+
+void EventCapture::setMonitoring(bool monitoring)
+{
+    if (monitoring_ == monitoring) return;
+    if (!monitoring) finishPartial("monitoring stopped");
+    else detector_.rearm();
+    manualTail_.reset();
+    monitoring_ = monitoring;
 }
 
 void EventCapture::rememberPeak(const Frame& frame)
@@ -42,6 +51,11 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
 {
     ring_.push(frame);
     detector_.analyze(*frame, display);
+    if (!monitoring_)
+    {
+        detector_.updateReference(*frame);
+        return;
+    }
     const bool firing = detector_.firing();
     if (!detector_.candidates().empty())
     {
@@ -102,6 +116,7 @@ DetectionView EventCapture::detectionView() const { return detector_.view(); }
 
 bool EventCapture::saveNow(std::chrono::system_clock::time_point requestedAt)
 {
+    if (!monitoring_) return false;
     const auto frames=ring_.stored();
     if (frames.empty()) return false;
     const auto& frame=*frames.back();

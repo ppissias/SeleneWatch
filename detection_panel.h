@@ -24,6 +24,8 @@ public:
     void setSettings(const DetectionSettings& settings);
     [[nodiscard]] DetectionOverlay overlay() const;
     void setView(const DetectionView& view);
+    // The current capture state can change while no new exposure is ready.
+    void setMonitoring(bool monitoring);
     [[nodiscard]] QImage overlayImage() const;
 
 signals:
@@ -32,6 +34,7 @@ signals:
 
 private:
     void controlsChanged(bool maximumChanged = false);
+    void updateDecision();
 
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
@@ -47,5 +50,7 @@ private:
     QLabel* mapScale_;
     PeakHistory* history_;
     QImage overlayImage_;
+    DetectionSummary latest_;
+    bool monitoring_{false}, settling_{false};
     bool updating_{false};
 };

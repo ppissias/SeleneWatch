@@ -40,11 +40,47 @@ class UiTest : public QObject
 private slots:
     void init() { QSettings saved; saved.clear(); saved.sync(); }
     void controlsPreserveValidSizeLimits();
+    void captureLabelChangesWithoutWaitingForANewExposure()
+    {
+        DetectionPanel panel;
+        DetectionView view; view.summary.ready=true; view.summary.passed=true; view.summary.firing=true;
+        panel.setView(view);
+        auto* state=panel.findChild<QLabel*>("detectionState");
+        QVERIFY(state->text().contains("Would trigger — capture OFF"));
+        panel.setMonitoring(true); QVERIFY(state->text().contains("Candidate — capture ON"));
+        panel.setMonitoring(false); QVERIFY(state->text().contains("Would trigger — capture OFF"));
+    }
+    void previewShowsWouldTriggerWithoutSaving();
     void livePanelInjectionEvidenceAndSavedSettings();
     void stretchARecordingWhileCapturingThenRestoreSettings();
     void saveARecordingManuallyThroughTheWindow();
     void cameraReadbacksRestartAndDisconnectKeepSeparateEvidence();
 };
+
+void UiTest::previewShowsWouldTriggerWithoutSaving()
+{
+    QTemporaryDir dir;
+    {
+        MainWindow window(nullptr,dir.path()); window.show();
+        window.findChild<QDockWidget*>("detectionDock")->raise();
+        window.findChild<QPushButton*>("startButton")->click();
+        auto* preview=window.findChild<PreviewWidget*>();
+        QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+        QTest::mouseClick(preview,Qt::LeftButton,Qt::NoModifier,preview->imageRect().center());
+        window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(100);
+        window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(10);
+        auto* inject=window.findChild<QPushButton*>("injectBlipButton");
+        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(),3000); inject->click();
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("detectionState")->text().contains("Would trigger"),3000);
+        QVERIFY(window.findChild<QLabel*>("sigmaReading")->text().contains("% of threshold"));
+        QVERIFY(window.findChild<QLabel*>("patchReading")->text().contains("allowed"));
+        QVERIFY(!window.findChild<QPushButton*>("saveNowButton")->isEnabled());
+        QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
+        QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/preview-would-trigger.png"));
+        window.findChild<QPushButton*>("stopButton")->click();
+    }
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
+}
 
 void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
 {
@@ -62,7 +98,23 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     auto* stop=window.findChild<QPushButton*>("stopButton");
     auto* save=window.findChild<QPushButton*>("saveNowButton");
     start->click(); QTRY_VERIFY_WITH_TIMEOUT(api->delivered>=2,3000);
-    save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    auto* monitoring=window.findChild<QPushButton*>("monitoringButton");
+    QVERIFY(!save->isEnabled());
+    QVERIFY(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"));
+    const int previewOpens=api->opened.load();
+    panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(13);
+    panel->findChild<QDoubleSpinBox*>("cameraControl0")->setValue(2);
+    panel->findChild<QDoubleSpinBox*>("cameraControl2")->setValue(11);
+    panel->findChild<QDoubleSpinBox*>("cameraControl3")->setValue(60);
+    QTRY_COMPARE_WITH_TIMEOUT(panel->profile().current.controls.at(ZwoControl::Gain),int64_t{12},3000);
+    QCOMPARE(panel->profile().current.controls.at(ZwoControl::Exposure),int64_t{2000});
+    QCOMPARE(panel->profile().current.controls.at(ZwoControl::Offset),int64_t{11});
+    QCOMPARE(panel->profile().current.controls.at(ZwoControl::Bandwidth),int64_t{60});
+    QCOMPARE(api->opened.load(),previewOpens); QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("sigmaReading")->text().contains("Settling"),3000);
+    QVERIFY(!QFile::exists(dir.path()+"/candidates.txt"));
+    QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
+    QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: 3"),3000);
     panel->findChild<QSpinBox*>("cameraWidth")->setValue(127);
     panel->findChild<QPushButton*>("applyCamera")->click();
@@ -76,6 +128,23 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
     QCOMPARE(panel->profile().current.width,64);
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),12.0);
+    QVERIFY(!save->isEnabled());
+    monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),3,3000);
+    QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl1")->isEnabled());
+    QVERIFY(window.findChild<QDoubleSpinBox*>("detectionSigma")->isEnabled());
+    save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    monitoring->click(); QTRY_COMPARE_WITH_TIMEOUT(monitoring->text(),QString("Start monitoring"),3000);
+    QVERIFY(!save->isEnabled()); QCOMPARE(api->starts.load(),3); QCOMPARE(api->stops.load(),2);
+    QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl1")->isEnabled());
+    panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(20);
+    QTRY_COMPARE_WITH_TIMEOUT(panel->profile().current.controls.at(ZwoControl::Gain),int64_t{20},3000);
+    format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono8)));
+    panel->findChild<QSpinBox*>("cameraWidth")->setValue(128);
+    panel->findChild<QPushButton*>("applyCamera")->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),4,3000);
+    monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),5,3000);
     save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     window.findChild<QDockWidget*>("cameraDock")->raise();
     window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
@@ -93,8 +162,8 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
     {
         const auto note=text(dir.path()+"/"+folder+"/event.txt");
-        if (note.contains("pixel_format: Mono8")) { QVERIFY(note.contains("collection_end: camera settings changed")); QVERIFY(note.contains("gain: 10\n")); QVERIFY(note.contains("gap:")); ++old; }
-        if (note.contains("pixel_format: Mono16")) { QVERIFY(note.contains("source failure: TEST camera disconnected")); QVERIFY(note.contains("gain: 12\n")); ++changed; }
+        if (note.contains("pixel_format: Mono16")) { QVERIFY(note.contains("collection_end: monitoring stopped")); QVERIFY(note.contains("gain: 12\n")); ++old; }
+        if (note.contains("pixel_format: Mono8")) { QVERIFY(note.contains("source failure: TEST camera disconnected")); QVERIFY(note.contains("gain: 20\n")); ++changed; }
         QVERIFY(note.contains("kind=manual")); QVERIFY(note.contains("contains_test_signal: yes"));
     }
     QCOMPARE(old,1); QCOMPARE(changed,1);
@@ -130,6 +199,8 @@ void UiTest::saveARecordingManuallyThroughTheWindow()
     window.findChild<DisplayPanel*>()->findChild<QDoubleSpinBox*>("postSeconds")->setValue(.3);
     window.findChild<QPushButton*>("startButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(!window.findChild<PreviewWidget*>()->imageRect().isEmpty(),3000);
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QVERIFY(save->isEnabled()); save->click();
     QString folder;
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
@@ -194,6 +265,7 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         panel->findChild<QSpinBox*>("detectionMinPixels")->setValue(chosen.minPixels);
         panel->findChild<QSpinBox*>("detectionMaxPixels")->setValue(chosen.maxPixels);
         start->click();
+        window.findChild<QPushButton*>("monitoringButton")->click();
         QVERIFY(stop->isEnabled());
         QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
         panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(1);
@@ -294,6 +366,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         auto* stop = window.findChild<QPushButton*>("stopButton");
         auto* preview = window.findChild<PreviewWidget*>();
         start->click();
+        window.findChild<QPushButton*>("monitoringButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
         QTRY_COMPARE_WITH_TIMEOUT(panel->findChild<QDoubleSpinBox*>("displayWhite")->maximum(), 4095.0, 3000);
         QVERIFY(!panel->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());

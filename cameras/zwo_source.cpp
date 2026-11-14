@@ -43,6 +43,11 @@ std::string controlText(const ZwoSettings& s,ZwoControl kind,const char* units="
     const auto i=s.controls.find(kind);
     return i==s.controls.end()?std::string{}:std::format("{}{}",i->second,units);
 }
+double exposureSeconds(const ZwoSettings& s)
+{
+    const auto i=s.controls.find(ZwoControl::Exposure);
+    return i==s.controls.end()?1.0:i->second/1e6;
+}
 }
 
 ZwoSource::ZwoSource(std::shared_ptr<ZwoApi> api,ZwoProfile profile,ZwoSettings settings)
@@ -105,26 +110,84 @@ bool ZwoSource::open(std::string& error)
             actual_.current.controls[c.kind]=c.value;
             if (c.kind==ZwoControl::Flip && c.value!=0) throw std::runtime_error("ASI flip could not be disabled for native sample orientation");
         }
-        const auto& s=actual_.current;
-        info_={}; info_.source=actual_.camera.name; info_.camera=actual_.camera.name;
-        info_.serial=actual_.serial; info_.sdkVersion=actual_.sdkVersion;
-        info_.exposure=controlText(s,ZwoControl::Exposure," us"); info_.gain=controlText(s,ZwoControl::Gain);
-        info_.offset=controlText(s,ZwoControl::Offset); info_.usbBandwidth=controlText(s,ZwoControl::Bandwidth);
-        info_.highSpeed=controlText(s,ZwoControl::HighSpeed); info_.binning=std::to_string(s.bin);
-        info_.roi=std::format("x={} y={} width={} height={} in output pixels after binning",s.x,s.y,s.width,s.height);
-        info_.sensorBits=actual_.camera.sensorBits>0?std::to_string(actual_.camera.sensorBits):"";
-        info_.sampleLayout=s.format==PixelFormat::Mono16
-            ? "RAW16 delivered words treated as 16 bits, low aligned; sensor ADC packing unverified; no bits removed or rescaled"
-            : "RAW8 delivered bytes; no rescaling";
-        info_.frameTime="host UTC immediately after ASIGetVideoData returns; includes readout/USB/buffering latency, not exposure start; host steady clock sampled alongside UTC";
-        info_.frameIndex="host delivery ordinal plus observed SDK drop total; derived, not hardware; gap attribution approximate because the SDK buffers frames";
-        info_.conversion="none; raw mono/Bayer; SDK dark subtraction and flip disabled";
+        updateInfo();
+        publishProfile();
         return true;
     }
     catch (const std::exception& ex) { error=ex.what(); release(); return false; }
 }
-StreamInfo ZwoSource::streamInfo() const { return info_; }
-const ZwoProfile& ZwoSource::actualProfile() const { return actual_; }
+
+void ZwoSource::updateInfo()
+{
+    const auto& s=actual_.current;
+    info_={}; info_.source=actual_.camera.name; info_.camera=actual_.camera.name;
+    info_.serial=actual_.serial; info_.sdkVersion=actual_.sdkVersion;
+    info_.exposure=controlText(s,ZwoControl::Exposure," us"); info_.gain=controlText(s,ZwoControl::Gain);
+    info_.offset=controlText(s,ZwoControl::Offset); info_.usbBandwidth=controlText(s,ZwoControl::Bandwidth);
+    info_.highSpeed=controlText(s,ZwoControl::HighSpeed); info_.binning=std::to_string(s.bin);
+    info_.roi=std::format("x={} y={} width={} height={} in output pixels after binning",s.x,s.y,s.width,s.height);
+    info_.sensorBits=actual_.camera.sensorBits>0?std::to_string(actual_.camera.sensorBits):"";
+    info_.sampleLayout=s.format==PixelFormat::Mono16
+        ? "RAW16 delivered words treated as 16 bits, low aligned; sensor ADC packing unverified; no bits removed or rescaled"
+        : "RAW8 delivered bytes; no rescaling";
+    info_.frameTime="host UTC immediately after ASIGetVideoData returns; includes readout/USB/buffering latency, not exposure start; host steady clock sampled alongside UTC";
+    info_.frameIndex="host delivery ordinal plus observed SDK drop total; derived, not hardware; gap attribution approximate because the SDK buffers frames";
+    info_.conversion="none; raw mono/Bayer; SDK dark subtraction and flip disabled";
+}
+void ZwoSource::publishProfile()
+{
+    std::lock_guard lock(settingsMutex_);
+    profileSnapshot_=actual_; infoSnapshot_=info_;
+}
+StreamInfo ZwoSource::streamInfo() const { std::lock_guard lock(settingsMutex_); return infoSnapshot_; }
+ZwoProfile ZwoSource::actualProfile() const { std::lock_guard lock(settingsMutex_); return profileSnapshot_; }
+void ZwoSource::requestLiveControls(std::map<ZwoControl,int64_t> controls)
+{
+    if (!worker_.joinable()) throw std::logic_error("start Preview before changing live camera controls");
+    std::lock_guard lock(settingsMutex_);
+    for (const auto& [kind,value]:controls)
+    {
+        const auto& caps=profileSnapshot_.controls;
+        const auto found=std::find_if(caps.begin(),caps.end(),[&](const auto& c){return c.kind==kind;});
+        if (found==caps.end() || value<found->minimum || value>found->maximum
+            || (!found->writable && value!=found->value) || (kind==ZwoControl::Flip && value!=0))
+            throw std::invalid_argument("ASI live control is unavailable, read only, or outside its reported range");
+    }
+    liveRequest_=std::move(controls);
+}
+std::optional<double> ZwoSource::applyLiveControls(FrameSourceListener& listener)
+{
+    std::optional<std::map<ZwoControl,int64_t>> request;
+    { std::lock_guard lock(settingsMutex_); request=std::move(liveRequest_); liveRequest_.reset(); }
+    if (!request) return {};
+    const auto previous=actual_.current;
+    bool changed=false;
+    for (const auto& [kind,value]:*request)
+    {
+        if (previous.controls.at(kind)==value) continue;
+        api_->setControl(actual_.camera.id,kind,value);
+        changed=true;
+    }
+    if (!changed) return {};
+    const auto roi=api_->roi(actual_.camera.id);
+    if (roi.width!=previous.width || roi.height!=previous.height || roi.x!=previous.x || roi.y!=previous.y
+        || roi.bin!=previous.bin || roi.format!=previous.format)
+        throw std::runtime_error("ASI frame layout changed during a live control update; restart Preview");
+    actual_.controls=api_->controls(actual_.camera.id);
+    actual_.current.controls.clear();
+    for (const auto& c:actual_.controls)
+    {
+        if (c.automatic || (c.kind==ZwoControl::Flip && c.value!=0))
+            throw std::runtime_error("ASI live readback changed automatic control or raw orientation; restart Preview");
+        actual_.current.controls[c.kind]=c.value;
+    }
+    updateInfo(); publishProfile();
+    // The SDK exposes neither buffer age nor settings on individual frames.
+    // This is a tuning estimate only. Monitoring always reopens the camera.
+    const double longestExposure=std::max(exposureSeconds(previous),exposureSeconds(actual_.current));
+    listener.onSettingsChanged(info_,std::chrono::duration<double>{2*longestExposure+1});
+    return 2*longestExposure+5; // Allow an in-flight old exposure to finish after a shorter new request.
+}
 void ZwoSource::start(FrameSourceListener& listener)
 {
     if (!opened_ || worker_.joinable()) throw std::logic_error("ASI source must be opened once before start");
@@ -134,6 +197,7 @@ void ZwoSource::stop()
 {
     if (worker_.joinable()) { worker_.request_stop(); worker_.join(); }
     release();
+    { std::lock_guard lock(settingsMutex_); liveRequest_.reset(); }
 }
 void ZwoSource::release() noexcept
 {
@@ -148,18 +212,30 @@ void ZwoSource::run(std::stop_token stop,FrameSourceListener& listener)
         api_->startVideo(id); capturing_=true;
         uint64_t delivered=0; int previousDrops=0;
         auto lastFrame=std::chrono::steady_clock::now();
-        const auto exposure=s.controls.find(ZwoControl::Exposure);
-        const double exposureSeconds=exposure==s.controls.end()?1:exposure->second/1e6;
+        std::chrono::steady_clock::time_point controlDeadline{};
+        double quietLimit=2*exposureSeconds(s)+5;
         while (!stop.stop_requested())
         {
+            if (const auto changed=applyLiveControls(listener))
+            {
+                lastFrame=std::chrono::steady_clock::now(); quietLimit=*changed;
+                // A buffered old frame can arrive while an older, longer
+                // exposure is still in flight. Do not shorten this allowance
+                // just because that buffered frame was delivered.
+                controlDeadline=std::max(controlDeadline,lastFrame
+                    +std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>{*changed}));
+            }
             auto f=pool_.acquire(frameBytes(s.width,s.height,s.format));
             if (!api_->read(id,std::span<uint8_t>(f->data.data(),f->data.size()),100))
             {
-                if (std::chrono::duration<double>(std::chrono::steady_clock::now()-lastFrame).count()>2*exposureSeconds+5)
+                listener.onIdle();
+                const auto now=std::chrono::steady_clock::now();
+                if (now>=controlDeadline && std::chrono::duration<double>(now-lastFrame).count()>quietLimit)
                     throw std::runtime_error("ASI produced no frame within twice the exposure plus five seconds");
                 continue;
             }
             f->timestamp=std::chrono::system_clock::now(); f->steadyTimestamp=std::chrono::steady_clock::now(); lastFrame=f->steadyTimestamp;
+            quietLimit=2*exposureSeconds(actual_.current)+5;
             f->width=s.width; f->height=s.height; f->format=s.format;
             f->significantBits=s.format==PixelFormat::Mono16?16:8; f->alignment=BitAlignment::Low;
             f->bayer=shifted(actual_.camera.bayer,s.x,s.y);

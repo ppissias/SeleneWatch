@@ -37,7 +37,12 @@ public:
     void configure(CaptureSettings capture, size_t clipBytes, size_t historyBytes);
 
     // Drops the ring, the detector state, and any clip still being collected.
-    void reset();
+    void reset(bool releaseDetectorBuffers = true);
+
+    // Source thread. Preview keeps history and runs the identical detector,
+    // but creates no clips or candidate notifications. Arming retains the
+    // reference/history and requires fresh persistence for existing patches.
+    void setMonitoring(bool monitoring);
 
     // Source thread. May call the candidate and clip callbacks before returning.
     void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {});
@@ -71,6 +76,7 @@ private:
     FlashDetector detector_;
     EventClip clip_;
     bool collecting_{false};
+    bool monitoring_{true};
     std::optional<ClipTrigger> manualTail_;
 
     std::chrono::system_clock::time_point lastFiringTime_{};

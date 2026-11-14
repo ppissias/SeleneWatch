@@ -46,6 +46,14 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     Session::Notifications notifications;
     notifications.previewReady = [this] { showLatestFrame(); };
     notifications.candidateStarted = [this] { onCandidateStarted(); };
+    notifications.modeChanged = [this] { updateControls(); updateStatusLabel(); };
+    notifications.cameraSettingsChanged = [this] {
+        if (camera_ && session_->mode()==Session::Mode::Preview)
+        {
+            cameraPanel_->showLiveActual(camera_->actualProfile());
+            statusBar()->showMessage("Camera controls read back; Preview is settling and relearning.",4000);
+        }
+    };
     notifications.manualSaveHandled = [this](bool saved) {
         if (saved) { ++manualCaptures_; updateCandidateReadout(); }
         updateControls();
@@ -65,13 +73,15 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         ui_->sourceComboBox->addItem("ZWO ASI camera");
         cameraPanel_=new CameraPanel(cameraApi_,this);
         cameraDock_=new QDockWidget("Camera",this); cameraDock_->setObjectName("cameraDock");
-        cameraDock_->setWidget(cameraPanel_); addDockWidget(Qt::RightDockWidgetArea,cameraDock_);
-        tabifyDockWidget(displayDock_,cameraDock_); displayDock_->raise();
+        cameraDock_->setWidget(cameraPanel_); addDockWidget(Qt::LeftDockWidgetArea,cameraDock_);
+        cameraDock_->hide();
         connect(cameraPanel_,&CameraPanel::applyRequested,this,&MainWindow::onApplyCamera);
+        connect(cameraPanel_,&CameraPanel::liveControlsRequested,this,&MainWindow::onApplyLiveCamera);
     }
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
+    connect(ui_->monitoringButton, &QPushButton::clicked, this, &MainWindow::onMonitoringClicked);
     connect(ui_->saveNowButton, &QPushButton::clicked, this, &MainWindow::onSaveNowClicked);
     connect(ui_->openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
     connect(ui_->injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
@@ -91,6 +101,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     connect(bufferReadoutTimer_, &QTimer::timeout, this, &MainWindow::updateStreamReadout);
 
     updateControls();
+    updateStatusLabel();
     updateBlipReadout();
 }
 
@@ -213,6 +224,9 @@ void MainWindow::updateDetectionDisplay()
 
 void MainWindow::setupStatusBar()
 {
+    modeLabel_=new QLabel(this); modeLabel_->setObjectName("captureModeLabel");
+    modeLabel_->setWordWrap(true); modeLabel_->setMargin(8);
+    ui_->verticalLayout->insertWidget(2,modeLabel_);
     statusLabel_ = new QLabel("Status: Idle", this);
     fpsLabel_ = new QLabel("FPS: --", this);
     framesLabel_ = new QLabel("Frames: 0", this);
@@ -250,10 +264,14 @@ void MainWindow::updateControls()
 {
     const bool running = session_->isRunning();
     const bool recording = recordingSelected();
+    const bool monitoring = session_->mode()==Session::Mode::Monitoring;
+    const bool pending = session_->modeChangePending();
 
     ui_->startButton->setEnabled(!running);
     ui_->stopButton->setEnabled(running);
-    ui_->saveNowButton->setEnabled(running && !session_->sourceFinished() && !session_->manualSavePending());
+    ui_->monitoringButton->setEnabled(running && !session_->sourceFinished() && !pending);
+    ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
+    ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
     ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!running);
@@ -268,7 +286,7 @@ void MainWindow::updateControls()
     if (cameraPanel_)
     {
         cameraDock_->setEnabled(cameraSelected());
-        cameraPanel_->setRunning(running && cameraSelected());
+        cameraPanel_->setRunning(running && cameraSelected(),running && (monitoring || pending));
     }
 }
 
@@ -341,7 +359,7 @@ void MainWindow::updateStatusLabel()
     }
     else if (session_->isRunning())
     {
-        statusLabel_->setText(recording_ ? "Status: Playing" : "Status: Streaming");
+        statusLabel_->setText(session_->mode()==Session::Mode::Monitoring?"Status: Monitoring":"Status: Preview");
     }
     else if (playbackEnded_)
     {
@@ -351,6 +369,17 @@ void MainWindow::updateStatusLabel()
     {
         statusLabel_->setText("Status: Stopped");
     }
+    const bool monitoring=session_->mode()==Session::Mode::Monitoring;
+    detectionPanel_->setMonitoring(monitoring);
+    modeLabel_->setStyleSheet(monitoring?"background:#164b3c; color:white; font-weight:bold;":"background:#26364e; color:white; font-weight:bold;");
+    if (session_->modeChangePending())
+        modeLabel_->setText(monitoring?"Stopping monitoring… finishing the current capture before returning to Preview.":"Starting monitoring… applying the capture boundary at the next frame.");
+    else if (!session_->isRunning())
+        modeLabel_->setText("STOPPED — select an input and start Preview to tune it.");
+    else if (monitoring)
+        modeLabel_->setText(recordFailed_?"MONITORING — recording failed. Check the reported storage error.":"MONITORING — event capture ON. Stop monitoring to return to Preview and tune camera settings.");
+    else
+        modeLabel_->setText("PREVIEW — capture OFF. Tune the camera and detector, then start monitoring. Previously queued clips can finish writing.");
 }
 
 void MainWindow::updateFrameLabel(const Frame& frame)
@@ -438,6 +467,11 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
 
 void MainWindow::onStartClicked()
 {
+    startStream(Session::Mode::Preview);
+}
+
+void MainWindow::startStream(Session::Mode mode)
+{
     std::unique_ptr<FrameSource> source = makeSource();
     if (!source)
     {
@@ -453,7 +487,7 @@ void MainWindow::onStartClicked()
     updateBlipReadout();
 
     QString error;
-    if (!session_->start(error))
+    if (!session_->start(error,mode))
     {
         synthetic_ = nullptr;
         recording_ = nullptr;
@@ -489,6 +523,27 @@ void MainWindow::onStartClicked()
 void MainWindow::onStopClicked()
 {
     finishStream();
+}
+
+void MainWindow::onMonitoringClicked()
+{
+    if (!session_->isRunning() || session_->modeChangePending()) return;
+    const bool monitoring=session_->mode()==Session::Mode::Monitoring;
+    if (!monitoring && camera_)
+    {
+        // Reopen with the requested controls, then read them back before any
+        // evidence frame. Never assign live Preview readbacks to buffered data.
+        try { ZwoSource::validateSettings(cameraPanel_->profile().camera,cameraPanel_->settings()); }
+        catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); return; }
+        bufferReadoutTimer_->stop();
+        session_->stop("monitoring settings boundary");
+        startStream(Session::Mode::Monitoring);
+        return;
+    }
+    if (session_->requestMonitoring(!monitoring))
+    {
+        updateControls(); updateStatusLabel();
+    }
 }
 
 void MainWindow::finishStream()
@@ -531,9 +586,11 @@ void MainWindow::selectRecording(QString path)
 
 void MainWindow::onSourceKindChanged()
 {
+    if (cameraDock_) cameraDock_->setVisible(cameraSelected());
     if (cameraSelected() && !session_->isRunning())
     {
         cameraDock_->raise();
+        detectionDock_->raise();
         cameraPanel_->refresh();
         ui_->fileLabel->setText("ASI camera selected");
     }
@@ -543,12 +600,13 @@ void MainWindow::onSourceKindChanged()
 void MainWindow::onApplyCamera()
 {
     if (!cameraSelected() || !cameraPanel_->hasCamera()) return;
+    if (session_->mode()==Session::Mode::Monitoring || session_->modeChangePending()) return;
     try { ZwoSource::validateSettings(cameraPanel_->profile().camera,cameraPanel_->settings()); }
     catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); return; }
     if (session_->isRunning())
     {
         bufferReadoutTimer_->stop(); session_->stop("camera settings changed");
-        onStartClicked();
+        startStream(Session::Mode::Preview);
     }
     else
     {
@@ -558,6 +616,13 @@ void MainWindow::onApplyCamera()
         else statusBar()->showMessage(QString::fromStdString(error));
     }
     updateControls();
+}
+
+void MainWindow::onApplyLiveCamera()
+{
+    if (!camera_ || session_->mode()!=Session::Mode::Preview || session_->modeChangePending()) return;
+    try { camera_->requestLiveControls(cameraPanel_->settings().controls); }
+    catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); }
 }
 
 void MainWindow::onInjectFlashClicked()

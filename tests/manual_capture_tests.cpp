@@ -78,9 +78,9 @@ public:
         });
     }
     void stop() override { if (worker_.joinable()) { worker_.request_stop(); ready_.notify_all(); worker_.join(); } }
-    void frame(uint64_t n)
+    void frame(uint64_t n, bool bright=false)
     {
-        command([this,n] {
+        command([this,n,bright] {
             auto f=pool_.acquire(64*48);
             f->width=64; f->height=48; f->format=PixelFormat::Mono8; f->significantBits=8;
             f->alignment=BitAlignment::Low; f->bayer=BayerPattern::None;
@@ -88,8 +88,14 @@ public:
             f->timestamp=std::chrono::system_clock::time_point{}+std::chrono::milliseconds{static_cast<int64_t>(n)*100};
             f->steadyTimestamp={}; f->testSource=true; f->syntheticFlash=false; f->blip.reset();
             std::fill(f->data.begin(),f->data.end(),uint8_t{100});
+            if (bright)
+                for (int y=10;y<13;++y) for (int x=10;x<13;++x) f->data[static_cast<size_t>(y)*64+x]+=40;
             listener_->onFrame(std::move(f));
         });
+    }
+    void settingsChanged()
+    {
+        command([this] { auto info=streamInfo(); info.gain="42"; listener_->onSettingsChanged(info,std::chrono::duration<double>{0}); });
     }
     void boundary(int kind) { command([this,kind] {
         if (kind==1) listener_->onEnded();
@@ -116,6 +122,76 @@ class ManualCaptureTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void previewNeverWritesAndArmingReconfirmsAnOngoingPatch()
+    {
+        QTemporaryDir dir; QObject context;
+        int candidates=0;
+        std::vector<ClipWriteResult> results;
+        {
+            Session::Notifications notices;
+            notices.candidateStarted=[&]{++candidates;};
+            notices.clipWritten=[&](const auto& r){results.push_back(r);};
+            Session session(&context,dir.path(),std::move(notices));
+            auto source=std::make_unique<ControlledSource>(); auto* controlled=source.get();
+            session.setSource(std::move(source));
+            QString error; QVERIFY(session.start(error));
+            QCOMPARE(session.mode(),Session::Mode::Preview);
+            controlled->frame(0); controlled->frame(1,true); controlled->frame(2,true);
+            QCoreApplication::processEvents();
+            const auto packet=session.takePreview(); QVERIFY(packet.detection);
+            QVERIFY(packet.detection->summary.triggered); QVERIFY(!packet.detection->monitoring);
+            QCOMPARE(candidates,0); QVERIFY(!session.requestManualSave());
+            QCOMPARE(QDir(dir.path()).entryList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
+            QVERIFY(session.requestMonitoring(true)); QVERIFY(session.modeChangePending());
+            controlled->frame(3,true); QCoreApplication::processEvents();
+            QCOMPARE(session.mode(),Session::Mode::Monitoring); QCOMPARE(candidates,1);
+            QVERIFY(session.requestMonitoring(false));
+            controlled->frame(4,true); QCoreApplication::processEvents();
+            QCOMPARE(session.mode(),Session::Mode::Preview); QVERIFY(session.isRunning());
+            QCOMPARE(session.acquiredFrames(),uint64_t{5});
+            controlled->frame(5); controlled->frame(6,true);
+            QCoreApplication::processEvents(); QCOMPARE(candidates,1);
+            session.stop();
+        }
+        QCoreApplication::processEvents(); QCOMPARE(results.size(),size_t{1});
+        QVERIFY(results[0].notSaved.isEmpty());
+        const auto note=read(results[0].folder+"/event.txt");
+        QVERIFY(note.contains("collection_end: monitoring stopped"));
+        QVERIFY(note.contains("onset_frame_index=3"));
+        SerReader reader; std::string error;
+        QVERIFY(reader.open(std::filesystem::path((results[0].folder+"/event.ser").toStdWString()),10,error));
+        QCOMPARE(reader.frameCount(),4); // Preview history 0–2 and the armed frame 3, never disarm frame 4.
+    }
+    void armingRequiresFreshTwoFramePersistenceWithoutLosingTheReference()
+    {
+        DetectionSettings settings; settings.oneFrame=false;
+        std::vector<EventClip> clips;
+        EventCapture capture({5,3,10},[]{},[&](EventClip c){clips.push_back(std::move(c));},settings);
+        capture.setMonitoring(false);
+        capture.onFrame(sample(0)); capture.onFrame(flash(1)); capture.onFrame(flash(2));
+        QVERIFY(capture.detectionSummary().firing); QVERIFY(!capture.saveNow({}));
+        capture.setMonitoring(true); capture.onFrame(flash(3));
+        QVERIFY(capture.detectionSummary().passed); QVERIFY(!capture.detectionSummary().firing);
+        capture.onFrame(flash(4)); QVERIFY(capture.detectionSummary().triggered);
+        capture.setMonitoring(false);
+        QCOMPARE(clips.size(),size_t{1}); QCOMPARE(clips[0].triggers[0].onsetFrameIndex,uint64_t{3});
+        QCOMPARE(clips[0].triggers[0].triggerFrameIndex,uint64_t{4}); QCOMPARE(clips[0].frames.size(),size_t{5});
+    }
+    void liveCameraReadbacksInvalidatePreviewHistoryAndRequireAReopen()
+    {
+        QTemporaryDir dir; QObject context; Session session(&context,dir.path(),{});
+        auto source=std::make_unique<ControlledSource>(); auto* controlled=source.get();
+        session.setSource(std::move(source)); QString error; QVERIFY(session.start(error));
+        controlled->frame(0); controlled->frame(1,true); QCOMPARE(session.bufferSize(),size_t{2});
+        QVERIFY(session.requestMonitoring(true)); // A live edit can race with an already queued arm request.
+        controlled->settingsChanged(); QCOMPARE(session.bufferSize(),size_t{0});
+        QCOMPARE(session.streamInfo().gain,std::string("42"));
+        QVERIFY(!session.requestMonitoring(true)); // Buffered live data cannot acquire a fixed evidence snapshot.
+        controlled->frame(2); QCOMPARE(session.bufferSize(),size_t{1});
+        QCOMPARE(session.mode(),Session::Mode::Preview); QVERIFY(!session.modeChangePending());
+        session.stop(); QVERIFY(session.start(error,Session::Mode::Monitoring));
+        controlled->frame(3); QVERIFY(session.requestManualSave()); session.stop();
+    }
     void retainsHistoryAndTheSourceTimeTail()
     {
         std::vector<EventClip> clips;
@@ -181,7 +257,7 @@ private slots:
                 auto source=std::make_unique<ControlledSource>(); auto* control=source.get();
                 session.setSource(std::move(source));
                 QVERIFY(!session.requestManualSave());
-                QString error; QVERIFY2(session.start(error),qPrintable(error));
+                QString error; QVERIFY2(session.start(error, Session::Mode::Monitoring),qPrintable(error));
                 control->frame(0); control->frame(1);
                 QVERIFY(session.requestManualSave()); QVERIFY(!session.requestManualSave());
                 if (boundary) control->boundary(boundary);
@@ -204,7 +280,7 @@ private slots:
             Session::Notifications notices; notices.manualSaveHandled=[&](bool ok){handled.push_back(ok);};
             Session session(&context,dir.path(),std::move(notices));
             session.setSource(std::make_unique<ControlledSource>());
-            QString error; QVERIFY(session.start(error)); QVERIFY(session.requestManualSave()); session.stop();
+            QString error; QVERIFY(session.start(error, Session::Mode::Monitoring)); QVERIFY(session.requestManualSave()); session.stop();
         }
         QCoreApplication::processEvents();
         QCOMPARE(handled.size(),size_t{1}); QVERIFY(!handled[0]);

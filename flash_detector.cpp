@@ -52,16 +52,25 @@ void FlashDetector::setSettings(const DetectionSettings& settings)
     settings_ = settings;
 }
 
-void FlashDetector::reset()
+void FlashDetector::rearm()
 {
-    mean_ = BudgetVector<float>(mean_.get_allocator());
-    variance_ = BudgetVector<float>(variance_.get_allocator());
-    grid_ = BudgetVector<float>(grid_.get_allocator());
-    thresholdPixels_ = BudgetVector<size_t>(thresholdPixels_.get_allocator());
-    thresholdSigma_ = BudgetVector<float>(thresholdSigma_.get_allocator());
-    visited_ = BudgetVector<uint8_t>(visited_.get_allocator());
-    pending_ = BudgetVector<size_t>(pending_.get_allocator());
-    protected_ = BudgetVector<uint8_t>(protected_.get_allocator());
+    active_.clear();
+    candidates_.clear();
+}
+
+void FlashDetector::reset(bool releaseBuffers)
+{
+    if (releaseBuffers)
+    {
+        mean_ = BudgetVector<float>(mean_.get_allocator());
+        variance_ = BudgetVector<float>(variance_.get_allocator());
+        grid_ = BudgetVector<float>(grid_.get_allocator());
+        thresholdPixels_ = BudgetVector<size_t>(thresholdPixels_.get_allocator());
+        thresholdSigma_ = BudgetVector<float>(thresholdSigma_.get_allocator());
+        visited_ = BudgetVector<uint8_t>(visited_.get_allocator());
+        pending_ = BudgetVector<size_t>(pending_.get_allocator());
+        protected_ = BudgetVector<uint8_t>(protected_.get_allocator());
+    }
     active_.clear(); candidates_.clear(); awaitingUpdate_ = false;
     history_.clear(); map_.reset();
     learnedFrames_ = 0;

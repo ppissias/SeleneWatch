@@ -47,7 +47,7 @@ struct WriterUsage
 // not fit is dropped at once and its candidates are logged as not saved.
 //
 // Every clip gets one line per candidate in <outputRoot>/candidates.txt,
-// saved or not. Each start of a stream gets a session_start line there
+// saved or not. Each entry to Monitoring gets a session_start line there
 // first, naming the source, so a candidate that was not saved still says
 // where it came from. One clip that fails to write is one failed clip; the
 // writer goes on to the next. Each result is reported through Finished on

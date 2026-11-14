@@ -54,9 +54,12 @@ private slots:
     void onInjectBlipClicked();
     void onSaveNowClicked();
     void onApplyCamera();
+    void onApplyLiveCamera();
+    void onMonitoringClicked();
 
 private:
     void setupStatusBar();
+    void startStream(Session::Mode mode);
     void setupDetectionPanel();
     void updateDetectionDisplay();
     void saveDetectionSettings();
@@ -113,6 +116,7 @@ private:
     QLabel* candidatesLabel_{nullptr};
     QLabel* bufferLabel_{nullptr};
     QLabel* frameLabel_{nullptr};
+    QLabel* modeLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
 
     uint64_t lastAcquiredSample_{0};

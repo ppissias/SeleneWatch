@@ -103,7 +103,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     maxSlider_ = new MeterSlider(1, 1'000'000, this); maxSlider_->setObjectName("maximumSlider");
     sigmaReading_ = new QLabel("Waiting for measurements", this); sigmaReading_->setObjectName("sigmaReading");
     sigmaReading_->setWordWrap(true);
-    sizeReading_ = new QLabel("Patch: --", this);
+    sizeReading_ = new QLabel("Patch: --", this); sizeReading_->setObjectName("patchReading"); sizeReading_->setWordWrap(true);
     layout->addWidget(new QLabel("Sensitivity K", this), 0, 0); layout->addWidget(sigma_, 0, 1);
     layout->addWidget(sigmaSlider_, 1, 0, 1, 2);
     layout->addWidget(sigmaReading_, 2, 0, 1, 2);
@@ -175,18 +175,26 @@ QImage DetectionPanel::overlayImage() const { return overlayImage_; }
 void DetectionPanel::setView(const DetectionView& view)
 {
     const auto& summary = view.summary;
+    latest_=summary; settling_=view.settling;
     double high = 0;
     int big = 0;
     for (const auto& point : view.history) { high = std::max(high, point.peakSigma); big = std::max(big, point.brightPixels); }
     sigmaSlider_->markers(summary.peakSigma, high);
     minSlider_->markers(summary.brightPixels, big);
     maxSlider_->markers(summary.brightPixels, big);
-    sigmaReading_->setText(QString("Now %1 sigma   Recent high %2 sigma").arg(summary.peakSigma, 0, 'f', 1).arg(high, 0, 'f', 1));
-    sizeReading_->setText(QString("Patch now %1 px   Recent high %2 px").arg(summary.brightPixels).arg(big));
-    state_->setText(QString("Noise floor %1 ADU; peak (%2, %3).\n%4   Detector %5 ms/frame\n%6 active patches; longest %7 s. Background learning outside %8 protected pixels.")
-        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
-        .arg(!summary.ready ? "Reference initialized" : summary.passed ? (summary.firing ? "Candidate" : "Passing; awaiting persistence") : "Quiet / patch rejected")
-        .arg(summary.processingMs, 0, 'f', 2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels));
+    const double threshold=std::max(0.1,summary.settings.sigma);
+    sigmaReading_->setText(QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
+        .arg(summary.peakSigma,0,'f',1).arg(threshold,0,'f',1).arg(100*summary.peakSigma/threshold,0,'f',0).arg(high,0,'f',1));
+    const double compactness=static_cast<double>(summary.boxWidth)*summary.boxHeight/std::max(1,summary.brightPixels);
+    sizeReading_->setText(QString("Patch %1 px; allowed %2–%3 px. Recent high %4.\nBox / patch %5; maximum %6.")
+        .arg(summary.brightPixels).arg(summary.settings.minPixels).arg(summary.settings.maxPixels).arg(big)
+        .arg(compactness,0,'f',1).arg(kMaxPatchBoxRatio,0,'f',1));
+    updateDecision();
+    if (view.settling || !summary.ready)
+    {
+        sigmaReading_->setText(view.settling?"Settling after camera change — relearning before threshold feedback.":"Learning the reference — waiting for measurements.");
+        sizeReading_->setText(QString("Allowed patch: %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
+    }
     history_->setView(view);
     overlayImage_ = {};
     if (!view.map || overlay() == DetectionOverlay::None)
@@ -226,4 +234,32 @@ void DetectionPanel::setView(const DetectionView& view)
     mapScale_->setText(map.kind == DetectionOverlay::Sigma
         ? QString("Red: at or above K (%1 sigma). Display only.").arg(scale, 0, 'f', 1)
         : QString("Noise colour scale: 0 to %1 ADU (95th percentile). Display only.").arg(scale, 0, 'f', 2));
+}
+
+void DetectionPanel::setMonitoring(bool monitoring)
+{
+    if (monitoring_==monitoring) return;
+    monitoring_=monitoring;
+    updateDecision();
+}
+
+void DetectionPanel::updateDecision()
+{
+    const auto& summary=latest_;
+    if (settling_)
+    {
+        state_->setText("Preview capture is OFF. Settling is an estimate; Monitoring starts fresh with verified camera settings.");
+        return;
+    }
+    if (!summary.ready)
+    {
+        state_->setText(QString("Learning reference (%1 frame(s)). Capture %2.").arg(summary.learningFrames).arg(monitoring_?"ON":"OFF"));
+        return;
+    }
+    const QString decision=summary.passed?(summary.firing?(monitoring_?"Candidate — capture ON":"Would trigger — capture OFF")
+        :"Passing; persistence 1 / 2 frames") :"Quiet / patch rejected";
+    state_->setText(QString("Noise floor %1 ADU; peak (%2, %3).\n%4   Detector %5 ms/frame\n%6 active patches; longest %7 s. Background learning outside %8 protected pixels.\n%9")
+        .arg(summary.noiseFloor,0,'f',2).arg(summary.peakX).arg(summary.peakY).arg(decision)
+        .arg(summary.processingMs,0,'f',2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels)
+        .arg(summary.settings.oneFrame?"One passing frame can trigger.":"Two consecutive passing frames required."));
 }

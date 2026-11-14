@@ -54,7 +54,7 @@ These rules protect the scientific value of what SeleneWatch records. Every feat
 2. **Samples are stored as delivered.** No rescaling and no truncation to 8 bits. A frame records its storage format, interpreted sample width and alignment. A source with a verified packing contract can declare 12 high or low bits in a 16-bit word. A source without that contract conservatively interprets all 16 delivered bits and records the advertised sensor ADC depth separately. The connected ASI120MM Mini has zero low four bits at bin 1 but meaningful lower bits at bin 2; a fixed ZWO 12-bit shift would be incorrect. Sampled zero bits alone do not prove padding. A colour sensor's raw Bayer mosaic is stored as raw data with its pattern, and is debayered only for display.
 3. **Evidence formats are lossless, and evidence is not written through the preview path.** SER holds clips and recordings. PNG (8- or 16-bit) is lossless and is acceptable for a few preview images and for today's Mono8 clips. JPEG and video codecs never hold evidence. The conversion that writes a file is separate from the conversion that feeds the screen. A preview shift or stretch must never be the code path that writes a frame to disk. The window has `frameToPreviewImage`; the writer has its own conversion beside the writer code (Feature-7).
 4. **Every frame carries its index and its time.** The index comes from the source (the camera's frame counter where one exists). Each frame has a UTC time and a monotonic time. A gap in the index is a dropped frame, and gaps inside a clip are written into its metadata. A flash can fall into a gap; the record must say so.
-5. **The detector never stops looking.** While a clip is being collected or written, frames are still analysed. A second candidate either extends the open clip or starts a new one. If memory or the writer cannot take it, it is still logged with its frame index, time, and measured values. Every candidate, saved or not, appears in the session's candidate log, so the record shows what was seen and what was kept.
+5. **The detector never stops looking.** While a clip is being collected or written, frames are still analysed. During Monitoring, a second candidate either extends the open clip or starts a new one. If memory or the writer cannot take it, it is still logged with its frame index, time, and measured values. Every Monitoring candidate, saved or not, appears in the session's candidate log, so the record shows what was seen and what was kept. Preview is an explicit tuning state with capture OFF: it shows the same detector's diagnostic decisions without creating clips or candidate records. Camera changes invalidate its reference/history and suppress threshold feedback during estimated settling. This scope distinction is deliberate: tuning feedback must not be mistaken for an observation record.
 6. **Test signals are marked.** Any frame changed by an injected signal is marked, per frame, and the clip says it contains a test. A clip without that mark is data.
 7. **A written clip is not rewritten.** Review decisions (kept, discarded, classified) are stored beside the clip, not inside it. A write ends with an explicit completion marker, so a clip without one is known to be partial. A clip folder is never reused, even when the same recording is played twice.
 8. **A clip describes itself.** Each clip records at least:
@@ -110,6 +110,8 @@ The application is a **processing core** with a **Qt Widgets interface**. The co
 ```
 
 `Session` owns the frame path. It applies a requested test blip before publication, then gives the same read-only frame to the preview and the capture. The window selects the source, sends requests, and reads notifications and counters.
+
+`Session` also owns Stopped / Preview / Monitoring state. Preview is the default and keeps acquisition, bounded history and analysis active with capture disabled. Monitoring enables both automatic clips and explicit Save now. Mode requests cross on the source thread before a frame (or at a camera timeout checkpoint); leaving Monitoring hands off the current available clip before Preview camera edits are allowed. The writer drains immutable jobs independently. Live ZWO controls use a worker request slot; readback snapshots are copied under a mutex. Since the SDK does not identify which settings produced a buffered frame, camera Monitoring starts with a fresh open/readback and an empty history/reference. Synthetic and recorded sources retain valid same-configuration history/reference and reconfirm ongoing patches on entry. [Preview and Monitoring](docs/preview-monitoring.md) records this workflow and its limits.
 
 ### Frame ownership
 
@@ -207,12 +209,12 @@ Output goes next to the executable for now (a Feature-4 decision). A configurabl
 ## 8. Intended Runtime Workflow
 
 1. The observer selects a source (camera, recording, or synthetic) and configures the session: exposure, gain, ROI, trigger parameters, site.
-2. SeleneWatch starts acquisition and keeps the latest frames in the ring.
+2. **Start preview** begins acquisition, bounded history and live detection feedback with capture OFF. Supported camera controls can be tuned live; layout changes restart Preview. The camera and Detection panels are visible together.
 3. Optionally, the observer locks on a lunar feature and watches the drift readout. With a mount connected and calibrated, guiding can be turned on to hold the field.
 4. The detector analyses every frame and shows its noise, peak, and pass/fail state live.
 5. Optionally, the observer injects a test signal to measure the session's faint limit.
-6. A candidate starts a clip; the clip is collected and written without stopping acquisition or detection.
-7. Predicted events are captured with continuous recording; anything the observer sees is kept with manual save.
+6. **Start monitoring** fixes the camera settings and enables event capture. For cameras this establishes a fresh acquisition/reference boundary, so tuning frames are excluded. A candidate starts a clip; the clip is collected and written without stopping acquisition or detection.
+7. **Stop monitoring** finishes the available clip and returns to Preview while acquisition continues. Save now is enabled during Monitoring; continuous recording for predicted events remains planned. **Stop stream** ends acquisition and closes the camera.
 8. Afterwards, the observer reviews, classifies, keeps, discards, or exports candidates.
 
 ## 9. Technology Choices

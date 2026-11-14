@@ -2261,7 +2261,7 @@ void SessionTest::serFileThroughSessionWritesAClip()
         session.setSource(std::move(source));
 
         QString error;
-        QVERIFY2(session.start(error), qPrintable(error));
+        QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(ended, 30000);
         QVERIFY(session.sourceFinished());
         session.stop();
@@ -2316,7 +2316,7 @@ void SessionTest::endOfFileHandsOffTheOpenClip()
         session.setSource(std::move(source));
 
         QString error;
-        QVERIFY2(session.start(error), qPrintable(error));
+        QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
 
         // The clip is handed off at the end, before the window stops anything.
         QTRY_VERIFY_WITH_TIMEOUT(ended, 30000);
@@ -2373,7 +2373,7 @@ void SessionTest::loopJumpFiresNoCandidate()
         session.setSource(std::move(source));
 
         QString error;
-        QVERIFY2(session.start(error), qPrintable(error));
+        QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames() >= 50, 10000);
         session.stop();
         QVERIFY(!session.sourceFinished());
@@ -2405,7 +2405,7 @@ void SessionTest::unreadableFileDoesNotStart()
     session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
 
     QString error;
-    QVERIFY(!session.start(error));
+    QVERIFY(!session.start(error, Session::Mode::Monitoring));
     QVERIFY2(error.contains("not a SER file"), qPrintable(error));
     QVERIFY(!session.isRunning());
 }
@@ -2477,7 +2477,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
         running = &session;
         session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
         QString error;
-        QVERIFY2(session.start(error), qPrintable(error));
+        QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(ended, 10000);
         QVERIFY(requested);
         QVERIFY(!session.blipBusy());
@@ -2549,7 +2549,7 @@ void SessionTest::stopCancelsAnUnfinishedInjection()
     QVERIFY(!session.requestBlip(settings));
     session.setSource(std::make_unique<RecordingSource>(fsPath(path)));
     QString error;
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     QVERIFY(session.requestBlip(settings));
     FramePtr observed;
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
@@ -2563,7 +2563,7 @@ void SessionTest::stopCancelsAnUnfinishedInjection()
     session.stop();
     QVERIFY(!session.blipBusy());
     QVERIFY(!session.requestBlip(settings));
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     observed.reset();
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         if (!observed)

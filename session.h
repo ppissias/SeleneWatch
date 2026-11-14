@@ -35,6 +35,7 @@
 class Session final : private FrameSourceListener
 {
 public:
+    enum class Mode { Stopped, Preview, Monitoring };
     // Each one runs on the context object's thread, queued. Any may be empty.
     struct Notifications
     {
@@ -42,6 +43,8 @@ public:
         // Take them together with takePreview().
         std::function<void()> previewReady;
         std::function<void()> candidateStarted;
+        std::function<void()> modeChanged;
+        std::function<void()> cameraSettingsChanged;
         std::function<void(bool)> manualSaveHandled;
         std::function<void(const ClipWriteResult&)> clipWritten;
 
@@ -65,9 +68,19 @@ public:
     // remain charged and may prevent lowering the ceiling until they drain.
     void setCaptureSettings(CaptureSettings settings);
 
-    // Opens the source and starts it. False, with the reason, when the
-    // source cannot be opened; nothing runs then.
-    bool start(QString& error);
+    // Opens the source and starts Preview by default. Diagnostic tools may
+    // explicitly start Monitoring. False, with the reason, when the source
+    // cannot be opened; nothing runs then.
+    bool start(QString& error, Mode mode = Mode::Preview);
+
+    // Context thread. Applied before the next delivered frame, or at a camera
+    // wait checkpoint when no frame is ready. Disarming ends the available
+    // clip before that frame, without stopping the source.
+    // A camera tuned live must be reopened before arming to exclude buffered
+    // frames whose settings cannot be established by the SDK.
+    bool requestMonitoring(bool monitoring);
+    [[nodiscard]] Mode mode() const;
+    [[nodiscard]] bool modeChangePending() const;
 
     // Stops the source and hands off a clip still being collected. Safe when stopped.
     void stop(std::string reason = "stopped");
@@ -92,7 +105,7 @@ public:
     [[nodiscard]] bool sourceFinished() const;
 
     // The stream of the current or last run. Context thread only.
-    [[nodiscard]] const StreamInfo& streamInfo() const;
+    [[nodiscard]] StreamInfo streamInfo() const;
 
     // Safe from any thread.
     [[nodiscard]] uint64_t acquiredFrames() const;
@@ -107,16 +120,20 @@ private:
     // Source thread.
     void onFrame(std::shared_ptr<Frame> frame) override;
     void onDiscontinuity() override;
+    void onSettingsChanged(const StreamInfo& info, std::chrono::duration<double> settling) override;
+    void onIdle() override;
     void onEnded() override;
     void onFailed(const std::string& message) override;
 
     void post(std::function<void()> call);
     void applyManualSave();
+    void applyModeRequest();
 
     QObject* context_;
     Notifications notifications_;
 
-    // Set at start, before the source thread runs, and only read while it runs.
+    // Changed at start or by source-thread Preview readbacks. Context queries
+    // copy it under requestMutex_; clips receive it on the source thread.
     StreamInfo streamInfo_;
 
     MemoryBudget memory_{size_t{2} * 1024 * 1024 * 1024};
@@ -131,6 +148,10 @@ private:
     DetectionSettings detectionSettings_;
     DetectionDisplayRequest displayRequest_;
     std::optional<std::chrono::system_clock::time_point> manualRequest_;
+    std::optional<bool> monitoringRequest_;
+    std::atomic<Mode> mode_{Mode::Stopped};
+    bool cameraTuned_{false}; // protected by requestMutex_
+    std::chrono::steady_clock::time_point settlingUntil_{};
     std::chrono::steady_clock::time_point lastPreviewTime_{};
     std::atomic<uint64_t> acquiredFrames_{0};
     std::atomic<uint64_t> droppedFrames_{0};

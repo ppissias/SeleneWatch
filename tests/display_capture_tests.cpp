@@ -303,7 +303,7 @@ void DisplayCaptureTest::memoryFailurePreservesTheOpenClipAndReportsItsEnd()
     session.setCaptureSettings(settings);
     session.setSource(std::make_unique<MemoryTestSource>());
     QString error;
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     QTRY_VERIFY_WITH_TIMEOUT(!failure.isEmpty(), 5000);
     QVERIFY(failure.contains("RAM limit"));
     session.stop();
@@ -334,7 +334,7 @@ void DisplayCaptureTest::memoryCapSplitsTheRunAndLeavesRoomForItsDifference()
     session.setCaptureSettings({0.005, 0.01, 100, 8 * 1024 * 1024});
     session.setSource(std::make_unique<MemoryTestSource>(false));
     QString error;
-    QVERIFY2(session.start(error), qPrintable(error));
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
     QTRY_VERIFY_WITH_TIMEOUT(ended || !failure.isEmpty(), 10000);
     QVERIFY2(failure.isEmpty(), qPrintable(failure));
     session.stop();

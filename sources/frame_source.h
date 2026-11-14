@@ -20,6 +20,15 @@ public:
     // looped playback starts again.
     virtual void onDiscontinuity() = 0;
 
+    // Live camera readbacks changed. Buffered frame association is unknown
+    // in Preview; the duration is a conservative settling estimate, not a
+    // per-frame settings guarantee. Recording requires a fresh camera open.
+    virtual void onSettingsChanged(const StreamInfo&, std::chrono::duration<double>) { onDiscontinuity(); }
+
+    // Camera wait returned without a frame. A listener may service mode
+    // requests here, on the same worker, even during a long exposure.
+    virtual void onIdle() {}
+
     // The source has no more frames, as at the end of a recording. Nothing
     // follows, and the worker thread ends.
     virtual void onEnded() = 0;

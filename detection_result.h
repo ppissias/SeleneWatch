@@ -68,4 +68,6 @@ struct DetectionView
     DetectionSummary summary;
     std::vector<DetectionHistoryPoint> history;
     std::shared_ptr<const DetectionMap> map;
+    bool monitoring{false};
+    bool settling{false};
 };
