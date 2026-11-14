@@ -113,8 +113,8 @@ int main(int argc,char** argv)
         std::vector<double> detectorTimes;
         QJsonObject report; QString failure; uint64_t acquired=0; MemoryUsage memory; WriterUsage usage;
         double elapsed=0; int candidates=0; bool injectionRequested=false;
+        Session* active=nullptr; // Outlives queued preview callbacks drained after Session destruction.
         {
-            Session* active=nullptr;
             const auto started=std::chrono::steady_clock::now();
             Session::Notifications notices;
             notices.previewReady=[&] {
