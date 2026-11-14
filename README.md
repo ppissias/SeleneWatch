@@ -8,7 +8,7 @@ The main motivation is to help observers detect and document **lunar transient p
 
 > **Project status: Feature-6 complete; Feature-9 and Feature-5 implemented, with observing field checks still open.** Synthetic streams and SER/uncompressed AVI recordings use the same detector, time-based history, shared image/analysis memory budget, and asynchronous SER writer. Detection controls the noise trigger and overlays; Display and capture adds native-bit stretch, Bayer colour, durations, and memory controls. Clips retain native pixels, timestamps, test marks, settings, and review previews. Measurements and data limitations are in [Feature-9 validation](docs/feature-9-validation.md) and [Feature-5 validation](docs/feature-5-validation.md). Camera adapters and mount guiding follow.
 
-The [registration follow-up](docs/registration-experiment.md) compares four recordings with matching crop controls and injected targets. It remains a manual experiment: fewer candidates can conceal a detector that stays active, so reference holding and rearming need investigation before registration is enabled.
+The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Eight test suites cover these paths; observing calibration remains partial. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
 
 ## What SeleneWatch aims to do
 
@@ -119,7 +119,7 @@ The **Display and capture** tab offers Linear, Black/white levels, and Auto-stre
 | 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
 | 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
 | 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Proposed |
+| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Manual save implemented; cameras proposed |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |
 | 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |
 | 12 | More camera families; registration, transit detection, event browser, export | — | Planned |

@@ -192,17 +192,17 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
         capture.onFrame(frame, {overlay, x, y, overlay != DetectionOverlay::None && i % mapEvery == 0});
         captureMs += timer.nsecsElapsed() / 1.0e6;
         const auto& summary = capture.detectionSummary();
-        if (summary.triggered)
+        for (const auto& candidate:capture.detectionCandidates())
         {
             // Match to a peak pixel actually brightened by the injection.
             // At a saturated centre the passing patch may lie to one side.
             const bool atBlip = frame->blip
-                && valueAt(*frame, summary.peakX, summary.peakY)
-                    > valueAt(*frames[static_cast<size_t>(i)], summary.peakX, summary.peakY);
+                && valueAt(*frame, candidate.peakX, candidate.peakY)
+                    > valueAt(*frames[static_cast<size_t>(i)], candidate.peakX, candidate.peakY);
             recovered = recovered || atBlip;
             if (!atBlip) ++background;
-            candidatePatches.append(QJsonObject{{"position", i}, {"peakX", summary.peakX}, {"peakY", summary.peakY},
-                {"peakSigma", summary.peakSigma}, {"pixels", summary.brightPixels}, {"atBlip", atBlip}});
+            candidatePatches.append(QJsonObject{{"position", i}, {"peakX", candidate.peakX}, {"peakY", candidate.peakY},
+                {"peakSigma", candidate.peakSigma}, {"pixels", candidate.brightPixels}, {"atBlip", atBlip}});
         }
         timings.push_back(summary.processingMs);
         if (frame->blip)
@@ -392,10 +392,13 @@ int registrationExperiment(const QString& input, const QString& output, const QJ
                         matchedPass=matchedPass||(measured.passed&&atBlip);
                         matchedTrigger=matchedTrigger||(measured.triggered&&atBlip);
                     }
-                    if (measured.triggered)
+                    for (const auto& candidate:capture.detectionCandidates())
                     {
+                        const int ox=candidate.peakX+border+sx, oy=candidate.peakY+border+sy;
+                        const bool matched=current->blip && valueAt(*current,ox,oy)>valueAt(*frames[i],ox,oy);
+                        matchedTrigger=matchedTrigger || matched;
                         positions.append(static_cast<int>(i));
-                        if (!atBlip) ++background;
+                        if (!matched) ++background;
                     }
                 }
                 capture.finishPartial();
@@ -415,7 +418,8 @@ int registrationExperiment(const QString& input, const QString& output, const QJ
         {"acceptedTranslations",accepted},{"boundaryTranslations",boundary},{"meanTranslationMs",shiftMean},
         {"p95TranslationMs",shiftTimes[(shiftTimes.size()-1)*95/100]},{"maxTranslationMs",shiftTimes.back()},
         {"method","integer translation, fixed first-frame template, 8x8 box coarse NCC and sparse native refinement; invalid estimates use zero shift"},
-        {"evidence","no event/evidence output; crops are derived TEST data only"},{"cases",cases}});
+        {"evidence","no event/evidence output; crops are derived TEST data only"},
+        {"detectorPolicy","local patch protection and independent persistence; candidates count new patch runs, including multiple in one frame"},{"cases",cases}});
     if (!writeJson(directory.filePath("registration.json"),report)) return 1;
     QTextStream(stdout) << "Compared " << cases.size() << " cases over " << frames.size() << " frames; accepted " << accepted
         << " translations; mean " << shiftMean << " ms; output " << directory.filePath("registration.json") << '\n';

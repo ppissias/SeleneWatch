@@ -1,5 +1,7 @@
 # Feature-9 follow-up: whole-frame registration — 14 November 2026
 
+> Historical experiment using the detector at `7c33b94`. The subsequent [reference/rearming follow-up](reference-and-manual-validation.md) changes reference learning and patch persistence and repeats these controls into separate outputs. The tables below retain the original results; running today's probe uses the revised detector.
+
 The manual integer-translation experiment is complete. **It does not justify enabling registration in the application.** At K=6, fewer candidates often mean one nearly continuous firing run, rather than a quieter detector. At the previously quiet comparison settings, alignment does not improve the tested mare or terminator recovery bracket. The crater-rim and RGB recoveries require saturated centres. These are short, single-position experiments, not observing calibration or a measured false-impact rate.
 
 The prototype is linked only into `SeleneWatchProbe` and its registration tests. The application still analyses original native frames. No archive file, evidence file, license, or dependency changed. Feature-9's earthshine/bright-limb calibration and Feature-5's real-earthshine display check remain open.

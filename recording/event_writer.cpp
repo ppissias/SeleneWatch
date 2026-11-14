@@ -137,13 +137,26 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
 
 QString triggerFields(const ClipTrigger& trigger)
 {
-    QString text = QString("onset_frame_index=%1 trigger_frame_index=%2 bright_pixel_count=%3")
-        .arg(trigger.onsetFrameIndex).arg(trigger.triggerFrameIndex).arg(trigger.brightPixelCount);
-    text += QString(" sigma=%1 min_pixels=%2 max_pixels=%3 one_frame=%4 peak_sigma=%5 noise_floor_adu=%6 peak=(%7,%8) box=(%9,%10,%11,%12)")
+    QString text = QString("onset_frame_index=%1 trigger_frame_index=%2")
+        .arg(trigger.onsetFrameIndex).arg(trigger.triggerFrameIndex);
+    if (trigger.kind==TriggerKind::Manual)
+    {
+        text += " kind=manual requested_host_utc=" + utcText(trigger.requestedAt);
+        text += " requested_source_utc=" + utcText(trigger.requestSourceTime);
+        text += QString(" detection_sigma=%1 detection_min_pixels=%2 detection_max_pixels=%3 detection_one_frame=%4")
+            .arg(trigger.settings.sigma,0,'g',17).arg(trigger.settings.minPixels).arg(trigger.settings.maxPixels).arg(trigger.settings.oneFrame?"yes":"no");
+    }
+    else
+    {
+        text += QString(" bright_pixel_count=%1").arg(trigger.brightPixelCount);
+        text += QString(" sigma=%1 min_pixels=%2 max_pixels=%3 one_frame=%4 peak_sigma=%5 noise_floor_adu=%6 peak=(%7,%8) box=(%9,%10,%11,%12)")
         .arg(trigger.settings.sigma, 0, 'g', 17).arg(trigger.settings.minPixels).arg(trigger.settings.maxPixels)
         .arg(trigger.settings.oneFrame ? "yes" : "no").arg(trigger.peakSigma, 0, 'g', 17)
         .arg(trigger.noiseFloor, 0, 'g', 17).arg(trigger.peakX).arg(trigger.peakY)
         .arg(trigger.boxX).arg(trigger.boxY).arg(trigger.boxWidth).arg(trigger.boxHeight);
+        text += QString(" kind=automatic active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
+            .arg(trigger.activePatches).arg(trigger.protectedPixels).arg(trigger.learningFrames).arg(trigger.longestActiveSeconds,0,'g',17);
+    }
     if (trigger.continuesPreviousClip)
     {
         text += " continues_previous_clip";
@@ -435,6 +448,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
                 << " trigger_time=" << utcText(trigger.triggerTime) << "\n";
         }
         out << "detector: per-pixel sigma / compact patch\n";
+        out << "reference_policy: update background outside passing patch boxes plus one pixel; clip collection does not hold learning\n";
+        out << "persistence_policy: adjacent/overlapping patches inherit state; separate patches trigger independently\n";
         out << "reference_time_constant_seconds: " << kReferenceTimeConstantSeconds << "\n";
         out << "max_patch_box_ratio: " << kMaxPatchBoxRatio << "\n";
         out << "frames_before: " << clip.framesBefore << "\n";
@@ -565,7 +580,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         QPainter painter(&difference);
         painter.setPen(QPen(Qt::red, 1));
         painter.drawRect(QRect(clip.peak.boxX, clip.peak.boxY, clip.peak.boxWidth, clip.peak.boxHeight));
-        painter.drawText(8, 18, QString("Difference from held reference; peak %1 sigma; display scaled")
+        painter.drawText(8, 18, QString("Pre-update reference difference; peak %1 sigma; display scaled")
             .arg(clip.peak.peakSigma, 0, 'f', 1));
     }
     else
@@ -591,6 +606,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         QTextStream out(&note);
         out << "baseline_frame_index: " << (baseline ? QString::number(baseline->frameIndex) : "unavailable") << "\n";
         out << "peak_preview_frame_index: " << peak->frameIndex << "\n";
+        out << "peak_preview_role: " << (clip.peak.ready ? "selected automatic passing patch" : "capture request frame; no measured passing peak") << "\n";
         if (clip.peak.ready)
         {
             out << "peak_sigma: " << QString::number(clip.peak.peakSigma, 'g', 17) << "\n";
@@ -642,7 +658,7 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
     for (const ClipTrigger& trigger : clip.triggers)
     {
         out << utcText(trigger.triggerTime) << " ";
-        if (pending) out << "candidate_pending ";
+        if (pending) out << (trigger.kind==TriggerKind::Manual ? "manual_pending " : "candidate_pending ");
         out << triggerFields(trigger)
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;

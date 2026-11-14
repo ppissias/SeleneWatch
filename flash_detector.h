@@ -8,10 +8,13 @@
 
 // Feature-9: per-pixel running reference and variance, in native sample
 // units. A robust grid estimate supplies a noise floor. At least one compact
-// patch over K must satisfy the size limits; the strongest passing patch wins.
+// patch over K must satisfy the size limits. Spatially separate patches have
+// independent persistence; all new candidates are reported.
 //
 // The source thread owns all state. Frames are read only. Reference and
-// variance freeze on a passing frame and while capture holds a clip open.
+// variance are held only within passing patch boxes plus one pixel. Background
+// elsewhere keeps learning, including while a clip is open. Measurement and
+// learning are separate so capture can retain the actual pre-update difference.
 // Display requests only produce derived data; they never change decisions.
 class FlashDetector
 {
@@ -20,21 +23,26 @@ public:
     void reset();
     void setSettings(const DetectionSettings& settings);
 
-    // True once per run: on its first passing frame, or its second when
-    // one-frame triggering is off. Invalid frame layouts throw.
-    bool observe(const Frame& frame, bool holdReference = false, DetectionDisplayRequest display = {});
+    // Source thread, in this order for each frame: analyze, inspect/copy derived
+    // measurements, updateReference with that same immutable frame.
+    bool analyze(const Frame& frame, DetectionDisplayRequest display = {});
+    void updateReference(const Frame& frame);
+    [[nodiscard]] const std::vector<DetectionSummary>& candidates() const;
+    [[nodiscard]] const DetectionSummary& strongestPatch() const;
 
     [[nodiscard]] bool firing() const;
     [[nodiscard]] int lastBrightCount() const;
     [[nodiscard]] uint64_t onsetFrameIndex() const;
     [[nodiscard]] const DetectionSummary& summary() const;
     [[nodiscard]] DetectionView view() const;
-    // Reuses the caller's charged buffer for a derived display difference.
+    // Before updateReference: reuses the caller's charged buffer for this
+    // frame's actual pre-update display difference.
     void difference(const Frame& frame, BudgetVector<float>& values) const;
 
 private:
     DetectionSettings settings_;
     DetectionSummary summary_;
+    DetectionSummary strongest_;
     MemoryBudget budget_;
     BudgetVector<float> mean_;
     BudgetVector<float> variance_;
@@ -44,6 +52,15 @@ private:
     BudgetVector<float> thresholdSigma_;
     BudgetVector<uint8_t> visited_;
     BudgetVector<size_t> pending_;
+    BudgetVector<uint8_t> protected_;
+    struct Patch
+    {
+        DetectionSummary measured;
+        int consecutive{0};
+        double seconds{0};
+    };
+    std::vector<Patch> active_;
+    std::vector<DetectionSummary> candidates_;
     size_t learnedFrames_{0};
     std::deque<DetectionHistoryPoint> history_;
     std::shared_ptr<const DetectionMap> map_;
@@ -53,7 +70,6 @@ private:
     BitAlignment alignment_{BitAlignment::Low};
     BayerPattern bayer_{BayerPattern::None};
     std::chrono::system_clock::time_point previousTime_{};
-    int consecutive_{0};
-    bool runTriggered_{false};
-    uint64_t onsetFrameIndex_{0};
+    double frameInterval_{0};
+    bool awaitingUpdate_{false};
 };

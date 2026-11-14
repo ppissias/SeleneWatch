@@ -40,6 +40,9 @@ struct DetectionSummary
     bool triggered{false};
     bool firing{false};
     bool overlaySkipped{false};
+    uint64_t onsetFrameIndex{0};
+    size_t newCandidates{0}, activePatches{0}, protectedPixels{0}, learningFrames{0};
+    double longestActiveSeconds{0};
 };
 
 struct DetectionHistoryPoint

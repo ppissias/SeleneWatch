@@ -6,6 +6,7 @@
 #include "frame_ring_buffer.h"
 
 #include <functional>
+#include <optional>
 
 // Runs the detector on every frame and collects the clips around candidates.
 //
@@ -42,6 +43,10 @@ public:
     void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {});
     void setDetectionSettings(const DetectionSettings& settings);
     [[nodiscard]] const DetectionSummary& detectionSummary() const;
+    [[nodiscard]] const std::vector<DetectionSummary>& detectionCandidates() const;
+    // Source thread, or after it is joined. Marks the latest retained frame
+    // and extends collection by the configured tail; no pixels are copied.
+    bool saveNow(std::chrono::system_clock::time_point requestedAt);
     [[nodiscard]] DetectionView detectionView() const;
 
     // Hands off a short clip when Stop interrupts collection.
@@ -54,7 +59,7 @@ private:
     void beginClip(const ClipTrigger& trigger);
     void handOff(std::string reason);
     void rememberPeak(const Frame& frame);
-    [[nodiscard]] ClipTrigger currentTrigger(const Frame& frame, bool continuation) const;
+    [[nodiscard]] ClipTrigger currentTrigger(const DetectionSummary& measured, bool continuation) const;
 
     FrameRingBuffer ring_;
     MemoryBudget budget_;
@@ -66,6 +71,7 @@ private:
     FlashDetector detector_;
     EventClip clip_;
     bool collecting_{false};
+    std::optional<ClipTrigger> manualTail_;
 
     std::chrono::system_clock::time_point lastFiringTime_{};
 };

@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 
 // The frame path from a source to the capture, the writer, and the preview.
@@ -41,6 +42,7 @@ public:
         // Take them together with takePreview().
         std::function<void()> previewReady;
         std::function<void()> candidateStarted;
+        std::function<void(bool)> manualSaveHandled;
         std::function<void(const ClipWriteResult&)> clipWritten;
 
         // The recording has no more frames. Call stop() to finish.
@@ -74,6 +76,8 @@ public:
     // are copied; later control edits do not change an active injection.
     bool requestBlip(const BlipSettings& settings);
     [[nodiscard]] bool blipBusy() const;
+    bool requestManualSave();
+    [[nodiscard]] bool manualSavePending() const;
 
     // Context thread. Copied by the source before the next frame.
     void setDetectionSettings(const DetectionSettings& settings);
@@ -106,6 +110,7 @@ private:
     void onFailed(const std::string& message) override;
 
     void post(std::function<void()> call);
+    void applyManualSave();
 
     QObject* context_;
     Notifications notifications_;
@@ -121,9 +126,10 @@ private:
     EventCapture capture_;
     LatestFrameSlot previewSlot_;
     BlipInjector blip_;
-    mutable std::mutex detectionMutex_;
+    mutable std::mutex requestMutex_;
     DetectionSettings detectionSettings_;
     DetectionDisplayRequest displayRequest_;
+    std::optional<std::chrono::system_clock::time_point> manualRequest_;
     std::chrono::steady_clock::time_point lastPreviewTime_{};
     std::atomic<uint64_t> acquiredFrames_{0};
     std::atomic<bool> sourceFinished_{false};

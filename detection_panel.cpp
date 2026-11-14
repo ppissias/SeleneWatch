@@ -183,10 +183,10 @@ void DetectionPanel::setView(const DetectionView& view)
     maxSlider_->markers(summary.brightPixels, big);
     sigmaReading_->setText(QString("Now %1 sigma   Recent high %2 sigma").arg(summary.peakSigma, 0, 'f', 1).arg(high, 0, 'f', 1));
     sizeReading_->setText(QString("Patch now %1 px   Recent high %2 px").arg(summary.brightPixels).arg(big));
-    state_->setText(QString("Noise floor %1 ADU; peak (%2, %3).\n%4   Detector %5 ms/frame")
+    state_->setText(QString("Noise floor %1 ADU; peak (%2, %3).\n%4   Detector %5 ms/frame\n%6 active patches; longest %7 s. Background learning outside %8 protected pixels.")
         .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
         .arg(!summary.ready ? "Reference initialized" : summary.passed ? (summary.firing ? "Candidate" : "Passing; awaiting persistence") : "Quiet / patch rejected")
-        .arg(summary.processingMs, 0, 'f', 2));
+        .arg(summary.processingMs, 0, 'f', 2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels));
     history_->setView(view);
     overlayImage_ = {};
     if (!view.map || overlay() == DetectionOverlay::None)

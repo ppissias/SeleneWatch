@@ -37,7 +37,7 @@ FlashDetector::FlashDetector(DetectionSettings settings, MemoryBudget budget)
     : budget_(std::move(budget)), mean_(BudgetAllocator<float>(budget_)), variance_(BudgetAllocator<float>(budget_)),
       grid_(BudgetAllocator<float>(budget_)), thresholdPixels_(BudgetAllocator<size_t>(budget_)),
       thresholdSigma_(BudgetAllocator<float>(budget_)), visited_(BudgetAllocator<uint8_t>(budget_)),
-      pending_(BudgetAllocator<size_t>(budget_))
+      pending_(BudgetAllocator<size_t>(budget_)), protected_(BudgetAllocator<uint8_t>(budget_))
 {
     setSettings(settings);
 }
@@ -45,13 +45,10 @@ FlashDetector::FlashDetector(DetectionSettings settings, MemoryBudget budget)
 void FlashDetector::setSettings(const DetectionSettings& settings)
 {
     if (!settings.valid()) throw std::invalid_argument("invalid detection settings");
-    // A pending two-frame confirmation must use one set of settings. Keep
-    // an already-triggered run armed until quiet, so an edit cannot duplicate it.
-    if (settings != settings_ && !runTriggered_)
-    {
-        consecutive_ = 0;
-        onsetFrameIndex_ = 0;
-    }
+    // Pending confirmation cannot combine different settings. Already firing
+    // patches remain firing until absent, so an edit cannot duplicate them.
+    if (settings != settings_)
+        std::erase_if(active_, [](const Patch& patch) { return !patch.measured.firing; });
     settings_ = settings;
 }
 
@@ -64,18 +61,19 @@ void FlashDetector::reset()
     thresholdSigma_ = BudgetVector<float>(thresholdSigma_.get_allocator());
     visited_ = BudgetVector<uint8_t>(visited_.get_allocator());
     pending_ = BudgetVector<size_t>(pending_.get_allocator());
+    protected_ = BudgetVector<uint8_t>(protected_.get_allocator());
+    active_.clear(); candidates_.clear(); awaitingUpdate_ = false;
     history_.clear(); map_.reset();
     learnedFrames_ = 0;
     width_ = height_ = bits_ = 0;
-    consecutive_ = 0;
-    runTriggered_ = false;
-    onsetFrameIndex_ = 0;
     previousTime_ = {};
     summary_ = {};
+    strongest_ = {};
 }
 
-bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDisplayRequest display)
+bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
 {
+    if (awaitingUpdate_) throw std::logic_error("update the detector reference before analyzing another frame");
     const auto started = std::chrono::steady_clock::now();
     if (frame.width <= 0 || frame.height <= 0 || bytesPerPixel(frame.format) == 0
         || frame.data.size() != frameBytes(frame.width, frame.height, frame.format)
@@ -85,11 +83,17 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
     const Samples samples{frame, frame.format == PixelFormat::Mono16 && frame.alignment == BitAlignment::High
         ? 16 - frame.significantBits : 0};
     summary_ = {};
+    strongest_ = {};
     summary_.settings = settings_;
     summary_.frameIndex = frame.frameIndex;
     summary_.time = frame.timestamp;
     summary_.probeX = display.probeX; summary_.probeY = display.probeY;
     map_.reset();
+    candidates_.clear();
+    protected_.assign(pixels, 0);
+    frameInterval_ = std::chrono::duration<double>(frame.timestamp - previousTime_).count();
+    if (!(frameInterval_ > 0) || !std::isfinite(frameInterval_)) frameInterval_ = 1.0/30;
+    frameInterval_ = std::min(frameInterval_, 10.0);
 
     if (width_ != frame.width || height_ != frame.height || format_ != frame.format
         || bits_ != frame.significantBits || alignment_ != frame.alignment || bayer_ != frame.bayer)
@@ -100,7 +104,7 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
         variance_.assign(pixels, 0);
         learnedFrames_ = 1;
         for (size_t i = 0; i < pixels; ++i) mean_[i] = samples.at(i);
-        consecutive_ = 0; runTriggered_ = false; onsetFrameIndex_ = 0;
+        active_.clear();
         history_.clear();
     }
     else
@@ -168,6 +172,9 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
         summary_.passed = summary_.brightPixels >= settings_.minPixels && summary_.brightPixels <= settings_.maxPixels
             && boxArea <= kMaxPatchBoxRatio * summary_.brightPixels;
 
+        std::vector<Patch> current;
+        DetectionSummary best = summary_;
+        int bestPriority = -1;
         // A global bounding box lets an unrelated hot pixel veto a real
         // flash. Split the sparse threshold pixels into 8-connected patches.
         // Dense changes are rejected before this work; its storage/work is
@@ -175,9 +182,6 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
         if (static_cast<size_t>(summary_.brightPixels) <= sparseLimit && !thresholdPixels_.empty())
         {
             visited_.assign(thresholdPixels_.size(), 0);
-            bool foundPassing = false;
-            double bestPeak = -1;
-            DetectionSummary best = summary_;
             for (size_t seed = 0; seed < thresholdPixels_.size(); ++seed)
             {
                 if (visited_[seed]) continue;
@@ -205,66 +209,104 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
                 }
                 const bool passes = count >= settings_.minPixels && count <= settings_.maxPixels
                     && static_cast<double>(x1 - x0 + 1) * (y1 - y0 + 1) <= kMaxPatchBoxRatio * count;
-                if ((passes && !foundPassing) || (passes == foundPassing && peak > bestPeak))
+                DetectionSummary measured = summary_;
+                measured.passed = passes;
+                measured.brightPixels = count; measured.boxX = x0; measured.boxY = y0;
+                measured.boxWidth = x1-x0+1; measured.boxHeight = y1-y0+1;
+                measured.peakSigma = peak;
+                measured.peakX = static_cast<int>(peakAt % static_cast<size_t>(width_));
+                measured.peakY = static_cast<int>(peakAt / static_cast<size_t>(width_));
+                measured.peakAdu = samples.at(peakAt)-mean_[peakAt];
+                if (passes)
                 {
-                    foundPassing = passes; bestPeak = peak;
-                    best.brightPixels = count; best.boxX = x0; best.boxY = y0;
-                    best.boxWidth = x1 - x0 + 1; best.boxHeight = y1 - y0 + 1;
-                    best.peakSigma = peak;
-                    best.peakX = static_cast<int>(peakAt % static_cast<size_t>(width_));
-                    best.peakY = static_cast<int>(peakAt / static_cast<size_t>(width_));
-                    best.peakAdu = samples.at(peakAt) - mean_[peakAt];
+                    Patch patch{measured, 1, 0};
+                    patch.measured.onsetFrameIndex = frame.frameIndex;
+                    for (const auto& prior : active_)
+                    {
+                        const auto& p = prior.measured;
+                        if (!p.firing && frame.frameIndex!=p.frameIndex+1) continue;
+                        // Adjacent/overlapping boxes follow a moving patch.
+                        // Merges and splits inherit firing, rather than duplicating
+                        // a continuing event. Separate boxes remain independent.
+                        if (x0 > p.boxX+p.boxWidth || p.boxX > x1+1
+                            || y0 > p.boxY+p.boxHeight || p.boxY > y1+1) continue;
+                        patch.consecutive = std::max(patch.consecutive, std::min(2,prior.consecutive+1));
+                        patch.measured.onsetFrameIndex = std::min(patch.measured.onsetFrameIndex,p.onsetFrameIndex);
+                        patch.measured.firing = patch.measured.firing || p.firing;
+                        patch.seconds = std::max(patch.seconds,prior.seconds+frameInterval_);
+                    }
+                    patch.measured.triggered = !patch.measured.firing && (settings_.oneFrame || patch.consecutive>=2);
+                    patch.measured.firing = patch.measured.firing || patch.measured.triggered;
+                    measured = patch.measured;
+                    if (!strongest_.passed || measured.peakSigma>strongest_.peakSigma) strongest_=measured;
+                    if (measured.triggered) candidates_.push_back(measured);
+                    current.push_back(std::move(patch));
+                    for (int py=std::max(0,y0-1); py<=std::min(height_-1,y1+1); ++py)
+                        std::fill(protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::max(0,x0-1),
+                            protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::min(width_,x1+2),uint8_t{1});
                 }
+                const int priority = measured.triggered?3:measured.firing?2:passes?1:0;
+                if (priority>bestPriority || (priority==bestPriority && measured.peakSigma>best.peakSigma))
+                { best=measured; bestPriority=priority; }
             }
-            best.passed = foundPassing;
             summary_ = best;
         }
-        if (summary_.passed)
-        {
-            if (consecutive_ == 0) onsetFrameIndex_ = frame.frameIndex;
-            consecutive_ = std::min(consecutive_ + 1, 2);
-            summary_.triggered = !runTriggered_ && (settings_.oneFrame || consecutive_ >= 2);
-            runTriggered_ = runTriggered_ || summary_.triggered;
-            summary_.firing = runTriggered_;
-        }
-        else
-        {
-            consecutive_ = 0; runTriggered_ = false; onsetFrameIndex_ = 0;
-        }
-
+        active_ = std::move(current);
         map_ = std::move(map);
-
-        // Two passes are intentional: a global patch decision must be known
-        // before any reference pixel can be changed. No rollback buffer is needed.
-        if (!holdReference && !summary_.passed)
-        {
-            double dt = std::chrono::duration<double>(frame.timestamp - previousTime_).count();
-            if (!(dt > 0) || !std::isfinite(dt)) dt = 1.0 / 30.0;
-            // Cumulative learning until the two-second exponential rate is
-            // reached. A cold variance of zero must not take two seconds to
-            // learn ordinary sample-to-sample fluctuations.
-            const float alpha = static_cast<float>(std::max(1.0 / static_cast<double>(learnedFrames_ + 1),
-                -std::expm1(-std::min(dt, 10.0) / kReferenceTimeConstantSeconds)));
-            for (size_t i = 0; i < pixels; ++i)
-            {
-                const float delta = samples.at(i) - mean_[i];
-                mean_[i] += alpha * delta;
-                variance_[i] = (1 - alpha) * (variance_[i] + alpha * delta * delta);
-            }
-            if (learnedFrames_ < 1'000'000) ++learnedFrames_;
-        }
     }
+    summary_.newCandidates = candidates_.size(); summary_.activePatches = active_.size();
+    summary_.protectedPixels = static_cast<size_t>(std::count(protected_.begin(),protected_.end(),uint8_t{1}));
+    summary_.learningFrames = learnedFrames_;
+    for (const auto& patch:active_) summary_.longestActiveSeconds=std::max(summary_.longestActiveSeconds,patch.seconds);
+    const auto copyContext=[this](DetectionSummary& candidate) {
+        candidate.newCandidates=summary_.newCandidates; candidate.activePatches=summary_.activePatches;
+        candidate.protectedPixels=summary_.protectedPixels; candidate.learningFrames=summary_.learningFrames;
+        candidate.longestActiveSeconds=summary_.longestActiveSeconds;
+    };
+    for (auto& candidate:candidates_) copyContext(candidate);
+    copyContext(strongest_);
+    awaitingUpdate_ = true;
     previousTime_ = frame.timestamp;
     history_.push_back({frame.timestamp, summary_.peakSigma, summary_.brightPixels});
     while (!history_.empty() && (history_.size() > 4096
         || frame.timestamp - history_.front().time > std::chrono::seconds{10})) history_.pop_front();
     summary_.processingMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    strongest_.processingMs=summary_.processingMs;
     return summary_.triggered;
 }
 
+void FlashDetector::updateReference(const Frame& frame)
+{
+    if (!awaitingUpdate_ || frame.frameIndex!=summary_.frameIndex || frame.timestamp!=summary_.time
+        || frame.width!=width_ || frame.height!=height_ || frame.format!=format_
+        || frame.significantBits!=bits_ || frame.alignment!=alignment_ || frame.bayer!=bayer_
+        || frame.data.size()!=mean_.size()*static_cast<size_t>(bytesPerPixel(format_)))
+        throw std::logic_error("reference update requires the frame just analyzed");
+    if (summary_.ready && summary_.protectedPixels<mean_.size())
+    {
+        const auto started=std::chrono::steady_clock::now();
+        const Samples samples{frame, format_==PixelFormat::Mono16 && alignment_==BitAlignment::High?16-bits_:0};
+        const float alpha=static_cast<float>(std::max(1.0/static_cast<double>(learnedFrames_+1),
+            -std::expm1(-frameInterval_/kReferenceTimeConstantSeconds)));
+        for (size_t i=0;i<mean_.size();++i)
+        {
+            if (protected_[i]) continue;
+            const float delta=samples.at(i)-mean_[i];
+            mean_[i]+=alpha*delta;
+            variance_[i]=(1-alpha)*(variance_[i]+alpha*delta*delta);
+        }
+        if (learnedFrames_<1'000'000) ++learnedFrames_;
+        summary_.processingMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+    }
+    awaitingUpdate_=false;
+}
+
+const std::vector<DetectionSummary>& FlashDetector::candidates() const { return candidates_; }
+const DetectionSummary& FlashDetector::strongestPatch() const { return strongest_; }
+
 bool FlashDetector::firing() const { return summary_.firing; }
 int FlashDetector::lastBrightCount() const { return summary_.brightPixels; }
-uint64_t FlashDetector::onsetFrameIndex() const { return onsetFrameIndex_; }
+uint64_t FlashDetector::onsetFrameIndex() const { return summary_.onsetFrameIndex; }
 const DetectionSummary& FlashDetector::summary() const { return summary_; }
 DetectionView FlashDetector::view() const
 {
@@ -273,6 +315,8 @@ DetectionView FlashDetector::view() const
 
 void FlashDetector::difference(const Frame& frame, BudgetVector<float>& values) const
 {
+    if (!awaitingUpdate_ || frame.frameIndex!=summary_.frameIndex || frame.timestamp!=summary_.time)
+        throw std::logic_error("copy the measured difference before updating the reference");
     if (frame.width != width_ || frame.height != height_ || frame.format != format_
         || frame.data.size() != frameBytes(width_, height_, format_))
         throw std::invalid_argument("difference requested for another frame layout");

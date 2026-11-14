@@ -98,6 +98,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="saveNowButton">
+        <property name="enabled"><bool>false</bool></property>
+        <property name="text"><string>Save now</string></property>
+        <property name="toolTip"><string>Keep the current history and following interval as a manual capture</string></property>
+       </widget>
+      </item>
+      <item>
        <widget class="QPushButton" name="injectFlashButton">
         <property name="enabled">
          <bool>false</bool>

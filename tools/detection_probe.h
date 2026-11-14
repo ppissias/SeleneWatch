@@ -4,3 +4,4 @@
 
 // Explicit-path, manual recording survey and detection calibration modes.
 int runDetectionProbe(const QStringList& arguments);
+int runRearmingProbe(const QStringList& arguments);

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <vector>
 
+enum class TriggerKind { Automatic, Manual };
+
 // One candidate inside a clip.
 struct ClipTrigger
 {
@@ -25,6 +27,11 @@ struct ClipTrigger
     double noiseFloor{0.5};
     int peakX{0}, peakY{0};
     int boxX{0}, boxY{0}, boxWidth{0}, boxHeight{0};
+    size_t activePatches{0}, protectedPixels{0}, learningFrames{0};
+    double longestActiveSeconds{0};
+    TriggerKind kind{TriggerKind::Automatic};
+    std::chrono::system_clock::time_point requestedAt{}; // Host UTC for a manual request.
+    std::chrono::system_clock::time_point requestSourceTime{}; // Original application time, retained across continuations.
 };
 
 // Frames kept around one or more candidates, oldest first.
@@ -39,7 +46,7 @@ struct EventClip
     std::vector<ClipTrigger> triggers;
 
     // Strongest passing frame in this clip and its actual difference from
-    // the held running reference. This is derived data, never evidence pixels.
+    // the pre-update reference. This is derived data, never evidence pixels.
     DetectionSummary peak;
     BudgetVector<float> peakDifference;
     bool previewLimited{false};

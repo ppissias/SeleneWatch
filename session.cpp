@@ -76,6 +76,7 @@ bool Session::start(QString& error)
     streamInfo_ = source_->streamInfo();
     acquiredFrames_.store(0, std::memory_order_relaxed);
     sourceFinished_.store(false);
+    { std::lock_guard<std::mutex> lock(requestMutex_); manualRequest_.reset(); }
     capture_.reset();
     blip_.reset();
     lastPreviewTime_ = {};
@@ -94,6 +95,7 @@ void Session::stop()
         return;
     }
     source_->stop();
+    applyManualSave();
     capture_.finishPartial("stopped");
     blip_.reset();
     running_ = false;
@@ -107,6 +109,30 @@ bool Session::requestBlip(const BlipSettings& settings)
 bool Session::blipBusy() const
 {
     return blip_.busy();
+}
+
+bool Session::requestManualSave()
+{
+    std::lock_guard<std::mutex> lock(requestMutex_);
+    if (!running_ || sourceFinished_.load() || manualRequest_) return false;
+    manualRequest_=std::chrono::system_clock::now();
+    return true;
+}
+
+bool Session::manualSavePending() const
+{
+    std::lock_guard<std::mutex> lock(requestMutex_);
+    return manualRequest_.has_value();
+}
+
+void Session::applyManualSave()
+{
+    std::optional<std::chrono::system_clock::time_point> request;
+    { std::lock_guard<std::mutex> lock(requestMutex_); request=manualRequest_; manualRequest_.reset(); }
+    if (!request) return;
+    const bool saved=capture_.saveNow(*request);
+    if (notifications_.manualSaveHandled)
+        post([done=notifications_.manualSaveHandled,saved]{ done(saved); });
 }
 
 bool Session::isRunning() const
@@ -146,13 +172,13 @@ PreviewFrame Session::takePreview()
 void Session::setDetectionSettings(const DetectionSettings& settings)
 {
     if (!settings.valid()) throw std::invalid_argument("invalid detection settings");
-    std::lock_guard<std::mutex> lock(detectionMutex_);
+    std::lock_guard<std::mutex> lock(requestMutex_);
     detectionSettings_ = settings;
 }
 
 void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY)
 {
-    std::lock_guard<std::mutex> lock(detectionMutex_);
+    std::lock_guard<std::mutex> lock(requestMutex_);
     displayRequest_.overlay = overlay;
     displayRequest_.probeX = probeX;
     displayRequest_.probeY = probeY;
@@ -186,7 +212,7 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     DetectionSettings settings;
     DetectionDisplayRequest display;
     {
-        std::lock_guard<std::mutex> lock(detectionMutex_);
+        std::lock_guard<std::mutex> lock(requestMutex_);
         settings = detectionSettings_;
         display = displayRequest_;
     }
@@ -195,6 +221,7 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     display.makeMap = previewDue;
     capture_.setDetectionSettings(settings);
     capture_.onFrame(published, display);
+    applyManualSave();
 
     // The preview converts on the context thread. It is woken once per frame
     // it has not yet taken, and skips frames when it falls behind.
@@ -210,21 +237,24 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
 // jump would look like a sudden change, so the capture starts afresh.
 void Session::onDiscontinuity()
 {
+    applyManualSave();
     capture_.finishPartial("playback loop boundary");
     capture_.reset();
 }
 
 void Session::onEnded()
 {
-    capture_.finishPartial("source ended");
     sourceFinished_.store(true);
+    applyManualSave();
+    capture_.finishPartial("source ended");
     post(notifications_.ended);
 }
 
 void Session::onFailed(const std::string& message)
 {
-    capture_.finishPartial("source failure: " + message);
     sourceFinished_.store(true);
+    applyManualSave();
+    capture_.finishPartial("source failure: " + message);
     const QString text = QString::fromStdString(message);
     if (notifications_.failed)
     {

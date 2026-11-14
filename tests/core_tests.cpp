@@ -1,3 +1,4 @@
+#include "tests/detector_observation.h"
 #include "event_capture.h"
 #include "blip_injector.h"
 #include "recording/event_writer.h"
@@ -1119,7 +1120,7 @@ void FlashDetectorTest::markerAloneNeverFires()
     int maxRising = 0;
     for (uint64_t index = 0; index < 200; ++index)
     {
-        QVERIFY(!detector.observe(*painted(index, false)));
+        QVERIFY(!observe(detector,*painted(index, false)));
         QVERIFY(!detector.firing());
         maxRising = std::max(maxRising, detector.lastBrightCount());
     }
@@ -1131,29 +1132,29 @@ void FlashDetectorTest::runFiresOnceOnItsSecondFrame()
     FlashDetector detector({6, 8, 400, false});
     for (uint64_t index = 0; index < 4; ++index)
     {
-        QVERIFY(!detector.observe(*painted(index, false)));
+        QVERIFY(!observe(detector,*painted(index, false)));
     }
 
-    QVERIFY(!detector.observe(*painted(4, true)));
+    QVERIFY(!observe(detector,*painted(4, true)));
     QVERIFY(!detector.firing());
     QVERIFY(detector.lastBrightCount() >= DetectionSettings{}.minPixels);
     QCOMPARE(detector.onsetFrameIndex(), static_cast<uint64_t>(4));
 
-    QVERIFY(detector.observe(*painted(5, true)));
+    QVERIFY(observe(detector,*painted(5, true)));
     QVERIFY(detector.firing());
     QCOMPARE(detector.onsetFrameIndex(), static_cast<uint64_t>(4));
 
     // Later frames of the same run are the same candidate.
-    QVERIFY(!detector.observe(*painted(6, true)));
+    QVERIFY(!observe(detector,*painted(6, true)));
     QVERIFY(detector.firing());
-    QVERIFY(!detector.observe(*painted(7, true)));
+    QVERIFY(!observe(detector,*painted(7, true)));
     QVERIFY(detector.firing());
 
     // A quiet frame ends the run. The next run is a new candidate.
-    QVERIFY(!detector.observe(*painted(8, false)));
+    QVERIFY(!observe(detector,*painted(8, false)));
     QVERIFY(!detector.firing());
-    QVERIFY(!detector.observe(*painted(9, true)));
-    QVERIFY(detector.observe(*painted(10, true)));
+    QVERIFY(!observe(detector,*painted(9, true)));
+    QVERIFY(observe(detector,*painted(10, true)));
     QCOMPARE(detector.onsetFrameIndex(), static_cast<uint64_t>(9));
 }
 
@@ -1162,13 +1163,13 @@ void FlashDetectorTest::oneFrameSpotDoesNotFire()
     FlashDetector detector({6, 8, 400, false});
     for (uint64_t index = 0; index < 2; ++index)
     {
-        QVERIFY(!detector.observe(*painted(index, false)));
+        QVERIFY(!observe(detector,*painted(index, false)));
     }
 
-    QVERIFY(!detector.observe(*painted(2, true)));
+    QVERIFY(!observe(detector,*painted(2, true)));
     QVERIFY(detector.lastBrightCount() >= DetectionSettings{}.minPixels);
 
-    QVERIFY(!detector.observe(*painted(3, false)));
+    QVERIFY(!observe(detector,*painted(3, false)));
     QVERIFY(!detector.firing());
 }
 
@@ -1182,16 +1183,16 @@ void FlashDetectorTest::mono16FramesFireLikeMono8()
         FlashDetector mono16({6, 8, 400, false});
         for (uint64_t index = 0; index < 4; ++index)
         {
-            QVERIFY(!mono8.observe(*painted(index, false)));
-            QVERIFY(!mono16.observe(*paintedMono16(index, false, alignment)));
+            QVERIFY(!observe(mono8,*painted(index, false)));
+            QVERIFY(!observe(mono16,*paintedMono16(index, false, alignment)));
         }
 
-        QVERIFY(!mono8.observe(*painted(4, true)));
-        QVERIFY(!mono16.observe(*paintedMono16(4, true, alignment)));
+        QVERIFY(!observe(mono8,*painted(4, true)));
+        QVERIFY(!observe(mono16,*paintedMono16(4, true, alignment)));
         QCOMPARE(mono16.lastBrightCount(), mono8.lastBrightCount());
         QVERIFY(mono16.lastBrightCount() >= DetectionSettings{}.minPixels);
 
-        QVERIFY(mono16.observe(*paintedMono16(5, true, alignment)));
+        QVERIFY(observe(mono16,*paintedMono16(5, true, alignment)));
         QVERIFY(mono16.firing());
         QCOMPARE(mono16.onsetFrameIndex(), static_cast<uint64_t>(4));
     }
@@ -1204,13 +1205,13 @@ void FlashDetectorTest::rgbFramesFireLikeMono8()
     FlashDetector rgb({6, 8, 400, false});
     for (uint64_t index = 0; index < 4; ++index)
     {
-        QVERIFY(!mono8.observe(*painted(index, false)));
-        QVERIFY(!rgb.observe(*paintedRgb(index, false)));
+        QVERIFY(!observe(mono8,*painted(index, false)));
+        QVERIFY(!observe(rgb,*paintedRgb(index, false)));
     }
-    QVERIFY(!mono8.observe(*painted(4, true)));
-    QVERIFY(!rgb.observe(*paintedRgb(4, true)));
+    QVERIFY(!observe(mono8,*painted(4, true)));
+    QVERIFY(!observe(rgb,*paintedRgb(4, true)));
     QCOMPARE(rgb.lastBrightCount(), mono8.lastBrightCount());
-    QVERIFY(rgb.observe(*paintedRgb(5, true)));
+    QVERIFY(observe(rgb,*paintedRgb(5, true)));
 }
 
 // ------------------------------------------------------------ PreviewImage

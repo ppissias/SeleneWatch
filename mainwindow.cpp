@@ -45,6 +45,11 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot)
     Session::Notifications notifications;
     notifications.previewReady = [this] { showLatestFrame(); };
     notifications.candidateStarted = [this] { onCandidateStarted(); };
+    notifications.manualSaveHandled = [this](bool saved) {
+        if (saved) { ++manualCaptures_; updateCandidateReadout(); }
+        updateControls();
+        statusBar()->showMessage(saved ? "Manual capture marked; collecting following frames." : "Manual capture unavailable: no frames acquired.",5000);
+    };
     notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
     notifications.ended = [this] { onPlaybackEnded(); };
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
@@ -56,6 +61,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot)
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
+    connect(ui_->saveNowButton, &QPushButton::clicked, this, &MainWindow::onSaveNowClicked);
     connect(ui_->openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
     connect(ui_->injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
     connect(ui_->injectBlipButton, &QPushButton::clicked, this, &MainWindow::onInjectBlipClicked);
@@ -234,6 +240,7 @@ void MainWindow::updateControls()
 
     ui_->startButton->setEnabled(!running);
     ui_->stopButton->setEnabled(running);
+    ui_->saveNowButton->setEnabled(running && !session_->sourceFinished() && !session_->manualSavePending());
     ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!running);
@@ -287,6 +294,7 @@ void MainWindow::updateStreamReadout()
 void MainWindow::updateCandidateReadout()
 {
     QString text = QString("Candidates: %1").arg(candidates_);
+    if (manualCaptures_>0) text += QString(" | Manual: %1").arg(manualCaptures_);
     if (clipsNotSaved_ > 0)
     {
         text += QString(" (%1 not saved)").arg(clipsNotSaved_);
@@ -427,6 +435,7 @@ void MainWindow::onStartClicked()
     recordFailed_ = false;
     playbackEnded_ = false;
     candidates_ = 0;
+    manualCaptures_ = 0;
     clipsNotSaved_ = 0;
     clipsLimited_ = 0;
     lastAcquiredSample_ = 0;
@@ -560,6 +569,13 @@ void MainWindow::onCandidateStarted()
     ++candidates_;
     updateCandidateReadout();
     statusBar()->showMessage(QString("Candidate %1 detected").arg(candidates_));
+}
+
+void MainWindow::onSaveNowClicked()
+{
+    if (session_->requestManualSave())
+        statusBar()->showMessage("Manual capture requested",3000);
+    updateControls();
 }
 
 void MainWindow::onClipWritten(const ClipWriteResult& result)

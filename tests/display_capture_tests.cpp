@@ -1,3 +1,4 @@
+#include "tests/detector_observation.h"
 #include "event_capture.h"
 #include "frame_pool.h"
 #include "preview_image.h"
@@ -223,10 +224,10 @@ void DisplayCaptureTest::deniedOverlayLeavesTheDecisionUnchanged()
 {
     MemoryBudget budget(45000);
     FlashDetector decorated({}, budget), plain;
-    plain.observe(flat(0)); decorated.observe(flat(0));
-    plain.observe(flat(1)); decorated.observe(flat(1));
+    observe(plain,flat(0)); observe(decorated,flat(0));
+    observe(plain,flat(1)); observe(decorated,flat(1));
     Frame frame = flat(2); flash(frame);
-    QCOMPARE(decorated.observe(frame, false, {DetectionOverlay::Sigma, -1, -1, true}), plain.observe(frame));
+    QCOMPARE(observe(decorated,frame, {DetectionOverlay::Sigma, -1, -1, true}), observe(plain,frame));
     QVERIFY(decorated.summary().triggered);
     QVERIFY(decorated.summary().overlaySkipped);
     QVERIFY(!decorated.view().map);

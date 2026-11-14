@@ -49,6 +49,7 @@ private slots:
     void onSpeedChanged();
     void onInjectFlashClicked();
     void onInjectBlipClicked();
+    void onSaveNowClicked();
 
 private:
     void setupStatusBar();
@@ -109,6 +110,7 @@ private:
     std::chrono::steady_clock::time_point lastFpsSampleTime_{};
 
     int candidates_{0};
+    int manualCaptures_{0};
     int clipsNotSaved_{0};
     int clipsLimited_{0};
     bool sourceFailed_{false};

@@ -40,7 +40,65 @@ private slots:
     void controlsPreserveValidSizeLimits();
     void livePanelInjectionEvidenceAndSavedSettings();
     void stretchARecordingWhileCapturingThenRestoreSettings();
+    void saveARecordingManuallyThroughTheWindow();
 };
+
+void UiTest::saveARecordingManuallyThroughTheWindow()
+{
+    QTemporaryDir directory;
+    const QString input=directory.path()+"/native.ser";
+    QFile file(input); QVERIFY(file.open(QIODevice::ReadWrite));
+    Frame f; f.width=64; f.height=48; f.format=PixelFormat::Mono16;
+    f.significantBits=12; f.alignment=BitAlignment::High; f.testSource=true;
+    for (int i=0;i<64*48;++i)
+    {
+        const int word=(1000+i%8)<<4;
+        f.data.push_back(static_cast<uint8_t>(word&255)); f.data.push_back(static_cast<uint8_t>(word>>8));
+    }
+    const auto native=f.data;
+    f.timestamp=std::chrono::system_clock::time_point{}+std::chrono::seconds{1700000000};
+    SerWriter writer(file); QString error;
+    QVERIFY(writer.start(f,"TEST: manual window",error));
+    for (int i=0;i<48;++i)
+    {
+        f.frameIndex=i;
+        f.timestamp=std::chrono::system_clock::time_point{}+std::chrono::seconds{1700000000}+std::chrono::milliseconds{i*50};
+        QVERIFY(writer.append(f,error));
+    }
+    QVERIFY(writer.finish(error)); file.seek(0); const auto inputBytes=file.readAll(); file.close();
+    const QString output=directory.path()+"/events";
+    MainWindow window(nullptr,output); window.selectRecording(input); window.show();
+    auto* save=window.findChild<QPushButton*>("saveNowButton");
+    QVERIFY(save); QVERIFY(!save->isEnabled());
+    window.findChild<DisplayPanel*>()->findChild<QDoubleSpinBox*>("postSeconds")->setValue(.3);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!window.findChild<PreviewWidget*>()->imageRect().isEmpty(),3000);
+    QVERIFY(save->isEnabled()); save->click();
+    QString folder;
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        for (const auto& name:QDir(output).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+        {
+            const QString candidate=output+"/"+name;
+            if (text(candidate+"/event.txt").contains("complete: yes")) { folder=candidate; return true; }
+        }
+        return false;
+    })(),4000);
+    const auto metadata=text(folder+"/event.txt");
+    QVERIFY(metadata.contains("kind=manual")); QVERIFY(metadata.contains("collection_end: post-event interval complete"));
+    QVERIFY(!metadata.contains("kind=automatic"));
+    QDir().mkpath(SELENEWATCH_MANUAL_QA_DIR);
+    QVERIFY(window.grab().save(QString(SELENEWATCH_MANUAL_QA_DIR)+"/window.png"));
+    window.findChild<QPushButton*>("stopButton")->click(); QVERIFY(!save->isEnabled());
+    SerReader reader; std::string reason;
+    QVERIFY(reader.open(std::filesystem::path((folder+"/event.ser").toStdWString()),20,reason));
+    QVERIFY(reader.frameCount()>5);
+    for (int i=0;i<reader.frameCount();++i)
+    {
+        Frame actual; actual.data.resize(reader.frameBytes()); QVERIFY(reader.readFrame(i,actual,reason));
+        QCOMPARE(actual.data,native);
+    }
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),inputBytes);
+}
 
 void UiTest::controlsPreserveValidSizeLimits()
 {

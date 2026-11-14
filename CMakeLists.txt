@@ -83,6 +83,7 @@ add_executable(SeleneWatchUiTests tests/ui_tests.cpp)
 target_link_libraries(SeleneWatchUiTests PRIVATE selenewatch_ui Qt6::Test)
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_UI_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature9")
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_DISPLAY_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature5")
+target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_MANUAL_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-manual")
 selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -97,7 +98,12 @@ target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6:
 selenewatch_compile_options(SeleneWatchRegistrationTests)
 add_test(NAME registration COMMAND SeleneWatchRegistrationTests -o -,tap)
 
+add_executable(SeleneWatchManualTests tests/manual_capture_tests.cpp)
+target_link_libraries(SeleneWatchManualTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchManualTests)
+add_test(NAME manual_capture COMMAND SeleneWatchManualTests -o -,tap)
+
 # Run by hand, with an explicit input and output path; never part of CTest.
-add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/translation_estimator.cpp)
+add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
