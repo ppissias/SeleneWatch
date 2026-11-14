@@ -224,6 +224,8 @@ int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_p
                 if (soak && elapsed-lastResource>=1)
                 {
                     lastResource=elapsed; outputBytes=directoryBytes(root);
+                    if (QFileInfo::exists(root.filePath("stop.request")))
+                    { stopReason="requested-stop"; app.quit(); return; }
                     QStorageInfo storage(root.absolutePath()); storage.refresh();
                     if (outputBytes>=outputLimit)
                     { failure="Soak output budget reached"; stopReason="output-limit"; app.quit(); return; }

@@ -6,6 +6,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
 #include <QtTest/QTest>
 
@@ -98,6 +99,16 @@ private slots:
                 QVERIFY(note.readAll().contains("complete: yes"));
             }
         }
+    }
+    void requestedStopDrainsTheWriter()
+    {
+        QTemporaryDir dir; QObject context; auto api=std::make_shared<FakeZwoApi>(); auto config=shortRun();
+        config["seconds"]=3;
+        QTimer::singleShot(200,&context,[&] { QFile stop(dir.path()+"/result/stop.request"); stop.open(QIODevice::WriteOnly); });
+        QCOMPARE(run(dir.path(),config,api),0);
+        const auto result=readJson(dir.path()+"/result/bench.json");
+        QCOMPARE(result["stopReason"].toString(),"requested-stop"); QVERIFY(result["elapsedSeconds"].toDouble()<2.5);
+        QVERIFY(!result["outputs"].toArray().empty()); QCOMPARE(api->starts.load(),api->stops.load());
     }
     void invalidConfigurationNeverOpensACameraOrOverwritesResults()
     {
