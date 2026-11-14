@@ -39,6 +39,8 @@ namespace {
 
 using namespace std::chrono;
 
+constexpr int kPostEventFrames = 30;
+constexpr int kMaxPostEventFrames = 300;
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 
@@ -55,6 +57,7 @@ FramePtr painted(uint64_t index, bool flash)
 {
     auto frame = std::make_shared<Frame>();
     paintSyntheticFrame(*frame, kWidth, kHeight, index, flash);
+    frame->timestamp = system_clock::time_point{} + milliseconds{static_cast<int64_t>(index)};
     return frame;
 }
 
@@ -62,7 +65,11 @@ FramePtr painted(uint64_t index, bool flash)
 // Feature-9 suite separately covers the default one-frame rule.
 EventCapture twoFrameCapture(size_t capacity, EventCapture::CandidateStarted candidate, EventCapture::ClipReady clip)
 {
-    return EventCapture(capacity, std::move(candidate), std::move(clip), {6, 8, 400, false});
+    CaptureSettings settings;
+    settings.historySeconds = (capacity - 1) / 1000.0;
+    settings.postSeconds = kPostEventFrames / 1000.0;
+    settings.maxPostSeconds = kMaxPostEventFrames / 1000.0;
+    return EventCapture(settings, std::move(candidate), std::move(clip), {6, 8, 400, false});
 }
 
 void feed(EventCapture& capture, uint64_t& index, int count, bool flash)
@@ -102,7 +109,7 @@ QString utcStamp(system_clock::time_point time)
     return QDateTime::fromMSecsSinceEpoch(ms, QTimeZone::UTC).toString("yyyyMMdd-HHmmss-zzz");
 }
 
-FramePtr smallFrame(uint64_t index, system_clock::time_point time, std::vector<uint8_t> pixels,
+FramePtr smallFrame(uint64_t index, system_clock::time_point time, BudgetVector<uint8_t> pixels,
     int width = 2, int height = 2)
 {
     auto frame = std::make_shared<Frame>();
@@ -171,13 +178,13 @@ struct SerFileSpec
     int64_t dateTimeUtcTicks = 0;
 
     // The bytes of each frame, exactly as stored in the file.
-    std::vector<std::vector<uint8_t>> frames;
+    std::vector<BudgetVector<uint8_t>> frames;
 
     // One time per frame, in SER ticks. Empty: no trailer.
     std::vector<int64_t> trailer;
 
     // Extra bytes after the frames, to make a file cut off mid-frame.
-    std::vector<uint8_t> tail;
+    BudgetVector<uint8_t> tail;
 };
 
 void appendLittleEndian(QByteArray& bytes, uint64_t value, int width)
@@ -219,7 +226,7 @@ QString writeSerFile(const QString& dir, const QString& name, const SerFileSpec&
     appendLittleEndian(bytes, static_cast<uint64_t>(spec.dateTimeUtcTicks), 8);  // DateTime_UTC
     Q_ASSERT(bytes.size() == 178);
 
-    for (const std::vector<uint8_t>& frame : spec.frames)
+    for (const BudgetVector<uint8_t>& frame : spec.frames)
     {
         bytes.append(reinterpret_cast<const char*>(frame.data()), static_cast<qsizetype>(frame.size()));
     }
@@ -246,9 +253,9 @@ int64_t serTicks(system_clock::time_point time)
     return duration_cast<Ticks>(time.time_since_epoch()).count() + 621'355'968'000'000'000;
 }
 
-std::vector<uint8_t> littleEndianSamples(const std::vector<uint16_t>& samples)
+BudgetVector<uint8_t> littleEndianSamples(const std::vector<uint16_t>& samples)
 {
-    std::vector<uint8_t> bytes;
+    BudgetVector<uint8_t> bytes;
     for (uint16_t sample : samples)
     {
         bytes.push_back(static_cast<uint8_t>(sample & 0xFF));
@@ -257,9 +264,9 @@ std::vector<uint8_t> littleEndianSamples(const std::vector<uint16_t>& samples)
     return bytes;
 }
 
-std::vector<uint8_t> bigEndianSamples(const std::vector<uint16_t>& samples)
+BudgetVector<uint8_t> bigEndianSamples(const std::vector<uint16_t>& samples)
 {
-    std::vector<uint8_t> bytes;
+    BudgetVector<uint8_t> bytes;
     for (uint16_t sample : samples)
     {
         bytes.push_back(static_cast<uint8_t>(sample >> 8));
@@ -412,7 +419,7 @@ struct AviFileSpec
 
     // Each frame as the program should read it: top-down rows of grey
     // values, or of RGB triples for the colour kinds.
-    std::vector<std::vector<uint8_t>> frames;
+    std::vector<BudgetVector<uint8_t>> frames;
 
     // For Yuy2: the colour samples stored beside the luma. The reader drops them.
     uint8_t chromaU = 17;
@@ -447,7 +454,7 @@ bool isDib(AviFileSpec::Kind kind)
 
 // One frame as it is stored: DIB rows padded to four bytes and bottom-up
 // unless told otherwise, BGR order, YUY2 as Y0 U Y1 V.
-QByteArray storedFrame(const AviFileSpec& spec, const std::vector<uint8_t>& pixels)
+QByteArray storedFrame(const AviFileSpec& spec, const BudgetVector<uint8_t>& pixels)
 {
     const int bits = bitsPerPixel(spec.kind);
     const int rowBytes = isDib(spec.kind) ? (spec.width * bits + 31) / 32 * 4 : spec.width * bits / 8;
@@ -658,12 +665,12 @@ QString writeAviFile(const QString& dir, const QString& name, const AviFileSpec&
 }
 
 // Frames of distinct values: frame f, sample i holds (f * 37 + i * 11) % 256.
-std::vector<std::vector<uint8_t>> patternFrames(int frames, size_t samples)
+std::vector<BudgetVector<uint8_t>> patternFrames(int frames, size_t samples)
 {
-    std::vector<std::vector<uint8_t>> result;
+    std::vector<BudgetVector<uint8_t>> result;
     for (int f = 0; f < frames; ++f)
     {
-        std::vector<uint8_t> frame(samples);
+        BudgetVector<uint8_t> frame(samples);
         for (size_t i = 0; i < samples; ++i)
         {
             frame[i] = static_cast<uint8_t>((static_cast<size_t>(f) * 37 + i * 11) % 256);
@@ -915,7 +922,7 @@ void FramePoolTest::acquireGivesRequestedSize()
 void FramePoolTest::warmRingAllocatesNoMoreBuffers()
 {
     FramePool pool;
-    FrameRingBuffer ring(5);
+    FrameRingBuffer ring(5 * 64);
 
     auto pushFrames = [&](int count) {
         for (int n = 0; n < count; ++n)
@@ -929,7 +936,7 @@ void FramePoolTest::warmRingAllocatesNoMoreBuffers()
     // warm ring of 5 keeps 6 frames in circulation.
     pushFrames(12);
     const size_t warm = pool.allocatedFrames();
-    QVERIFY(warm <= ring.capacity() + 1);
+    QVERIFY(warm <= size_t{6});
 
     pushFrames(200);
     QCOMPARE(pool.allocatedFrames(), warm);
@@ -938,7 +945,7 @@ void FramePoolTest::warmRingAllocatesNoMoreBuffers()
 void FramePoolTest::clipKeepsItsFramesWhileRingWraps()
 {
     FramePool pool;
-    FrameRingBuffer ring(3);
+    FrameRingBuffer ring(3 * 4);
 
     auto pushValue = [&](uint8_t value) {
         std::shared_ptr<Frame> frame = pool.acquire(4);
@@ -957,9 +964,9 @@ void FramePoolTest::clipKeepsItsFramesWhileRingWraps()
     {
         pushValue(value);
     }
-    QCOMPARE(clip[0]->data, std::vector<uint8_t>(4, 1));
-    QCOMPARE(clip[1]->data, std::vector<uint8_t>(4, 2));
-    QCOMPARE(clip[2]->data, std::vector<uint8_t>(4, 3));
+    QCOMPARE(clip[0]->data, BudgetVector<uint8_t>(4, 1));
+    QCOMPARE(clip[1]->data, BudgetVector<uint8_t>(4, 2));
+    QCOMPARE(clip[2]->data, BudgetVector<uint8_t>(4, 3));
 
     const std::vector<FramePtr> inRing = ring.stored();
     for (const FramePtr& held : clip)
@@ -1023,8 +1030,8 @@ void RingBufferTest::oldestFirstBeforeWrap()
     QCOMPARE(stored.size(), static_cast<size_t>(2));
     QCOMPARE(stored[0]->frameIndex, static_cast<uint64_t>(1));
     QCOMPARE(stored[1]->frameIndex, static_cast<uint64_t>(2));
-    QCOMPARE(stored[0]->data, std::vector<uint8_t>({1}));
-    QCOMPARE(stored[1]->data, std::vector<uint8_t>({2}));
+    QCOMPARE(stored[0]->data, BudgetVector<uint8_t>({1}));
+    QCOMPARE(stored[1]->data, BudgetVector<uint8_t>({2}));
 }
 
 void RingBufferTest::oldestFirstAfterWrap()
@@ -1231,7 +1238,7 @@ void PreviewImageTest::twelveBitsAreVisibleAtTopAndBottom()
         frame.significantBits = c.significantBits;
         frame.alignment = c.alignment;
         frame.data = littleEndianSamples(c.samples);
-        const std::vector<uint8_t> stored = frame.data;
+        const BudgetVector<uint8_t> stored = frame.data;
 
         const QImage image = frameToPreviewImage(frame);
         QCOMPARE(image.format(), QImage::Format_Grayscale8);
@@ -1354,7 +1361,7 @@ void BlipInjectorTest::durationAndSettingsAreFixedAtRequest()
         else
         {
             QVERIFY(!frame.blip);
-            QCOMPARE(frame.data, std::vector<uint8_t>(25, 10));
+            QCOMPARE(frame.data, BudgetVector<uint8_t>(25, 10));
         }
         QCOMPARE(injector.busy(), i < 2);
     }
@@ -1591,9 +1598,9 @@ void SerReaderTest::turnsBgrIntoRgb()
         QVERIFY2(reader.readFrame(0, frame, error), error.c_str());
         QVERIFY(frame.format == PixelFormat::RGB888);
 
-        const std::vector<uint8_t> expected = colorId == 101
-            ? std::vector<uint8_t>{3, 2, 1, 6, 5, 4}
-            : std::vector<uint8_t>{1, 2, 3, 4, 5, 6};
+        const BudgetVector<uint8_t> expected = colorId == 101
+            ? BudgetVector<uint8_t>{3, 2, 1, 6, 5, 4}
+            : BudgetVector<uint8_t>{1, 2, 3, 4, 5, 6};
         QCOMPARE(frame.data, expected);
     }
 }
@@ -1631,7 +1638,7 @@ void SerReaderTest::fileWithoutTrailerHasNoFrameTimes()
 
     SerFileSpec spec;
     spec.dateTimeUtcTicks = serTicks(testTime(0));
-    spec.frames = {std::vector<uint8_t>(8, 1), std::vector<uint8_t>(8, 2)};
+    spec.frames = {BudgetVector<uint8_t>(8, 1), BudgetVector<uint8_t>(8, 2)};
     SerReader reader;
     std::string error;
     QVERIFY2(reader.open(fsPath(writeSerFile(dir.path(), "dated.ser", spec)), 30.0, error), error.c_str());
@@ -1654,7 +1661,7 @@ void SerReaderTest::shortFilePlaysTheWholeFramesItHolds()
     // has no trailer either.
     SerFileSpec spec;
     spec.headerFrameCount = 5;
-    spec.frames = {std::vector<uint8_t>(8, 1), std::vector<uint8_t>(8, 2)};
+    spec.frames = {BudgetVector<uint8_t>(8, 1), BudgetVector<uint8_t>(8, 2)};
     spec.tail = {3, 3, 3, 3};
     const QString path = writeSerFile(dir.path(), "short.ser", spec);
 
@@ -1689,12 +1696,12 @@ void SerReaderTest::refusesWhatItCannotPlay()
 
     SerFileSpec colour16;
     colour16.colorId = 16;
-    colour16.frames = {std::vector<uint8_t>(8, 0)};
+    colour16.frames = {BudgetVector<uint8_t>(8, 0)};
 
     SerFileSpec rgb16;
     rgb16.colorId = 100;
     rgb16.pixelDepth = 16;
-    rgb16.frames = {std::vector<uint8_t>(48, 0)};
+    rgb16.frames = {BudgetVector<uint8_t>(48, 0)};
 
     SerFileSpec empty;
 
@@ -2098,7 +2105,7 @@ void RecordingSourceTest::wholeFilePlaysEveryFrameThenEnds()
     SerFileSpec spec;
     for (int i = 0; i < 5; ++i)
     {
-        spec.frames.push_back(std::vector<uint8_t>(8, static_cast<uint8_t>(10 * i)));
+        spec.frames.push_back(BudgetVector<uint8_t>(8, static_cast<uint8_t>(10 * i)));
         spec.trailer.push_back(serTicks(testTime(40 * i)));
     }
     const QString path = writeSerFile(dir.path(), "whole.ser", spec);
@@ -2137,7 +2144,7 @@ void RecordingSourceTest::loopRestartsAndKeepsCounting()
     SerFileSpec spec;
     for (int i = 0; i < 10; ++i)
     {
-        spec.frames.push_back(std::vector<uint8_t>(8, static_cast<uint8_t>(i)));
+        spec.frames.push_back(BudgetVector<uint8_t>(8, static_cast<uint8_t>(i)));
         spec.trailer.push_back(serTicks(testTime(100 * i)));
     }
     const QString path = writeSerFile(dir.path(), "loop.ser", spec);
@@ -2173,7 +2180,7 @@ void RecordingSourceTest::realTimeFollowsTheFileIntervals()
     SerFileSpec spec;
     for (int i = 0; i < 4; ++i)
     {
-        spec.frames.push_back(std::vector<uint8_t>(8, 0));
+        spec.frames.push_back(BudgetVector<uint8_t>(8, 0));
         spec.trailer.push_back(serTicks(testTime(50 * i)));
     }
     const QString path = writeSerFile(dir.path(), "realtime.ser", spec);
@@ -2201,7 +2208,7 @@ void RecordingSourceTest::fileWithoutTrailerGetsNominalTimes()
 
     SerFileSpec spec;
     spec.dateTimeUtcTicks = serTicks(testTime(0));
-    spec.frames = {std::vector<uint8_t>(8, 0), std::vector<uint8_t>(8, 1), std::vector<uint8_t>(8, 2)};
+    spec.frames = {BudgetVector<uint8_t>(8, 0), BudgetVector<uint8_t>(8, 1), BudgetVector<uint8_t>(8, 2)};
     const QString path = writeSerFile(dir.path(), "nominal.ser", spec);
 
     RecordingSource source(fsPath(path));
@@ -2338,7 +2345,7 @@ void SessionTest::loopJumpFiresNoCandidate()
     spec.height = height;
     for (int i = 0; i < 10; ++i)
     {
-        spec.frames.push_back(std::vector<uint8_t>(static_cast<size_t>(width * height),
+        spec.frames.push_back(BudgetVector<uint8_t>(static_cast<size_t>(width * height),
             static_cast<uint8_t>(200 - 10 * i)));
         spec.trailer.push_back(serTicks(testTime(100 * i)));
     }
@@ -2419,7 +2426,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     spec.width = spec.height = 64;
     spec.pixelDepth = kind == 1 ? 16 : 8;
     spec.colorId = kind == 1 ? 8 : (kind == 2 ? 100 : 0);
-    std::vector<uint8_t> pixels;
+    BudgetVector<uint8_t> pixels;
     for (int i = 0; i < 64 * 64; ++i)
     {
         if (kind == 1)
@@ -2757,7 +2764,7 @@ void EventWriterTest::writesMetadataAndCandidateLog()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(smallClip(triggerTime));
@@ -2800,7 +2807,7 @@ void EventWriterTest::serRoundTripIsExact()
     // Every 8-bit value, in an image whose width is not a multiple of four.
     const int width = 17;
     const int height = 16;
-    std::vector<uint8_t> pixels(static_cast<size_t>(width * height));
+    BudgetVector<uint8_t> pixels(static_cast<size_t>(width * height));
     for (size_t i = 0; i < pixels.size(); ++i)
     {
         pixels[i] = static_cast<uint8_t>((i * 7) % 256);
@@ -2812,7 +2819,7 @@ void EventWriterTest::serRoundTripIsExact()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(std::move(clip));
@@ -2869,7 +2876,7 @@ void EventWriterTest::badClipDoesNotStopTheWriter()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
 
@@ -2907,7 +2914,7 @@ void EventWriterTest::sameTriggerTimeGetsTwoFolders()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(smallClip(testTime(500)));
@@ -2936,7 +2943,7 @@ void EventWriterTest::unwritableRootIsARecordFailure()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, blocker + "/events", 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, blocker + "/events", 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(smallClip(testTime(600)));
@@ -2954,7 +2961,7 @@ void EventWriterTest::submitAfterShutdownIsRefused()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.shutdown();
@@ -2977,7 +2984,7 @@ void EventWriterTest::captureToWriterEndToEnd()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 1000, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 512 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     auto capture = twoFrameCapture(50, [] {}, [&writer](EventClip clip) {
@@ -3033,7 +3040,7 @@ void EventWriterTest::mono16SerRoundTripIsExact()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(std::move(clip));
@@ -3089,7 +3096,7 @@ void EventWriterTest::eventTxtDescribesTheStream()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.submit(std::move(played));
@@ -3136,7 +3143,7 @@ void EventWriterTest::sessionStartLineNamesTheSource()
 
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&results](const ClipWriteResult& result) {
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&results](const ClipWriteResult& result) {
         results.push_back(result);
     });
     writer.logSessionStart(recording);
@@ -3172,7 +3179,7 @@ void EventWriterTest::blipMetadataSurvivesAPartialClipAndRefusal()
     clip.frames[1] = second;
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, root.path(), 100, [&](const ClipWriteResult& result) { results.push_back(result); });
+    EventWriter writer(&context, root.path(), 128 * 1024 * 1024, [&](const ClipWriteResult& result) { results.push_back(result); });
     writer.submit(clip);
     QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 10000);
     QVERIFY(results[0].notSaved.isEmpty());

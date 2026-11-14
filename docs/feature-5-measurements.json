@@ -1,0 +1,117 @@
+{
+  "feature": "Feature-5",
+  "date": "2026-11-14",
+  "build": "Release MSVC / Qt 6.12.0, Feature-5 working changes based on cad937b",
+  "writerMeaning": "128 repeats of one native frame; generated TEST with repeated indices/times; buffered SER rate, not sustained physical-disk throughput",
+  "previewMeaning": "12 cached frames, 3 repeats, conversion only",
+  "results": [
+    {
+      "name": "mono8",
+      "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+      "frames": 128,
+      "bytes": 159917234,
+      "serSeconds": 0.0439127,
+      "MBps": 3641.71,
+      "preview": {
+        "format": "Mono8",
+        "frames": 12,
+        "height": 964,
+        "input": "2015.12.19 Moon C9.25/raw/videos and stacked/Moon_181337.avi",
+        "results": [
+          {
+            "maxMs": 3.1764,
+            "meanMs": 2.5825083333333323,
+            "mode": "linear",
+            "p95Ms": 2.6455
+          },
+          {
+            "maxMs": 5.276,
+            "meanMs": 5.1467777777777775,
+            "mode": "window",
+            "p95Ms": 5.2299
+          },
+          {
+            "maxMs": 6.5476,
+            "meanMs": 6.367347222222221,
+            "mode": "auto",
+            "p95Ms": 6.4694
+          }
+        ],
+        "significantBits": 8,
+        "width": 1296
+      }
+    },
+    {
+      "name": "largest_rgb",
+      "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+      "frames": 128,
+      "bytes": 503317682,
+      "serSeconds": 0.117506,
+      "MBps": 4283.34,
+      "preview": {
+        "format": "RGB888",
+        "frames": 12,
+        "height": 1024,
+        "input": "2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI",
+        "results": [
+          {
+            "maxMs": 8.0152,
+            "meanMs": 7.909083333333336,
+            "mode": "linear",
+            "p95Ms": 7.9851
+          },
+          {
+            "maxMs": 24.9499,
+            "meanMs": 23.318374999999996,
+            "mode": "window",
+            "p95Ms": 23.6814
+          },
+          {
+            "maxMs": 25.7766,
+            "meanMs": 25.24913055555556,
+            "mode": "auto",
+            "p95Ms": 25.5069
+          }
+        ],
+        "significantBits": 8,
+        "width": 1280
+      }
+    },
+    {
+      "name": "native16_noise",
+      "input": "2013.06.25 ISS/raw/Moon_202643.ser",
+      "frames": 128,
+      "bytes": 319833266,
+      "serSeconds": 0.0827776,
+      "MBps": 3863.77,
+      "preview": {
+        "format": "Mono16",
+        "frames": 12,
+        "height": 964,
+        "input": "2013.06.25 ISS/raw/Moon_202643.ser",
+        "results": [
+          {
+            "maxMs": 3.3295,
+            "meanMs": 3.2331222222222227,
+            "mode": "linear",
+            "p95Ms": 3.3114
+          },
+          {
+            "maxMs": 15.1278,
+            "meanMs": 14.621583333333332,
+            "mode": "window",
+            "p95Ms": 14.8537
+          },
+          {
+            "maxMs": 14.3448,
+            "meanMs": 14.05145,
+            "mode": "auto",
+            "p95Ms": 14.1709
+          }
+        ],
+        "significantBits": 13,
+        "width": 1296
+      }
+    }
+  ]
+}

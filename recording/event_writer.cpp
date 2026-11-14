@@ -153,10 +153,10 @@ QString triggerFields(const ClipTrigger& trigger)
 
 } // namespace
 
-EventWriter::EventWriter(QObject* context, QString outputRoot, size_t maxQueuedFrames, Finished finished)
+EventWriter::EventWriter(QObject* context, QString outputRoot, size_t maxQueuedBytes, Finished finished)
     : context_(context)
     , outputRoot_(std::move(outputRoot))
-    , maxQueuedFrames_(maxQueuedFrames)
+    , maxQueuedBytes_(maxQueuedBytes)
     , finished_(std::move(finished))
 {
     thread_ = std::jthread([this](std::stop_token stopToken) {
@@ -169,12 +169,24 @@ EventWriter::~EventWriter()
     shutdown();
 }
 
+void EventWriter::setByteLimit(size_t bytes)
+{
+    std::lock_guard lock(mutex_);
+    maxQueuedBytes_ = bytes;
+}
+
+WriterUsage EventWriter::usage() const
+{
+    std::lock_guard lock(mutex_);
+    return usage_;
+}
+
 void EventWriter::submit(EventClip clip)
 {
     const bool testSignal = containsTestSignal(clip);
     // Frames of a refused clip are released after the lock is dropped.
     std::vector<FramePtr> dropped;
-    std::vector<float> droppedDifference;
+    BudgetVector<float> droppedDifference;
     bool ended = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -187,14 +199,19 @@ void EventWriter::submit(EventClip clip)
         {
             Job job;
             job.containsTestSignal = testSignal;
+            clip.writerByteLimit = maxQueuedBytes_;
             job.recordId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            if (queuedFrames_ + clip.frames.size() > maxQueuedFrames_)
+            for (const auto& frame : clip.frames) job.payloadBytes += frame->data.capacity();
+            job.payloadBytes += clip.peakDifference.capacity() * sizeof(float);
+            if (job.payloadBytes > maxQueuedBytes_ - std::min(maxQueuedBytes_, usage_.retainedBytes))
             {
                 job.notSavedReason = "writer busy";
                 dropped.swap(clip.frames);
                 droppedDifference.swap(clip.peakDifference);
+                job.payloadBytes = 0;
             }
-            queuedFrames_ += clip.frames.size();
+            usage_.retainedBytes += job.payloadBytes;
+            if (job.payloadBytes) ++usage_.outstandingClips;
             job.clip = std::move(clip);
             queue_.push_back(std::move(job));
         }
@@ -291,7 +308,8 @@ void EventWriter::run(std::stop_token stopToken)
         std::lock_guard<std::mutex> lock(mutex_);
         ended_ = true;
         abandoned.swap(queue_);
-        queuedFrames_ = 0;
+        usage_.retainedBytes = 0;
+        usage_.outstandingClips = 0;
     }
 }
 
@@ -311,11 +329,15 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             }
             job = std::move(queue_.front());
             queue_.pop_front();
-            queuedFrames_ -= job.clip.frames.size();
         }
 
         // A session_start line is reported only when it could not be written.
         const ClipWriteResult result = process(job);
+        {
+            std::lock_guard lock(mutex_);
+            usage_.retainedBytes -= job.payloadBytes;
+            if (job.payloadBytes) --usage_.outstandingClips;
+        }
         if (!job.sessionStart || result.recordFailed)
         {
             deliver(result);
@@ -326,6 +348,7 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
 ClipWriteResult EventWriter::process(Job& job)
 {
     ClipWriteResult result;
+    result.memoryLimited = job.clip.endReason == "clip memory allowance";
 
     if (job.sessionStart)
     {
@@ -378,7 +401,7 @@ ClipWriteResult EventWriter::process(Job& job)
     return result;
 }
 
-QString EventWriter::writeClip(const EventClip& clip, QString& error) const
+QString EventWriter::writeClip(EventClip& clip, QString& error)
 {
     if (clip.triggers.empty())
     {
@@ -416,6 +439,16 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         out << "max_patch_box_ratio: " << kMaxPatchBoxRatio << "\n";
         out << "frames_before: " << clip.framesBefore << "\n";
         out << "frames_after: " << clip.framesAfter << "\n";
+        out << "capture_history_seconds: " << clip.captureSettings.historySeconds << "\n";
+        out << "capture_post_seconds: " << clip.captureSettings.postSeconds << "\n";
+        out << "capture_max_post_seconds: " << clip.captureSettings.maxPostSeconds << "\n";
+        out << "memory_limit_bytes: " << clip.captureSettings.memoryBytes << "\n";
+        out << "history_available_seconds: " << clip.availableHistorySeconds << "\n";
+        out << "history_byte_limit: " << clip.historyByteLimit << "\n";
+        out << "collection_byte_limit: " << clip.collectionByteLimit << "\n";
+        out << "writer_byte_limit: " << clip.writerByteLimit << "\n";
+        out << "collection_end: " << QString::fromStdString(clip.endReason) << "\n";
+        out << "difference_memory_limited: " << (clip.previewLimited ? "yes" : "no") << "\n";
         out << "frames:\n";
         for (size_t i = 0; i < clip.frames.size(); ++i)
         {
@@ -459,6 +492,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         return {};
     }
     SerWriter ser(evidence);
+    const auto writeStarted = std::chrono::steady_clock::now();
     if (!ser.start(*clip.frames.front(), clip.stream.camera, error, containsTestSignal(clip))) return {};
     for (const FramePtr& frame : clip.frames)
     {
@@ -469,7 +503,13 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         if (error.isEmpty()) error = "could not flush event.ser";
         return {};
     }
+    const auto evidenceBytes = evidence.size();
     evidence.close();
+    {
+        std::lock_guard lock(mutex_);
+        usage_.writtenBytes += static_cast<uint64_t>(evidenceBytes);
+        usage_.writeSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - writeStarted).count();
+    }
 
     const uint64_t onset = clip.triggers.front().onsetFrameIndex;
     FramePtr baseline;
@@ -480,9 +520,13 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     const auto peakTrigger = std::max_element(clip.triggers.begin(), clip.triggers.end(),
         [](const ClipTrigger& a, const ClipTrigger& b) { return a.brightPixelCount < b.brightPixelCount; });
     const auto peakFrame = std::find_if(clip.frames.begin(), clip.frames.end(), [&](const FramePtr& frame) {
-        return frame->frameIndex == (clip.peakDifference.empty() ? peakTrigger->triggerFrameIndex : clip.peak.frameIndex);
+        return frame->frameIndex == (clip.peak.ready ? clip.peak.frameIndex : peakTrigger->triggerFrameIndex);
     });
     const FramePtr peak = peakFrame == clip.frames.end() ? clip.frames.front() : *peakFrame;
+    // Metadata and native evidence are closed. Retain just the two frames
+    // needed for display previews, freeing the remaining payload promptly.
+    clip.frames.clear();
+    const MemoryBudget budget = peak->data.get_allocator().budget;
     QImage baselineImage;
     if (baseline)
     {
@@ -490,7 +534,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     }
     else
     {
-        baselineImage = QImage(peak->width, peak->height, QImage::Format_RGB32);
+        baselineImage = makeBudgetImage(peak->width, peak->height, QImage::Format_RGB32, budget);
         baselineImage.fill(Qt::black);
         QPainter painter(&baselineImage);
         painter.setPen(Qt::yellow);
@@ -503,7 +547,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         return {};
     }
 
-    QImage difference(peak->width, peak->height, QImage::Format_RGB32);
+    QImage difference = makeBudgetImage(peak->width, peak->height, QImage::Format_RGB32, budget);
     difference.fill(Qt::black);
     if (clip.peakDifference.size() == static_cast<size_t>(peak->width) * peak->height)
     {
@@ -528,7 +572,8 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
     {
         QPainter painter(&difference);
         painter.setPen(Qt::yellow);
-        painter.drawText(difference.rect(), Qt::AlignCenter, "No measured reference difference available");
+        painter.drawText(difference.rect(), Qt::AlignCenter, clip.previewLimited
+            ? "Reference difference not retained: RAM limit" : "No measured reference difference available");
     }
     if (!difference.save(dir.filePath("03_diff_annotated.png"), "PNG"))
     {
@@ -546,7 +591,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
         QTextStream out(&note);
         out << "baseline_frame_index: " << (baseline ? QString::number(baseline->frameIndex) : "unavailable") << "\n";
         out << "peak_preview_frame_index: " << peak->frameIndex << "\n";
-        if (!clip.peakDifference.empty())
+        if (clip.peak.ready)
         {
             out << "peak_sigma: " << QString::number(clip.peak.peakSigma, 'g', 17) << "\n";
             out << "peak_delta_adu: " << QString::number(clip.peak.peakAdu, 'g', 17) << "\n";
@@ -555,7 +600,7 @@ QString EventWriter::writeClip(const EventClip& clip, QString& error) const
             out << "peak_settings: sigma=" << QString::number(clip.peak.settings.sigma, 'g', 17)
                 << " min_pixels=" << clip.peak.settings.minPixels << " max_pixels=" << clip.peak.settings.maxPixels
                 << " one_frame=" << (clip.peak.settings.oneFrame ? "yes" : "no") << "\n";
-            out << "difference_preview: positive native-ADU difference scaled to its maximum; annotations are display only\n";
+            out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
         out.flush();
         if (out.status() != QTextStream::Ok || !note.flush())

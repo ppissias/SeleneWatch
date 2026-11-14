@@ -5,13 +5,21 @@
 #include <cstddef>
 #include <mutex>
 #include <vector>
+#include <deque>
 
-// Thread-safe bounded circular buffer holding the most recent published frames.
+struct RingUsage
+{
+    size_t frames{0}, bytes{0};
+    double seconds{0};
+    bool memoryClamped{false};
+};
+
+// Thread-safe time and byte bounded history of published frames.
 // It holds pointers. Pushing drops the oldest pointer; it never copies pixels.
 class FrameRingBuffer
 {
 public:
-    explicit FrameRingBuffer(size_t capacity = 150);
+    explicit FrameRingBuffer(size_t maxBytes = 512 * 1024 * 1024, double seconds = 5);
     ~FrameRingBuffer() = default;
 
     FrameRingBuffer(const FrameRingBuffer&) = delete;
@@ -19,8 +27,8 @@ public:
     FrameRingBuffer(FrameRingBuffer&&) = delete;
     FrameRingBuffer& operator=(FrameRingBuffer&&) = delete;
 
-    // Stores the frame as the newest. When the buffer is full, the oldest
-    // frame is let go.
+    // Stores the newest frame; drops history older than the duration or
+    // over the byte allowance. Keeps the current frame even at a tiny quota.
     void push(FramePtr frame);
 
     // Lets go of every stored frame.
@@ -29,16 +37,16 @@ public:
     // Returns the number of frames currently stored.
     [[nodiscard]] size_t size() const;
 
-    // Returns the maximum number of frames the buffer can store.
-    [[nodiscard]] size_t capacity() const;
+    void configure(size_t maxBytes, double seconds);
+    [[nodiscard]] RingUsage usage() const;
 
     // The stored frames, oldest first. Copies pointers under the lock, not pixels.
     [[nodiscard]] std::vector<FramePtr> stored() const;
 
 private:
-    const size_t capacity_;
     mutable std::mutex mutex_;
-    std::vector<FramePtr> slots_;
-    size_t head_{0};
-    size_t count_{0};
+    std::deque<FramePtr> frames_;
+    size_t maxBytes_, bytes_{0};
+    double seconds_;
+    bool clamped_{false};
 };

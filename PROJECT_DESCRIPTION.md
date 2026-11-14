@@ -1,6 +1,6 @@
 # SeleneWatch — Project Description and Architecture
 
-> **Status:** Working architecture, revised November 2026 after Feature-6 and the Feature-9 implementation and recording measurements. Feature-9's observing calibration remains open. It is not a frozen specification. Feature-level detail lives in [features.md](features.md) (open proposals) and [implemented features.md](implemented%20features.md) (history). This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down.
+> **Status:** Working architecture, revised November 2026 after Feature-6 and the Feature-9/Feature-5 implementations and recording measurements. Their earthshine field checks remain open. It is not a frozen specification. Feature-level detail lives in [features.md](features.md) (open proposals) and [implemented features.md](implemented%20features.md) (history). This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down.
 
 ## 1. Project Overview
 
@@ -119,7 +119,7 @@ One rule covers every frame: **one writer, then many readers.**
 - The `Session` may add a test signal to it (Evidence rule 6). Then it publishes the frame as a `FramePtr`, a shared pointer to a constant `Frame`. From that point nobody can change it, which is how Evidence rule 1 is held in code and not only by convention.
 - The ring, a clip, the preview, and the guider each hold pointers. Collecting a clip copies pointers, not pixels. Clips that overlap share frames.
 - When the last pointer is dropped, the pixel buffer returns to the pool. A warm stream allocates no pixel buffer per frame.
-- Live memory is the ring, plus the open clip, plus the clips waiting for the writer. Each of the three has its own cap, so the total is bounded and is shown.
+- One shared image/analysis allocation budget follows pixels until their last owner releases them, including frames from old sources still held by the writer. Numeric detector arrays, maps, differences and application-created preview images share it. History, collection and active/queued writing also have byte allowances. Their policy is in [Feature-5 validation](docs/feature-5-validation.md). This is a payload ceiling, not process RSS: metadata, Qt caches, indices, codec workspaces and allocator overhead are additional.
 
 This was chosen in Feature-7 over copying the ring at each trigger, and over protecting ring slots from overwrite. Its reasons are recorded there.
 
@@ -144,7 +144,7 @@ SeleneWatch is meant to work with many cameras, not one vendor. Each camera fami
 
 Each piece of mutable state has one owner. `Session` touches `EventCapture` on the source thread, or while that thread is joined or not yet started. Threads meet through published read-only frames, the one-slot mailboxes for the preview and the guider, the test-blip request slot, and the writer's queue. Results travel to the window as notifications. Nothing on the frame path waits for the window or reads state the window keeps.
 
-`FlashDetector` owns its running mean and variance. It works in native sample units, uses a robust difference-noise floor, and selects a compact 8-connected patch above the observer's sigma threshold. Passing frames and open clips hold the reference. Settings travel through a mutex-protected request copied before each frame; each trigger keeps the values it used. At preview rate, the source sends the frame and its immutable measurements/map together in one packet. The GUI never reads mutable detector buffers. Noise/sigma maps and annotated differences are derived display data. The detector uses two float arrays per pixel, with optional map and peak-difference arrays; these are additional to the live-frame memory readout. A complete shared RAM budget remains Feature-5.
+`FlashDetector` owns its running mean and variance. It works in native sample units, uses a robust difference-noise floor, and selects a compact 8-connected patch above the observer's sigma threshold. Passing frames and open clips hold the reference. Settings travel through a mutex-protected request copied before each frame; each trigger keeps the values it used. At preview rate, the source sends the frame and its immutable measurements/map together in one packet. The GUI never reads mutable detector buffers. Noise/sigma maps and annotated differences are derived display data. Numeric arrays and display payload now count against the shared Feature-5 ceiling. Optional overlay refusal leaves detection running; failure to admit a required source/model allocation stops the stream visibly and hands off the available clip.
 
 ### Overload policy
 
@@ -289,7 +289,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | 5 | **An evidence-safe core.** Shared frames, detection on every frame, a writer that owns its backlog, a candidate log, and a file conversion separate from the preview | Feature-7 | Done |
 | 6 | **Recordings in, SER out.** The source type, `Session`, `StreamInfo`, Mono16 frames, playback of SER and uncompressed AVI recordings (whole or looped), the injected test signal, and the SER clip writer | Feature-6 | Done |
 | 7 | **A measured trigger.** Per-pixel noise, live controls, overlays, and measurements on the observer's recordings | Feature-9 | Implemented; field calibration partial |
-| 8 | **Seeing the faint side.** Display stretch, debayering for display, and a ring sized in seconds under one RAM limit | Feature-5 | Proposed |
+| 8 | **Seeing the faint side.** Display stretch, Bayer colour, source-time windows and a shared image/analysis byte ceiling | Feature-5 | Implemented; real-earthshine display check pending |
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Proposed |
 | 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Proposed |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | To be written | Planned |

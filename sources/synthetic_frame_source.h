@@ -28,12 +28,14 @@ public:
 
     // Paints a bright spot for the next few frames. Safe to call while running.
     void requestFlash();
+    // While stopped. Mono16 includes a deliberately faint half-disk for stretch QA.
+    void setPixelLayout(PixelFormat format, int bits, BitAlignment alignment = BitAlignment::Low,
+        BayerPattern bayer = BayerPattern::None);
 
     bool open(std::string& error) override;
     [[nodiscard]] StreamInfo streamInfo() const override;
     void start(FrameSourceListener& listener) override;
     void stop() override;
-    [[nodiscard]] size_t liveFrameBytes() const override;
 
 private:
     void run(std::stop_token stopToken, FrameSourceListener& listener);
@@ -41,8 +43,11 @@ private:
 
     int width_;
     int height_;
+    PixelFormat format_{PixelFormat::Mono8};
+    int bits_{8};
+    BitAlignment alignment_{BitAlignment::Low};
+    BayerPattern bayer_{BayerPattern::None};
     std::atomic<double> targetFps_;
     std::atomic<int> flashFramesRemaining_{0};
-    FramePool pool_;
     std::jthread workerThread_;
 };

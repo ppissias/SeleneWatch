@@ -24,6 +24,8 @@ public:
     static constexpr size_t kMaxSpareFrames = 4;
 
     FramePool();
+    // While stopped. Old published frames keep their original budget until freed.
+    void setMemoryBudget(MemoryBudget budget);
 
     // A frame whose data holds exactly pixelBytes bytes. The pixel values
     // and the other fields are whatever the previous user left there.

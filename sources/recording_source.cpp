@@ -146,11 +146,6 @@ void RecordingSource::stop()
     }
 }
 
-size_t RecordingSource::liveFrameBytes() const
-{
-    return pool_.allocatedBytes();
-}
-
 system_clock::time_point RecordingSource::fileTime(int position) const
 {
     return reader_->frameTime(position);

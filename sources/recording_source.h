@@ -54,7 +54,6 @@ public:
     [[nodiscard]] StreamInfo streamInfo() const override;
     void start(FrameSourceListener& listener) override;
     void stop() override;
-    [[nodiscard]] size_t liveFrameBytes() const override;
 
 private:
     void run(std::stop_token stopToken, FrameSourceListener& listener);
@@ -78,6 +77,5 @@ private:
     std::chrono::system_clock::duration lapLength_{};
     StreamInfo info_;
 
-    FramePool pool_;
     std::jthread worker_;
 };

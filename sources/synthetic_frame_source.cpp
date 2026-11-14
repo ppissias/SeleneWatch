@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <stdexcept>
 
 namespace {
 
@@ -37,8 +38,18 @@ void SyntheticFrameSource::requestFlash()
     flashFramesRemaining_.store(kFlashFrames);
 }
 
-bool SyntheticFrameSource::open(std::string& /*error*/)
+void SyntheticFrameSource::setPixelLayout(PixelFormat format, int bits, BitAlignment alignment, BayerPattern bayer)
 {
+    if (workerThread_.joinable() || (format != PixelFormat::Mono8 && format != PixelFormat::Mono16)
+        || bits < 8 || bits > 16 || (format == PixelFormat::Mono8 && (bits != 8 || bayer != BayerPattern::None))
+        || (bayer != BayerPattern::None && bayer != BayerPattern::RGGB))
+        throw std::invalid_argument("invalid synthetic pixel layout, or source is running");
+    format_ = format; bits_ = bits; alignment_ = alignment; bayer_ = bayer;
+}
+
+bool SyntheticFrameSource::open(std::string& error)
+{
+    if (width_ <= 0 || height_ <= 0) { error = "synthetic dimensions must be positive"; return false; }
     return true;
 }
 
@@ -78,11 +89,6 @@ void SyntheticFrameSource::stop()
     }
 }
 
-size_t SyntheticFrameSource::liveFrameBytes() const
-{
-    return pool_.allocatedBytes();
-}
-
 void SyntheticFrameSource::run(std::stop_token stopToken, FrameSourceListener& listener)
 {
     try
@@ -92,7 +98,7 @@ void SyntheticFrameSource::run(std::stop_token stopToken, FrameSourceListener& l
         using clock = std::chrono::steady_clock;
         uint64_t frameIndex = 0;
         auto nextFrameTime = clock::now();
-        const size_t pixelBytes = frameBytes(width_, height_, PixelFormat::Mono8);
+        const size_t pixelBytes = frameBytes(width_, height_, format_);
 
         while (!stopToken.stop_requested())
         {
@@ -142,4 +148,32 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
     }
 
     paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0);
+    frame.testSource = true;
+    if (format_ == PixelFormat::Mono16)
+    {
+        const size_t pixels = static_cast<size_t>(width_) * height_;
+        frame.data.resize(2 * pixels);
+        const int shift = alignment_ == BitAlignment::High ? 16 - bits_ : 0;
+        const int maximum = (1 << bits_) - 1;
+        const LunarDisk disk = LunarDisk::centered(width_, height_);
+        for (size_t i = pixels; i-- > 0;)
+        {
+            const int x = static_cast<int>(i % width_), y = static_cast<int>(i / width_);
+            const int original = frame.data[i];
+            int value = original * maximum / 255;
+            if (original < 250 && !disk.contains(x, y)) value = 1 + original % 7;
+            if (original < 250 && disk.contains(x, y) && x > disk.centerX)
+                value = 4 + original % 20 + (x + y * 3) % 32;
+            if (bayer_ != BayerPattern::None && original < 250)
+            {
+                if ((x & 1) != (y & 1)) value = value * 7 / 10;
+                else if (y & 1) value = value * 4 / 10;
+            }
+            value <<= shift;
+            frame.data[2 * i] = static_cast<uint8_t>(value & 255);
+            frame.data[2 * i + 1] = static_cast<uint8_t>(value >> 8);
+        }
+        frame.format = format_; frame.significantBits = bits_;
+        frame.alignment = alignment_; frame.bayer = bayer_;
+    }
 }

@@ -6,7 +6,7 @@ SeleneWatch is a native C++/Qt desktop application being developed to monitor th
 
 The main motivation is to help observers detect and document **lunar transient phenomena**, particularly brief flashes that may be caused by meteoroid impacts. The design also covers transits, occultations, moving objects, and other unexpected events.
 
-> **Project status: Feature-6 complete; Feature-9 implemented, with observing calibration still open.** Synthetic streams and SER/uncompressed AVI recordings use the same detector, 150-frame history, and asynchronous SER writer. The Detection panel controls a per-pixel noise trigger, including single-frame flashes, and shows its history and display overlays. Clips retain native pixel values, timestamps, test marks, detector settings, and review previews. Debug and Release tests cover the processing path and the actual window. Measurements and remaining data limitations are in [Feature-9 validation](docs/feature-9-validation.md). Display stretch, a shared RAM budget, camera adapters, and mount guiding follow.
+> **Project status: Feature-6 complete; Feature-9 and Feature-5 implemented, with observing field checks still open.** Synthetic streams and SER/uncompressed AVI recordings use the same detector, time-based history, shared image/analysis memory budget, and asynchronous SER writer. Detection controls the noise trigger and overlays; Display and capture adds native-bit stretch, Bayer colour, durations, and memory controls. Clips retain native pixels, timestamps, test marks, settings, and review previews. Measurements and data limitations are in [Feature-9 validation](docs/feature-9-validation.md) and [Feature-5 validation](docs/feature-5-validation.md). Camera adapters and mount guiding follow.
 
 ## What SeleneWatch aims to do
 
@@ -93,7 +93,7 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 4. Open the project in Visual Studio, select **Debug-x64**, configure, and build.
 5. Run **SeleneWatch** from the IDE.
 
-With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
+With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
 
 Camera SDKs are not part of the repository. Each camera adapter is built only when its SDK is installed and enabled in CMake. Without any SDK, the app still builds and runs on synthetic and recorded sources.
 
@@ -102,6 +102,8 @@ To try a test flash, start a source, click the preview to select a pixel, set **
 Use the **Detection** dock to adjust K (sigma), minimum and maximum patch size, and whether one frame may trigger. Changes reach the next frame; Stop and closing the app remember the values. Green slider marks show the current measurement and amber marks the recent maximum. The history covers ten seconds of source time. **Sigma map** shows positive changes relative to local noise, with pixels at or above K in red; **Noise map** shows the noise in ADU. The overlays affect only the display. Closing the dock leaves detection running; reopen it through **View → Detection**.
 
 Start by measuring a recording with no injection, then lower the injected amplitude until recovery stops. A peak above K alone is insufficient: enough neighbouring pixels must also pass. Saturation and motion at bright edges can limit recovery. The defaults (6 sigma, 8–400 pixels) are starting values, not a calibrated observing prescription. Each event folder contains `event.ser`, `event.txt`, `01_baseline.png`, `02_event_peak.png`, and `03_diff_annotated.png`; the PNGs are display previews. A final `complete: yes` line identifies a finished clip. The candidate log records a pending entry before the writer starts the clip and its outcome afterwards; open clips and queued work still in RAM can be lost in a process crash.
+
+The **Display and capture** tab offers Linear, Black/white levels, and Auto-stretch, plus inversion and Bayer colour. Level controls use native ADU and work while stopped. Choose pre-event history, quiet tail, maximum duration after a trigger, and the image/analysis RAM ceiling before Start. Defaults are 5 s, 3 s, 10 s, and 2 GiB. Playback speed does not change these source-time windows. The effective history may be shorter under the byte allowance, and clip metadata records why collection ended. The readout includes shared pixels, detector buffers, maps, and previews; Qt caches, container metadata, and codec workspaces are additional to that ceiling. A full writer logs refused work, and a required allocation failure stops acquisition visibly while preserving the available clip.
 
 ## Roadmap
 
@@ -114,7 +116,7 @@ Start by measuring a recording with no injection, then lower the injected amplit
 | 5 | An evidence-safe core: shared frames, detection on every frame, candidate log, lossless file path | Feature-7 | Done |
 | 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
 | 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
-| 8 | Seeing the faint side: display stretch, ring sized in seconds | Feature-5 | Proposed |
+| 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
 | 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Proposed |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |
 | 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |

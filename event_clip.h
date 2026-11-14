@@ -3,16 +3,10 @@
 #include "frame.h"
 #include "stream_info.h"
 #include "detection_result.h"
+#include "capture_settings.h"
 
 #include <chrono>
 #include <vector>
-
-// A clip ends after this many quiet frames in a row.
-inline constexpr int kPostEventFrames = 30;
-
-// A clip collects at most this many frames after its first trigger.
-// About 10 s at 30 fps. A longer event continues in the next clip.
-inline constexpr int kMaxPostEventFrames = 300;
 
 // One candidate inside a clip.
 struct ClipTrigger
@@ -37,6 +31,8 @@ struct ClipTrigger
 // The frames are shared with the ring and with any overlapping clip.
 struct EventClip
 {
+    EventClip() = default;
+    explicit EventClip(MemoryBudget budget) : peakDifference(BudgetAllocator<float>(std::move(budget))) {}
     std::vector<FramePtr> frames;
 
     // At least one. The first trigger names the clip.
@@ -45,7 +41,13 @@ struct EventClip
     // Strongest passing frame in this clip and its actual difference from
     // the held running reference. This is derived data, never evidence pixels.
     DetectionSummary peak;
-    std::vector<float> peakDifference;
+    BudgetVector<float> peakDifference;
+    bool previewLimited{false};
+    CaptureSettings captureSettings;
+    std::string endReason;
+    size_t payloadBytes{0};
+    size_t historyByteLimit{0}, collectionByteLimit{0}, writerByteLimit{0};
+    double availableHistorySeconds{0};
 
     // Frames before and after the first trigger frame.
     int framesBefore{0};

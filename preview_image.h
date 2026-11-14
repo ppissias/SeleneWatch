@@ -1,15 +1,19 @@
 #pragma once
 
 #include "frame.h"
+#include "display_settings.h"
 
 #include <QtGui/QImage>
 
 // The conversion for the screen. It belongs to the window and returns an
 // 8-bit image that owns its pixels. It may shift, stretch, or invert as the
-// preview needs, so it is never used to write a file. The event writer has
-// its own conversion, which keeps the stored samples exactly.
+// preview needs. The event writer may use it for clearly labelled display
+// PNGs; native SER evidence has its own unchanged-byte write path.
 //
-// Mono16 is shown as its top 8 significant bits. A Bayer mosaic is shown as
-// the grey mosaic it is. A frame whose data does not match its size and
-// format gives a null image.
-[[nodiscard]] QImage frameToPreviewImage(const Frame& frame);
+// Window levels and automatic percentile/midtones operate in native sample
+// units before conversion. Bayer interpolation is display only.
+[[nodiscard]] QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings = {}, DisplayLevels* levels = nullptr);
+
+// A writable QImage backed by charged pixels. Shared image copies keep one
+// allocation until the last copy is destroyed. For display and writer previews.
+[[nodiscard]] QImage makeBudgetImage(int width, int height, QImage::Format format, MemoryBudget budget);

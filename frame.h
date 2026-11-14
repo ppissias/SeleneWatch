@@ -1,6 +1,7 @@
 #pragma once
 
 #include "blip.h"
+#include "memory_budget.h"
 
 #include <chrono>
 #include <cstdint>
@@ -46,6 +47,7 @@ enum class BayerPattern
 // so a source sets all of them for each frame it fills.
 struct Frame
 {
+    explicit Frame(MemoryBudget budget = {}) : data(BudgetAllocator<uint8_t>(std::move(budget))) {}
     int width = 0;
     int height = 0;
     PixelFormat format = PixelFormat::Mono8;
@@ -72,7 +74,7 @@ struct Frame
     bool testSource{false};
 
     // The samples as delivered, row by row from the top.
-    std::vector<uint8_t> data;
+    BudgetVector<uint8_t> data;
 };
 
 // A published frame. A source fills a frame while it is the only owner.
@@ -99,17 +101,6 @@ using FramePtr = std::shared_ptr<const Frame>;
 {
     return static_cast<size_t>(width) * static_cast<size_t>(height)
         * static_cast<size_t>(bytesPerPixel(format));
-}
-
-// The right shift that leaves the top 8 significant bits of a Mono16 sample.
-// The preview and the Feature-4 detector read 16-bit samples this way.
-[[nodiscard]] constexpr int shiftToEightBits(const Frame& frame)
-{
-    if (frame.alignment == BitAlignment::High)
-    {
-        return 8;
-    }
-    return frame.significantBits > 8 ? frame.significantBits - 8 : 0;
 }
 
 [[nodiscard]] constexpr const char* pixelFormatName(PixelFormat format)

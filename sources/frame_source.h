@@ -1,6 +1,7 @@
 #pragma once
 
 #include "frame.h"
+#include "frame_pool.h"
 #include "stream_info.h"
 
 #include <cstddef>
@@ -54,7 +55,8 @@ public:
     // Stops and joins the worker. Safe to call when it is not running.
     virtual void stop() = 0;
 
-    // Pixel bytes of every frame this source has handed out that is still
-    // held somewhere, plus those waiting for reuse. Safe from any thread.
-    [[nodiscard]] virtual size_t liveFrameBytes() const = 0;
+    // While stopped. Both sources allocate their frame pixels from this pool.
+    void setMemoryBudget(MemoryBudget budget) { pool_.setMemoryBudget(std::move(budget)); }
+protected:
+    FramePool pool_;
 };

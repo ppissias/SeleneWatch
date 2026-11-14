@@ -16,7 +16,7 @@
 class FlashDetector
 {
 public:
-    explicit FlashDetector(DetectionSettings settings = {});
+    explicit FlashDetector(DetectionSettings settings = {}, MemoryBudget budget = {});
     void reset();
     void setSettings(const DetectionSettings& settings);
 
@@ -29,19 +29,21 @@ public:
     [[nodiscard]] uint64_t onsetFrameIndex() const;
     [[nodiscard]] const DetectionSummary& summary() const;
     [[nodiscard]] DetectionView view() const;
-    [[nodiscard]] std::vector<float> difference(const Frame& frame) const;
+    // Reuses the caller's charged buffer for a derived display difference.
+    void difference(const Frame& frame, BudgetVector<float>& values) const;
 
 private:
     DetectionSettings settings_;
     DetectionSummary summary_;
-    std::vector<float> mean_;
-    std::vector<float> variance_;
-    std::vector<float> grid_;
+    MemoryBudget budget_;
+    BudgetVector<float> mean_;
+    BudgetVector<float> variance_;
+    BudgetVector<float> grid_;
     // Sparse 8-connected patch work space, reused between frames.
-    std::vector<size_t> thresholdPixels_;
-    std::vector<float> thresholdSigma_;
-    std::vector<uint8_t> visited_;
-    std::vector<size_t> pending_;
+    BudgetVector<size_t> thresholdPixels_;
+    BudgetVector<float> thresholdSigma_;
+    BudgetVector<uint8_t> visited_;
+    BudgetVector<size_t> pending_;
     size_t learnedFrames_{0};
     std::deque<DetectionHistoryPoint> history_;
     std::shared_ptr<const DetectionMap> map_;

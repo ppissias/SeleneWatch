@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "detection_panel.h"
+#include "display_panel.h"
 
 #include "preview_image.h"
 #include "sources/recording_source.h"
@@ -18,6 +19,7 @@
 #include <QtWidgets/QStatusBar>
 
 #include <filesystem>
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -50,6 +52,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot)
 
     setupStatusBar();
     setupDetectionPanel();
+    setupDisplayPanel();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
@@ -80,7 +83,10 @@ MainWindow::~MainWindow()
     // this derived window and its members have ceased to exist.
     if (detectionDock_) disconnect(detectionDock_, nullptr, this, nullptr);
     if (detectionPanel_) disconnect(detectionPanel_, nullptr, this, nullptr);
+    if (displayDock_) disconnect(displayDock_, nullptr, this, nullptr);
+    if (displayPanel_) disconnect(displayPanel_, nullptr, this, nullptr);
     saveDetectionSettings();
+    saveDisplaySettings();
     if (bufferReadoutTimer_)
     {
         bufferReadoutTimer_->stop();
@@ -125,6 +131,59 @@ void MainWindow::saveDetectionSettings()
     saved.setValue("detection/maxPixels", values.maxPixels);
     saved.setValue("detection/oneFrame", values.oneFrame);
     saved.sync();
+}
+
+void MainWindow::setupDisplayPanel()
+{
+    displayPanel_ = new DisplayPanel(this);
+    displayDock_ = new QDockWidget("Display and capture", this);
+    displayDock_->setObjectName("displayDock"); displayDock_->setWidget(displayPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, displayDock_);
+    tabifyDockWidget(detectionDock_, displayDock_);
+    menuBar()->actions().front()->menu()->addAction(displayDock_->toggleViewAction());
+    QSettings saved;
+    DisplaySettings display;
+    const int mode = saved.value("display/mode", 0).toInt();
+    display.mode = mode >= 0 && mode <= 2 ? static_cast<DisplayMode>(mode) : DisplayMode::Linear;
+    display.black = saved.value("display/black", 0).toDouble(); display.white = saved.value("display/white", 1).toDouble();
+    display.invert = saved.value("display/invert", false).toBool(); display.debayer = saved.value("display/debayer", true).toBool();
+    displayPanel_->setDisplaySettings(display.valid() ? display : DisplaySettings{});
+    CaptureSettings capture;
+    capture.historySeconds = saved.value("capture/history", 5).toDouble();
+    capture.postSeconds = saved.value("capture/post", 3).toDouble();
+    capture.maxPostSeconds = saved.value("capture/maxPost", 10).toDouble();
+    capture.memoryBytes = static_cast<size_t>(std::clamp(saved.value("capture/memoryMiB", 2048).toInt(), 16, 65536)) * 1024 * 1024;
+    displayPanel_->setCaptureSettings(capture.valid() ? capture : CaptureSettings{});
+    connect(displayPanel_, &DisplayPanel::displayChanged, this, &MainWindow::renderPreview);
+    displayDock_->raise();
+    updateBufferReadout();
+}
+
+void MainWindow::saveDisplaySettings()
+{
+    if (!displayPanel_) return;
+    const auto display = displayPanel_->displaySettings();
+    const auto capture = displayPanel_->captureSettings();
+    QSettings saved;
+    saved.setValue("display/mode", static_cast<int>(display.mode));
+    saved.setValue("display/black", display.black); saved.setValue("display/white", display.white);
+    saved.setValue("display/invert", display.invert); saved.setValue("display/debayer", display.debayer);
+    saved.setValue("capture/history", capture.historySeconds); saved.setValue("capture/post", capture.postSeconds);
+    saved.setValue("capture/maxPost", capture.maxPostSeconds); saved.setValue("capture/memoryMiB", static_cast<int>(capture.memoryBytes / (1024 * 1024)));
+    saved.sync();
+}
+
+void MainWindow::renderPreview()
+{
+    if (!latestFrame_) return;
+    try
+    {
+        DisplayLevels levels;
+        QImage image = frameToPreviewImage(*latestFrame_, displayPanel_->displaySettings(), &levels);
+        ui_->previewWidget->setImage(std::move(image));
+        displayPanel_->showLevels(levels);
+    }
+    catch (const MemoryLimitError&) { statusBar()->showMessage("Preview skipped: RAM ceiling reached"); }
 }
 
 void MainWindow::updateDetectionDisplay()
@@ -184,6 +243,7 @@ void MainWindow::updateControls()
 
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);
+    if (displayPanel_) displayPanel_->setRunning(running, recording);
 }
 
 void MainWindow::updateBufferReadout()
@@ -195,11 +255,13 @@ void MainWindow::updateBufferReadout()
 
     // The memory is that of every live frame: the ring, clips being
     // collected or waiting for the writer, and buffers waiting for reuse.
-    const double mb = static_cast<double>(session_->liveFrameBytes()) / 1'000'000.0;
-    bufferLabel_->setText(QString("Buffer: %1/%2 frames (%3 MB live)")
-        .arg(session_->bufferSize())
-        .arg(session_->bufferCapacity())
-        .arg(mb, 0, 'f', 1));
+    const auto memory = session_->memoryUsage();
+    const auto history = session_->historyUsage();
+    const auto writer = session_->writerUsage();
+    bufferLabel_->setText(QString("History %1 s / %2 frames; RAM %3 / %4 MiB")
+        .arg(history.seconds, 0, 'f', 1).arg(history.frames)
+        .arg(memory.used / 1048576.0, 0, 'f', 1).arg(memory.limit / 1048576.0, 0, 'f', 0));
+    if (displayPanel_) displayPanel_->showUsage(memory, history, writer);
 }
 
 void MainWindow::updateStreamReadout()
@@ -229,6 +291,7 @@ void MainWindow::updateCandidateReadout()
     {
         text += QString(" (%1 not saved)").arg(clipsNotSaved_);
     }
+    if (clipsLimited_ > 0) text += QString(" (%1 RAM limits)").arg(clipsLimited_);
     candidatesLabel_->setText(text);
 }
 
@@ -276,6 +339,7 @@ void MainWindow::updateFrameLabel(const Frame& frame)
     }
     const int maximum = frame.format == PixelFormat::Mono16 ? (1 << frame.significantBits) - 1 : 255;
     ui_->blipAmplitudeSpinBox->setMaximum(maximum);
+    displayPanel_->setNativeMaximum(maximum);
 }
 
 void MainWindow::updateBlipReadout()
@@ -309,6 +373,10 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     if (!recordingSelected())
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
+        const int kind = displayPanel_->syntheticFormat();
+        if (kind) source->setPixelLayout(PixelFormat::Mono16, kind == 3 ? 16 : 12,
+            kind == 2 || kind == 4 ? BitAlignment::High : BitAlignment::Low,
+            kind == 4 ? BayerPattern::RGGB : BayerPattern::None);
         synthetic_ = source.get();
         return source;
     }
@@ -337,6 +405,9 @@ void MainWindow::onStartClicked()
     }
     session_->setSource(std::move(source));
     ui_->previewWidget->clear();
+    latestFrame_.reset();
+    detectionPanel_->setView({});
+    session_->setCaptureSettings(displayPanel_->captureSettings());
     latestDetection_ = {};
     updateDetectionDisplay();
     updateBlipReadout();
@@ -357,6 +428,7 @@ void MainWindow::onStartClicked()
     playbackEnded_ = false;
     candidates_ = 0;
     clipsNotSaved_ = 0;
+    clipsLimited_ = 0;
     lastAcquiredSample_ = 0;
     lastFpsSampleTime_ = std::chrono::steady_clock::now();
     framesLabel_->setText("Frames: 0");
@@ -381,6 +453,7 @@ void MainWindow::finishStream()
     bufferReadoutTimer_->stop();
     session_->stop();
     saveDetectionSettings();
+    saveDisplaySettings();
 
     fpsLabel_->setText("FPS: --");
     framesLabel_->setText(QString("Frames: %1").arg(session_->acquiredFrames()));
@@ -400,9 +473,17 @@ void MainWindow::onOpenFileClicked()
         return;
     }
 
-    recordingPath_ = path;
-    ui_->fileLabel->setText(QFileInfo(path).fileName());
-    ui_->fileLabel->setToolTip(QDir::toNativeSeparators(path));
+    selectRecording(path);
+}
+
+void MainWindow::selectRecording(QString path)
+{
+    if (session_->isRunning()) return;
+    recordingPath_ = std::move(path);
+    ui_->sourceComboBox->setCurrentIndex(1);
+    ui_->fileLabel->setText(QFileInfo(recordingPath_).fileName());
+    ui_->fileLabel->setToolTip(QDir::toNativeSeparators(recordingPath_));
+    updateControls();
 }
 
 void MainWindow::onSourceKindChanged()
@@ -458,12 +539,14 @@ void MainWindow::showLatestFrame()
     if (frame)
     {
         updateFrameLabel(*frame);
-        ui_->previewWidget->setImage(frameToPreviewImage(*frame));
+        latestFrame_ = frame;
+        renderPreview();
         if (packet.detection)
         {
             const auto& view = *packet.detection;
             latestDetection_ = view.summary;
-            detectionPanel_->setView(view);
+            try { detectionPanel_->setView(view); }
+            catch (const MemoryLimitError&) { statusBar()->showMessage("Overlay skipped: RAM ceiling reached"); }
             if (detectionDock_->isVisible())
                 ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
                     {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});
@@ -481,6 +564,7 @@ void MainWindow::onCandidateStarted()
 
 void MainWindow::onClipWritten(const ClipWriteResult& result)
 {
+    if (result.memoryLimited) { ++clipsLimited_; updateCandidateReadout(); }
     if (result.recordFailed)
     {
         recordFailed_ = true;
@@ -494,7 +578,7 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
     }
     else if (!result.folder.isEmpty())
     {
-        statusBar()->showMessage(result.folder);
+        statusBar()->showMessage(result.memoryLimited ? "Clip saved at RAM limit: " + result.folder : result.folder);
     }
 
     updateStatusLabel();

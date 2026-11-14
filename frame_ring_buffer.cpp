@@ -3,62 +3,58 @@
 #include <algorithm>
 #include <utility>
 
-FrameRingBuffer::FrameRingBuffer(size_t capacity)
-    : capacity_(std::max<size_t>(1, capacity))
+FrameRingBuffer::FrameRingBuffer(size_t maxBytes, double seconds)
+    : maxBytes_(std::max(size_t{1}, maxBytes)), seconds_(seconds) {}
+
+void FrameRingBuffer::configure(size_t maxBytes, double seconds)
 {
-    slots_.resize(capacity_);
+    clear();
+    std::lock_guard lock(mutex_);
+    maxBytes_ = std::max(size_t{1}, maxBytes);
+    seconds_ = seconds;
 }
 
 void FrameRingBuffer::push(FramePtr frame)
 {
-    // The frame that leaves the ring is released after the lock is dropped,
-    // so returning its buffer to the pool does not happen under this mutex.
-    FramePtr leaving;
+    std::vector<FramePtr> leaving;
+    std::lock_guard lock(mutex_);
+    bytes_ += frame->data.capacity();
+    frames_.push_back(std::move(frame));
+    while (frames_.size() > 1)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        leaving = std::exchange(slots_[head_], std::move(frame));
-        head_ = (head_ + 1) % capacity_;
-        if (count_ < capacity_)
-        {
-            ++count_;
-        }
+        const bool old = std::chrono::duration<double>(frames_.back()->timestamp - frames_.front()->timestamp).count() > seconds_;
+        const bool full = bytes_ > maxBytes_;
+        if (!old && !full) break;
+        if (full && !old) clamped_ = true;
+        bytes_ -= frames_.front()->data.capacity();
+        leaving.push_back(std::move(frames_.front()));
+        frames_.pop_front();
     }
-}
-
-std::vector<FramePtr> FrameRingBuffer::stored() const
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    std::vector<FramePtr> frames;
-    frames.reserve(count_);
-
-    const size_t oldest = (head_ + capacity_ - count_) % capacity_;
-    for (size_t i = 0; i < count_; ++i)
-    {
-        frames.push_back(slots_[(oldest + i) % capacity_]);
-    }
-    return frames;
 }
 
 void FrameRingBuffer::clear()
 {
-    std::vector<FramePtr> leaving(capacity_);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        slots_.swap(leaving);
-        head_ = 0;
-        count_ = 0;
-    }
+    std::deque<FramePtr> leaving;
+    std::lock_guard lock(mutex_);
+    leaving.swap(frames_);
+    bytes_ = 0; clamped_ = false;
 }
 
 size_t FrameRingBuffer::size() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return count_;
+    std::lock_guard lock(mutex_);
+    return frames_.size();
 }
 
-size_t FrameRingBuffer::capacity() const
+RingUsage FrameRingBuffer::usage() const
 {
-    return capacity_;
+    std::lock_guard lock(mutex_);
+    return {frames_.size(), bytes_, frames_.empty() ? 0 : std::max(0.0,
+        std::chrono::duration<double>(frames_.back()->timestamp - frames_.front()->timestamp).count()), clamped_};
+}
+
+std::vector<FramePtr> FrameRingBuffer::stored() const
+{
+    std::lock_guard lock(mutex_);
+    return {frames_.begin(), frames_.end()};
 }

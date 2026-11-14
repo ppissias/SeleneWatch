@@ -16,7 +16,7 @@ void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bo
     frame.syntheticFlash = flash;
     frame.testSource = false;
 
-    const size_t targetSize = static_cast<size_t>(width * height);
+    const size_t targetSize = static_cast<size_t>(width) * height;
     if (frame.data.size() != targetSize)
     {
         frame.data.resize(targetSize);

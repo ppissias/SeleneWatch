@@ -1,7 +1,9 @@
 #include "detection_panel.h"
+#include "display_panel.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "recording/ser_reader.h"
+#include "recording/ser_writer.h"
 #include "sources/synthetic_scene.h"
 
 #include <QtCore/QDir>
@@ -37,6 +39,7 @@ private slots:
     void init() { QSettings saved; saved.clear(); saved.sync(); }
     void controlsPreserveValidSizeLimits();
     void livePanelInjectionEvidenceAndSavedSettings();
+    void stretchARecordingWhileCapturingThenRestoreSettings();
 };
 
 void UiTest::controlsPreserveValidSizeLimits()
@@ -65,6 +68,7 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         window.show();
         auto* panel = window.findChild<DetectionPanel*>();
         auto* dock = window.findChild<QDockWidget*>("detectionDock");
+        dock->raise();
         auto* preview = window.findChild<PreviewWidget*>("previewWidget");
         auto* start = window.findChild<QPushButton*>("startButton");
         auto* stop = window.findChild<QPushButton*>("stopButton");
@@ -136,6 +140,119 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
     }
     MainWindow restored(nullptr, output.path());
     QCOMPARE(restored.findChild<DetectionPanel*>()->settings(), chosen);
+}
+
+void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
+{
+    QTemporaryDir output;
+    const QString input = QDir(output.path()).filePath("faint-test.ser");
+    QFile file(input);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    SerWriter writer(file);
+    QString reason;
+    for (int i = 0; i < 100; ++i)
+    {
+        Frame frame; frame.width = 64; frame.height = 48; frame.format = PixelFormat::Mono16;
+        frame.significantBits = 12; frame.alignment = BitAlignment::High; frame.testSource = true;
+        frame.frameIndex = static_cast<uint64_t>(i);
+        frame.timestamp = std::chrono::system_clock::time_point{} + std::chrono::milliseconds{i * 100};
+        for (int y = 0; y < 48; ++y) for (int x = 0; x < 64; ++x)
+        {
+            const int value = (x == 0 && y == 0 ? 4000 : 8 + (x + y) % 48) << 4;
+            frame.data.push_back(static_cast<uint8_t>(value & 255)); frame.data.push_back(static_cast<uint8_t>(value >> 8));
+        }
+        if (i == 0) QVERIFY(writer.start(frame, "TEST faint recording", reason));
+        QVERIFY(writer.append(frame, reason));
+    }
+    QVERIFY(writer.finish(reason)); file.close();
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray inputBefore = file.readAll(); file.close();
+    DisplaySettings savedDisplay;
+    const CaptureSettings chosen{0.3, 0.25, 0.6, size_t{128} * 1024 * 1024};
+    {
+        MainWindow window(nullptr, QDir(output.path()).filePath("events"));
+        window.selectRecording(input); window.show();
+        auto* panel = window.findChild<DisplayPanel*>();
+        window.findChild<QDockWidget*>("displayDock")->raise();
+        panel->setCaptureSettings(chosen);
+        auto* start = window.findChild<QPushButton*>("startButton");
+        auto* stop = window.findChild<QPushButton*>("stopButton");
+        auto* preview = window.findChild<PreviewWidget*>();
+        start->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(panel->findChild<QDoubleSpinBox*>("displayWhite")->maximum(), 4095.0, 3000);
+        QVERIFY(!panel->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
+        const auto brightness = [&] {
+            const QRect rect = preview->imageRect();
+            const QPoint point(rect.x() + rect.width() * 47 / 64, rect.y() + rect.height() * 24 / 48);
+            return qGray(preview->grab().toImage().pixel(point));
+        };
+        const int linear = brightness();
+        auto* mode = panel->findChild<QComboBox*>("displayMode");
+        mode->setCurrentIndex(2);
+        QTRY_VERIFY_WITH_TIMEOUT(brightness() > linear + 30, 3000);
+        QDir().mkpath(SELENEWATCH_DISPLAY_QA_DIR);
+        QVERIFY(window.grab().save(QString(SELENEWATCH_DISPLAY_QA_DIR) + "/window-auto.png"));
+        mode->setCurrentIndex(1);
+        panel->findChild<QDoubleSpinBox*>("displayBlack")->setValue(8);
+        panel->findChild<QDoubleSpinBox*>("displayWhite")->setValue(64);
+        const int normal = brightness();
+        panel->findChild<QCheckBox*>("displayInvert")->setChecked(true);
+        QCOMPARE(brightness() + normal, 255);
+        panel->findChild<QCheckBox*>("displayInvert")->setChecked(false);
+        QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
+        window.findChild<QDoubleSpinBox*>("blipFwhmSpinBox")->setValue(4);
+        window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(50);
+        window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(1);
+        auto* inject = window.findChild<QPushButton*>("injectBlipButton");
+        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(), 3000);
+        inject->click();
+        QString folder;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            QDir events(QDir(output.path()).filePath("events"));
+            for (const auto& entry : events.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+                if (text(events.filePath(entry + "/event.txt")).contains("complete: yes")) { folder = events.filePath(entry); return true; }
+            return false;
+        })(), 5000);
+        const QString metadata = text(QDir(folder).filePath("event.txt"));
+        QVERIFY(metadata.contains("capture_history_seconds: 0.3"));
+        QVERIFY(metadata.contains("capture_post_seconds: 0.25"));
+        QCOMPARE(metadata.count(" test_blip="), 1);
+        SerReader source, saved;
+        std::string error;
+        QVERIFY(source.open(std::filesystem::path(input.toStdWString()), 10, error));
+        QVERIFY(saved.open(std::filesystem::path(QDir(folder).filePath("event.ser").toStdWString()), 10, error));
+        int checked = 0;
+        for (const auto& line : metadata.split('\n'))
+        {
+            bool isFrame = false;
+            const int position = line.section(' ', 0, 0).toInt(&isFrame);
+            if (!isFrame || line.contains(" test_blip=")) continue;
+            Frame original, stored;
+            original.data.resize(source.frameBytes()); stored.data.resize(saved.frameBytes());
+            QVERIFY(source.readFrame(line.section(' ', 1, 1).toInt(), original, error));
+            QVERIFY(saved.readFrame(position, stored, error));
+            QCOMPARE(stored.data, original.data);
+            ++checked;
+        }
+        QVERIFY(checked > 1);
+        stop->click();
+        QVERIFY(panel->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
+        // A stopped recording can still be restretched from the retained raw frame.
+        const int before = brightness();
+        panel->findChild<QSlider*>("blackSlider")->setValue(12);
+        QVERIFY(brightness() != before);
+        savedDisplay = panel->displaySettings();
+        QVERIFY(window.grab().save(QString(SELENEWATCH_DISPLAY_QA_DIR) + "/window-levels-stopped.png"));
+    }
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), inputBefore);
+    MainWindow restored(nullptr, QDir(output.path()).filePath("restored-events"));
+    auto* panel = restored.findChild<DisplayPanel*>();
+    QCOMPARE(panel->displaySettings().mode, savedDisplay.mode);
+    QCOMPARE(panel->displaySettings().black, savedDisplay.black);
+    QCOMPARE(panel->captureSettings().historySeconds, chosen.historySeconds);
+    QCOMPARE(panel->captureSettings().memoryBytes, chosen.memoryBytes);
 }
 
 int main(int argc, char** argv)

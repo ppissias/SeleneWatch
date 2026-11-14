@@ -24,7 +24,7 @@ struct Samples
     }
 };
 
-float median(std::vector<float>& values)
+float median(BudgetVector<float>& values)
 {
     const auto middle = values.begin() + static_cast<ptrdiff_t>(values.size() / 2);
     std::nth_element(values.begin(), middle, values.end());
@@ -33,7 +33,11 @@ float median(std::vector<float>& values)
 
 } // namespace
 
-FlashDetector::FlashDetector(DetectionSettings settings)
+FlashDetector::FlashDetector(DetectionSettings settings, MemoryBudget budget)
+    : budget_(std::move(budget)), mean_(BudgetAllocator<float>(budget_)), variance_(BudgetAllocator<float>(budget_)),
+      grid_(BudgetAllocator<float>(budget_)), thresholdPixels_(BudgetAllocator<size_t>(budget_)),
+      thresholdSigma_(BudgetAllocator<float>(budget_)), visited_(BudgetAllocator<uint8_t>(budget_)),
+      pending_(BudgetAllocator<size_t>(budget_))
 {
     setSettings(settings);
 }
@@ -53,8 +57,14 @@ void FlashDetector::setSettings(const DetectionSettings& settings)
 
 void FlashDetector::reset()
 {
-    mean_.clear(); variance_.clear(); grid_.clear(); history_.clear(); map_.reset();
-    thresholdPixels_.clear(); thresholdSigma_.clear(); visited_.clear(); pending_.clear();
+    mean_ = BudgetVector<float>(mean_.get_allocator());
+    variance_ = BudgetVector<float>(variance_.get_allocator());
+    grid_ = BudgetVector<float>(grid_.get_allocator());
+    thresholdPixels_ = BudgetVector<size_t>(thresholdPixels_.get_allocator());
+    thresholdSigma_ = BudgetVector<float>(thresholdSigma_.get_allocator());
+    visited_ = BudgetVector<uint8_t>(visited_.get_allocator());
+    pending_ = BudgetVector<size_t>(pending_.get_allocator());
+    history_.clear(); map_.reset();
     learnedFrames_ = 0;
     width_ = height_ = bits_ = 0;
     consecutive_ = 0;
@@ -113,9 +123,13 @@ bool FlashDetector::observe(const Frame& frame, bool holdReference, DetectionDis
         std::shared_ptr<DetectionMap> map;
         if (display.makeMap && display.overlay != DetectionOverlay::None)
         {
-            map = std::make_shared<DetectionMap>();
-            map->width = width_; map->height = height_; map->kind = display.overlay;
-            map->values.resize(pixels);
+            try
+            {
+                map = std::make_shared<DetectionMap>(budget_);
+                map->width = width_; map->height = height_; map->kind = display.overlay;
+                map->values.resize(pixels);
+            }
+            catch (const MemoryLimitError&) { map.reset(); summary_.overlaySkipped = true; }
         }
         for (int y = 0; y < height_; ++y)
         {
@@ -257,13 +271,12 @@ DetectionView FlashDetector::view() const
     return {summary_, {history_.begin(), history_.end()}, map_};
 }
 
-std::vector<float> FlashDetector::difference(const Frame& frame) const
+void FlashDetector::difference(const Frame& frame, BudgetVector<float>& values) const
 {
     if (frame.width != width_ || frame.height != height_ || frame.format != format_
         || frame.data.size() != frameBytes(width_, height_, format_))
         throw std::invalid_argument("difference requested for another frame layout");
     const Samples samples{frame, format_ == PixelFormat::Mono16 && alignment_ == BitAlignment::High ? 16 - bits_ : 0};
-    std::vector<float> values(mean_.size());
+    values.resize(mean_.size());
     for (size_t i = 0; i < values.size(); ++i) values[i] = samples.at(i) - mean_[i];
-    return values;
 }

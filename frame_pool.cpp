@@ -8,6 +8,8 @@
 // this, so a frame dropped after the pool is gone finds nothing and is freed.
 struct FramePool::Shared
 {
+    explicit Shared(MemoryBudget value = {}) : budget(std::move(value)) {}
+    MemoryBudget budget;
     std::mutex mutex;
     std::vector<std::unique_ptr<Frame>> free;
     size_t allocatedFrames{0};
@@ -17,6 +19,11 @@ struct FramePool::Shared
 FramePool::FramePool()
     : shared_(std::make_shared<Shared>())
 {
+}
+
+void FramePool::setMemoryBudget(MemoryBudget budget)
+{
+    shared_ = std::make_shared<Shared>(std::move(budget));
 }
 
 std::shared_ptr<Frame> FramePool::acquire(size_t pixelBytes)
@@ -34,7 +41,7 @@ std::shared_ptr<Frame> FramePool::acquire(size_t pixelBytes)
     const bool isNew = !frame;
     if (isNew)
     {
-        frame = std::make_unique<Frame>();
+        frame = std::make_unique<Frame>(shared_->budget);
     }
 
     // Resizing a recycled buffer of the same size does nothing.

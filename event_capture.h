@@ -14,8 +14,8 @@
 // whoever receives it decides whether it can be saved.
 //
 // A clip starts at a candidate with the frames then in the ring. It ends
-// after kPostEventFrames quiet frames in a row, or at kMaxPostEventFrames
-// frames after its first trigger. A candidate that fires while a clip is
+// after the configured quiet interval, maximum interval after its first
+// trigger, or collection byte allowance. A candidate that fires while a clip is
 // open joins that clip. If the detector is still firing when a clip reaches
 // its cap, the next clip starts at once and overlaps the one just ended.
 //
@@ -29,7 +29,11 @@ public:
     using CandidateStarted = std::function<void()>;
     using ClipReady = std::function<void(EventClip clip)>;
 
-    EventCapture(size_t capacity, CandidateStarted onCandidate, ClipReady onClip, DetectionSettings settings = {});
+    EventCapture(CaptureSettings capture, CandidateStarted onCandidate, ClipReady onClip,
+        DetectionSettings settings = {}, MemoryBudget budget = {});
+    // While stopped. The Session reserves working space before dividing the
+    // remaining payload allowance between history, collection, and writing.
+    void configure(CaptureSettings capture, size_t clipBytes, size_t historyBytes);
 
     // Drops the ring, the detector state, and any clip still being collected.
     void reset();
@@ -41,23 +45,27 @@ public:
     [[nodiscard]] DetectionView detectionView() const;
 
     // Hands off a short clip when Stop interrupts collection.
-    void finishPartial();
+    void finishPartial(std::string reason = "stream ended");
 
     [[nodiscard]] size_t bufferSize() const;
-    [[nodiscard]] size_t bufferCapacity() const;
+    [[nodiscard]] RingUsage historyUsage() const;
 
 private:
     void beginClip(const ClipTrigger& trigger);
-    void handOff();
+    void handOff(std::string reason);
+    void rememberPeak(const Frame& frame);
     [[nodiscard]] ClipTrigger currentTrigger(const Frame& frame, bool continuation) const;
 
     FrameRingBuffer ring_;
+    MemoryBudget budget_;
+    CaptureSettings captureSettings_;
+    size_t maxClipBytes_;
+    size_t maxHistoryBytes_;
     CandidateStarted onCandidate_;
     ClipReady onClip_;
     FlashDetector detector_;
     EventClip clip_;
     bool collecting_{false};
 
-    // Frames since the detector last fired, while a clip is open.
-    int quietFrames_{0};
+    std::chrono::system_clock::time_point lastFiringTime_{};
 };

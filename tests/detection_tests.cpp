@@ -121,10 +121,11 @@ void DetectionTest::twoFrameReferenceIsHeld()
     QVERIFY(detector.observe(first));
     QCOMPARE(detector.summary().peakSigma, peak);
     Frame shifted = flat(3, 101);
+    BudgetVector<float> differences;
     QVERIFY(!detector.observe(shifted, true));
-    QCOMPARE(detector.difference(shifted).front(), 1.0f);
+    QCOMPARE((detector.difference(shifted, differences), differences.front()), 1.0f);
     for (int i = 0; i < 20; ++i) detector.observe(shifted, true);
-    QCOMPARE(detector.difference(shifted).front(), 1.0f);
+    QCOMPARE((detector.difference(shifted, differences), differences.front()), 1.0f);
 }
 
 void DetectionTest::anIsolatedPixelCannotVetoACompactFlash()
@@ -248,7 +249,7 @@ void DetectionTest::overlaysChangeNoPixelsOrDecisions()
 void DetectionTest::capturedSettingsAndPeakRemainAtTheirOriginalValues()
 {
     std::vector<EventClip> clips;
-    EventCapture capture(64, [] {}, [&](EventClip clip) { clips.push_back(std::move(clip)); });
+    EventCapture capture(CaptureSettings{5, 0.99, 10}, [] {}, [&](EventClip clip) { clips.push_back(std::move(clip)); });
     capture.onFrame(std::make_shared<const Frame>(flat(0)));
     Frame flash = flat(1); patch(flash, 20, 20, 3, 20);
     capture.onFrame(std::make_shared<const Frame>(flash));
@@ -264,7 +265,7 @@ void DetectionTest::capturedSettingsAndPeakRemainAtTheirOriginalValues()
     QTemporaryDir directory;
     QObject context;
     std::vector<ClipWriteResult> results;
-    EventWriter writer(&context, directory.path(), 100, [&](const auto& result) { results.push_back(result); });
+    EventWriter writer(&context, directory.path(), 128 * 1024 * 1024, [&](const auto& result) { results.push_back(result); });
     writer.submit(std::move(clips[0]));
     QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 5000);
     QVERIFY(results[0].notSaved.isEmpty());

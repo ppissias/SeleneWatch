@@ -39,6 +39,7 @@ struct DetectionSummary
     bool passed{false};
     bool triggered{false};
     bool firing{false};
+    bool overlaySkipped{false};
 };
 
 struct DetectionHistoryPoint
@@ -52,9 +53,10 @@ struct DetectionHistoryPoint
 // for a frame's decision. The GUI colours it without accessing detector state.
 struct DetectionMap
 {
+    explicit DetectionMap(MemoryBudget budget = {}) : values(BudgetAllocator<float>(std::move(budget))) {}
     int width{0}, height{0};
     DetectionOverlay kind{DetectionOverlay::None};
-    std::vector<float> values;
+    BudgetVector<float> values;
 };
 
 // Immutable display snapshot, sent together with its frame in the preview slot.

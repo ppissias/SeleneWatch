@@ -21,8 +21,15 @@
 #include <cmath>
 #include <numeric>
 #include <optional>
+#include <filesystem>
 
 namespace {
+
+bool sameFile(const QString& first, const QString& second)
+{
+    std::error_code error;
+    return std::filesystem::equivalent(std::filesystem::path(first.toStdWString()), std::filesystem::path(second.toStdWString()), error);
+}
 
 double valueAt(const Frame& frame, int x, int y)
 {
@@ -131,7 +138,7 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
     const bool inject = amplitude > 0 || amplitudeSigma > 0;
     if (inject && (injectionAt < 1 || injectionAt + duration > count || duration <= 0))
     { err << "Injection is outside the cached prefix\n"; return 1; }
-    if (!QDir().mkpath(QFileInfo(output).absolutePath()) || QFileInfo(input).absoluteFilePath() == QFileInfo(output).absoluteFilePath()) return 1;
+    if (sameFile(input, output) || !QDir().mkpath(QFileInfo(output).absolutePath())) return 1;
     QFile csv(output);
     if (!csv.open(QIODevice::WriteOnly | QIODevice::Text)) return 1;
     QTextStream rows(&csv);
@@ -141,14 +148,14 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
     std::vector<ClipWriteResult> written;
     std::unique_ptr<EventWriter> writer;
     if (config.value("saveEvents").toBool(false))
-        writer = std::make_unique<EventWriter>(&context, eventRoot, 2000, [&](const auto& result) { written.push_back(result); });
+        writer = std::make_unique<EventWriter>(&context, eventRoot, size_t{2} * 1024 * 1024 * 1024, [&](const auto& result) { written.push_back(result); });
     StreamInfo info = cached.info;
     info.playback = "manual detection calibration over an explicitly selected prefix";
     if (writer) writer->logSessionStart(info);
     int current = 0, candidates = 0, background = 0, injectedFrames = 0;
     bool recovered = false;
     QJsonArray candidatePositions, candidatePatches;
-    EventCapture capture(150, [&] {
+    EventCapture capture(CaptureSettings{}, [&] {
         ++candidates; candidatePositions.append(current);
     }, [&](EventClip clip) { if (writer) { clip.stream = info; writer->submit(std::move(clip)); } }, settings);
     BlipInjector blip;
@@ -238,12 +245,44 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
     return 0;
 }
 
+int profileDisplay(const QString& input, const QString& output, const CachedRecording& cached)
+{
+    if (sameFile(input, output) || !QDir().mkpath(QFileInfo(output).absolutePath())) return 1;
+    QJsonArray modes;
+    const auto& frames = cached.frames;
+    for (auto mode : {DisplayMode::Linear, DisplayMode::Window, DisplayMode::Auto})
+    {
+        DisplaySettings settings; settings.mode = mode;
+        settings.black = 0; settings.white = 0.1;
+        std::vector<double> times;
+        QImage image;
+        for (int repeat = 0; repeat < 3; ++repeat) for (const auto& frame : frames)
+        {
+            QElapsedTimer timer; timer.start();
+            image = frameToPreviewImage(*frame, settings);
+            if (image.isNull()) return 1;
+            times.push_back(timer.nsecsElapsed() / 1e6);
+        }
+        const double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+        std::sort(times.begin(), times.end());
+        modes.append(QJsonObject{{"mode", mode == DisplayMode::Linear ? "linear" : mode == DisplayMode::Window ? "window" : "auto"},
+            {"meanMs", mean}, {"p95Ms", times[(times.size() - 1) * 95 / 100]}, {"maxMs", times.back()}});
+        if (!image.save(output + QString(".%1.png").arg(static_cast<int>(mode)))) return 1;
+    }
+    const QJsonDocument report(QJsonObject{{"input", input}, {"frames", static_cast<int>(frames.size())},
+        {"width", frames[0]->width}, {"height", frames[0]->height}, {"format", pixelFormatName(frames[0]->format)},
+        {"significantBits", frames[0]->significantBits}, {"results", modes}});
+    if (!writeJson(output, report)) return 1;
+    QTextStream(stdout) << report.toJson(QJsonDocument::Compact) << '\n';
+    return 0;
+}
+
 } // namespace
 
 int runDetectionProbe(const QStringList& args)
 {
     if (args.size() == 4 && args[1] == "survey") return survey(args[2], args[3]);
-    if (args.size() >= 4 && (args[1] == "measure" || args[1] == "measure-batch"))
+    if (args.size() >= 4 && (args[1] == "measure" || args[1] == "measure-batch" || args[1] == "profile"))
     {
         QJsonObject config;
         if (args.size() >= 5)
@@ -254,10 +293,12 @@ int runDetectionProbe(const QStringList& args)
             if (!document.isObject()) return 1;
             config = document.object();
         }
-        if (args[1] == "measure")
+        if (args[1] == "measure" || args[1] == "profile")
         {
+            if (args[1] == "profile" && !config.contains("frameLimit")) config["frameLimit"] = 12;
             auto cached = load(args[2], config);
-            return cached ? measure(args[2], args[3], config, *cached) : 1;
+            if (!cached) return 1;
+            return args[1] == "profile" ? profileDisplay(args[2], args[3], *cached) : measure(args[2], args[3], config, *cached);
         }
         const auto common = config.value("sourceConfig").toObject();
         auto cached = load(args[2], common);

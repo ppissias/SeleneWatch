@@ -1,4 +1,5 @@
 #include "detection_panel.h"
+#include "preview_image.h"
 
 #include <QtGui/QPainter>
 #include <QtWidgets/QCheckBox>
@@ -188,20 +189,24 @@ void DetectionPanel::setView(const DetectionView& view)
         .arg(summary.processingMs, 0, 'f', 2));
     history_->setView(view);
     overlayImage_ = {};
-    if (!view.map || overlay() == DetectionOverlay::None) return;
+    if (!view.map || overlay() == DetectionOverlay::None)
+    {
+        mapScale_->setText(summary.overlaySkipped ? "Overlay skipped: RAM ceiling reached. Detection continues." : "Overlays affect the display only.");
+        return;
+    }
     const auto& map = *view.map;
     if (map.kind != overlay() || map.values.empty()) return;
     double scale = summary.settings.sigma;
     if (map.kind == DetectionOverlay::Noise)
     {
-        std::vector<float> sorted;
+        BudgetVector<float> sorted{BudgetAllocator<float>(map.values.get_allocator().budget)};
         const size_t step = std::max(size_t{1}, (map.values.size() + 4095) / 4096);
         for (size_t i = 0; i < map.values.size(); i += step) sorted.push_back(map.values[i]);
         auto at = sorted.begin() + static_cast<ptrdiff_t>(sorted.size() * 95 / 100);
         std::nth_element(sorted.begin(), at, sorted.end());
         scale = std::max(0.5, static_cast<double>(*at));
     }
-    overlayImage_ = QImage(map.width, map.height, QImage::Format_ARGB32);
+    overlayImage_ = makeBudgetImage(map.width, map.height, QImage::Format_ARGB32, map.values.get_allocator().budget);
     QRgb palette[256];
     for (int level = 0; level < 256; ++level)
     {

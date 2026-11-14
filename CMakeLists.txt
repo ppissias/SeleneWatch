@@ -23,7 +23,7 @@ endfunction()
 # One processing library, shared by the application and tests. It has no
 # Widgets dependency; the UI library and its tests use Widgets separately.
 add_library(selenewatch_core STATIC
-    blip_injector.cpp frame_pool.cpp preview_image.cpp session.cpp
+    blip_injector.cpp frame_pool.cpp memory_budget.cpp preview_image.cpp session.cpp
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
     sources/fine_sleep.cpp sources/synthetic_scene.cpp
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
@@ -40,7 +40,7 @@ endif()
 selenewatch_compile_options(selenewatch_core)
 
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
-    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp)
+    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
 selenewatch_compile_options(selenewatch_ui)
@@ -82,9 +82,15 @@ add_test(NAME detection COMMAND SeleneWatchDetectionTests -o -,tap)
 add_executable(SeleneWatchUiTests tests/ui_tests.cpp)
 target_link_libraries(SeleneWatchUiTests PRIVATE selenewatch_ui Qt6::Test)
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_UI_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature9")
+target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_DISPLAY_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature5")
 selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchDisplayTests tests/display_capture_tests.cpp)
+target_link_libraries(SeleneWatchDisplayTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchDisplayTests)
+add_test(NAME display_capture COMMAND SeleneWatchDisplayTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp)

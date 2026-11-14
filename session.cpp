@@ -8,7 +8,7 @@
 Session::Session(QObject* context, QString outputRoot, Notifications notifications)
     : context_(context)
     , notifications_(std::move(notifications))
-    , writer_(context, std::move(outputRoot), kMaxQueuedFrames,
+    , writer_(context, std::move(outputRoot), captureSettings_.memoryBytes * 2 / 5,
           [done = notifications_.clipWritten](const ClipWriteResult& result) {
               if (done)
               {
@@ -16,14 +16,14 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
               }
           })
     , capture_(
-          kRingFrames,
+          captureSettings_,
           [this] { post(notifications_.candidateStarted); },
           // A finished clip goes straight from the capture to the writer, on
           // the source thread. The window is not in between.
           [this](EventClip clip) {
               clip.stream = streamInfo_;
               writer_.submit(std::move(clip));
-          })
+          }, {}, memory_)
 {
 }
 
@@ -39,6 +39,12 @@ void Session::setSource(std::unique_ptr<FrameSource> source)
     source_ = std::move(source);
 }
 
+void Session::setCaptureSettings(CaptureSettings settings)
+{
+    if (running_ || !settings.valid()) throw std::invalid_argument("capture settings must be valid and changed while stopped");
+    captureSettings_ = settings;
+}
+
 bool Session::start(QString& error)
 {
     if (running_)
@@ -51,6 +57,15 @@ bool Session::start(QString& error)
         return false;
     }
 
+    capture_.reset();
+    (void)previewSlot_.take();
+    source_->setMemoryBudget(memory_);
+    if (!memory_.setLimit(captureSettings_.memoryBytes))
+    {
+        error = "RAM ceiling is below buffers still held by the writer or display; wait for them to drain";
+        return false;
+    }
+    budgetPrepared_ = false;
     std::string reason;
     if (!source_->open(reason))
     {
@@ -79,7 +94,7 @@ void Session::stop()
         return;
     }
     source_->stop();
-    capture_.finishPartial();
+    capture_.finishPartial("stopped");
     blip_.reset();
     running_ = false;
 }
@@ -119,15 +134,9 @@ size_t Session::bufferSize() const
     return capture_.bufferSize();
 }
 
-size_t Session::bufferCapacity() const
-{
-    return capture_.bufferCapacity();
-}
-
-size_t Session::liveFrameBytes() const
-{
-    return source_ ? source_->liveFrameBytes() : 0;
-}
+RingUsage Session::historyUsage() const { return capture_.historyUsage(); }
+MemoryUsage Session::memoryUsage() const { return memory_.usage(); }
+WriterUsage Session::writerUsage() const { return writer_.usage(); }
 
 PreviewFrame Session::takePreview()
 {
@@ -153,6 +162,22 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
 // writes it again. Test injection is the last write before publication.
 void Session::onFrame(std::shared_ptr<Frame> frame)
 {
+    if (!budgetPrepared_)
+    {
+        // Reserve for mean/variance, two maps/differences, GUI/writer images,
+        // incoming/spare frames, and bounded sparse work before sharing the
+        // rest between the open clip and all writer-held clips.
+        const size_t pixels = static_cast<size_t>(frame->width) * frame->height;
+        const size_t working = std::max(captureSettings_.memoryBytes / 5,
+            pixels * 32 + frame->data.capacity() * 5 + size_t{4} * 1024 * 1024);
+        if (working >= captureSettings_.memoryBytes) throw std::runtime_error("RAM ceiling too small for this frame layout and processing reserve; increase it");
+        const size_t half = (captureSettings_.memoryBytes - working) / 2;
+        const size_t previewAndNextFrame = pixels * sizeof(float) + frame->data.capacity();
+        if (previewAndNextFrame >= half) throw std::runtime_error("RAM ceiling leaves too little room for a frame and its difference; increase it");
+        capture_.configure(captureSettings_, half - previewAndNextFrame, half / 2);
+        writer_.setByteLimit(half);
+        budgetPrepared_ = true;
+    }
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
 
     blip_.apply(*frame);
@@ -185,19 +210,20 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
 // jump would look like a sudden change, so the capture starts afresh.
 void Session::onDiscontinuity()
 {
-    capture_.finishPartial();
+    capture_.finishPartial("playback loop boundary");
     capture_.reset();
 }
 
 void Session::onEnded()
 {
-    capture_.finishPartial();
+    capture_.finishPartial("source ended");
     sourceFinished_.store(true);
     post(notifications_.ended);
 }
 
 void Session::onFailed(const std::string& message)
 {
+    capture_.finishPartial("source failure: " + message);
     sourceFinished_.store(true);
     const QString text = QString::fromStdString(message);
     if (notifications_.failed)

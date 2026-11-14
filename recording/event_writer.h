@@ -30,13 +30,21 @@ struct ClipWriteResult
     // The session's record is broken: candidates.txt could not be written,
     // or the writer thread has ended. Later candidates are not on record.
     bool recordFailed{false};
+    bool memoryLimited{false};
+};
+
+struct WriterUsage
+{
+    size_t retainedBytes{0}, outstandingClips{0};
+    uint64_t writtenBytes{0};
+    double writeSeconds{0};
 };
 
 // Writes finished clips and the candidate log on a background thread.
 //
 // submit never blocks and never touches the disk. The writer owns its
-// backlog: clips wait in a queue bounded by a number of frames, and a clip
-// that does not fit is dropped at once and logged as not saved.
+// backlog: queued and active clips share a byte allowance. A clip that does
+// not fit is dropped at once and its candidates are logged as not saved.
 //
 // Every clip gets one line per candidate in <outputRoot>/candidates.txt,
 // saved or not. Each start of a stream gets a session_start line there
@@ -50,7 +58,7 @@ public:
     using Finished = std::function<void(const ClipWriteResult& result)>;
 
     // context and finished must be valid for the writer's lifetime.
-    EventWriter(QObject* context, QString outputRoot, size_t maxQueuedFrames, Finished finished);
+    EventWriter(QObject* context, QString outputRoot, size_t maxQueuedBytes, Finished finished);
     ~EventWriter();
 
     EventWriter(const EventWriter&) = delete;
@@ -65,6 +73,8 @@ public:
 
     // Writes what is queued, then stops the thread.
     void shutdown();
+    void setByteLimit(size_t bytes);
+    [[nodiscard]] WriterUsage usage() const;
 
 private:
     // The start of a stream, for its session_start line.
@@ -83,6 +93,7 @@ private:
         QString notSavedReason;
         bool containsTestSignal{false}; // Kept even when a refused clip drops its frames.
         QString recordId;
+        size_t payloadBytes{0};
     };
 
     void run(std::stop_token stopToken);
@@ -90,20 +101,20 @@ private:
     ClipWriteResult process(Job& job);
     void deliver(const ClipWriteResult& result);
 
-    QString writeClip(const EventClip& clip, QString& error) const;
+    QString writeClip(EventClip& clip, QString& error);
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
     bool appendLog(const QString& lines) const;
 
     QObject* context_;
     const QString outputRoot_;
-    const size_t maxQueuedFrames_;
+    size_t maxQueuedBytes_;
     Finished finished_;
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable ready_;
     std::deque<Job> queue_;
-    size_t queuedFrames_{0};
+    WriterUsage usage_;
     bool ended_{false};
     std::jthread thread_;
 };

@@ -6,6 +6,7 @@
 #include <bit>
 #include <cstring>
 #include <format>
+#include <span>
 #include <utility>
 
 namespace {
@@ -70,7 +71,7 @@ std::string readText(const unsigned char* bytes, size_t width)
     return text;
 }
 
-uint16_t sampleAt(const std::vector<uint8_t>& data, size_t sample)
+uint16_t sampleAt(std::span<const uint8_t> data, size_t sample)
 {
     return static_cast<uint16_t>(data[2 * sample] | (data[2 * sample + 1] << 8));
 }

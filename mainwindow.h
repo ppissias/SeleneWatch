@@ -18,6 +18,7 @@ class QTimer;
 class RecordingSource;
 class SyntheticFrameSource;
 class DetectionPanel;
+class DisplayPanel;
 class QDockWidget;
 namespace Ui { class MainWindowClass; }
 
@@ -35,6 +36,9 @@ public:
     // Empty outputRoot writes beside the executable. Tests supply an isolated directory.
     explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {});
     ~MainWindow() override;
+    // Selects a file while stopped; Start opens it. Shared by the file dialog
+    // and the window test, which supplies an isolated recording.
+    void selectRecording(QString path);
 
 private slots:
     void onStartClicked();
@@ -51,6 +55,9 @@ private:
     void setupDetectionPanel();
     void updateDetectionDisplay();
     void saveDetectionSettings();
+    void setupDisplayPanel();
+    void saveDisplaySettings();
+    void renderPreview();
 
     // The source the controls describe. Null, with a message, when none can be made.
     std::unique_ptr<FrameSource> makeSource();
@@ -80,6 +87,9 @@ private:
     DetectionPanel* detectionPanel_{nullptr};
     QDockWidget* detectionDock_{nullptr};
     DetectionSummary latestDetection_;
+    DisplayPanel* displayPanel_{nullptr};
+    QDockWidget* displayDock_{nullptr};
+    FramePtr latestFrame_;
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};
@@ -100,6 +110,7 @@ private:
 
     int candidates_{0};
     int clipsNotSaved_{0};
+    int clipsLimited_{0};
     bool sourceFailed_{false};
     bool playbackEnded_{false};
 

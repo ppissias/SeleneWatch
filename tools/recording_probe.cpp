@@ -1,6 +1,7 @@
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
+#include "recording/recording_reader.h"
 #include "session.h"
 #include "sources/recording_source.h"
 #include "tools/detection_probe.h"
@@ -28,11 +29,11 @@ int main(int argc, char** argv)
     const QStringList args = app.arguments();
     if (args.size() < 3)
     {
-        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json\n";
+        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json\n";
         return 2;
     }
     const QString mode = args[1];
-    if (mode == "survey" || mode == "measure" || mode == "measure-batch") return runDetectionProbe(args);
+    if (mode == "survey" || mode == "measure" || mode == "measure-batch" || mode == "profile") return runDetectionProbe(args);
     QObject context;
     if (mode == "capture" && args.size() == 4)
     {
@@ -68,24 +69,27 @@ int main(int argc, char** argv)
 
     const QString output = args.back();
     std::vector<EventClip> clips;
-    if (mode == "sample" && args.size() == 4)
+    if ((mode == "sample" || mode == "write-benchmark") && args.size() == 4)
     {
-        SerReader reader;
         std::string error;
-        if (!reader.open(std::filesystem::path(args[2].toStdWString()), 30, error))
+        auto reader = openRecordingReader(std::filesystem::path(args[2].toStdWString()), 30, error);
+        if (!reader)
         { err << QString::fromStdString(error) << "\n"; return 1; }
         EventClip clip;
-        clip.stream = reader.describe();
+        clip.stream = reader->describe();
         clip.stream.source = args[2].toStdString();
         clip.stream.playback = "TEST: six nonconsecutive format-check samples, not a detected event";
-        for (int i = 0; i < 6; ++i)
+        const bool benchmark = mode == "write-benchmark";
+        if (benchmark) clip.stream.playback = "TEST: repeat one native frame 128 times for buffered writer throughput; indices/times repeat, not an observation";
+        for (int i = 0; i < (benchmark ? 128 : 6); ++i)
         {
-            const int position = i * (reader.frameCount() - 1) / 5;
+            if (benchmark && i > 0) { clip.frames.push_back(clip.frames.front()); continue; }
+            const int position = i * (reader->frameCount() - 1) / 5;
             auto frame = std::make_shared<Frame>();
-            frame->data.resize(reader.frameBytes());
-            if (!reader.readFrame(position, *frame, error)) return 1;
-            frame->frameIndex = reader.frameNumber(position);
-            frame->timestamp = reader.frameTime(position);
+            frame->data.resize(reader->frameBytes());
+            if (!reader->readFrame(position, *frame, error)) return 1;
+            frame->frameIndex = reader->frameNumber(position);
+            frame->timestamp = reader->frameTime(position);
             frame->testSource = true;
             clip.frames.push_back(frame);
         }
@@ -153,9 +157,12 @@ int main(int argc, char** argv)
     QElapsedTimer timer;
     timer.start();
     {
-        EventWriter writer(&context, output, 10000, [&](const ClipWriteResult& result) { results.push_back(result); });
+        EventWriter writer(&context, output, size_t{2} * 1024 * 1024 * 1024, [&](const ClipWriteResult& result) { results.push_back(result); });
         for (auto& clip : clips) writer.submit(std::move(clip));
         writer.shutdown();
+        const auto usage = writer.usage();
+        out << "ser_bytes=" << usage.writtenBytes << " ser_seconds=" << usage.writeSeconds
+            << " ser_MB_per_second=" << (usage.writeSeconds > 0 ? usage.writtenBytes / usage.writeSeconds / 1e6 : 0) << "\n";
     }
     QCoreApplication::processEvents();
     out << "write_and_shutdown_ms=" << timer.elapsed() << "\n";

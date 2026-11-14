@@ -88,7 +88,7 @@ void SerWriterTest::exactPixelsHeaderAndTimes()
                 frame.data.push_back(static_cast<uint8_t>(10 * i + c));
         }
     }
-    const std::vector<uint8_t> original = frame.data;
+    const BudgetVector<uint8_t> original = frame.data;
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = QDir(directory.path()).filePath("roundtrip.ser");

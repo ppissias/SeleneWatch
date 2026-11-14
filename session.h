@@ -50,12 +50,6 @@ public:
         std::function<void(const QString&)> failed;
     };
 
-    // Frames of history kept in the ring.
-    static constexpr size_t kRingFrames = 150;
-
-    // Frames that may wait for the writer: two clips of the maximum length.
-    static constexpr size_t kMaxQueuedFrames = 2 * (kRingFrames + static_cast<size_t>(kMaxPostEventFrames));
-
     // Clips and candidates.txt go under outputRoot. context must outlive the session.
     Session(QObject* context, QString outputRoot, Notifications notifications);
     ~Session();
@@ -65,6 +59,9 @@ public:
 
     // While stopped only. The session owns the source from here on.
     void setSource(std::unique_ptr<FrameSource> source);
+    // While stopped. Limits are applied at Start; writer-held old frames
+    // remain charged and may prevent lowering the ceiling until they drain.
+    void setCaptureSettings(CaptureSettings settings);
 
     // Opens the source and starts it. False, with the reason, when the
     // source cannot be opened; nothing runs then.
@@ -96,8 +93,9 @@ public:
     // Safe from any thread.
     [[nodiscard]] uint64_t acquiredFrames() const;
     [[nodiscard]] size_t bufferSize() const;
-    [[nodiscard]] size_t bufferCapacity() const;
-    [[nodiscard]] size_t liveFrameBytes() const;
+    [[nodiscard]] RingUsage historyUsage() const;
+    [[nodiscard]] MemoryUsage memoryUsage() const;
+    [[nodiscard]] WriterUsage writerUsage() const;
     [[nodiscard]] PreviewFrame takePreview();
 
 private:
@@ -114,6 +112,10 @@ private:
 
     // Set at start, before the source thread runs, and only read while it runs.
     StreamInfo streamInfo_;
+
+    MemoryBudget memory_{size_t{2} * 1024 * 1024 * 1024};
+    CaptureSettings captureSettings_;
+    bool budgetPrepared_{false};
 
     EventWriter writer_;
     EventCapture capture_;
