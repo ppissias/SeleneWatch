@@ -70,7 +70,7 @@ public:
     bool start(QString& error);
 
     // Stops the source and hands off a clip still being collected. Safe when stopped.
-    void stop();
+    void stop(std::string reason = "stopped");
 
     // Context thread. One request at a time, while running only. Settings
     // are copied; later control edits do not change an active injection.
@@ -96,6 +96,7 @@ public:
 
     // Safe from any thread.
     [[nodiscard]] uint64_t acquiredFrames() const;
+    [[nodiscard]] std::optional<uint64_t> droppedFrames() const;
     [[nodiscard]] size_t bufferSize() const;
     [[nodiscard]] RingUsage historyUsage() const;
     [[nodiscard]] MemoryUsage memoryUsage() const;
@@ -132,6 +133,8 @@ private:
     std::optional<std::chrono::system_clock::time_point> manualRequest_;
     std::chrono::steady_clock::time_point lastPreviewTime_{};
     std::atomic<uint64_t> acquiredFrames_{0};
+    std::atomic<uint64_t> droppedFrames_{0};
+    std::atomic<bool> dropsKnown_{false};
     std::atomic<bool> sourceFinished_{false};
     bool running_{false};
 

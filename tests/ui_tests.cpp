@@ -1,5 +1,7 @@
 #include "detection_panel.h"
 #include "display_panel.h"
+#include "camera_panel.h"
+#include "tests/fake_zwo_api.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "recording/ser_reader.h"
@@ -41,7 +43,62 @@ private slots:
     void livePanelInjectionEvidenceAndSavedSettings();
     void stretchARecordingWhileCapturingThenRestoreSettings();
     void saveARecordingManuallyThroughTheWindow();
+    void cameraReadbacksRestartAndDisconnectKeepSeparateEvidence();
 };
+
+void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
+{
+    QTemporaryDir dir;
+    auto api=std::make_shared<FakeZwoApi>(); api->dropCounts={0,0,3,3};
+    MainWindow window(nullptr,dir.path(),api); window.show();
+    auto* source=window.findChild<QComboBox*>("sourceComboBox");
+    auto* panel=window.findChild<CameraPanel*>(); QVERIFY(panel);
+    QCOMPARE(api->opened.load(),0); // Other source types never inspect hardware.
+    source->setCurrentIndex(2); QVERIFY(panel->hasCamera());
+    auto* fps=window.findChild<QSpinBox*>("targetFpsSpinBox"); QVERIFY(!fps->isEnabled());
+    QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl0"));
+    QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl4")); // Unsupported high-speed control is absent.
+    auto* start=window.findChild<QPushButton*>("startButton");
+    auto* stop=window.findChild<QPushButton*>("stopButton");
+    auto* save=window.findChild<QPushButton*>("saveNowButton");
+    start->click(); QTRY_VERIFY_WITH_TIMEOUT(api->delivered>=2,3000);
+    save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: 3"),3000);
+    panel->findChild<QSpinBox*>("cameraWidth")->setValue(127);
+    panel->findChild<QPushButton*>("applyCamera")->click();
+    QVERIFY(stop->isEnabled()); QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
+    panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(13);
+    auto* format=panel->findChild<QComboBox*>("cameraFormat");
+    format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono16)));
+    panel->findChild<QSpinBox*>("cameraWidth")->setValue(64);
+    panel->findChild<QPushButton*>("applyCamera")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(api->starts>=2,3000);
+    QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
+    QCOMPARE(panel->profile().current.width,64);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),12.0);
+    save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    window.findChild<QDockWidget*>("cameraDock")->raise();
+    window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
+    QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
+    QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/window-simulated.png"));
+    api->connected=false;
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(),3000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        int complete=0;
+        for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+            complete+=text(dir.path()+"/"+folder+"/event.txt").contains("complete: yes");
+        return complete>=2;
+    })(),5000);
+    int old=0,changed=0;
+    for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    {
+        const auto note=text(dir.path()+"/"+folder+"/event.txt");
+        if (note.contains("pixel_format: Mono8")) { QVERIFY(note.contains("collection_end: camera settings changed")); QVERIFY(note.contains("gain: 10\n")); QVERIFY(note.contains("gap:")); ++old; }
+        if (note.contains("pixel_format: Mono16")) { QVERIFY(note.contains("source failure: TEST camera disconnected")); QVERIFY(note.contains("gain: 12\n")); ++changed; }
+        QVERIFY(note.contains("kind=manual")); QVERIFY(note.contains("contains_test_signal: yes"));
+    }
+    QCOMPARE(old,1); QCOMPARE(changed,1);
+}
 
 void UiTest::saveARecordingManuallyThroughTheWindow()
 {

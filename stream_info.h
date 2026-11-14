@@ -40,6 +40,10 @@ struct StreamInfo
     // How a recording is played: the whole file, or a loop and over which
     // frames. Empty for a live source.
     std::string playback;
+    // Camera readbacks. Empty when unavailable; packing distinguishes sensor
+    // ADC depth from the conservative delivered-word interpretation.
+    std::string serial, sdkVersion, offset, binning, roi, sensorBits, sampleLayout;
+    std::string usbBandwidth, highSpeed;
 };
 
 // A path as UTF-8 text, for StreamInfo and for messages.

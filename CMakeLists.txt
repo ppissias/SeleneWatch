@@ -27,6 +27,7 @@ add_library(selenewatch_core STATIC
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
     sources/fine_sleep.cpp sources/synthetic_scene.cpp
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
+    cameras/zwo_source.cpp cameras/zwo_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp
 )
@@ -39,8 +40,29 @@ if(WIN32)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
+set(SELENEWATCH_ZWO_SDK_DIR "" CACHE PATH "Optional ZWO ASI SDK root, containing include and lib/x64")
+if(SELENEWATCH_ZWO_SDK_DIR)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "The configured ASI SDK integration requires Windows x64")
+    endif()
+    foreach(part include/ASICamera2.h lib/x64/ASICamera2.lib lib/x64/ASICamera2.dll license.txt)
+        if(NOT EXISTS "${SELENEWATCH_ZWO_SDK_DIR}/${part}")
+            message(FATAL_ERROR "ASI SDK component missing: ${SELENEWATCH_ZWO_SDK_DIR}/${part}")
+        endif()
+    endforeach()
+    target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_WITH_ZWO=1)
+    target_include_directories(selenewatch_core SYSTEM PRIVATE "${SELENEWATCH_ZWO_SDK_DIR}/include")
+    target_link_libraries(selenewatch_core PRIVATE "${SELENEWATCH_ZWO_SDK_DIR}/lib/x64/ASICamera2.lib")
+    add_custom_target(selenewatch_zwo_runtime
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/licenses"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SELENEWATCH_ZWO_SDK_DIR}/lib/x64/ASICamera2.dll" "${CMAKE_CURRENT_BINARY_DIR}/ASICamera2.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SELENEWATCH_ZWO_SDK_DIR}/license.txt" "${CMAKE_CURRENT_BINARY_DIR}/licenses/ZWO-ASI-SDK.txt"
+        VERBATIM)
+    add_dependencies(selenewatch_core selenewatch_zwo_runtime)
+endif()
+
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
-    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp)
+    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
 selenewatch_compile_options(selenewatch_ui)
@@ -84,6 +106,7 @@ target_link_libraries(SeleneWatchUiTests PRIVATE selenewatch_ui Qt6::Test)
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_UI_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature9")
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_DISPLAY_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature5")
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_MANUAL_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-manual")
+target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_CAMERA_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-zwo")
 selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -103,7 +126,16 @@ target_link_libraries(SeleneWatchManualTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchManualTests)
 add_test(NAME manual_capture COMMAND SeleneWatchManualTests -o -,tap)
 
+add_executable(SeleneWatchZwoTests tests/zwo_tests.cpp)
+target_link_libraries(SeleneWatchZwoTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchZwoTests)
+add_test(NAME zwo COMMAND SeleneWatchZwoTests -o -,tap)
+
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
+
+add_executable(SeleneWatchCameraProbe tools/camera_probe.cpp)
+target_link_libraries(SeleneWatchCameraProbe PRIVATE selenewatch_core)
+selenewatch_compile_options(SeleneWatchCameraProbe)

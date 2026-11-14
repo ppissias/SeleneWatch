@@ -6,9 +6,9 @@ SeleneWatch is a native C++/Qt desktop application being developed to monitor th
 
 The main motivation is to help observers detect and document **lunar transient phenomena**, particularly brief flashes that may be caused by meteoroid impacts. The design also covers transits, occultations, moving objects, and other unexpected events.
 
-> **Project status: Feature-6 complete; Feature-9 and Feature-5 implemented, with observing field checks still open.** Synthetic streams and SER/uncompressed AVI recordings use the same detector, time-based history, shared image/analysis memory budget, and asynchronous SER writer. Detection controls the noise trigger and overlays; Display and capture adds native-bit stretch, Bayer colour, durations, and memory controls. Clips retain native pixels, timestamps, test marks, settings, and review previews. Measurements and data limitations are in [Feature-9 validation](docs/feature-9-validation.md) and [Feature-5 validation](docs/feature-5-validation.md). Camera adapters and mount guiding follow.
+> **Project status: ZWO acquisition and manual save implemented; QHY and observing acceptance remain open.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO ASI cameras use the same detector, time-based history, shared image/analysis memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The connected ASI120MM Mini has passed RAW8/RAW16 bench checks; see [ZWO validation](docs/zwo-validation.md). Feature-9's [observing calibration](docs/feature-9-validation.md) and Feature-5's [earthshine display check](docs/feature-5-validation.md) remain partial. Mount guiding follows.
 
-The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Eight test suites cover these paths; observing calibration remains partial. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
+The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Nine test suites cover the processing, evidence and window paths without requiring camera hardware. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
 
 ## What SeleneWatch aims to do
 
@@ -99,6 +99,18 @@ With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --te
 
 Camera SDKs are not part of the repository. Each camera adapter is built only when its SDK is installed and enabled in CMake. Without any SDK, the app still builds and runs on synthetic and recorded sources.
 
+For ZWO on Windows x64, configure a separate build after loading the MSVC/Qt environment:
+
+```powershell
+cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
+cmake --build out/build/zwo-release
+ctest --test-dir out/build/zwo-release --output-on-failure
+.\out\build\zwo-release\SeleneWatch.exe
+```
+
+Select **ZWO ASI camera** under Source. The Camera tab discovers connected devices and shows only their reported controls. Choose RAW8/RAW16, exposure (ms), gain, offset, bin and ROI; USB bandwidth and high-speed mode appear when supported. **Apply settings** reads the values back. **Apply and restart** finishes the current clip and starts a fresh session with the new settings. Stop also closes the camera. The status bar shows SDK-reported drops; UTC is host arrival time, and drop locations are approximate because the SDK buffers frames. RAW16 keeps all delivered bits; the sensor's advertised ADC depth is separate metadata. The SDK DLL and its notice are copied into the build directory; release packaging must also satisfy [dependency notices](THIRD_PARTY_LICENSES.md).
+
 To try a test flash, start a source, click the preview to select a pixel, set **FWHM**, **Peak**, and **Duration** under **Test flash**, then press **Inject blip**. Peak is an addition in native sample units (ADU), including for 12-bit data stored in a 16-bit word. The readout also gives the requested peak in local noise units. A saved clip marks each injected frame and records its settings. The synthetic source's **Fixed flash** remains available as a capture check.
 
 Use the **Detection** dock to adjust K (sigma), minimum and maximum patch size, and whether one frame may trigger. Changes reach the next frame; Stop and closing the app remember the values. Green slider marks show the current measurement and amber marks the recent maximum. The history covers ten seconds of source time. **Sigma map** shows positive changes relative to local noise, with pixels at or above K in red; **Noise map** shows the noise in ADU. The overlays affect only the display. Closing the dock leaves detection running; reopen it through **View → Detection**.
@@ -119,7 +131,7 @@ The **Display and capture** tab offers Linear, Black/white levels, and Auto-stre
 | 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
 | 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
 | 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Manual save implemented; cameras proposed |
+| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | ZWO and manual save implemented; QHY and observing acceptance pending |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |
 | 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |
 | 12 | More camera families; registration, transit detection, event browser, export | — | Planned |

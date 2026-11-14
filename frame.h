@@ -22,8 +22,8 @@ enum class PixelFormat
 };
 
 // Where the significant bits of a Mono16 sample sit in its 16-bit word.
-// Some cameras shift 12-bit data into the top bits (ZWO's RAW16, FireCapture's
-// SER files); others leave it in the low bits.
+// A verified source may put 12-bit data in high or low bits. Unverified camera
+// packing uses all 16 delivered bits; sampled zeros alone do not prove padding.
 enum class BitAlignment
 {
     Low,
@@ -52,8 +52,10 @@ struct Frame
     int height = 0;
     PixelFormat format = PixelFormat::Mono8;
 
-    // Bits of each sample that carry data: 8 for Mono8 and RGB888, up to 16
-    // for Mono16. A 12-bit camera's frame is Mono16 with 12 here.
+    // Interpreted sample width: 8 for Mono8 and RGB888, up to 16
+    // for Mono16. Sources with verified packing can declare 12 high/low;
+    // an unverified camera conservatively interprets all 16 delivered bits.
+    // Its separate sensor ADC depth and packing policy are in StreamInfo.
     int significantBits = 8;
     BitAlignment alignment = BitAlignment::Low;
     BayerPattern bayer = BayerPattern::None;
@@ -69,9 +71,13 @@ struct Frame
     // The synthetic source's original fixed flash, kept as a pipeline check.
     bool syntheticFlash{false};
 
-    // A replayed SER explicitly marked as test data by its writer. Its
+    // An explicitly marked TEST source or replayed TEST SER. For a replay,
     // individual injection details remain in the original clip's sidecar.
     bool testSource{false};
+    // SDK cumulative loss observed when this camera frame was delivered.
+    // Not a hardware exposure counter; absent for recordings/synthetic data,
+    // or when telemetry failed (the live source then ends visibly).
+    std::optional<uint64_t> sourceDroppedFrames;
 
     // The samples as delivered, row by row from the top.
     BudgetVector<uint8_t> data;

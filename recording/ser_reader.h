@@ -81,6 +81,7 @@ private:
     bool bigEndian_{false};
     bool bgr_{false};
     bool testSource_{false};
+    bool declaredLayout_{false};
 
     int frameCount_{0};
     int headerFrameCount_{0};

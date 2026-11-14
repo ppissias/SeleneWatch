@@ -217,6 +217,7 @@ void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listen
                 throw std::runtime_error(error);
             }
             frame->frameIndex = static_cast<uint64_t>(lap) * numbersPerLap_ + reader_->frameNumber(position);
+            frame->sourceDroppedFrames.reset();
             frame->timestamp = time;
             frame->steadyTimestamp = steady_clock::now();
             listener.onFrame(std::move(frame));

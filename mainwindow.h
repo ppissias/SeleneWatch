@@ -19,6 +19,9 @@ class RecordingSource;
 class SyntheticFrameSource;
 class DetectionPanel;
 class DisplayPanel;
+class CameraPanel;
+class ZwoApi;
+class ZwoSource;
 class QDockWidget;
 namespace Ui { class MainWindowClass; }
 
@@ -34,7 +37,7 @@ class MainWindow : public QMainWindow
 
 public:
     // Empty outputRoot writes beside the executable. Tests supply an isolated directory.
-    explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {});
+    explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {}, std::shared_ptr<ZwoApi> cameraApi = {});
     ~MainWindow() override;
     // Selects a file while stopped; Start opens it. Shared by the file dialog
     // and the window test, which supplies an isolated recording.
@@ -50,6 +53,7 @@ private slots:
     void onInjectFlashClicked();
     void onInjectBlipClicked();
     void onSaveNowClicked();
+    void onApplyCamera();
 
 private:
     void setupStatusBar();
@@ -82,6 +86,7 @@ private:
     void onSourceFailed(const QString& message);
 
     [[nodiscard]] bool recordingSelected() const;
+    [[nodiscard]] bool cameraSelected() const;
 
     std::unique_ptr<Ui::MainWindowClass> ui_;
     std::unique_ptr<Session> session_;
@@ -91,6 +96,10 @@ private:
     DisplayPanel* displayPanel_{nullptr};
     QDockWidget* displayDock_{nullptr};
     FramePtr latestFrame_;
+    std::shared_ptr<ZwoApi> cameraApi_;
+    CameraPanel* cameraPanel_{nullptr};
+    QDockWidget* cameraDock_{nullptr};
+    ZwoSource* camera_{nullptr};
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};

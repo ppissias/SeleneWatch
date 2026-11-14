@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "detection_panel.h"
 #include "display_panel.h"
+#include "camera_panel.h"
 
 #include "preview_image.h"
 #include "sources/recording_source.h"
@@ -33,7 +34,7 @@ constexpr int kSyntheticHeight = 480;
 
 } // namespace
 
-MainWindow::MainWindow(QWidget *parent, QString outputRoot)
+MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoApi> cameraApi)
     : QMainWindow(parent)
     , ui_(std::make_unique<Ui::MainWindowClass>())
 {
@@ -58,6 +59,16 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot)
     setupStatusBar();
     setupDetectionPanel();
     setupDisplayPanel();
+    cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
+    if (cameraApi_)
+    {
+        ui_->sourceComboBox->addItem("ZWO ASI camera");
+        cameraPanel_=new CameraPanel(cameraApi_,this);
+        cameraDock_=new QDockWidget("Camera",this); cameraDock_->setObjectName("cameraDock");
+        cameraDock_->setWidget(cameraPanel_); addDockWidget(Qt::RightDockWidgetArea,cameraDock_);
+        tabifyDockWidget(displayDock_,cameraDock_); displayDock_->raise();
+        connect(cameraPanel_,&CameraPanel::applyRequested,this,&MainWindow::onApplyCamera);
+    }
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
@@ -205,6 +216,7 @@ void MainWindow::setupStatusBar()
     statusLabel_ = new QLabel("Status: Idle", this);
     fpsLabel_ = new QLabel("FPS: --", this);
     framesLabel_ = new QLabel("Frames: 0", this);
+    framesLabel_->setObjectName("framesReadout");
     candidatesLabel_ = new QLabel(this);
     bufferLabel_ = new QLabel(this);
     frameLabel_ = new QLabel("No frame yet", this);
@@ -229,8 +241,9 @@ void MainWindow::setupStatusBar()
 
 bool MainWindow::recordingSelected() const
 {
-    return ui_->sourceComboBox->currentIndex() != kSyntheticEntry;
+    return ui_->sourceComboBox->currentIndex() == 1;
 }
+bool MainWindow::cameraSelected() const { return ui_->sourceComboBox->currentIndex()==2 && cameraPanel_; }
 
 // Which controls can be used depends on the source and on whether it runs.
 void MainWindow::updateControls()
@@ -250,7 +263,13 @@ void MainWindow::updateControls()
 
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);
-    if (displayPanel_) displayPanel_->setRunning(running, recording);
+    ui_->targetFpsSpinBox->setEnabled(!cameraSelected());
+    if (displayPanel_) displayPanel_->setRunning(running, recording || cameraSelected());
+    if (cameraPanel_)
+    {
+        cameraDock_->setEnabled(cameraSelected());
+        cameraPanel_->setRunning(running && cameraSelected());
+    }
 }
 
 void MainWindow::updateBufferReadout()
@@ -289,6 +308,11 @@ void MainWindow::updateStreamReadout()
     lastAcquiredSample_ = acquired;
     lastFpsSampleTime_ = now;
     framesLabel_->setText(QString("Frames: %1").arg(acquired));
+    if (camera_)
+    {
+        const auto drops=session_->droppedFrames();
+        framesLabel_->setText(framesLabel_->text()+QString(" | SDK drops: %1").arg(drops?QString::number(*drops):"unknown"));
+    }
 }
 
 void MainWindow::updateCandidateReadout()
@@ -334,7 +358,8 @@ void MainWindow::updateFrameLabel(const Frame& frame)
     QString text = QString("%1 x %2 %3").arg(frame.width).arg(frame.height).arg(pixelFormatName(frame.format));
     if (frame.format == PixelFormat::Mono16)
     {
-        text += QString(", %1 bits %2").arg(frame.significantBits)
+        if (camera_) text += ", delivered 16-bit words";
+        else text += QString(", %1 bits %2").arg(frame.significantBits)
             .arg(frame.alignment == BitAlignment::High ? "high" : "low");
     }
     if (frame.bayer != BayerPattern::None)
@@ -376,8 +401,15 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
 {
     synthetic_ = nullptr;
     recording_ = nullptr;
+    camera_ = nullptr;
     const int fps = ui_->targetFpsSpinBox->value();
 
+    if (cameraSelected())
+    {
+        if (!cameraPanel_->hasCamera()) { statusBar()->showMessage("Connect an ASI camera and refresh its list"); return {}; }
+        auto source=std::make_unique<ZwoSource>(cameraApi_,cameraPanel_->profile(),cameraPanel_->settings());
+        camera_=source.get(); return source;
+    }
     if (!recordingSelected())
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
@@ -425,6 +457,7 @@ void MainWindow::onStartClicked()
     {
         synthetic_ = nullptr;
         recording_ = nullptr;
+        camera_ = nullptr;
         statusBar()->showMessage(QString("Cannot start: %1").arg(error));
         updateControls();
         updateStatusLabel();
@@ -432,6 +465,7 @@ void MainWindow::onStartClicked()
     }
 
     sourceFailed_ = false;
+    if (camera_) cameraPanel_->showActual(camera_->actualProfile());
     recordFailed_ = false;
     playbackEnded_ = false;
     candidates_ = 0;
@@ -464,8 +498,8 @@ void MainWindow::finishStream()
     saveDetectionSettings();
     saveDisplaySettings();
 
+    updateStreamReadout();
     fpsLabel_->setText("FPS: --");
-    framesLabel_->setText(QString("Frames: %1").arg(session_->acquiredFrames()));
     updateControls();
     updateStatusLabel();
     updateBufferReadout();
@@ -497,6 +531,32 @@ void MainWindow::selectRecording(QString path)
 
 void MainWindow::onSourceKindChanged()
 {
+    if (cameraSelected() && !session_->isRunning())
+    {
+        cameraDock_->raise();
+        cameraPanel_->refresh();
+        ui_->fileLabel->setText("ASI camera selected");
+    }
+    updateControls();
+}
+
+void MainWindow::onApplyCamera()
+{
+    if (!cameraSelected() || !cameraPanel_->hasCamera()) return;
+    try { ZwoSource::validateSettings(cameraPanel_->profile().camera,cameraPanel_->settings()); }
+    catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); return; }
+    if (session_->isRunning())
+    {
+        bufferReadoutTimer_->stop(); session_->stop("camera settings changed");
+        onStartClicked();
+    }
+    else
+    {
+        ZwoSource source(cameraApi_,cameraPanel_->profile(),cameraPanel_->settings());
+        std::string error;
+        if (source.open(error)) { cameraPanel_->showActual(source.actualProfile()); statusBar()->showMessage("Camera settings read back; ready to Start",5000); }
+        else statusBar()->showMessage(QString::fromStdString(error));
+    }
     updateControls();
 }
 

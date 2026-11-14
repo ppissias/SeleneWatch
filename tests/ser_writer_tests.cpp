@@ -44,6 +44,7 @@ private slots:
     void changedLayoutIsRefused();
     void testMarkSurvivesWithoutSidecar();
     void aLaterTestFrameMarksTheWholeSource();
+    void declarationsRejectContradictionsAndLegacyFilesStillInfer();
 };
 
 void SerWriterTest::exactPixelsHeaderAndTimes_data()
@@ -221,6 +222,36 @@ void SerWriterTest::aLaterTestFrameMarksTheWholeSource()
     first.data.resize(reader.frameBytes());
     QVERIFY(reader.readFrame(0, first, reason));
     QVERIFY(first.testSource);
+}
+
+void SerWriterTest::declarationsRejectContradictionsAndLegacyFilesStillInfer()
+{
+    QBuffer output; QVERIFY(output.open(QIODevice::ReadWrite));
+    Frame frame; frame.width=frame.height=2; frame.format=PixelFormat::Mono16;
+    frame.significantBits=16; frame.data={16,25,0,25,0,25,0,25};
+    SerWriter writer(output); QString error;
+    QVERIFY(writer.start(frame,"TEST words",error)); QVERIFY(writer.append(frame,error)); QVERIFY(writer.finish(error));
+    QTemporaryDir directory;
+    const QString path=QDir(directory.path()).filePath("declaration.ser");
+    for (const auto& mark:{QByteArray("SeleneWatch;layout="),QByteArray("SeleneWatch;layout=0L"),
+        QByteArray("SeleneWatch;layout=17L"),QByteArray("SeleneWatch;layout=16Z"),
+        QByteArray("SeleneWatch;layout=16LH"),QByteArray("SeleneWatch;layout=12L"),
+        QByteArray("SeleneWatch TEST DATA"),QByteArray("FireCapture;layout=12L")})
+    {
+        auto bytes=output.data(); QByteArray field(40,'\0'); std::copy(mark.begin(),mark.end(),field.begin());
+        bytes.replace(42,40,field);
+        QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); QCOMPARE(file.write(bytes),bytes.size()); file.close();
+        SerReader reader; std::string reason;
+        const bool legacy=mark=="SeleneWatch TEST DATA" || mark.startsWith("FireCapture");
+        QCOMPARE(reader.open(std::filesystem::path(path.toStdWString()),30,reason),legacy);
+        if (legacy)
+        {
+            Frame read; read.data.resize(reader.frameBytes()); QVERIFY(reader.readFrame(0,read,reason));
+            QCOMPARE(read.significantBits,12); QCOMPARE(read.alignment,BitAlignment::High);
+            QCOMPARE(read.testSource,mark=="SeleneWatch TEST DATA");
+        }
+        else QVERIFY(reason.find("layout")!=std::string::npos);
+    }
 }
 
 QTEST_GUILESS_MAIN(SerWriterTest)

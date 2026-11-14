@@ -149,6 +149,7 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
 
     paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0);
     frame.testSource = true;
+    frame.sourceDroppedFrames.reset();
     if (format_ == PixelFormat::Mono16)
     {
         const size_t pixels = static_cast<size_t>(width_) * height_;

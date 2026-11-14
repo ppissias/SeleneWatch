@@ -75,6 +75,7 @@ bool Session::start(QString& error)
 
     streamInfo_ = source_->streamInfo();
     acquiredFrames_.store(0, std::memory_order_relaxed);
+    droppedFrames_.store(0); dropsKnown_.store(false);
     sourceFinished_.store(false);
     { std::lock_guard<std::mutex> lock(requestMutex_); manualRequest_.reset(); }
     capture_.reset();
@@ -88,7 +89,7 @@ bool Session::start(QString& error)
     return true;
 }
 
-void Session::stop()
+void Session::stop(std::string reason)
 {
     if (!running_)
     {
@@ -96,7 +97,7 @@ void Session::stop()
     }
     source_->stop();
     applyManualSave();
-    capture_.finishPartial("stopped");
+    capture_.finishPartial(std::move(reason));
     blip_.reset();
     running_ = false;
 }
@@ -155,6 +156,12 @@ uint64_t Session::acquiredFrames() const
     return acquiredFrames_.load(std::memory_order_relaxed);
 }
 
+std::optional<uint64_t> Session::droppedFrames() const
+{
+    if (!dropsKnown_.load()) return {};
+    return droppedFrames_.load();
+}
+
 size_t Session::bufferSize() const
 {
     return capture_.bufferSize();
@@ -205,6 +212,8 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         budgetPrepared_ = true;
     }
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
+    if (frame->sourceDroppedFrames) droppedFrames_.store(*frame->sourceDroppedFrames);
+    dropsKnown_.store(frame->sourceDroppedFrames.has_value());
 
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);

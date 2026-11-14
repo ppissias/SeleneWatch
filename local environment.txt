@@ -32,6 +32,8 @@ Visual Studio & Toolchain
 
 Cameras and telescopes on hand
   ZWO ASI120MM            mono,   1280x960, 3.75 um pixels, 8-bit or 12-bit (in 16), no GPS
+                          Connected device checked 2026-11-14: ZWO ASI120MM Mini (USB2), bins 1/2.
+                          RAW16 retains every delivered word bit; ADC depth is separate metadata.
   QHY ALccd5L-II colour   colour (Bayer), 1280x960, 3.75 um pixels, 8-bit or 12-bit (in 16), no GPS
                           (Astrolumina's name for the QHY5L-II-C; qhyccdcamdef.h lists DEVICETYPE_QHY5LII_C)
   Telescopes seen in the archive folder names: Celestron C9.25 (2350 mm, 0.33 arcsec/pixel with these cameras)
@@ -43,14 +45,23 @@ Camera SDKs (not part of the repository)
     Header:  include\ASICamera2.h
     x64 lib: lib\x64\ASICamera2.lib, ASICamera2.dll
     License: license.txt in the SDK folder (permissive, MIT wording)
+    Runtime checked 2026-11-14: 1, 41, 0, 0 (1.41.0.0)
     Docs:    doc\ASICamera2 Software Development Kit.pdf
   QHYCCD (qhyccd):       C:\dev\tools\SDKs\QHY sdk
     Header:  include\qhyccd.h (version 25.06.16 per include\config.h)
     x64 lib: x64\qhyccd.lib, qhyccd.dll, plus ftd2xx.dll, tbb.dll, winusb.dll, msvcr90.dll, msvcp90.dll
     License: none in the SDK folder; terms to be found before the adapter is merged
   Both paths contain a space; quote them in CMake and on the command line.
-  The adapters are not built yet (Feature-10). When they are, the paths are given to CMake as
-  SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR.
+  The ZWO adapter is implemented (Feature-10); the default presets still omit it.
+  Optional SDK builds: out\build\zwo-debug and out\build\zwo-release.
+  Configure from the development PowerShell environment, for example:
+    cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
+    cmake --build out/build/zwo-release
+    ctest --test-dir out/build/zwo-release --output-on-failure
+    .\out\build\zwo-release\SeleneWatch.exe
+  Use Debug and out/build/zwo-debug for the corresponding Debug build.
+  QHY integration and SELENEWATCH_QHY_SDK_DIR remain proposed; QHY is not enabled by this build.
+  See docs/zwo-validation.md for hardware measurements and the manual camera probe.
 
 Recordings archive (the observer's own lunar and planetary videos; read-only test data, not part of the repository)
   Root: D:\space\02_Planetary

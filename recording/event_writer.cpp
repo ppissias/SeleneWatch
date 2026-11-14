@@ -114,6 +114,15 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
     out << "camera: " << orUnknown(clip.stream.camera) << "\n";
     out << "exposure: " << orUnknown(clip.stream.exposure) << "\n";
     out << "gain: " << orUnknown(clip.stream.gain) << "\n";
+    out << "camera_serial: " << orUnknown(clip.stream.serial) << "\n";
+    out << "camera_sdk_version: " << orUnknown(clip.stream.sdkVersion) << "\n";
+    out << "offset: " << orUnknown(clip.stream.offset) << "\n";
+    out << "binning: " << orUnknown(clip.stream.binning) << "\n";
+    out << "roi: " << orUnknown(clip.stream.roi) << "\n";
+    out << "sensor_adc_bits: " << orUnknown(clip.stream.sensorBits) << "\n";
+    out << "sample_layout_policy: " << orUnknown(clip.stream.sampleLayout) << "\n";
+    out << "usb_bandwidth: " << orUnknown(clip.stream.usbBandwidth) << "\n";
+    out << "high_speed: " << orUnknown(clip.stream.highSpeed) << "\n";
     out << "frame_rate: " << orUnknown(clip.stream.frameRate) << "\n";
     out << "frame_time: " << orUnknown(clip.stream.frameTime) << "\n";
     out << "frame_index: " << orUnknown(clip.stream.frameIndex) << "\n";
@@ -479,6 +488,10 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
                 out << " synthetic_flash";
             }
             if (frame.testSource) out << " test_source";
+            if (frame.sourceDroppedFrames) out << " sdk_dropped_frames=" << *frame.sourceDroppedFrames;
+            else if (!clip.stream.sdkVersion.empty()) out << " sdk_dropped_frames=unknown";
+            if (!clip.stream.sdkVersion.empty())
+                out << " host_steady_ns=" << std::chrono::duration_cast<std::chrono::nanoseconds>(frame.steadyTimestamp.time_since_epoch()).count();
             out << "\n";
             if (i > 0 && frame.frameIndex > clip.frames[i - 1]->frameIndex + 1)
             {
@@ -676,6 +689,13 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
 {
     QString line = utcText(start.time) + " session_start";
     line += QString(" camera=\"%1\"").arg(orUnknown(start.stream.camera));
+    if (!start.stream.sdkVersion.empty())
+    {
+        line += QString(" sdk=\"%1\" serial=\"%2\" exposure=\"%3\" gain=\"%4\" offset=\"%5\" binning=\"%6\" roi=\"%7\" sample_layout=\"%8\" usb_bandwidth=\"%9\" high_speed=\"%10\" frame_time=\"%11\" frame_index=\"%12\"")
+            .arg(orUnknown(start.stream.sdkVersion),orUnknown(start.stream.serial),orUnknown(start.stream.exposure),orUnknown(start.stream.gain),orUnknown(start.stream.offset),
+                orUnknown(start.stream.binning),orUnknown(start.stream.roi),orUnknown(start.stream.sampleLayout),orUnknown(start.stream.usbBandwidth),orUnknown(start.stream.highSpeed),
+                orUnknown(start.stream.frameTime),orUnknown(start.stream.frameIndex));
+    }
     if (!start.stream.playback.empty())
     {
         line += QString(" playback=\"%1\"").arg(QString::fromStdString(start.stream.playback));

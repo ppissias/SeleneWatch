@@ -29,6 +29,18 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ---
 
+### 2. ZWO ASI Camera SDK (optional Windows x64 camera support)
+
+- **Official source:** [ZWO product SDK](https://www.zwoastro.com/software/product-sdk/).
+- **Verified version:** SDK 1.41; the installed DLL reports `1, 41, 0, 0` (1.41.0.0) at run time.
+- **Copyright:** Copyright (c) 2015, ZWO Company. All rights reserved.
+- **License:** MIT wording, as supplied in the SDK root's `license.txt`. The notice permits use, modification and redistribution subject to retaining its copyright and permission notice, including the supplied warranty disclaimer.
+- **Integration:** `ASICamera2.h` and the x64 import library are used only when `SELENEWATCH_ZWO_SDK_DIR` is set. The application dynamically loads the linked `ASICamera2.dll`; only `cameras/zwo_sdk.cpp` includes the vendor header. SDK files stay outside this repository. Builds without the SDK have no ASI runtime dependency.
+- **Redistribution:** CMake copies the unmodified DLL beside the executables and its complete supplied notice to `licenses/ZWO-ASI-SDK.txt`. Include both when distributing an SDK-enabled build. Do not omit the notice during packaging. The build does not bundle or install a camera driver; any driver redistribution needs its own terms checked.
+- **Scope:** No OpenCV, vendor demo code, firmware or guide-port integration is incorporated. SeleneWatch's original code remains BSD-2-Clause. Qt's separate obligations above still apply.
+
+---
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

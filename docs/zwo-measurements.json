@@ -1,0 +1,1093 @@
+{
+  "feature": "Feature-10 (ZWO portion)",
+  "date": "2026-11-14",
+  "validationBase": "7b23beb plus the ZWO implementation working tree",
+  "environment": {
+    "os": "Windows x64",
+    "cpu": "AMD Ryzen 9 9955HX",
+    "physicalMemoryBytes": 16299302912,
+    "compiler": "MSVC 19.51.36260",
+    "qt": "6.12.0",
+    "build": "Release",
+    "sdkRuntime": "1, 41, 0, 0",
+    "camera": "ZWO ASI120MM Mini",
+    "transport": "USB2"
+  },
+  "captureDefaults": {
+    "historySeconds": 5,
+    "quietTailSeconds": 3,
+    "maximumPostSeconds": 10,
+    "imageAnalysisBudgetBytes": 2147483648
+  },
+  "interpretation": {
+    "raw16SampleBits": 16,
+    "raw16Alignment": "low",
+    "sensorAdcBitsReported": 12,
+    "packingContract": "unverified; all delivered bits retained",
+    "time": "host UTC immediately after SDK read, not exposure time",
+    "index": "delivery ordinal plus observed cumulative SDK drops; approximate gap attribution"
+  },
+  "limitations": [
+    "Nonastronomical bench observations; illumination and sensor temperature not controlled.",
+    "Normal long cases run for 60 seconds, not the one-hour lunar acceptance session.",
+    "arrivalFpsFromSavedTimes excludes startup; deliveredFps includes startup.",
+    "Detector times sample preview notifications and omit QWidget/display conversion; every delivered frame still goes through detection.",
+    "Native byte checks compare up to 20 preview-frame SHA256 hashes with saved pixels, not every hardware frame against a second original copy.",
+    "savedFramesIncludingOverlap and gap line counts include clip overlap; uniqueSavedTimestamps is the distinct saved frame count.",
+    "Memory peak is charged image/analysis payload, not process RSS. SER write time includes buffering/flush, not durable disk throughput.",
+    "Full serial, camera clips, raw logs and build logs remain in ignored out/qa-zwo; serial omitted here.",
+    "First six cases precede the explicit SER layout declaration; their existing files are preserved unchanged.",
+    "Physical unplug, QHY, raw-colour hardware, long lunar calibration and real earthshine acceptance remain pending."
+  ],
+  "cases": [
+    {
+      "acquiredFrames": 26,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 31949186,
+      "bufferedSerSecondsAtStop": 0.0092823,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 40,
+        "exposureUs": 1000,
+        "frames": 25,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": false,
+        "seconds": 10,
+        "sigma": 1000
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 40,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 10.528908373308765,
+      "elapsedSeconds": 2.4693918,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 43024384,
+      "memoryRefusals": 0,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "smoke-raw8/events/20261114-124048-687",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 8,
+      "savedFramesIncludingOverlap": 26,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "smoke-raw8"
+    },
+    {
+      "acquiredFrames": 25,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 61440378,
+      "bufferedSerSecondsAtStop": 0.0171154,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 40,
+        "exposureUs": 1000,
+        "frames": 25,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": true,
+        "seconds": 10,
+        "sigma": 1000
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 40,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 5.880731243054856,
+      "elapsedSeconds": 4.251172,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 74973184,
+      "memoryRefusals": 0,
+      "nativeWordMax": 9664,
+      "nativeWordMin": 5376,
+      "nativeWordOr": 16368,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "smoke-raw16/events/20261114-124106-992",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "savedFramesIncludingOverlap": 25,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "smoke-raw16"
+    },
+    {
+      "acquiredFrames": 50,
+      "arrivalFpsFromSavedTimes": 7.000837500188951,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 122880578,
+      "bufferedSerSecondsAtStop": 0.0387392,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "amplitude": 8192,
+        "bandwidth": 40,
+        "exposureUs": 1000,
+        "frames": 50,
+        "gain": 0,
+        "id": 0,
+        "inject": true,
+        "offset": 9,
+        "raw16": true,
+        "seconds": 12,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 40,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 6.376844524597695,
+      "detectorTimingSamples": 49,
+      "elapsedSeconds": 7.8408686,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 1,
+      "injectionMatchedNewCandidate": true,
+      "injectionRequested": true,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 141329151,
+      "memoryRefusals": 0,
+      "nativeWordMax": 9616,
+      "nativeWordMin": 5408,
+      "nativeWordOr": 16368,
+      "newCandidates": 1,
+      "outputs": [
+        {
+          "folder": "injection/events/20261114-130002-862",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 5.1438897959183665,
+      "previewSampledDetectorP95Ms": 6.552899999999999,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "savedFramesIncludingOverlap": 50,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 6.9991626,
+      "uniqueSavedTimestamps": 50,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "injection"
+    },
+    {
+      "acquiredFrames": 41,
+      "arrivalFpsFromSavedTimes": 14.005429134576874,
+      "bin": 2,
+      "bufferedSerBytesAtStop": 25190906,
+      "bufferedSerSecondsAtStop": 0.0088346,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "bin": 2,
+        "exposureUs": 1000,
+        "frames": 40,
+        "gain": 20,
+        "height": 480,
+        "id": 0,
+        "offset": 12,
+        "raw16": true,
+        "seconds": 12,
+        "sigma": 1000,
+        "width": 640
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 20,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 12,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 11.575672983511414,
+      "detectorTimingSamples": 40,
+      "elapsedSeconds": 3.5419107,
+      "failure": "",
+      "height": 480,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 27971584,
+      "memoryRefusals": 0,
+      "nativeWordMax": 21472,
+      "nativeWordMin": 12300,
+      "nativeWordOr": 32764,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "bin2-roi/events/20261114-130012-673",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 1.3595774999999999,
+      "previewSampledDetectorP95Ms": 1.8266,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "savedFramesIncludingOverlap": 41,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 2.8560353,
+      "uniqueSavedTimestamps": 41,
+      "width": 640,
+      "x": 0,
+      "y": 0,
+      "case": "bin2-roi"
+    },
+    {
+      "acquiredFrames": 1662,
+      "arrivalFpsFromSavedTimes": 28.02000088243603,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 2908589604,
+      "bufferedSerSecondsAtStop": 10.430646800000002,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "frames": 100000,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": false,
+        "seconds": 60,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 27.694131244334244,
+      "detectorTimingSamples": 830,
+      "elapsedSeconds": 60.0127148,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 647594005,
+      "memoryRefusals": 0,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "long-raw8/events/20261114-130017-508",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw8/events/20261114-130027-537",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw8/events/20261114-130037-566",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw8/events/20261114-130047-595",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw8/events/20261114-130057-623",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw8/events/20261114-130107-652",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 5.2764891566265035,
+      "previewSampledDetectorP95Ms": 7.5489,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 8,
+      "savedFramesIncludingOverlap": 2367,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 59.2790845,
+      "uniqueSavedTimestamps": 1662,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "long-raw8"
+    },
+    {
+      "acquiredFrames": 830,
+      "arrivalFpsFromSavedTimes": 14.00062432313568,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 2907351332,
+      "bufferedSerSecondsAtStop": 6.3122742999999994,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "frames": 100000,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": true,
+        "seconds": 60,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 13.830717114883882,
+      "detectorTimingSamples": 829,
+      "elapsedSeconds": 60.0113496,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 630390805,
+      "memoryRefusals": 0,
+      "nativeWordMax": 10304,
+      "nativeWordMin": 5584,
+      "nativeWordOr": 16368,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "long-raw16/events/20261114-130129-027",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw16/events/20261114-130139-098",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw16/events/20261114-130149-098",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw16/events/20261114-130159-169",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw16/events/20261114-130209-240",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "long-raw16/events/20261114-130219-240",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 5.369373462002414,
+      "previewSampledDetectorP95Ms": 8.6764,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "savedFramesIncludingOverlap": 1183,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 59.2116452,
+      "uniqueSavedTimestamps": 830,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "long-raw16"
+    },
+    {
+      "acquiredFrames": 31,
+      "arrivalFpsFromSavedTimes": 28.027254075559796,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 38093226,
+      "bufferedSerSecondsAtStop": 0.0113273,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "frames": 30,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": false,
+        "seconds": 10,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 17.50857595465934,
+      "detectorTimingSamples": 15,
+      "elapsedSeconds": 1.7705609,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 16,
+      "memoryPeakBytes": 49168405,
+      "memoryRefusals": 0,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "declared-raw8/events/20261114-132245-086",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 16,
+      "previewSampledDetectorMeanMs": 4.136526666666666,
+      "previewSampledDetectorP95Ms": 4.3976,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 8,
+      "recordedGapLinesIncludingOverlap": 0,
+      "savedAlignment": "low",
+      "savedFramesIncludingOverlap": 31,
+      "savedSampleBits": 8,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 1.0703867,
+      "uniqueSavedTimestamps": 31,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "declared-raw8"
+    },
+    {
+      "acquiredFrames": 30,
+      "arrivalFpsFromSavedTimes": 14.005216025386337,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 73728418,
+      "bufferedSerSecondsAtStop": 0.0186236,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "frames": 30,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": true,
+        "seconds": 10,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 10.52732087158216,
+      "detectorTimingSamples": 29,
+      "elapsedSeconds": 2.8497279,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 84803584,
+      "memoryRefusals": 0,
+      "nativeWordMax": 10576,
+      "nativeWordMin": 5920,
+      "nativeWordOr": 16368,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "declared-raw16/events/20261114-132248-303",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 4.496720689655174,
+      "previewSampledDetectorP95Ms": 7.322100000000001,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 16,
+      "recordedGapLinesIncludingOverlap": 0,
+      "savedAlignment": "low",
+      "savedFramesIncludingOverlap": 30,
+      "savedSampleBits": 16,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 0,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 2.0706571,
+      "uniqueSavedTimestamps": 30,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "declared-raw16"
+    },
+    {
+      "acquiredFrames": 56,
+      "arrivalFpsFromSavedTimes": 3.9029180500323153,
+      "bin": 1,
+      "bufferedSerBytesAtStop": 93389764,
+      "bufferedSerSecondsAtStop": 0.0266325,
+      "camera": "ZWO ASI120MM Mini",
+      "config": {
+        "bandwidth": 80,
+        "exposureUs": 1000,
+        "frames": 100000,
+        "gain": 0,
+        "id": 0,
+        "offset": 9,
+        "raw16": false,
+        "readDelayMs": 250,
+        "seconds": 15,
+        "sigma": 6
+      },
+      "controls": [
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 0,
+          "name": "Gain",
+          "value": 0,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 2000000000,
+          "minimum": 64,
+          "name": "Exposure",
+          "value": 1000,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 20,
+          "minimum": 0,
+          "name": "Offset",
+          "value": 9,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 100,
+          "minimum": 40,
+          "name": "BandWidth",
+          "value": 80,
+          "writable": true
+        },
+        {
+          "automatic": false,
+          "maximum": 3,
+          "minimum": 0,
+          "name": "Flip",
+          "value": 0,
+          "writable": true
+        }
+      ],
+      "deliveredFps": 3.7329324412753566,
+      "detectorTimingSamples": 55,
+      "elapsedSeconds": 15.0016109,
+      "failure": "",
+      "height": 960,
+      "injectedFramesInSavedClips": 0,
+      "injectionMatchedNewCandidate": false,
+      "injectionRequested": false,
+      "matchedPreviewHashes": 20,
+      "memoryPeakBytes": 65142831,
+      "memoryRefusals": 0,
+      "newCandidates": 0,
+      "outputs": [
+        {
+          "folder": "overload/events/20261114-132253-180",
+          "notSaved": "",
+          "recordFailed": false
+        },
+        {
+          "folder": "overload/events/20261114-132303-428",
+          "notSaved": "",
+          "recordFailed": false
+        }
+      ],
+      "previewHashes": 20,
+      "previewSampledDetectorMeanMs": 5.237821818181818,
+      "previewSampledDetectorP95Ms": 7.5823,
+      "purpose": "Connected-camera bench validation; no astronomical event claim",
+      "rawBits": 8,
+      "recordedGapLinesIncludingOverlap": 74,
+      "savedAlignment": "low",
+      "savedFramesIncludingOverlap": 76,
+      "savedSampleBits": 8,
+      "sdk": "1, 41, 0, 0",
+      "sdkDrops": 343,
+      "sensorBits": 12,
+      "sourceSpanSeconds": 14.0920202,
+      "uniqueSavedTimestamps": 56,
+      "width": 1280,
+      "x": 0,
+      "y": 0,
+      "case": "overload"
+    }
+  ],
+  "independentReader": {
+    "reader": "Siril 1.4.4",
+    "cases": [
+      {
+        "case": "declared-raw8",
+        "width": 1280,
+        "height": 960,
+        "storageBits": 8,
+        "frames": 31,
+        "utcTrailerMatchesSidecar": true,
+        "observer": "SeleneWatch;layout=8L",
+        "sirilStatisticsForEveryFrame": true
+      },
+      {
+        "case": "declared-raw16",
+        "width": 1280,
+        "height": 960,
+        "storageBits": 16,
+        "frames": 30,
+        "utcTrailerMatchesSidecar": true,
+        "observer": "SeleneWatch;layout=16L",
+        "sirilStatisticsForEveryFrame": true
+      },
+      {
+        "case": "overload",
+        "width": 1280,
+        "height": 960,
+        "storageBits": 8,
+        "frames": 43,
+        "utcTrailerMatchesSidecar": true,
+        "observer": "SeleneWatch TEST DATA;layout=8L",
+        "sirilStatisticsForEveryFrame": true
+      }
+    ]
+  },
+  "verification": {
+    "ctest": [
+      {
+        "build": "debug",
+        "testsPassed": 9,
+        "testsFailed": 0,
+        "seconds": 30.66
+      },
+      {
+        "build": "release",
+        "testsPassed": 9,
+        "testsFailed": 0,
+        "seconds": 19.46
+      },
+      {
+        "build": "zwo-debug",
+        "testsPassed": 9,
+        "testsFailed": 0,
+        "seconds": 30.85
+      },
+      {
+        "build": "zwo-release",
+        "testsPassed": 9,
+        "testsFailed": 0,
+        "seconds": 19.23
+      }
+    ],
+    "sdkDisabledHasAsiDllDependency": false,
+    "sdkEnabledHasAsiDllDependency": true,
+    "qtDynamicallyLinked": true,
+    "runtimeAndNoticeCopyHashesMatchedInSdkDebugAndRelease": true,
+    "sdkDllSha256": "0c8778c3cce2012961b079e3c7d0d8348a8b3823939335d9e98148cb5d5dc34a",
+    "sdkNoticeSha256": "98ad1c18048bfdabc8463740ac36a8d8cd710bdc3102ac6c22978ec50056e5a2"
+  },
+  "cameraRestoration": {
+    "camera": "ZWO ASI120MM Mini",
+    "restoredInitialCaptureSettings": true,
+    "captureStarted": false,
+    "rawBits": 8,
+    "width": 1280,
+    "height": 960,
+    "bin": 1,
+    "controls": [
+      {
+        "automatic": false,
+        "maximum": 100,
+        "minimum": 0,
+        "name": "Gain",
+        "value": 0,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 2000000000,
+        "minimum": 64,
+        "name": "Exposure",
+        "value": 1000,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 20,
+        "minimum": 0,
+        "name": "Offset",
+        "value": 9,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 100,
+        "minimum": 40,
+        "name": "BandWidth",
+        "value": 40,
+        "writable": true
+      },
+      {
+        "automatic": false,
+        "maximum": 3,
+        "minimum": 0,
+        "name": "Flip",
+        "value": 0,
+        "writable": true
+      }
+    ],
+    "verifiedBeforeClose": true,
+    "closedAfterVerification": true,
+    "note": "Settings were read back before close. A fresh SDK initialization can choose defaults again (bandwidth 80 observed)."
+  }
+}

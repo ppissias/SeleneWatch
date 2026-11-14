@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <cstring>
 #include <format>
 #include <span>
@@ -89,6 +90,7 @@ bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std:
 {
     pathText_ = utf8Path(path);
     testSource_ = false;
+    declaredLayout_ = false;
     fallbackFps_ = std::max(1.0, fallbackFps);
 
     std::error_code sizeError;
@@ -132,7 +134,20 @@ bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std:
     const int depth = readInt32(header + kPixelDepthAt);
     headerFrameCount_ = readInt32(header + kFrameCountAt);
     instrument_ = readText(header + kInstrumentAt, kTextFieldBytes);
-    testSource_ = readText(header + 42, kTextFieldBytes).starts_with("SeleneWatch TEST DATA");
+    const auto observer=readText(header + 42,kTextFieldBytes);
+    testSource_ = observer.starts_with("SeleneWatch TEST DATA");
+    const auto layoutAt=observer.find(";layout=");
+    if (observer.starts_with("SeleneWatch") && layoutAt!=std::string::npos)
+    {
+        const auto token=observer.substr(layoutAt+8);
+        int bits=0;
+        const auto parsed=std::from_chars(token.data(),token.data()+token.size(),bits);
+        if (token.size()<2 || parsed.ec!=std::errc{} || parsed.ptr!=token.data()+token.size()-1 || bits<1 || bits>16
+            || (*parsed.ptr!='L' && *parsed.ptr!='H'))
+        { error="invalid SeleneWatch sample-layout declaration in "+pathText_; return false; }
+        significantBits_=bits; alignment_=*parsed.ptr=='H'?BitAlignment::High:BitAlignment::Low;
+        declaredLayout_=true;
+    }
     startTicks_ = readInt64(header + kDateTimeUtcAt);
 
     if (width_ <= 0 || height_ <= 0)
@@ -218,9 +233,16 @@ bool SerReader::open(const std::filesystem::path& path, double fallbackFps, std:
         }
     }
 
+    if (declaredLayout_)
+    {
+        const int expectedDepth=format_!=PixelFormat::Mono16?8:
+            (alignment_==BitAlignment::Low && significantBits_>=9?significantBits_:16);
+        if (depth!=expectedDepth || (format_!=PixelFormat::Mono16 && significantBits_!=8))
+        { error="SeleneWatch sample-layout declaration contradicts SER storage depth in "+pathText_; return false; }
+    }
     if (format_ == PixelFormat::Mono16)
     {
-        if (!inspectSignificantBits(depth, error))
+        if (!declaredLayout_ && !inspectSignificantBits(depth, error))
         {
             return false;
         }
@@ -277,6 +299,7 @@ StreamInfo SerReader::describe() const
         info.conversion = "none";
     }
     if (testSource_) info.conversion += "; test data, marked by the originating SeleneWatch writer";
+    if (declaredLayout_) info.sampleLayout="explicit SeleneWatch-declared sample interpretation retained; no padding inference";
     return info;
 }
 
