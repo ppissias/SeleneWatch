@@ -14,6 +14,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QFontDatabase>
 
+#include <exception>
 #include <filesystem>
 #include <memory>
 
@@ -29,11 +30,15 @@ int main(int argc, char** argv)
     const QStringList args = app.arguments();
     if (args.size() < 3)
     {
-        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json\n";
+        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json | register INPUT OUTPUT [CONFIG.json]\n";
         return 2;
     }
     const QString mode = args[1];
-    if (mode == "survey" || mode == "measure" || mode == "measure-batch" || mode == "profile") return runDetectionProbe(args);
+    if (mode == "survey" || mode == "measure" || mode == "measure-batch" || mode == "profile" || mode == "register")
+    {
+        try { return runDetectionProbe(args); }
+        catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
+    }
     QObject context;
     if (mode == "capture" && args.size() == 4)
     {

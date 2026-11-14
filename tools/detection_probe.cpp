@@ -1,4 +1,5 @@
 #include "tools/detection_probe.h"
+#include "tools/translation_estimator.h"
 
 #include "blip_injector.h"
 #include "event_capture.h"
@@ -16,6 +17,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QTextStream>
+#include <QtGui/QPainter>
 
 #include <algorithm>
 #include <cmath>
@@ -277,12 +279,155 @@ int profileDisplay(const QString& input, const QString& output, const CachedReco
     return 0;
 }
 
+// Compare the same native samples and detector settings over a common
+// interior. These derived frames are never passed to the evidence writer.
+int registrationExperiment(const QString& input, const QString& output, const QJsonObject& config, const CachedRecording& cached)
+{
+    if (!QDir().mkpath(output)) return 1;
+    const QDir directory(output);
+    for (const QString name : {"registration.json","translations.csv","reference.png","unaligned.png","aligned.png"})
+        if (sameFile(input,directory.filePath(name))) return 1;
+    const auto& frames = cached.frames;
+    TranslationEstimator estimator(*frames.front(), config.value("maxShift").toInt(48));
+    const int margin = estimator.margin();
+    const int x = config.value("x").toInt(frames[0]->width/2), y = config.value("y").toInt(frames[0]->height/2);
+    const int at = config.value("atFrame").toInt(std::min(180,static_cast<int>(frames.size())*3/4));
+    const int duration = config.value("duration").toInt(1);
+    const double fwhm = config.value("fwhm").toDouble(5);
+    if (at < 1 || duration < 1 || static_cast<int64_t>(at)+duration > static_cast<int64_t>(frames.size())
+        || !std::isfinite(fwhm) || fwhm <= 0 || x < margin || y < margin
+        || x >= frames[0]->width-margin || y >= frames[0]->height-margin) return 1;
+    std::vector<FrameTranslation> shifts;
+    std::vector<double> shiftTimes;
+    int accepted = 0, boundary = 0;
+    QFile trace(directory.filePath("translations.csv"));
+    if (!trace.open(QIODevice::WriteOnly|QIODevice::Text)) return 1;
+    QTextStream rows(&trace);
+    rows << "position,source_index,dx,dy,correlation,peak_gap,accepted,processing_ms\n";
+    for (size_t i = 0; i < frames.size(); ++i)
+    {
+        QElapsedTimer timer; timer.start();
+        const auto shift = estimator.estimate(*frames[i]);
+        const double ms = timer.nsecsElapsed()/1e6;
+        shifts.push_back(shift); shiftTimes.push_back(ms);
+        accepted += shift.valid;
+        boundary += std::max(std::abs(shift.dx),std::abs(shift.dy)) >= config.value("maxShift").toInt(48);
+        rows << i << ',' << frames[i]->frameIndex << ',' << shift.dx << ',' << shift.dy << ',' << shift.correlation << ','
+            << shift.peakGap << ',' << shift.valid << ',' << ms << '\n';
+    }
+    rows.flush(); if (rows.status()!=QTextStream::Ok || !trace.flush()) return 1; trace.close();
+    const auto inspection = [&](const FramePtr& frame, const QString& name, const QString& label) {
+        QImage image=frameToPreviewImage(*frame);
+        QPainter painter(&image);
+        painter.fillRect(0,0,image.width(),24,Qt::black); painter.setPen(Qt::white);
+        painter.drawText(8,17,"Derived TEST crop: " + label); painter.end();
+        return image.save(directory.filePath(name));
+    };
+    const auto& selected=shifts[static_cast<size_t>(at)];
+    if (!inspection(registrationInterior(frames[0],margin,0,0),"reference.png","first-frame reference")
+        || !inspection(registrationInterior(frames[static_cast<size_t>(at)],margin,0,0),"unaligned.png","current, unaligned")
+        || !inspection(registrationInterior(frames[static_cast<size_t>(at)],margin,selected.dx,selected.dy),"aligned.png","current, integer aligned")) return 1;
+    const double shiftMean = std::accumulate(shiftTimes.begin(),shiftTimes.end(),0.0)/shiftTimes.size();
+    std::sort(shiftTimes.begin(),shiftTimes.end());
+    const double seconds = std::chrono::duration<double>(frames.back()->timestamp-frames.front()->timestamp).count();
+    QJsonArray cases;
+    const auto levels = config.value("sigmaLevels").toArray(QJsonArray{6,24});
+    const auto amplitudes = config.value("amplitudes").toArray(QJsonArray{8,16,32,64,128,192});
+    if (levels.isEmpty()) return 1;
+    for (const auto level : levels)
+    {
+        const double k = level.toDouble();
+        for (const QString mode : {QString("full"),QString("cropped"),QString("aligned")})
+        {
+            const int trials = mode=="full" ? 1 : static_cast<int>(amplitudes.size())+1;
+            for (int trial = 0; trial < trials; ++trial)
+            {
+                const double amplitude = trial==0 ? 0 : amplitudes[trial-1].toDouble();
+                if (!std::isfinite(amplitude) || amplitude < 0 || amplitude > 65535) return 1;
+                DetectionSettings settings{k,config.value("minPixels").toInt(8),config.value("maxPixels").toInt(400),true};
+                if (!settings.valid()) return 1;
+                EventCapture capture(CaptureSettings{}, [] {}, [](EventClip) {}, settings);
+                BlipInjector blip;
+                QJsonArray positions;
+                int background = 0, passingFrames = 0, firingFrames = 0, runFrames = 0, longestRun = 0;
+                bool matchedTrigger = false, matchedPass = false, priorRun = false;
+                double addition = 0, noise = 0, pipeline = 0, detector = 0;
+                for (size_t i = 0; i < frames.size(); ++i)
+                {
+                    const auto& shift = shifts[i];
+                    FramePtr current = frames[i];
+                    if (amplitude > 0 && static_cast<int>(i)==at)
+                    {
+                        priorRun = capture.detectionSummary().firing;
+                        const int bx=x+shift.dx, by=y+shift.dy;
+                        if (bx<margin || by<margin || bx>=frames[0]->width-margin || by>=frames[0]->height-margin) return 1;
+                        if (!blip.request({bx,by,fwhm,amplitude,duration})) return 1;
+                    }
+                    QElapsedTimer timer; timer.start();
+                    if (blip.busy())
+                    {
+                        auto changed=std::make_shared<Frame>(*current);
+                        blip.apply(*changed); current=std::move(changed);
+                        const auto& point=current->blip->settings;
+                        addition=std::max(addition,valueAt(*current,point.x,point.y)-valueAt(*frames[i],point.x,point.y));
+                    }
+                    const bool aligned=mode=="aligned";
+                    const int sx=aligned?shift.dx:0, sy=aligned?shift.dy:0;
+                    const int border=mode=="full"?0:margin;
+                    const FramePtr derived=mode=="full"?current:registrationInterior(current,margin,sx,sy);
+                    const int px=x+shift.dx-border-sx, py=y+shift.dy-border-sy;
+                    capture.onFrame(derived,{DetectionOverlay::None,px,py,false});
+                    const auto& measured=capture.detectionSummary();
+                    passingFrames += measured.passed; firingFrames += measured.firing;
+                    runFrames = measured.firing ? runFrames+1 : 0;
+                    longestRun = std::max(longestRun,runFrames);
+                    detector += measured.processingMs;
+                    pipeline += timer.nsecsElapsed()/1e6;
+                    bool atBlip=false;
+                    if (current->blip)
+                    {
+                        noise=std::max(noise,measured.probeNoise);
+                        const int ox=measured.peakX+border+sx, oy=measured.peakY+border+sy;
+                        atBlip=valueAt(*current,ox,oy)>valueAt(*frames[i],ox,oy);
+                        matchedPass=matchedPass||(measured.passed&&atBlip);
+                        matchedTrigger=matchedTrigger||(measured.triggered&&atBlip);
+                    }
+                    if (measured.triggered)
+                    {
+                        positions.append(static_cast<int>(i));
+                        if (!atBlip) ++background;
+                    }
+                }
+                capture.finishPartial();
+                cases.append(QJsonObject{{"mode",mode},{"sigma",k},{"amplitudeAdu",amplitude},{"actualCentreAdditionAdu",addition},
+                    {"candidates",positions.size()},{"backgroundCandidates",background},{"candidatePositions",positions},
+                    {"passingFrames",passingFrames},{"firingFrames",firingFrames},{"longestFiringRunFrames",longestRun},
+                    {"candidatesPerMinute",seconds>0?positions.size()*60/seconds:0},{"matchedTrigger",matchedTrigger},
+                    {"matchedPassingPatch",matchedPass},{"priorRunActive",priorRun},{"probeNoiseDuringAdu",noise},
+                    {"meanDetectorMs",detector/frames.size()},{"meanPipelineMs",pipeline/frames.size()}});
+            }
+        }
+    }
+    QJsonDocument report(QJsonObject{{"input",input},{"frames",static_cast<int>(frames.size())},{"startFrame",cached.start},
+        {"width",frames[0]->width},{"height",frames[0]->height},{"format",pixelFormatName(frames[0]->format)},
+        {"frameTimeMeaning",QString::fromStdString(cached.info.frameTime)},{"streamSeconds",seconds},{"cropMargin",margin},
+        {"referenceX",x},{"referenceY",y},{"injectionPosition",at},{"duration",duration},{"fwhm",fwhm},
+        {"acceptedTranslations",accepted},{"boundaryTranslations",boundary},{"meanTranslationMs",shiftMean},
+        {"p95TranslationMs",shiftTimes[(shiftTimes.size()-1)*95/100]},{"maxTranslationMs",shiftTimes.back()},
+        {"method","integer translation, fixed first-frame template, 8x8 box coarse NCC and sparse native refinement; invalid estimates use zero shift"},
+        {"evidence","no event/evidence output; crops are derived TEST data only"},{"cases",cases}});
+    if (!writeJson(directory.filePath("registration.json"),report)) return 1;
+    QTextStream(stdout) << "Compared " << cases.size() << " cases over " << frames.size() << " frames; accepted " << accepted
+        << " translations; mean " << shiftMean << " ms; output " << directory.filePath("registration.json") << '\n';
+    return 0;
+}
+
 } // namespace
 
 int runDetectionProbe(const QStringList& args)
 {
     if (args.size() == 4 && args[1] == "survey") return survey(args[2], args[3]);
-    if (args.size() >= 4 && (args[1] == "measure" || args[1] == "measure-batch" || args[1] == "profile"))
+    if (args.size() >= 4 && (args[1] == "measure" || args[1] == "measure-batch" || args[1] == "profile" || args[1] == "register"))
     {
         QJsonObject config;
         if (args.size() >= 5)
@@ -293,11 +438,13 @@ int runDetectionProbe(const QStringList& args)
             if (!document.isObject()) return 1;
             config = document.object();
         }
-        if (args[1] == "measure" || args[1] == "profile")
+        if (args[1] == "measure" || args[1] == "profile" || args[1] == "register")
         {
             if (args[1] == "profile" && !config.contains("frameLimit")) config["frameLimit"] = 12;
+            if (args[1] == "register" && !config.contains("frameLimit")) config["frameLimit"] = 240;
             auto cached = load(args[2], config);
             if (!cached) return 1;
+            if (args[1] == "register") return registrationExperiment(args[2],args[3],config,*cached);
             return args[1] == "profile" ? profileDisplay(args[2], args[3], *cached) : measure(args[2], args[3], config, *cached);
         }
         const auto common = config.value("sourceConfig").toObject();

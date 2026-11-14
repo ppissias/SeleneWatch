@@ -8,6 +8,8 @@ The main motivation is to help observers detect and document **lunar transient p
 
 > **Project status: Feature-6 complete; Feature-9 and Feature-5 implemented, with observing field checks still open.** Synthetic streams and SER/uncompressed AVI recordings use the same detector, time-based history, shared image/analysis memory budget, and asynchronous SER writer. Detection controls the noise trigger and overlays; Display and capture adds native-bit stretch, Bayer colour, durations, and memory controls. Clips retain native pixels, timestamps, test marks, settings, and review previews. Measurements and data limitations are in [Feature-9 validation](docs/feature-9-validation.md) and [Feature-5 validation](docs/feature-5-validation.md). Camera adapters and mount guiding follow.
 
+The [registration follow-up](docs/registration-experiment.md) compares four recordings with matching crop controls and injected targets. It remains a manual experiment: fewer candidates can conceal a detector that stays active, so reference holding and rearming need investigation before registration is enabled.
+
 ## What SeleneWatch aims to do
 
 - **Monitor continuously** using cameras from many vendors, at the highest resolution and frame rate the hardware allows.

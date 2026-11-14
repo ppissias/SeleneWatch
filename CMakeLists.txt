@@ -92,7 +92,12 @@ target_link_libraries(SeleneWatchDisplayTests PRIVATE selenewatch_core Qt6::Test
 selenewatch_compile_options(SeleneWatchDisplayTests)
 add_test(NAME display_capture COMMAND SeleneWatchDisplayTests -o -,tap)
 
+add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
+target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchRegistrationTests)
+add_test(NAME registration COMMAND SeleneWatchRegistrationTests -o -,tap)
+
 # Run by hand, with an explicit input and output path; never part of CTest.
-add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp)
+add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
