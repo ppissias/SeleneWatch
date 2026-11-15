@@ -10,6 +10,8 @@ The main motivation is to help observers detect and document **lunar transient p
 
 The detector keeps learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Observing calibration and the earthshine display check remain partial. Registration remains experimental. [Reference and rearming](docs/reference-and-manual-validation.md), [observing calibration](docs/feature-9-validation.md), [earthshine display](docs/feature-5-validation.md), [registration experiment](docs/registration-experiment.md)
 
+**Using SeleneWatch:** the [User Manual](MANUAL.md) explains the window, sources, Preview and Monitoring, camera and detector settings, test flashes, the saved files, the feature lock and mount guiding, and a step-by-step observing session.
+
 ## What SeleneWatch aims to do
 
 - **Monitor continuously** using cameras from many vendors, at the highest resolution and frame rate the hardware allows.
@@ -93,7 +95,7 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 2. Install a **Qt 6** build for your MSVC toolchain, including **Qt Widgets**.
 3. Point `QTDIR` in `CMakeUserPresets.json` at that Qt kit. Machine-specific paths and commands are in [local environment.txt](local%20environment.txt).
 4. Open the project in Visual Studio, select **Debug-x64**, configure, and build.
-5. Run **SeleneWatch** from the IDE.
+5. Run **SeleneWatch** from the IDE. The [User Manual](MANUAL.md) explains how to use it.
 
 With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
 
