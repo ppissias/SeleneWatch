@@ -2,20 +2,15 @@
 
 #include "cameras/zwo_source.h"
 #include <QtWidgets/QWidget>
-#include <map>
 #include <optional>
 
 class QComboBox;
-class QSpinBox;
-class QDoubleSpinBox;
 class QPushButton;
 class QLabel;
-class QFormLayout;
-class QTimer;
+class CameraSettingsEditor;
 
-// Stopped discovery/inspection and requested camera settings. Hardware readback
-// remains distinct from edits. Preview control edits are queued to the source;
-// layout edits require Apply. Monitoring freezes acquisition settings.
+// Requested settings and separate actual readbacks. Native control edits are
+// queued during Preview; layout edits restart it. Monitoring fixes settings.
 class CameraPanel : public QWidget
 {
     Q_OBJECT
@@ -34,17 +29,12 @@ signals:
 private:
     void inspectSelected();
     void showProfile();
-    void updateBounds();
     void updateReadback();
     std::shared_ptr<ZwoApi> api_;
     std::optional<ZwoProfile> profile_;
-    QComboBox* cameras_; QComboBox* format_; QComboBox* bin_;
-    QSpinBox *width_,*height_,*x_,*y_;
+    QComboBox* cameras_;
     QPushButton *refresh_,*apply_;
     QLabel* readback_;
-    QFormLayout* controlForm_;
-    QWidget* controls_;
-    std::map<ZwoControl,QDoubleSpinBox*> values_;
-    QTimer* liveTimer_;
-    bool running_{false}, monitoring_{false}, updating_{false};
+    CameraSettingsEditor* editor_;
+    bool running_{false},monitoring_{false};
 };

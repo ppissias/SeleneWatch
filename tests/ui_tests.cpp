@@ -2,6 +2,8 @@
 #include "display_panel.h"
 #include "camera_panel.h"
 #include "tests/fake_zwo_api.h"
+#include "tests/fake_qhy_api.h"
+#include "qhy_camera_panel.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "recording/ser_reader.h"
@@ -55,6 +57,8 @@ private slots:
     void stretchARecordingWhileCapturingThenRestoreSettings();
     void saveARecordingManuallyThroughTheWindow();
     void cameraReadbacksRestartAndDisconnectKeepSeparateEvidence();
+    void qhyRuntimeOverridePersistsAndRecovers();
+    void qhyReadbacksBayerEvidenceAndUnknownDrops();
 };
 
 void UiTest::previewShowsWouldTriggerWithoutSaving()
@@ -82,6 +86,170 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
 }
 
+void UiTest::qhyRuntimeOverridePersistsAndRecovers()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString savedPath=dir.filePath("QHY SDK/qhyccd.dll");
+    QSettings().setValue("qhy/runtimePath",savedPath);
+    auto api=std::make_shared<FakeQhyApi>();
+    {
+        MainWindow window(nullptr,dir.path(),{},api);
+        QVERIFY(api->runtimeOverride.isEmpty()); // No runtime discovery during application startup.
+        auto* source=window.findChild<QComboBox*>("sourceComboBox");
+        api->failOperation="devices";
+        source->setCurrentIndex(source->findData("qhy"));
+        QCOMPARE(api->runtimeOverride,savedPath);
+        QVERIFY(window.findChild<QLabel*>("qhyReadback")->text().contains("TEST QHY devices failed"));
+        auto* start=window.findChild<QPushButton*>("startButton");
+        QVERIFY(!start->isEnabled());
+        api->failOperation.clear();
+        api->connected=false;
+        auto* automatic=window.findChild<QPushButton*>("automaticQhyRuntime");
+        QVERIFY(automatic->isEnabled());
+        automatic->click();
+        QVERIFY(api->runtimeOverride.isEmpty());
+        QVERIFY(!QSettings().contains("qhy/runtimePath"));
+        QVERIFY(!start->isEnabled());
+        QVERIFY(window.findChild<QLabel*>("qhyReadback")->text().contains("check the QHY driver installation"));
+        api->connected=true;
+        window.findChild<QPushButton*>("refreshQhyCameras")->click();
+        QVERIFY(start->isEnabled());
+    }
+    MainWindow reopened(nullptr,dir.path(),{},api);
+    auto* source=reopened.findChild<QComboBox*>("sourceComboBox");
+    source->setCurrentIndex(source->findData("qhy"));
+    QVERIFY(!reopened.findChild<QPushButton*>("automaticQhyRuntime")->isEnabled());
+    QVERIFY(reopened.findChild<QPushButton*>("startButton")->isEnabled());
+    source->setCurrentIndex(source->findData("recording"));
+    QVERIFY(reopened.findChild<QDockWidget*>("qhyCameraDock")->isHidden());
+    QCOMPARE(reopened.findChild<QLabel*>("fileLabel")->text(),QString("No recording chosen"));
+    source->setCurrentIndex(source->findData("synthetic"));
+    QVERIFY(reopened.findChild<QLabel*>("fileLabel")->text().isEmpty());
+}
+
+void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
+{
+    QTemporaryDir dir;
+    auto api=std::make_shared<FakeQhyApi>();
+    for (auto& c:api->state.controls)
+        if (c.kind==QhyControl::Gain) { c.minimum=.25;c.step=.5;c.value=12.25; }
+    MainWindow window(nullptr,dir.path(),{},api);
+    window.show();
+    QCOMPARE(api->opened.load(),0);
+    auto* source=window.findChild<QComboBox*>("sourceComboBox");
+    const int qhyIndex=source->findData("qhy");
+    QVERIFY(qhyIndex>=2);
+    source->setCurrentIndex(qhyIndex);
+    auto* panel=window.findChild<QhyCameraPanel*>();
+    QVERIFY(panel);
+    QVERIFY(panel->hasCamera());
+    QVERIFY(!window.findChild<QSpinBox*>("targetFpsSpinBox")->isEnabled());
+    QCOMPARE(panel->findChild<QComboBox*>("cameraBin")->count(),1);
+    auto* start=window.findChild<QPushButton*>("startButton");
+    auto* stop=window.findChild<QPushButton*>("stopButton");
+    auto* save=window.findChild<QPushButton*>("saveNowButton");
+    auto* monitoring=window.findChild<QPushButton*>("monitoringButton");
+    auto* apply=panel->findChild<QPushButton*>("applyQhyCamera");
+    auto* preview=window.findChild<PreviewWidget*>();
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+    auto* gain=panel->findChild<QDoubleSpinBox*>("cameraControl1");
+    QCOMPARE(gain->value(),12.25);
+    QVERIFY(!save->isEnabled());
+    const int previewOpens=api->opened.load();
+    gain->setValue(13.37);
+    panel->findChild<QDoubleSpinBox*>("cameraControl0")->setValue(2);
+    panel->findChild<QDoubleSpinBox*>("cameraControl2")->setValue(17);
+    panel->findChild<QDoubleSpinBox*>("cameraControl3")->setValue(20);
+    panel->findChild<QDoubleSpinBox*>("cameraControl4")->setValue(1);
+    QTRY_COMPARE_WITH_TIMEOUT(panel->profile().current.controls.at(QhyControl::Gain),13.25,3000);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::Exposure),2000.0);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::Offset),17.0);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::UsbTraffic),20.0);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::TransferSpeed),1.0);
+    QCOMPARE(api->opened.load(),previewOpens);
+    QCOMPARE(api->starts.load(),1);
+    QCOMPARE(api->stops.load(),0);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("sigmaReading")->text().contains("Settling"),3000);
+    QVERIFY(!QFile::exists(dir.path()+"/candidates.txt"));
+
+    monitoring->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),2,3000);
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+    QVERIFY(!apply->isEnabled());
+    QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl1")->isEnabled());
+    QVERIFY(!panel->findChild<QPushButton*>("chooseQhyRuntime")->isEnabled());
+    QVERIFY(save->isEnabled());
+    save->click();
+    QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    api->notReady=true;
+    monitoring->click();
+    QTRY_COMPARE_WITH_TIMEOUT(monitoring->text(),QString("Start monitoring"),3000);
+    QVERIFY(!save->isEnabled());
+    QCOMPARE(api->starts.load(),2);
+    QCOMPARE(api->stops.load(),1);
+    api->notReady=false;
+
+    gain=panel->findChild<QDoubleSpinBox*>("cameraControl1");
+    QVERIFY(gain->isEnabled());
+    gain->setValue(20.25);
+    auto* format=panel->findChild<QComboBox*>("cameraFormat");
+    format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono16)));
+    panel->findChild<QSpinBox*>("cameraWidth")->setValue(64);
+    panel->findChild<QSpinBox*>("cameraHeight")->setValue(32);
+    panel->findChild<QSpinBox*>("cameraX")->setValue(1);
+    panel->findChild<QSpinBox*>("cameraY")->setValue(1);
+    apply->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),3,3000);
+    QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::Gain),20.25);
+    QVERIFY(!save->isEnabled());
+    monitoring->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),4,3000);
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: unknown"),3000);
+    save->click();
+    QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
+    QVERIFY(window.findChild<QDockWidget*>("qhyCameraDock")->isVisible());
+    window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
+    QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
+    QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/qhy-window.png"));
+    api->connected=false;
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(),3000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        int complete=0;
+        for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+            complete+=text(dir.path()+"/"+folder+"/event.txt").contains("complete: yes");
+        return complete>=2;
+    })(),5000);
+    int before=0,after=0;
+    for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    {
+        const auto note=text(dir.path()+"/"+folder+"/event.txt");
+        if (note.contains("pixel_format: Mono8"))
+        {
+            QVERIFY(note.contains("gain: 13.25\n"));
+            QVERIFY(note.contains("collection_end: monitoring stopped"));
+            ++before;
+        }
+        if (note.contains("pixel_format: Mono16"))
+        {
+            QVERIFY(note.contains("gain: 20.25\n"));
+            QVERIFY(note.contains("source failure: TEST QHY disconnected"));
+            QVERIFY(note.contains("bayer_pattern: BGGR\n"));
+            ++after;
+        }
+        QVERIFY(note.contains("sdk_dropped_frames=unknown"));
+        QVERIFY(note.contains("kind=manual"));
+        QVERIFY(note.contains("camera_serial: unknown"));
+    }
+    QCOMPARE(before,1);
+    QCOMPARE(after,1);
+    QCOMPARE(api->opened.load(),api->closed.load());
+}
+
 void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
 {
     QTemporaryDir dir;
@@ -93,6 +261,8 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     source->setCurrentIndex(2); QVERIFY(panel->hasCamera());
     auto* fps=window.findChild<QSpinBox*>("targetFpsSpinBox"); QVERIFY(!fps->isEnabled());
     QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl0"));
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->decimals(),3);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->singleStep(),0.1);
     QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl4")); // Unsupported high-speed control is absent.
     auto* start=window.findChild<QPushButton*>("startButton");
     auto* stop=window.findChild<QPushButton*>("stopButton");

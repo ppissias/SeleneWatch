@@ -1,0 +1,47 @@
+{
+  "feature": "Feature-10 QHY development draft",
+  "date": "2026-11-14",
+  "sdkRuntimeVersion": "25.6.16.15",
+  "vendorFilesBundled": false,
+  "physicalCameraTested": false,
+  "sdkRedistributionTermsVerified": false,
+  "requiredSdkExportsPresent": 26,
+  "tests": [
+    {
+      "configuration": "no-sdk-debug",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 42.07
+    },
+    {
+      "configuration": "no-sdk-release",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 28.24
+    },
+    {
+      "configuration": "qhy-debug",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 42.55
+    },
+    {
+      "configuration": "qhy-release",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 28.59
+    },
+    {
+      "configuration": "both-debug",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 40.14
+    },
+    {
+      "configuration": "both-release",
+      "passed": 11,
+      "failed": 0,
+      "seconds": 27.65
+    }
+  ]
+}

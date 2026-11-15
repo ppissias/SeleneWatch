@@ -1,4 +1,5 @@
 #include "cameras/zwo_source.h"
+#include "cameras/raw_camera_layout.h"
 
 #include <algorithm>
 #include <format>
@@ -29,14 +30,6 @@ void validate(const ZwoCameraInfo& camera,const ZwoSettings& s)
         throw std::invalid_argument("Colour binning needs camera-specific Bayer verification; use bin 1 for raw colour");
     if (frameBytes(s.width,s.height,s.format)>static_cast<size_t>(std::numeric_limits<long>::max()))
         throw std::invalid_argument("ASI frame exceeds the SDK buffer-size range");
-}
-BayerPattern shifted(BayerPattern pattern,int x,int y)
-{
-    // Index is the top-left filter: rows [RGGB, GRBG], [GBRG, BGGR].
-    const BayerPattern patterns[]{BayerPattern::RGGB,BayerPattern::GRBG,BayerPattern::GBRG,BayerPattern::BGGR};
-    const auto found=std::find(std::begin(patterns),std::end(patterns),pattern);
-    if (found==std::end(patterns)) return BayerPattern::None;
-    return patterns[(found-std::begin(patterns)) ^ (x&1) ^ ((y&1)<<1)];
 }
 std::string controlText(const ZwoSettings& s,ZwoControl kind,const char* units="")
 {
@@ -238,7 +231,7 @@ void ZwoSource::run(std::stop_token stop,FrameSourceListener& listener)
             quietLimit=2*exposureSeconds(actual_.current)+5;
             f->width=s.width; f->height=s.height; f->format=s.format;
             f->significantBits=s.format==PixelFormat::Mono16?16:8; f->alignment=BitAlignment::Low;
-            f->bayer=shifted(actual_.camera.bayer,s.x,s.y);
+            f->bayer=roiBayerPattern(actual_.camera.bayer,s.x,s.y);
             f->testSource=actual_.camera.testSource; f->syntheticFlash=false; f->blip.reset(); f->sourceDroppedFrames.reset();
             std::string telemetryError;
             try

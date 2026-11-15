@@ -22,6 +22,9 @@ class DisplayPanel;
 class CameraPanel;
 class ZwoApi;
 class ZwoSource;
+class QhyApi;
+class QhySource;
+class QhyCameraPanel;
 class QDockWidget;
 namespace Ui { class MainWindowClass; }
 
@@ -37,7 +40,8 @@ class MainWindow : public QMainWindow
 
 public:
     // Empty outputRoot writes beside the executable. Tests supply an isolated directory.
-    explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {}, std::shared_ptr<ZwoApi> cameraApi = {});
+    explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {}, std::shared_ptr<ZwoApi> cameraApi = {},
+        std::shared_ptr<QhyApi> qhyApi = {});
     ~MainWindow() override;
     // Selects a file while stopped; Start opens it. Shared by the file dialog
     // and the window test, which supplies an isolated recording.
@@ -90,6 +94,9 @@ private:
 
     [[nodiscard]] bool recordingSelected() const;
     [[nodiscard]] bool cameraSelected() const;
+    [[nodiscard]] bool qhySelected() const;
+    [[nodiscard]] bool anyCameraSelected() const;
+    [[nodiscard]] bool validateCameraSettings();
 
     std::unique_ptr<Ui::MainWindowClass> ui_;
     std::unique_ptr<Session> session_;
@@ -103,6 +110,10 @@ private:
     CameraPanel* cameraPanel_{nullptr};
     QDockWidget* cameraDock_{nullptr};
     ZwoSource* camera_{nullptr};
+    std::shared_ptr<QhyApi> qhyApi_;
+    QhyCameraPanel* qhyPanel_{nullptr};
+    QDockWidget* qhyDock_{nullptr};
+    QhySource* qhyCamera_{nullptr};
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};

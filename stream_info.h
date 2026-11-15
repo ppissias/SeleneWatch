@@ -45,6 +45,7 @@ struct StreamInfo
     // ADC depth from the conservative delivered-word interpretation.
     std::string serial, sdkVersion, offset, binning, roi, sensorBits, sampleLayout;
     std::string usbBandwidth, highSpeed;
+    std::string deviceId, transferSpeed;
 };
 
 // A path as UTF-8 text, for StreamInfo and for messages.

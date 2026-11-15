@@ -1,5 +1,7 @@
 #include "tools/camera_probe.h"
 #include "tests/fake_zwo_api.h"
+#include "tests/fake_qhy_api.h"
+#include "tools/qhy_probe.h"
 #include "recording/ser_reader.h"
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
@@ -35,6 +37,26 @@ class CameraProbeTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void qhyBayerSoakUsesTheSharedRunnerAndNeverInventsLossCounts()
+    {
+        QTemporaryDir dir;auto api=std::make_shared<FakeQhyApi>();auto config=shortRun();
+        config["raw16"]=true;config["width"]=64;config["height"]=32;config["x"]=1;config["y"]=1;config["gain"]=13.37;
+        QFile file(dir.path()+"/qhy.json");QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(config).toJson());file.close();
+        QCOMPARE(runQhyProbe(*QCoreApplication::instance(),{"probe","soak",dir.path()+"/result",file.fileName()},api),0);
+        const auto report=readJson(dir.path()+"/result/bench.json");
+        QVERIFY(report["sdkDrops"].isNull());QVERIFY(report["serial"].isNull());QCOMPARE(report["savedSampleBits"].toInt(),16);
+        QVERIFY(report["previewHashes"].toInt()>0);QCOMPARE(report["previewHashes"],report["matchedPreviewHashes"]);
+        const auto outputs=report["outputs"].toArray();QVERIFY(outputs.size()>=3);
+        for(const auto& output:outputs)
+        {
+            SerReader reader;std::string error;
+            const auto path=output.toObject()["folder"].toString()+"/event.ser";
+            QVERIFY(reader.open(std::filesystem::path(path.toStdWString()),30,error));
+            Frame f;f.data.resize(reader.frameBytes());QVERIFY(reader.readFrame(0,f,error));
+            QCOMPARE(f.width,64);QCOMPARE(f.height,32);QCOMPARE(f.bayer,BayerPattern::BGGR);QVERIFY(f.testSource);
+        }
+        QCOMPARE(api->opened.load(),api->closed.load());
+    }
     void periodicClipsAndProgressRetainNativeEvidence()
     {
         for (bool raw16 : {false,true})

@@ -48,11 +48,12 @@ Camera SDKs (not part of the repository)
     Runtime checked 2026-11-14: 1, 41, 0, 0 (1.41.0.0)
     Docs:    doc\ASICamera2 Software Development Kit.pdf
   QHYCCD (qhyccd):       C:\dev\tools\SDKs\QHY sdk
-    Header:  include\qhyccd.h (version 25.06.16 per include\config.h)
-    x64 lib: x64\qhyccd.lib, qhyccd.dll, plus ftd2xx.dll, tbb.dll, winusb.dll, msvcr90.dll, msvcp90.dll
-    License: none in the SDK folder; terms to be found before the adapter is merged
+    Build header: include\qhyccd.h (25.06.16 per include\config.h)
+    Detected runtime: C:\Program Files\QHYCCD\AllInOne\sdk\x64\qhyccd.dll (25.6.16.15)
+    The optional build uses the external header. The user installs the driver and DLL.
+    See THIRD_PARTY_LICENSES.md for QHY redistribution status.
   Both paths contain a space; quote them in CMake and on the command line.
-  The ZWO adapter is implemented (Feature-10); the default presets still omit it.
+  The default presets omit both vendor SDKs. Enable either or both when configuring.
   Optional SDK builds: out\build\zwo-debug and out\build\zwo-release.
   Configure from the development PowerShell environment, for example:
     cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
@@ -60,7 +61,10 @@ Camera SDKs (not part of the repository)
     ctest --test-dir out/build/zwo-release --output-on-failure
     .\out\build\zwo-release\SeleneWatch.exe
   Use Debug and out/build/zwo-debug for the corresponding Debug build.
-  QHY integration and SELENEWATCH_QHY_SDK_DIR remain proposed; QHY is not enabled by this build.
+  For QHY use -DSELENEWATCH_QHY_SDK_DIR="C:/dev/tools/SDKs/QHY sdk" at configure time.
+  Use out/build/qhy-release for QHY alone or out/build/both-release for both adapters.
+  Run .\out\build\qhy-release\SeleneWatchQhyProbe.exe version to check runtime discovery.
+  See docs/qhy-development.md for the path override and physical-camera checklist.
   See docs/zwo-validation.md for hardware measurements and the manual camera probe.
 
 Recordings archive (the observer's own lunar and planetary videos; read-only test data, not part of the repository)

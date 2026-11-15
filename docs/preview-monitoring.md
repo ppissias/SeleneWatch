@@ -8,13 +8,13 @@ Implemented 14 November 2026. The observer tunes a stream before enabling event 
 | Preview | Active; same detector as Monitoring | Every supported writable live control; layout changes restart Preview | No new automatic/manual clips or candidate records |
 | Monitoring | Active on every delivered frame | Fixed acquisition settings; display and detection controls remain editable | Automatic event clips and explicit Save now |
 
-**Start preview** is the default. **Start monitoring** enables capture. **Stop monitoring** hands off the current available clip with `collection_end: monitoring stopped`, returns to Preview, and leaves acquisition running. The disarm frame is outside the old clip. Existing writer jobs retain their immutable pixels and metadata and drain in the background. **Stop stream** ends acquisition and closes a camera. A mode change is visibly pending until the source thread applies it; a camera read timeout also services disarming during a long exposure.
+**Start preview** is the default. **Start monitoring** enables capture. **Stop monitoring** hands off the current available clip with `collection_end: monitoring stopped`, returns to Preview, and leaves acquisition running. The disarm frame is outside the old clip. Existing writer jobs retain their immutable pixels and metadata and drain in the background. **Stop stream** ends acquisition and closes a camera. The mode change stays pending until the worker reaches a frame or the SDK returns without one.
 
 Save now is disabled in Preview intentionally: its capture-OFF banner promises no new recordings. Test injection works in either running state. Preview injections show diagnostic decisions; Monitoring injections use the existing per-frame TEST markings and evidence path. Previously written files are never changed.
 
 ## Live tuning and feedback
 
-The ZWO panel queues exposure, gain, offset, USB bandwidth and high-speed edits where the camera reports them writable. Edits are coalesced for 180 ms; typed values apply when the edit is committed. The worker applies controls between bounded SDK reads, reads the actual controls and layout back, and publishes copied snapshots. The context thread never calls the SDK alongside acquisition. Requested values can differ from actual readbacks when hardware quantises them; both remain visible. Flip remains disabled to preserve raw orientation. Unsupported controls do not appear.
+The ZWO panel queues exposure, gain, offset, USB bandwidth and high-speed edits where the camera reports them writable. QHY queues reported exposure, gain, offset, USB traffic and transfer speed. The panels coalesce edits for 180 ms and submit typed values after the edit is committed. The worker applies controls between SDK reads, reads the actual controls and layout back, and publishes copied snapshots. The panels show requested values alongside actual readbacks when the camera quantises them. ZWO flip stays disabled to preserve raw orientation. QHY changes to or from exposures of at least one second restart the SDK's live capture on the same connection. [QHY integration and validation](qhy-development.md)
 
 Raw format, binning and ROI require **Apply format / ROI and restart Preview** because the SDK requires capture to stop. Invalid geometry is rejected before stopping a healthy Preview. These changes and all camera controls are disabled during Monitoring. Stopping Monitoring enables tuning again without disconnecting. Detection settings and display stretch remain adjustable during Monitoring; every trigger retains the detection settings it actually used.
 
@@ -36,13 +36,13 @@ Synthetic and recorded sources can retain their valid history and learned refere
 
 `Session` owns the mode and applies requests on the source thread. `EventCapture` gates clip creation and notifications while retaining the detector/ring path. Live camera requests, actual-profile snapshots and `StreamInfo` snapshots use mutex-protected copies. Preview creates no candidate journal; entering Monitoring queues the existing `session_start` record. A live settings notification outside Preview ends acquisition before any frame with changed settings can be recorded under the old metadata. Arming is rejected after a tuning notification until the source is reopened, including when the notification races with a pending arm request.
 
-The manual recording/camera QA commands explicitly start in Monitoring, preserving their documented unattended capture behavior. No dependency or licence change accompanies this work. QHY remains in its separate development branch; runtime discovery and QHY hardware qualification remain separate unfinished work.
+The manual recording and camera QA commands explicitly start in Monitoring, preserving unattended capture behavior.
 
 ## Validation
 
 The hardware-independent tests cover Preview's lack of files/records, live diagnostic Would-trigger feedback, fresh persistence at arming, retained same-configuration history, exclusion of the disarm frame, history invalidation on camera changes, a pending-arm race, disarming during camera waits, native control readback clamps and worker serialization, rejection of live layout/orientation changes, fixed Monitoring metadata, simulated disconnect, partial evidence, and the existing manual camera probe. Offscreen window screenshots are inspected with Camera and Detection visible together.
 
-All 10 CTest suites pass in Debug and Release, both with and without the ASI SDK. Tests never open a physical camera. The source/core checks were run for all four configurations; the final UI checks also cover mode-label changes when no new exposure arrives. Screenshots show the actual offscreen window, not a mock-up.
+The initial 14 November ZWO implementation passed all 10 CTest suites in Debug and Release, both with and without the ASI SDK. The offscreen UI checks cover mode-label changes when no new exposure arrives. The later QHY results are recorded alongside its hardware checklist. [QHY validation](qhy-development.md)
 
 The connected **ASI120MM Mini**, SDK **1.41.0.0**, passed a separate automated offscreen `MainWindow` check using the real SDK:
 

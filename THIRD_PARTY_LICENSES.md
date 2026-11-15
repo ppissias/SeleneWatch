@@ -41,6 +41,15 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ---
 
+## QHYCCD Windows SDK (user-installed runtime)
+
+- **Installed version:** Windows x64 25.6.16.15, confirmed from the file/header and a runtime version-only query.
+- **Vendor sources reviewed:** [SDK documentation and demos](https://www.qhyccd.com/sdk-demo-and-sample-project/), [downloads](https://www.qhyccd.com/download/). A [historical SDK repository](https://github.com/qhyccd-lzr/QHYCCD_Linux) was also checked for context, without establishing this Windows package's terms.
+- **Terms:** The installed package has no SDK-wide license text. Windows SDK redistribution rights and any required notices remain unverified. The compatibility header refers to its own copyright and license.
+- **Integration:** The optional build uses declarations from the externally installed header. At runtime SeleneWatch loads the user's x64 `qhyccd.dll` by absolute path when QHY is selected. QHY documents the All-In-One package as the source for third-party application SDKs. [QHY installation guidance](https://www.qhyccd.com/download/)
+- **Distribution:** QHY headers, import libraries, DLLs, drivers, firmware and demos stay out of the repository and SeleneWatch packages. The tested `qhyccd.dll` imports Windows components. Bundling any QHY component would require verifying its terms and notices first. SeleneWatch's original adapter code remains BSD-2-Clause.
+- **Validation:** Physical camera qualification is pending. [QHY integration and validation](docs/qhy-development.md)
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

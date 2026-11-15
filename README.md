@@ -6,9 +6,9 @@ SeleneWatch is a native C++/Qt desktop application being developed to monitor th
 
 The main motivation is to help observers detect and document **lunar transient phenomena**, particularly brief flashes that may be caused by meteoroid impacts. The design also covers transits, occultations, moving objects, and other unexpected events.
 
-> **Project status: ZWO acquisition and manual save implemented; QHY and observing acceptance remain open.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO ASI cameras use the same detector, time-based history, shared image/analysis memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The connected ASI120MM Mini has passed RAW8/RAW16 bench checks; see [ZWO validation](docs/zwo-validation.md). Feature-9's [observing calibration](docs/feature-9-validation.md) and Feature-5's [earthshine display check](docs/feature-5-validation.md) remain partial. Mount guiding follows.
+> **ZWO and QHY acquisition and manual save are implemented. QHY camera and lunar observing checks are pending.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO and QHY cameras use the same detector, time-based history, shared memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The ASI120MM Mini passed RAW8/RAW16 bench checks. [ZWO validation](docs/zwo-validation.md)
 
-The [reference and rearming follow-up](docs/reference-and-manual-validation.md) keeps background learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Ten test suites cover the processing, evidence, diagnostics and window paths without requiring camera hardware. The [registration experiment](docs/registration-experiment.md) and its repeated controls remain outside production.
+The detector keeps learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Observing calibration and the earthshine display check remain partial. Registration remains experimental. [Reference and rearming](docs/reference-and-manual-validation.md), [observing calibration](docs/feature-9-validation.md), [earthshine display](docs/feature-5-validation.md), [registration experiment](docs/registration-experiment.md)
 
 ## What SeleneWatch aims to do
 
@@ -97,7 +97,7 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 
 With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
 
-Camera SDKs are not part of the repository. Each camera adapter is built only when its SDK is installed and enabled in CMake. Without any SDK, the app still builds and runs on synthetic and recorded sources.
+Camera SDKs stay outside the repository. Each adapter is optional in CMake. The default presets support synthetic and recorded sources.
 
 The manual [camera soak tool](docs/camera-soak.md) saves periodic clips, flushes progress/memory/drop diagnostics, and stops at configured storage thresholds. The Mini completed [30 minutes in each raw format](docs/zwo-soak-validation.md), with zero SDK drops/refusals and all 420 sampled pixel hashes matched. These are bench checks; lunar observing acceptance remains open.
 
@@ -114,6 +114,8 @@ ctest --test-dir out/build/zwo-release --output-on-failure
 Start with **Start preview**: frames reach the history, display and detector, while automatic capture, Save now and the candidate record are off. The Detection panel shows peak sigma relative to K, patch size/compactness limits, noise, persistence and **Would trigger** feedback. **Start monitoring** enables automatic event clips and Save now; **Stop monitoring** finishes the available clip and returns to Preview while acquisition continues. Queued evidence writes finish in the background. The banner always shows whether capture is ON or OFF. See [Preview and Monitoring](docs/preview-monitoring.md) for boundaries and validation.
 
 Select **ZWO ASI camera** under Source. The Camera panel discovers devices and shows their reported controls beside the Detection panel. In Preview, exposure (ms), gain, offset, USB bandwidth and high-speed mode apply live when supported and writable; actual readbacks remain visible separately from requested values. Format, binning and ROI use **Apply format / ROI and restart Preview**. Camera settings are fixed during Monitoring; display and detection controls remain editable. Starting Monitoring reopens the camera and learns a new reference, excluding buffered tuning frames and history with uncertain settings. **Stop stream** closes the camera. The status bar shows SDK-reported drops; UTC is host arrival time, and drop locations are approximate because the SDK buffers frames. RAW16 keeps all delivered bits; the sensor's advertised ADC depth is separate metadata. The SDK DLL and its notice are copied into the build directory; release packaging must also satisfy [dependency notices](THIRD_PARTY_LICENSES.md).
+
+For QHY on Windows x64, set `SELENEWATCH_QHY_SDK_DIR` to the vendor SDK root when configuring the build. Install QHY's Windows All-In-One driver and SDK, then select **QHY camera** under Source. SeleneWatch discovers the installed x64 DLL on demand. **Choose QHY DLL…** saves a path for a custom installation. **Use automatic discovery** clears that override. QHY supports live tuning in Preview and fixes acquisition settings during Monitoring. The adapter uses bin 1 and reports SDK losses as unknown. [Build and validation instructions](docs/qhy-development.md), [QHY downloads](https://www.qhyccd.com/download/)
 
 To try a test flash, start Preview, click the image to select a pixel, set **FWHM**, **Peak**, and **Duration** under **Test flash**, then press **Inject blip**. Preview shows whether it would trigger; start Monitoring to save test events. Peak is an addition in native sample units (ADU), including for 12-bit data stored in a 16-bit word. The readout also gives the requested peak in local noise units. A saved clip marks each injected frame and records its settings. The synthetic source's **Fixed flash** remains available as a capture check.
 
@@ -135,7 +137,7 @@ The **Display and capture** tab offers Linear, Black/white levels, and Auto-stre
 | 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
 | 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
 | 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | ZWO and manual save implemented; QHY and observing acceptance pending |
+| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Software implemented. QHY hardware and observing checks pending. |
 | 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Proposed |
 | 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |
 | 12 | More camera families; registration, transit detection, event browser, export | — | Planned |
