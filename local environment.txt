@@ -53,8 +53,12 @@ Camera SDKs (not part of the repository)
     The optional build uses the external header. The user installs the driver and DLL.
     See THIRD_PARTY_LICENSES.md for QHY redistribution status.
   Both paths contain a space; quote them in CMake and on the command line.
-  The default presets omit both vendor SDKs. Enable either or both when configuring.
-  Optional SDK builds: out\build\zwo-debug and out\build\zwo-release.
+  Since 2026-11-15 the Debug-x64 and Release-x64 presets build both adapters: they inherit the hidden
+  Camera-SDKs preset in CMakeUserPresets.json, which sets SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR
+  to the two paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera and QHY camera
+  under Source, and ASICamera2.dll plus licenses\ZWO-ASI-SDK.txt are copied into out\build\debug (or release).
+  Separate single-adapter builds (below) are still possible but no longer needed for daily work.
+  Older separate SDK builds: out\build\zwo-debug and out\build\zwo-release.
   Configure from the development PowerShell environment, for example:
     cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
     cmake --build out/build/zwo-release
@@ -111,8 +115,8 @@ Quick Start (PowerShell Shortcut)
     cmake --build out/build/debug
     .\out\build\debug\SeleneWatch.exe
 
-  For live cameras, launch the build with both SDKs from the same PowerShell window.
-    .\out\build\both-release\SeleneWatch.exe
+  The preset builds include both camera adapters, so live cameras work from either one:
+    .\out\build\debug\SeleneWatch.exe   or   .\out\build\release\SeleneWatch.exe
   With the stream stopped, choose ZWO ASI camera or QHY camera from Source at the top left.
   The device list opens on the left. Use Refresh cameras if the device is missing.
 

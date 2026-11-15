@@ -97,11 +97,11 @@ The processing core does not depend on Qt UI classes, so it can be tested and me
 
 With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
 
-Camera SDKs stay outside the repository. Each adapter is optional in CMake. The default presets support synthetic and recorded sources.
+Camera SDKs stay outside the repository. Each adapter is optional in CMake: without an SDK path the application builds and runs on synthetic and recorded sources. On the development machine the **Debug-x64** and **Release-x64** presets set both SDK paths (the hidden `Camera-SDKs` preset in `CMakeUserPresets.json`), so a normal build from Visual Studio includes the ZWO and QHY adapters. On another machine, change those two paths, or remove `Camera-SDKs` from the presets' `inherits` to build without cameras.
 
 The manual [camera soak tool](docs/camera-soak.md) saves periodic clips, flushes progress/memory/drop diagnostics, and stops at configured storage thresholds. The Mini completed [30 minutes in each raw format](docs/zwo-soak-validation.md), with zero SDK drops/refusals and all 420 sampled pixel hashes matched. These are bench checks; lunar observing acceptance remains open.
 
-For ZWO on Windows x64, configure a separate build after loading the MSVC/Qt environment:
+For a ZWO-only build outside the presets on Windows x64, configure a separate build after loading the MSVC/Qt environment:
 
 ```powershell
 cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release `

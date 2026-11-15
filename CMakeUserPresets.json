@@ -9,7 +9,8 @@
         "CMAKE_BUILD_TYPE": "Debug"
       },
       "inherits": [
-        "Qt-Default"
+        "Qt-Default",
+        "Camera-SDKs"
       ]
     },
     {
@@ -20,8 +21,18 @@
         "CMAKE_BUILD_TYPE": "Release"
       },
       "inherits": [
-        "Qt-Default"
+        "Qt-Default",
+        "Camera-SDKs"
       ]
+    },
+    {
+      "hidden": true,
+      "name": "Camera-SDKs",
+      "displayName": "Camera SDKs on this machine (vendor SDKs stay outside the repository)",
+      "cacheVariables": {
+        "SELENEWATCH_ZWO_SDK_DIR": "C:/dev/tools/SDKs/ASI SDK",
+        "SELENEWATCH_QHY_SDK_DIR": "C:/dev/tools/SDKs/QHY sdk"
+      }
     },
     {
       "hidden": true,
