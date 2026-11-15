@@ -50,6 +50,14 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 - **Distribution:** QHY headers, import libraries, DLLs, drivers, firmware and demos stay out of the repository and SeleneWatch packages. The tested `qhyccd.dll` imports Windows components. Bundling any QHY component would require verifying its terms and notices first. SeleneWatch's original adapter code remains BSD-2-Clause.
 - **Validation:** Physical camera qualification is pending. [QHY integration and validation](docs/qhy-development.md)
 
+## ASCOM Platform (user-installed runtime, mount guiding)
+
+- **Installed version on the development machine:** ASCOM Platform 7.1 Update 3 (7.1.3.4851), with the OmniSim simulator.
+- **License:** The ASCOM Platform repository is licensed under Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0, SPDX `CC-BY-SA-3.0`), except `DriverAccess.XML`, which is MIT. Sources: the [ASCOMPlatform repository page](https://github.com/ASCOMInitiative/ASCOMPlatform) ("The entire ASCOM Platform (as opposed to drivers and programs that use it) is open source...") and its [LicenseExceptions.txt](https://github.com/ASCOMInitiative/ASCOMPlatform/blob/main/LicenseExceptions.txt), read 15 November 2026. No license file ships with the installed Platform 7 in Program Files. The OmniSim simulator ships its own MIT notice (`C:\Program Files\ASCOM\OmniSimulator\license.md`).
+- **Integration:** `guiding/ascom_mount.cpp` (CMake option `SELENEWATCH_WITH_ASCOM`, on by default for Windows) uses only Windows COM: `CLSIDFromProgID`, `CoCreateInstance`, and `IDispatch` calls by member name, against the Platform and the driver the observer has installed. No ASCOM header, type library, assembly, or source is copied into the repository, generated into the build, or linked. The build links only the Windows system libraries `ole32` and `oleaut32`.
+- **Members used:** the ASCOM Telescope interface's `Connected` (read and write), `CanPulseGuide`, `Tracking`, `Slewing`, `AtPark`, `SideOfPier`, `AlignmentMode`, `GuideRateRightAscension`, `GuideRateDeclination`, `IsPulseGuiding`, and `PulseGuide`; and `ASCOM.Utilities.Chooser`'s `DeviceType` and `Choose` for the driver dialog.
+- **Distribution:** SeleneWatch packages contain no ASCOM component. The observer installs the ASCOM Platform and their mount's driver. Read as written, CC BY-SA obligations attach to distributing the Platform or adaptations of it, and the Platform page separates the Platform from "drivers and programs that use it". This is a reading of the license text, not legal advice. Bundling any ASCOM file, or the OmniSim simulator, would need its terms and notices checked first. SeleneWatch's adapter code remains BSD-2-Clause.
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

@@ -13,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <thread>
 
 // What became of one clip handed to the writer.
@@ -31,6 +32,27 @@ struct ClipWriteResult
     // or the writer thread has ended. Later candidates are not on record.
     bool recordFailed{false};
     bool memoryLimited{false};
+};
+
+// A guide pulse, kept by the writer to mark candidates that fall inside a
+// mount correction and to list the pulses inside each clip (Evidence rule 9).
+struct GuidePulseRecord
+{
+    std::chrono::system_clock::time_point start{};
+    int milliseconds{0};
+    // The image is still settling for this long after the pulse ends.
+    double settleSeconds{0};
+    std::string direction;
+    bool calibration{false};
+};
+
+// The guiding state at one moment, from the guider's once-per-second line.
+struct GuideStateRecord
+{
+    std::chrono::system_clock::time_point time{};
+    // The lock state, and "guiding" or "calibrating" when the mount is being corrected.
+    std::string state;
+    double dx{0}, dy{0};
 };
 
 // Queued and active clip payload, outstanding clip count and cumulative write measurements.
@@ -75,9 +97,12 @@ public:
     // Only a failure to write it is reported.
     void logSessionStart(const StreamInfo& stream);
 
-    // Any thread. Queues finished lines for <outputRoot>/guiding.txt. A
-    // failure is counted in usage(), not reported as a clip result.
-    void logGuiding(QString lines);
+    // Any thread. Queues finished lines for <outputRoot>/guiding.txt (none
+    // when empty) and the records that go with them. The records are kept in
+    // memory, in order with the clips, so each clip can say whether its
+    // triggers fell inside a mount correction. A failure to write is counted
+    // in usage(), not reported as a clip result.
+    void logGuiding(QString lines, std::optional<GuidePulseRecord> pulse = {}, std::optional<GuideStateRecord> state = {});
 
     // Writes what is queued, then stops the thread.
     void shutdown();
@@ -98,7 +123,10 @@ private:
     struct Job
     {
         std::optional<SessionStart> sessionStart;
+        bool guiding{false};
         QString guidingLines;
+        std::optional<GuidePulseRecord> pulse;
+        std::optional<GuideStateRecord> guideState;
         EventClip clip;
         QString notSavedReason;
         bool containsTestSignal{false}; // Kept even when a refused clip drops its frames.
@@ -115,6 +143,8 @@ private:
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
     bool appendLog(const QString& lines, const QString& fileName = "candidates.txt") const;
+    // Writer thread. Whether a trigger at this time falls inside a pulse or its settling.
+    [[nodiscard]] bool duringMountCorrection(std::chrono::system_clock::time_point time) const;
 
     QObject* context_;
     const QString outputRoot_;
@@ -126,5 +156,10 @@ private:
     std::deque<Job> queue_;
     WriterUsage usage_;
     bool ended_{false};
+
+    // Writer thread only: the guiding records of the last minutes.
+    std::deque<GuidePulseRecord> pulses_;
+    std::deque<GuideStateRecord> guideStates_;
+
     std::jthread thread_;
 };

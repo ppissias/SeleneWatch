@@ -40,4 +40,11 @@ inline constexpr float kFlashCenterYOffset = 0.45f;
 
 // Fills one synthetic lunar image, including the moving marker.
 // flash paints the injected spot. Timestamps are left to the caller.
-void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bool flash);
+//
+// The disk, its texture, a fixed set of crater-like features, and the flash
+// are painted shifted by (offsetX, offsetY) frame pixels, so a simulated
+// mount can move the Moon in the field; the pacing marker stays where it is.
+// The craters do not repeat, unlike the texture, so a feature lock has a
+// unique place to find.
+void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bool flash,
+    double offsetX = 0, double offsetY = 0);

@@ -642,3 +642,71 @@ Findings for Part B:
 - The widened 64 px search costs about seven times a tracking search. In a Debug build that is roughly 0.2 s per search, which is acceptable on the guide thread.
 
 Still open for Part A: the earthshine side (no recording yet), a terminator region over an hour (template refresh, see the open decisions), and a check by hand at the telescope with the ZWO camera.
+
+### Part B implementation — 15 November 2026
+
+**Where it lives.** `guiding/mount.h` is the narrow mount type: connect, disconnect, state, and one guide pulse. `SimulatedPointing` and `SimulatedMount` are the simulation. `Calibrator` and `GuideController` are plain state machines, stepped with a `GuideObservation` (time, lock, estimate, mount state, frame interval). Each returns a `GuideDecision`: a pulse to send, and whether to restart the estimate. Neither has a thread or a clock. `Guider` (the guide thread) owns the mount, the calibration, and both machines; it reads the mount, steps the active machine, sends its pulse, and records it. The window's Guiding dock has Mount and Guiding sections and holds no guiding state.
+
+**The simulation.** The offset is kept in arcseconds along RA and Dec. Defaults are 0.10″/s RA and 0.25″/s Dec drift, a guide rate of 3.75″/s (a quarter of sidereal), 1″ per pixel, and a 30° camera angle. Declination backlash and a mirror flip are optional; so is a mount that ignores pulses, as a test fault. Connecting the simulated mount activates the pointing and disconnecting freezes it, so the synthetic Moon moves only while that mount is in use. The synthetic scene gained 14 fixed crater-like features (dark floor, bright rim) in a ring between 0.25 and 0.85 of the radius, clear of the centre and of the fixed flash. The disk, its texture, the craters, and the flash are painted at the pointing's offset; the pacing marker stays fixed in the frame.
+
+**Calibration, as built.**
+- Settle 1 s, then a fresh estimate of at least 8 matches.
+- West in 500 ms steps until the feature has moved 25 px (at most 30 s), then a fresh estimate. East for the same pulse time, then another fresh estimate.
+- The two legs share the field's own drift, so their sum gives the drift and their difference the west vector, with the drift removed.
+- The backlash is taken up by pulsing north until the feature moves 4 px beyond the drift (at most 10 s). Then a north leg is measured the same way, less the drift, and the mount returns south for the north and backlash time together.
+- Fails, with the reason, when a leg moves the feature less than 8 px, when the two axes are more than 20° from perpendicular, when the lock is lost, when the pier side changes, when the mount may not be pulsed, or when a pulse overruns by 10 s.
+- The result records both vectors, the drift, the axis angle, the backlash time, the pier side, and arcseconds per pixel when the mount reports its declination guide rate.
+
+**Control, as built.**
+- The estimate is split along the two calibrated mount axes. The tolerance box applies to each *mount* axis, not to the image's x and y, since corrections are made per mount axis.
+- When an axis component passes the tolerance, a pulse removes 70 % of it. Pulses are 20–1500 ms; RA goes first and declination after it ends.
+- After the pulses, the guider waits for each to end (time and `IsPulseGuiding`), settles 1 s, restarts the estimate, and waits for a fresh one.
+- A declination pulse opposite to the last one is withheld unless the error exceeds twice the tolerance.
+- A correction is fruitless when the fresh error is not smaller than before; three in a row stop guiding.
+- Pulse time in any minute is capped at 20 s.
+- A pulse is refused when it would move the image more than 0.25 px per frame, measured from the calibration and the frame interval.
+
+**Open decision closed: the tolerance unit.** The observer sets the tolerance as a share of the frame's shorter side (default 3 %, so 14 px on the 480-line synthetic frame and 29 px on the 960-line cameras). The dock shows it in pixels, and in arcseconds when the calibration has an image scale. This needs neither a focal length nor a guide rate. The finding from the recordings (1.2–2.4 px of seeing scatter at 0.33″/px) puts the default well above the scatter.
+
+**Evidence, as built.** Every pulse goes to the writer as a `GuidePulseRecord` (start, duration, settle, direction, calibration or guiding). Its `guide_pulse` line in `guiding.txt` is written only while Monitoring and gives the estimate, the last match, the RA and Dec error, and the mount state. The once-per-second `guide_offset` line also carries a `GuideStateRecord`. The writer keeps 15 minutes of both and does the matching itself, as the plan says:
+- a candidate whose trigger falls inside a pulse or its settle time gets `during_mount_correction=yes` in `candidates.txt` and on its `event.txt` trigger line;
+- `event.txt` gains `guiding_at_first_trigger` (the nearest state record within 2 s, or "no lock record") and `mount_pulses_in_clip` with one `mount_pulse` line per pulse overlapping the clip.
+
+`EventCapture` and the detector know nothing about the mount. Calibration and guiding starts and stops, mount connects and disconnects, and failures are also logged.
+
+**Ownership and threads.** The mount is created by a factory on the guide thread, used only there, and released there when the guider ends. While a mount is connected, the guide thread wakes at least every 100 ms to follow pulses. It reads the mount's state every step while calibrating or guiding, and once a second otherwise. A mount call running for more than 5 s shows "Mount not responding"; the window also polls once a second, because a hung call publishes nothing. `Session::start` and `Session::stop` end calibration and guiding (safety rules 1 and 8). The lock and the calibration survive a restart; a new lock or an unlock ends guiding. Disconnecting discards the calibration.
+
+**Tests (`guiding`, 28 cases, about 4 s).**
+
+| Done-when item | Result |
+| --- | --- |
+| 4. Calibration, 30° camera angle; mirrored with 20″ backlash | west −3.236, −1.903 px/s against −3.248, −1.875 simulated; mirrored 3.250, 1.822 against 3.248, 1.875; axes within 5° of 90°; 1.0″/px recovered; backlash 6.5 s taken up (20″ at 3.75″/s = 5.3 s) |
+| 4. A mount that ignores pulses | fails: "does not respond to pulses" |
+| 5. One hour of constant drift, 10 px tolerance, 0.5 px seeing noise | worst 10.4 px RA, 10.9 px Dec; 222 pulses against 180 predicted; no declination reversal |
+| 6. Slewing, parked, not tracking, pier flip (calibration discarded), cannot pulse-guide, alt-azimuth | each stops with its reason and sends nothing |
+| 6. A mount that moves the wrong way; the per-minute cap | "corrections have no effect" after three; "cap" |
+| 6. Lost lock or invalid estimate | no pulse |
+| 7. A flash during a pulse | saved, marked `during_mount_correction=yes`; its clip lists the pulse and the guiding state; a later clip lists none |
+
+Also: the simulation's pulses and backlash; a guide rate too fast for the frame rate is refused. The window test connects the simulated mount, starts a calibration, disconnects, and finds the output folder empty in Preview.
+
+**Through the real threads (done-when 8, by tool).** `SeleneWatchProbe guide-sim OUTPUT 180` runs a Monitoring session on the synthetic source with the simulated mount and the full frame path. It locks on the most lockable 64 × 64 box, calibrates, and guides for 180 s (Debug build):
+- Calibration took 46.5 s. It measured west −3.247, −1.874 px/s against −3.248, −1.875 simulated, and north 1.872, −3.257 against 1.875, −3.248; axes 89.9° apart, 0.998″/px, 0.126 px per frame.
+- The lock held in all 178 one-second samples.
+- From where guiding started, the field stayed within 9.8 px in RA and 2.9 px in Dec (tolerance 14.4 px). Unguided, it would have drifted 18 and 45 px.
+- Each correction was one 1500 ms north pulse about every 22 s. The pulse cap limited each correction to 5.6 px, so the field was held at the edge of the box rather than brought back to centre, as a tolerance box should.
+- `guiding.txt` recorded every calibration and guiding pulse.
+
+**Finding: field motion triggers the detector on the synthetic scene.** In that run the detector fired from 2.7 s after the simulated mount connected, before any pulse, and kept firing. It produced 26 candidates in chained clips, 9 of them correctly marked `during_mount_correction=yes`. The cause is the scene: the new craters have sharp rims on a noise-free render, so the per-pixel noise there is about 1.5 ADU, and 0.27 px/s of drift is many sigma against a 2 s reference. Real frames carry seeing motion and sensor noise in the noise model, but whether steady drift and guide pulses disturb the detector on real data is exactly design point 1 of this feature. It has to be checked on the first guided lunar session, before trusting unattended candidates during guiding. If they do disturb it, the open decision on rate offsets, or registration (Stage 12), is the remedy.
+
+### Part C implementation — 15 November 2026
+
+`AscomMount` (`guiding/ascom_mount.cpp`) uses late-bound COM by ProgID. It reads and writes only the members listed in Part C; DISPIDs are looked up once per member. The driver is created on the guide thread, in the multithreaded apartment. Errors carry the driver's own exception text. A driver that cannot be created gets the 32-bit in-process explanation. Optional members (`SideOfPier`, `AlignmentMode`, guide rates) stay unknown when a driver does not implement them. **Choose…** opens `ASCOM.Utilities.Chooser` on the GUI thread, and the chosen ProgID is remembered. The CMake option `SELENEWATCH_WITH_ASCOM` is on by default for Windows; it needs no SDK and links only `ole32` and `oleaut32`. Without the Platform, the dock offers the simulated mount only. License position: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) (Platform CC BY-SA 3.0; nothing distributed or linked).
+
+Checked by hand with `SeleneWatchProbe ascom ASCOM.OmniSim.Telescope OUTPUT.txt`, from a 64-bit worker thread:
+- Driver created in 335 ms; the first full state read took 34 ms.
+- OmniSim reports German equatorial, pier east, `CanPulseGuide`, guide rates of 0.004178°/s (1× sidereal), and tracking off.
+- `PulseGuide` returned within 12 ms each time (an asynchronous driver), and `IsPulseGuiding` cleared about 390 ms after each 300 ms pulse in all four directions.
+- Safety rule 3 correctly reported "not tracking", so the guider would have refused to pulse.
+
+Still open for Part C, by hand: connecting through the chooser in the window; EQMOD with the observer's mount; and calibrate and guide under the Moon. There, check the readout and `guiding.txt` against what the mount did. With OmniSim and a camera the image does not respond to the mount, so calibration correctly fails with "does not respond".

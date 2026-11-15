@@ -1,33 +1,57 @@
 #pragma once
 
-#include "guiding/lock_tracker.h"
+#include "guiding/guider.h"
 
 #include <QtWidgets/QWidget>
 
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
 
-// Shows the feature lock: its state, the drift estimate, the latest match,
-// and why a lock was refused or lost. It holds no lock state; the window
-// passes each status the guider publishes and forwards the two requests.
+// The Guiding dock: the feature lock, the mount, the calibration, and
+// guiding. It holds no guiding state; the window passes each status the
+// guider publishes and forwards the requests. The only values it keeps are
+// the observer's choices: the mount kind and the tolerance.
 class GuidingPanel final : public QWidget
 {
     Q_OBJECT
 public:
     // The side of the box locked around a selected pixel, in frame pixels.
     static constexpr int kDefaultLockSide = 64;
+    enum class MountKind { Simulated, Ascom };
 
     explicit GuidingPanel(QWidget* parent = nullptr);
-    void setStatus(const LockStatus& status);
+    void setStatus(const GuiderStatus& status);
     // Lock at selection needs a running stream and a selected pixel.
     void setAvailable(bool running, bool pixelSelected);
     void setLogFailed(bool failed);
+    void setAscomAvailable(bool available);
+    void setAscomDriver(const QString& progId);
+    // The frame's shorter side, to show the tolerance in pixels.
+    void setFrameShortSide(int pixels);
+
+    [[nodiscard]] MountKind mountKind() const;
+    void setMountKind(MountKind kind);
+    // The tolerance as a percentage of the frame's shorter side.
+    [[nodiscard]] double tolerancePercent() const;
+    void setTolerancePercent(double percent);
 
 signals:
     void lockAtSelectionRequested();
     void unlockRequested();
+    void chooseDriverRequested();
+    void connectRequested();
+    void disconnectRequested();
+    void calibrateRequested();
+    void guidingRequested(bool on);
+    void toleranceChanged();
+    void mountKindChanged();
 
 private:
+    void updateTolerance();
+    void updateMountControls();
+
     QLabel* state_;
     QLabel* drift_;
     QLabel* match_;
@@ -36,5 +60,27 @@ private:
     QLabel* logProblem_;
     QPushButton* lockButton_;
     QPushButton* unlockButton_;
+
+    QComboBox* mountKind_;
+    QPushButton* chooseButton_;
+    QLabel* driver_;
+    QPushButton* connectButton_;
+    QPushButton* disconnectButton_;
+    QLabel* mountState_;
+
+    QPushButton* calibrateButton_;
+    QLabel* calibration_;
+    QDoubleSpinBox* tolerance_;
+    QLabel* toleranceReadout_;
+    QPushButton* guideButton_;
+    QLabel* guiding_;
+    QLabel* guideMessage_;
+
     bool locked_{false};
+    bool connected_{false};
+    bool ascomAvailable_{false};
+    GuideMode mode_{GuideMode::Idle};
+    bool calibrated_{false};
+    int frameShortSide_{0};
+    std::optional<double> arcsecPerPixel_;
 };

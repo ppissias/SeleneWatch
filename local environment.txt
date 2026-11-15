@@ -100,6 +100,11 @@ Mount (ASCOM)
     ASCOM.DeviceHub.Telescope, ASCOM.JustAHub.Telescope, ASCOM.JustAHub64.Telescope,
     and simulators: ASCOM.OmniSim.Telescope, ASCOM.Simulator.Telescope, EQMOD_SIM.Telescope, ScopeSim.Telescope
   A 64-bit program can use all of them through COM. OmniSim is the first test target for Feature-8 part C.
+  Checked 2026-11-15 with the adapter (SELENEWATCH_WITH_ASCOM, on by default; no SDK needed):
+    .\out\build\debug\SeleneWatchProbe.exe ascom ASCOM.OmniSim.Telescope <new output file>
+  OmniSim starts with tracking off; turn it on in OmniSim's page before trying the guider against it.
+  The full loop without hardware (synthetic source + simulated mount, real threads, a few minutes):
+    .\out\build\debug\SeleneWatchProbe.exe guide-sim <new output directory> [seconds]
 
 Source Control
   Git initialized on branch 'main'.

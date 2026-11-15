@@ -31,6 +31,7 @@ add_library(selenewatch_core STATIC
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
+    guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -61,6 +62,18 @@ if(SELENEWATCH_ZWO_SDK_DIR)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SELENEWATCH_ZWO_SDK_DIR}/license.txt" "${CMAKE_CURRENT_BINARY_DIR}/licenses/ZWO-ASI-SDK.txt"
         VERBATIM)
     add_dependencies(selenewatch_core selenewatch_zwo_runtime)
+endif()
+
+# The ASCOM mount adapter uses late-bound COM against the installed ASCOM
+# Platform, so it needs no SDK at build time. Without the Platform the
+# application offers the simulated mount only.
+option(SELENEWATCH_WITH_ASCOM "Build the ASCOM telescope adapter (Windows)" ${WIN32})
+if(SELENEWATCH_WITH_ASCOM)
+    if(NOT WIN32)
+        message(FATAL_ERROR "The ASCOM adapter requires Windows")
+    endif()
+    target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_WITH_ASCOM=1)
+    target_link_libraries(selenewatch_core PRIVATE ole32 oleaut32)
 endif()
 
 # Build against the QHY declarations. The adapter discovers the user's DLL at runtime.
@@ -154,6 +167,7 @@ add_executable(SeleneWatchGuidingTests tests/guiding_tests.cpp)
 target_link_libraries(SeleneWatchGuidingTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchGuidingTests)
 add_test(NAME guiding COMMAND SeleneWatchGuidingTests -o -,tap)
+set_tests_properties(guiding PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(SeleneWatchQhyTests tests/qhy_tests.cpp)
 target_link_libraries(SeleneWatchQhyTests PRIVATE selenewatch_core Qt6::Test)
@@ -162,7 +176,7 @@ add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
-    tools/lock_probe.cpp)
+    tools/lock_probe.cpp tools/guide_probe.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 

@@ -1,18 +1,24 @@
+#include "guiding/calibrator.h"
 #include "guiding/feature_lock.h"
+#include "guiding/guide_controller.h"
 #include "guiding/guider.h"
 #include "guiding/lock_tracker.h"
+#include "guiding/simulated_mount.h"
 #include "recording/event_writer.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QGuiApplication>
 #include <QtTest/QTest>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <vector>
 
 namespace {
@@ -382,23 +388,23 @@ private slots:
         uint64_t index = 0;
         auto offer = [&](const FramePtr& frame, bool recording) {
             guider.offer(frame, recording);
-            return QTest::qWaitFor([&] { return guider.status().frameIndex == frame->frameIndex; }, 5000);
+            return QTest::qWaitFor([&] { return guider.status().lock.frameIndex == frame->frameIndex; }, 5000);
         };
         // Nothing is wanted yet, so the frame is not kept.
         guider.offer(canvas.frame(0, 0, 0.0, ++index), true);
         QTest::qWait(50);
-        QCOMPARE(guider.status().state, LockState::Off);
+        QCOMPARE(guider.status().lock.state, LockState::Off);
 
         guider.requestLock({100, 70, 24, 24});
         QVERIFY(offer(canvas.frame(0, 0, 0.2, ++index), false));
-        QCOMPARE(guider.status().state, LockState::Locked);
+        QCOMPARE(guider.status().lock.state, LockState::Locked);
         // Preview: measured, not written.
         QVERIFY(offer(canvas.frame(2, -1, 0.4, ++index), false));
         for (int step = 3; step <= 10; ++step) QVERIFY(offer(canvas.frame(2, -1, step * 0.2, ++index), true));
-        QVERIFY(guider.status().estimateValid);
+        QVERIFY(guider.status().lock.estimateValid);
         QVERIFY(notified.load() > 0);
         guider.requestUnlock();
-        QVERIFY(QTest::qWaitFor([&] { return guider.status().state == LockState::Off; }, 5000));
+        QVERIFY(QTest::qWaitFor([&] { return guider.status().lock.state == LockState::Off; }, 5000));
 
         guider.shutdown();
         writer.shutdown();
@@ -418,7 +424,389 @@ private slots:
         QCOMPARE(text.count("guide_offset"), 2);
         QCOMPARE(writer.usage().guidingWriteFailures, uint64_t{0});
     }
+
+    // Part B: the simulation itself.
+    void simulatedPointingFollowsPulsesAndBacklash()
+    {
+        using namespace std::chrono_literals;
+        auto now = SimulatedPointing::Clock::time_point{} + 1h;
+        SimulatedPointing::Settings settings;
+        settings.driftRa = 0;
+        settings.driftDec = 0;
+        settings.decBacklash = 5;
+        settings.cameraAngleDegrees = 30;
+        auto pointing = std::make_shared<SimulatedPointing>(settings, now);
+        SimulatedMount mount(pointing, [&] { return now; });
+        // Inactive until the mount connects: no pulse moves it, no offset.
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error, mount.pulseGuide(GuideDirection::West, 100));
+        mount.connect();
+        mount.pulseGuide(GuideDirection::West, 1000);
+        QVERIFY(mount.state().pulseGuiding);
+        now += 1500ms;
+        QVERIFY(!mount.state().pulseGuiding);
+        const auto rate = pointing->imageRate(GuideDirection::West);
+        const auto moved = pointing->imageOffset(now);
+        QVERIFY(std::abs(moved.x - rate.x * 1000) < 1e-9 && std::abs(moved.y - rate.y * 1000) < 1e-9);
+        QVERIFY(std::abs(std::hypot(rate.x, rate.y) * 1000 - 3.75) < 1e-9);
+        // The first north pulse takes up 5 arcseconds of slack: 1.33 s at 3.75"/s.
+        mount.pulseGuide(GuideDirection::North, 2000);
+        now += 2000ms;
+        QVERIFY(std::abs(pointing->skyOffset(now).y + (7.5 - 5.0)) < 1e-9);
+        mount.pulseGuide(GuideDirection::North, 1000); // same direction: no slack
+        now += 1000ms;
+        QVERIFY(std::abs(pointing->skyOffset(now).y + (11.25 - 5.0)) < 1e-9);
+        mount.disconnect();
+        const auto frozen = pointing->imageOffset(now);
+        now += 10s;
+        QCOMPARE(pointing->imageOffset(now).x, frozen.x);
+    }
+
+    // Done-when 4: calibration against the simulated mount with a 30 degree
+    // camera angle and a mirror flip measures the simulation's vectors.
+    void calibrationMeasuresTheSimulation_data()
+    {
+        QTest::addColumn<bool>("mirrored");
+        QTest::addColumn<double>("backlash");
+        QTest::newRow("30 degrees") << false << 0.0;
+        QTest::newRow("30 degrees, mirrored, 20 arcsec backlash") << true << 20.0;
+    }
+
+    void calibrationMeasuresTheSimulation()
+    {
+        QFETCH(bool, mirrored);
+        QFETCH(double, backlash);
+        SimulatedPointing::Settings settings;
+        settings.mirrored = mirrored;
+        settings.decBacklash = backlash;
+        Loop loop(settings);
+        Calibrator calibrator;
+        while (!calibrator.finished() && loop.elapsed() < 600) loop.step(calibrator.step(loop.observe()));
+        QVERIFY2(calibrator.finished() && !calibrator.failed(), calibrator.failure().c_str());
+        const GuideCalibration& result = *calibrator.result();
+        const auto west = loop.pointing->imageRate(GuideDirection::West);
+        const auto north = loop.pointing->imageRate(GuideDirection::North);
+        const double speed = std::hypot(west.x, west.y);
+        QVERIFY2(std::hypot(result.west.x - west.x, result.west.y - west.y) < 0.05 * speed,
+            qPrintable(QString("west %1,%2 expected %3,%4").arg(result.west.x * 1000).arg(result.west.y * 1000).arg(west.x * 1000).arg(west.y * 1000)));
+        QVERIFY2(std::hypot(result.north.x - north.x, result.north.y - north.y) < 0.05 * speed,
+            qPrintable(QString("north %1,%2 expected %3,%4").arg(result.north.x * 1000).arg(result.north.y * 1000).arg(north.x * 1000).arg(north.y * 1000)));
+        QVERIFY(std::abs(result.axisAngleDegrees - 90) < 5);
+        QVERIFY(result.arcsecPerPixel && std::abs(*result.arcsecPerPixel - 1.0) < 0.05);
+        QCOMPARE(result.pierSide, PierSide::West);
+        if (backlash > 0) QVERIFY(result.backlashMs >= 5000); // 20" at 3.75"/s
+        qInfo("west %.3f,%.3f north %.3f,%.3f px/s, drift %.3f,%.3f px/s, backlash %d ms, %.0f s",
+            result.west.x * 1000, result.west.y * 1000, result.north.x * 1000, result.north.y * 1000,
+            result.drift.x, result.drift.y, result.backlashMs, loop.elapsed());
+    }
+
+    void calibrationFailsWhenTheMountIgnoresPulses()
+    {
+        SimulatedPointing::Settings settings;
+        settings.ignorePulses = true;
+        Loop loop(settings);
+        Calibrator calibrator;
+        while (!calibrator.finished() && loop.elapsed() < 600) loop.step(calibrator.step(loop.observe()));
+        QVERIFY(calibrator.failed());
+        QVERIFY2(calibrator.failure().find("does not respond") != std::string::npos, calibrator.failure().c_str());
+        QVERIFY(!calibrator.result());
+    }
+
+    // Done-when 5: an hour of constant drift stays in the box, with about the
+    // predicted number of pulses and no declination reversal.
+    void guidingHoldsTheFieldForAnHour()
+    {
+        Loop loop({});
+        GuideController::Settings settings;
+        settings.tolerancePixels = 10;
+        GuideController controller(loop.trueCalibration(), settings);
+        QVERIFY2(GuideController::refusal(loop.trueCalibration(), settings, loop.observe()).empty(),
+            GuideController::refusal(loop.trueCalibration(), settings, loop.observe()).c_str());
+        double worstRa = 0, worstDec = 0;
+        int north = 0, south = 0, east = 0, west = 0;
+        while (loop.elapsed() < 3600)
+        {
+            const GuideDecision decision = controller.step(loop.observe());
+            if (decision.pulse)
+            {
+                switch (decision.pulse->direction)
+                {
+                case GuideDirection::North: ++north; break;
+                case GuideDirection::South: ++south; break;
+                case GuideDirection::East: ++east; break;
+                case GuideDirection::West: ++west; break;
+                }
+            }
+            loop.step(decision);
+            QVERIFY2(!controller.stopped(), controller.stopReason().c_str());
+            const auto sky = loop.pointing->skyOffset(loop.now);
+            worstRa = std::max(worstRa, std::abs(sky.x));
+            worstDec = std::max(worstDec, std::abs(sky.y));
+        }
+        // Each correction removes kGain of an error just past the tolerance.
+        const auto s = loop.pointing->settings();
+        const double predicted = 3600 * (std::abs(s.driftRa) + std::abs(s.driftDec)) / s.arcsecPerPixel / (settings.gain * settings.tolerancePixels);
+        const int pulses = north + south + east + west;
+        qInfo("%d pulses (%d N, %d S, %d E, %d W), predicted %.0f; worst RA %.1f px, Dec %.1f px; %d reversals withheld",
+            pulses, north, south, east, west, predicted, worstRa, worstDec, controller.declinationReversalsWithheld());
+        QVERIFY(worstRa <= 1.3 * settings.tolerancePixels && worstDec <= 1.3 * settings.tolerancePixels);
+        QVERIFY(pulses > 0.6 * predicted && pulses < 1.4 * predicted);
+        QVERIFY(north == 0 || south == 0); // declination never reversed
+    }
+
+    // Done-when 6: each safety rule stops guiding or withholds pulses.
+    void safetyRulesStopOrWithholdPulses_data()
+    {
+        QTest::addColumn<int>("rule");
+        QTest::addColumn<QString>("reason");
+        QTest::newRow("slewing") << 0 << "slewing";
+        QTest::newRow("parked") << 1 << "parked";
+        QTest::newRow("not tracking") << 2 << "not tracking";
+        QTest::newRow("pier flip") << 3 << "side of pier";
+        QTest::newRow("cannot pulse-guide") << 4 << "cannot pulse-guide";
+        QTest::newRow("alt-azimuth") << 5 << "alt-azimuth";
+    }
+
+    void safetyRulesStopOrWithholdPulses()
+    {
+        QFETCH(int, rule);
+        QFETCH(QString, reason);
+        Loop loop({});
+        GuideController controller(loop.trueCalibration(), {});
+        // Let the drift carry the field out of the box, with the mount nominal.
+        while (loop.elapsed() < 20) loop.step({});
+        SimulatedMount::Condition& condition = loop.mount.condition;
+        switch (rule)
+        {
+        case 0: condition.slewing = true; break;
+        case 1: condition.parked = true; break;
+        case 2: condition.tracking = false; break;
+        case 3: condition.pierSide = PierSide::East; break;
+        case 4: condition.canPulseGuide = false; break;
+        case 5: condition.altAzimuth = true; break;
+        }
+        GuideObservation o = loop.observe();
+        o.estimateDx = 50; // far outside the tolerance
+        const GuideDecision decision = controller.step(o);
+        QVERIFY(!decision.pulse);
+        QVERIFY(controller.stopped());
+        QVERIFY2(QString::fromStdString(controller.stopReason()).contains(reason), controller.stopReason().c_str());
+        QCOMPARE(controller.calibrationInvalid(), rule == 3);
+        QVERIFY(GuideController::refusal(loop.trueCalibration(), {}, loop.observe()).size() > 0);
+    }
+
+    void noPulseOnALostLockOrInvalidEstimate()
+    {
+        Loop loop({});
+        GuideController controller(loop.trueCalibration(), {});
+        GuideObservation o = loop.observe();
+        o.estimateDx = 50;
+        o.locked = false;
+        QVERIFY(!controller.step(o).pulse);
+        o.locked = true;
+        o.estimateValid = false;
+        QVERIFY(!controller.step(o).pulse);
+        QVERIFY(!controller.stopped());
+        o.estimateValid = true;
+        QVERIFY(controller.step(o).pulse);
+    }
+
+    void mountThatMovesTheWrongWayStopsGuiding()
+    {
+        SimulatedPointing::Settings settings;
+        settings.driftDec = 0;
+        settings.driftRa = 0.5;
+        Loop loop(settings);
+        GuideCalibration wrong = loop.trueCalibration();
+        wrong.west = wrong.west * -1.0; // as if RA were reversed after calibrating
+        GuideController controller(wrong, {});
+        while (!controller.stopped() && loop.elapsed() < 600) loop.step(controller.step(loop.observe()));
+        QVERIFY(controller.stopped());
+        QVERIFY2(controller.stopReason().find("no effect") != std::string::npos, controller.stopReason().c_str());
+        QCOMPARE(controller.corrections(), GuideController::Settings{}.maxFruitlessCorrections);
+    }
+
+    void pulseTimeCapStopsGuiding()
+    {
+        SimulatedPointing::Settings settings;
+        settings.driftRa = 2;
+        Loop loop(settings);
+        GuideController::Settings guide;
+        guide.maxPulseMsPerMinute = 1000;
+        GuideController controller(loop.trueCalibration(), guide);
+        while (!controller.stopped() && loop.elapsed() < 120) loop.step(controller.step(loop.observe()));
+        QVERIFY(controller.stopped());
+        QVERIFY2(controller.stopReason().find("cap") != std::string::npos, controller.stopReason().c_str());
+    }
+
+    void guidingRefusesAGuideRateTooFastForTheDetector()
+    {
+        Loop loop({});
+        GuideObservation o = loop.observe();
+        o.frameInterval = 0.5; // 3.75 px/s at 2 fps is 1.9 px per frame
+        const std::string refusal = GuideController::refusal(loop.trueCalibration(), {}, o);
+        QVERIFY2(refusal.find("lower guide rate") != std::string::npos, refusal.c_str());
+    }
+
+    // Done-when 7: a flash during a pulse is saved, marked, and the clip lists the pulse.
+    void candidateDuringAPulseIsMarked()
+    {
+        QTemporaryDir directory;
+        QObject context;
+        std::vector<ClipWriteResult> results;
+        {
+            EventWriter writer(&context, directory.path(), size_t{64} << 20, [&](const ClipWriteResult& r) { results.push_back(r); });
+            const auto start = at(100);
+            GuidePulseRecord pulse;
+            pulse.start = start;
+            pulse.milliseconds = 400;
+            pulse.settleSeconds = 1.0;
+            pulse.direction = "north";
+            writer.logGuiding("pulse line\n", pulse, GuideStateRecord{start, "locked, guiding", 3.5, -12.0});
+            writer.submit(clipAt(start + std::chrono::milliseconds{300}, 1));
+            // Two seconds after the pulse ended and settled: not marked.
+            writer.submit(clipAt(start + std::chrono::seconds{4}, 50));
+            writer.shutdown();
+        }
+        QCoreApplication::processEvents();
+        QCOMPARE(static_cast<int>(results.size()), 2);
+        QFile log(QDir(directory.path()).filePath("candidates.txt"));
+        QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QStringList lines = QString::fromUtf8(log.readAll()).split('\n', Qt::SkipEmptyParts);
+        QStringList outcomes;
+        for (const QString& line : lines)
+            if (!line.contains("_pending")) outcomes << line;
+        QCOMPARE(outcomes.size(), 2);
+        QVERIFY2(outcomes[0].contains("during_mount_correction=yes") && outcomes[0].contains("clip="), qPrintable(outcomes[0]));
+        QVERIFY2(!outcomes[1].contains("during_mount_correction"), qPrintable(outcomes[1]));
+        QFile event(QDir(results[0].folder).filePath("event.txt"));
+        QVERIFY(event.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString text = QString::fromUtf8(event.readAll());
+        QVERIFY2(text.contains("mount_pulses_in_clip: 1"), qPrintable(text));
+        QVERIFY2(text.contains("mount_pulse: start=") && text.contains("direction=north ms=400"), qPrintable(text));
+        QVERIFY2(text.contains("guiding_at_first_trigger: state=\"locked, guiding\" offset_dx=3.50"), qPrintable(text));
+        QFile second(QDir(results[1].folder).filePath("event.txt"));
+        QVERIFY(second.open(QIODevice::ReadOnly | QIODevice::Text));
+        QVERIFY(QString::fromUtf8(second.readAll()).contains("mount_pulses_in_clip: 0"));
+    }
+
+private:
+    // A stepped simulation: the simulated mount and pointing, and an
+    // estimate built the way the tracker builds it (median of the matches
+    // since the last restart, over its window), from the true image offset
+    // plus seeing noise. One step is one measurement, 0.2 s.
+    struct Loop
+    {
+        explicit Loop(SimulatedPointing::Settings settings)
+            : now(SimulatedPointing::Clock::time_point{} + std::chrono::hours{1})
+            , pointing(std::make_shared<SimulatedPointing>(settings, now))
+            , mount(pointing, [this] { return now; })
+            , start(now)
+        {
+            mount.connect();
+        }
+
+        GuideObservation observe()
+        {
+            const auto offset = pointing->imageOffset(now);
+            const double nx = offset.x + 0.5 * noise(static_cast<int>(count), 1, 5);
+            const double ny = offset.y + 0.5 * noise(static_cast<int>(count), 2, 5);
+            if (count != lastSampled)
+            {
+                samples.push_back({now, nx, ny});
+                lastSampled = count;
+            }
+            while (!samples.empty() && std::chrono::duration<double>(now - samples.front().time).count() > LockTracker::kEstimateSeconds)
+                samples.pop_front();
+            GuideObservation o;
+            o.now = now;
+            o.locked = true;
+            o.foundDx = nx;
+            o.foundDy = ny;
+            o.estimateSamples = static_cast<int>(samples.size());
+            o.estimateValid = samples.size() >= LockTracker::kMinEstimateSamples;
+            if (o.estimateValid)
+            {
+                std::vector<double> xs, ys;
+                for (const Sample& sample : samples)
+                {
+                    xs.push_back(sample.x);
+                    ys.push_back(sample.y);
+                }
+                std::sort(xs.begin(), xs.end());
+                std::sort(ys.begin(), ys.end());
+                o.estimateDx = xs[xs.size() / 2];
+                o.estimateDy = ys[ys.size() / 2];
+            }
+            o.mount = mount.state();
+            o.frameInterval = 1.0 / 30.0;
+            return o;
+        }
+
+        void step(const GuideDecision& decision)
+        {
+            if (decision.restartEstimate) samples.clear();
+            if (decision.pulse) mount.pulseGuide(decision.pulse->direction, decision.pulse->milliseconds);
+            now += std::chrono::milliseconds{200};
+            ++count;
+        }
+
+        [[nodiscard]] double elapsed() const { return std::chrono::duration<double>(now - start).count(); }
+
+        [[nodiscard]] GuideCalibration trueCalibration() const
+        {
+            const auto west = pointing->imageRate(GuideDirection::West);
+            const auto north = pointing->imageRate(GuideDirection::North);
+            GuideCalibration calibration;
+            calibration.west = {west.x, west.y};
+            calibration.north = {north.x, north.y};
+            calibration.pierSide = PierSide::West;
+            return calibration;
+        }
+
+        struct Sample
+        {
+            SimulatedPointing::Clock::time_point time;
+            double x, y;
+        };
+
+        SimulatedPointing::Clock::time_point now;
+        std::shared_ptr<SimulatedPointing> pointing;
+        SimulatedMount mount;
+        SimulatedPointing::Clock::time_point start;
+        std::deque<Sample> samples;
+        uint64_t count{0};
+        uint64_t lastSampled{~uint64_t{0}};
+    };
+
+    static EventClip clipAt(std::chrono::system_clock::time_point trigger, uint64_t index)
+    {
+        EventClip clip;
+        ClipTrigger first;
+        first.onsetFrameIndex = index;
+        first.triggerFrameIndex = index;
+        first.triggerTime = trigger;
+        first.brightPixelCount = 9;
+        clip.triggers.push_back(first);
+        clip.framesBefore = 1;
+        for (int i = 0; i < 2; ++i)
+        {
+            auto frame = std::make_shared<Frame>();
+            frame->width = 2;
+            frame->height = 2;
+            frame->frameIndex = index - 1 + static_cast<uint64_t>(i);
+            frame->timestamp = trigger - std::chrono::milliseconds{33} * (1 - i);
+            frame->data.assign(4, static_cast<uint8_t>(i ? 200 : 10));
+            clip.frames.push_back(frame);
+        }
+        return clip;
+    }
 };
 
-QTEST_GUILESS_MAIN(GuidingTest)
+// The clip writer draws its preview images with fonts, which need a GUI application.
+int main(int argc, char* argv[])
+{
+    QGuiApplication app(argc, argv);
+    GuidingTest tests;
+    return QTest::qExec(&tests, argc, argv);
+}
 #include "guiding_tests.moc"

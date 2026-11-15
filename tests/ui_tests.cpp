@@ -148,10 +148,30 @@ void UiTest::dragLocksOnAFeatureAndClickStillSelects()
         QVERIFY(lockAtSelection->isEnabled());
         lockAtSelection->click();
         QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
+
+        // Part B controls: the simulated mount connects, calibration starts, and a disconnect ends it.
+        auto* mountState = window.findChild<QLabel*>("mountStateLabel");
+        auto* calibrate = window.findChild<QPushButton*>("calibrateButton");
+        auto* guide = window.findChild<QPushButton*>("guideButton");
+        QVERIFY(!calibrate->isEnabled());
+        QVERIFY(!guide->isEnabled());
+        window.findChild<QPushButton*>("connectMountButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(mountState->text().contains("Simulated mount"), 3000);
+        QVERIFY(mountState->text().contains("not slewing"));
+        QTRY_VERIFY_WITH_TIMEOUT(calibrate->isEnabled(), 3000);
+        QVERIFY(!guide->isEnabled()); // not calibrated yet
+        calibrate->click();
+        auto* calibration = window.findChild<QLabel*>("calibrationLabel");
+        QTRY_VERIFY_WITH_TIMEOUT(calibration->text().contains("Calibrating"), 3000);
         QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
         QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR) + "/preview-feature-lock.png"));
+        window.findChild<QPushButton*>("disconnectMountButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(mountState->text().contains("Not connected"), 3000);
+        QVERIFY(calibration->text().contains("Not calibrated"));
+        QVERIFY(window.findChild<QLabel*>("guideMessageLabel")->text().contains("disconnected"));
         window.findChild<QPushButton*>("stopButton")->click();
     }
+    // Preview writes nothing, guiding included.
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 }
 

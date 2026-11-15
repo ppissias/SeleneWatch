@@ -21,6 +21,7 @@ class DetectionPanel;
 class DisplayPanel;
 class HistogramPanel;
 class GuidingPanel;
+class SimulatedPointing;
 class CameraPanel;
 class ZwoApi;
 class ZwoSource;
@@ -74,6 +75,10 @@ private:
     void setupGuidingPanel();
     void onLockChanged();
     void onLockAtSelection();
+    void onConnectMount();
+    void onChooseMountDriver();
+    void sendTolerance();
+    void saveGuidingSettings();
     void saveDisplaySettings();
     void renderPreview();
     void updateHistogram(bool force = false);
@@ -117,6 +122,12 @@ private:
     GuidingPanel* guidingPanel_{nullptr};
     QDockWidget* guidingDock_{nullptr};
     QLabel* lockLabel_{nullptr};
+    QTimer* guidingTimer_{nullptr};
+    // Moves the synthetic Moon for the simulated mount. Shared with the
+    // synthetic source and the simulated mount on the guide thread.
+    std::shared_ptr<SimulatedPointing> simulatedPointing_;
+    QString ascomDriver_;
+    int frameShortSide_{0};
     FramePtr latestFrame_;
     std::chrono::steady_clock::time_point lastHistogramTime_{};
     std::shared_ptr<ZwoApi> cameraApi_;

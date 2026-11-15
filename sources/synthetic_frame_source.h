@@ -5,8 +5,10 @@
 #include "sources/frame_source.h"
 
 #include <atomic>
+#include <functional>
 #include <stop_token>
 #include <thread>
+#include <utility>
 
 // Generates a painted lunar disk at a configurable rate, with a moving
 // marker and, on request, a fixed flash. It is the check that the whole
@@ -32,6 +34,11 @@ public:
     void setPixelLayout(PixelFormat format, int bits, BitAlignment alignment = BitAlignment::Low,
         BayerPattern bayer = BayerPattern::None);
 
+    // Where the Moon sits in the field, in frame pixels, asked once per
+    // frame on the source thread. A simulated mount supplies it. While stopped.
+    using SceneOffset = std::function<std::pair<double, double>()>;
+    void setSceneOffset(SceneOffset offset);
+
     bool open(std::string& error) override;
     [[nodiscard]] StreamInfo streamInfo() const override;
     void start(FrameSourceListener& listener) override;
@@ -47,6 +54,7 @@ private:
     int bits_{8};
     BitAlignment alignment_{BitAlignment::Low};
     BayerPattern bayer_{BayerPattern::None};
+    SceneOffset sceneOffset_;
     std::atomic<double> targetFps_;
     std::atomic<int> flashFramesRemaining_{0};
     std::jthread workerThread_;

@@ -91,7 +91,9 @@ bool Session::start(QString& error, Mode mode)
 
     if (mode == Mode::Monitoring) writer_.logSessionStart(streamInfo_);
     // A held lock carries over; its estimate starts again with this run.
+    // Guiding is off at every start (safety rule 1).
     guider_.discontinuity();
+    guider_.endGuiding("The stream started. Guiding is off at every start; turn it on again.");
     source_->start(*this);
     running_ = true;
     return true;
@@ -104,6 +106,8 @@ void Session::stop(std::string reason)
         return;
     }
     source_->stop();
+    // Safety rule 8: no guiding without frames. Only pulses were sent, so nothing is undone.
+    guider_.endGuiding("The stream stopped (" + reason + ").");
     applyManualSave();
     capture_.finishPartial(std::move(reason));
     blip_.reset();
@@ -242,10 +246,6 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
     displayRequest_.probeX = probeX;
     displayRequest_.probeY = probeY;
 }
-
-void Session::requestLock(LockRegion region) { guider_.requestLock(region); }
-void Session::requestUnlock() { guider_.requestUnlock(); }
-LockStatus Session::lockStatus() const { return guider_.status(); }
 
 // From the moment the frame is held as a FramePtr it is published: nobody
 // writes it again. Test injection is the last write before publication.

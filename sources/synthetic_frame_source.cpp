@@ -47,6 +47,12 @@ void SyntheticFrameSource::setPixelLayout(PixelFormat format, int bits, BitAlign
     format_ = format; bits_ = bits; alignment_ = alignment; bayer_ = bayer;
 }
 
+void SyntheticFrameSource::setSceneOffset(SceneOffset offset)
+{
+    if (workerThread_.joinable()) throw std::logic_error("set the scene offset while the source is stopped");
+    sceneOffset_ = std::move(offset);
+}
+
 bool SyntheticFrameSource::open(std::string& error)
 {
     if (width_ <= 0 || height_ <= 0) { error = "synthetic dimensions must be positive"; return false; }
@@ -147,7 +153,8 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
     {
     }
 
-    paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0);
+    const auto [offsetX, offsetY] = sceneOffset_ ? sceneOffset_() : std::pair{0.0, 0.0};
+    paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0, offsetX, offsetY);
     frame.testSource = true;
     frame.sourceDroppedFrames.reset();
     if (format_ == PixelFormat::Mono16)
@@ -156,7 +163,9 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
         frame.data.resize(2 * pixels);
         const int shift = alignment_ == BitAlignment::High ? 16 - bits_ : 0;
         const int maximum = (1 << bits_) - 1;
-        const LunarDisk disk = LunarDisk::centered(width_, height_);
+        LunarDisk disk = LunarDisk::centered(width_, height_);
+        disk.centerX += static_cast<float>(offsetX);
+        disk.centerY += static_cast<float>(offsetY);
         for (size_t i = pixels; i-- > 0;)
         {
             const int x = static_cast<int>(i % width_), y = static_cast<int>(i / width_);

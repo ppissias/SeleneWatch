@@ -25,7 +25,15 @@ void read(RecordingReader& reader, int index, Frame& frame)
     frame.timestamp = reader.frameTime(index);
 }
 
-// The 64 x 64 box of a 32-pixel grid with the most two-dimensional detail.
+double median(std::vector<double> values)
+{
+    if (values.empty()) return 0;
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
+
+} // namespace
+
 LockRegion mostLockable(const Frame& frame)
 {
     LockRegion best{};
@@ -48,15 +56,6 @@ LockRegion mostLockable(const Frame& frame)
     if (bestScore < 0) throw std::runtime_error("no lockable 64 x 64 region in the first frame");
     return best;
 }
-
-double median(std::vector<double> values)
-{
-    if (values.empty()) return 0;
-    std::sort(values.begin(), values.end());
-    return values[values.size() / 2];
-}
-
-} // namespace
 
 int runLockProbe(const QStringList& args)
 {

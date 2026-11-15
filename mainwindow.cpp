@@ -7,6 +7,8 @@
 #include "camera_panel.h"
 #include "qhy_camera_panel.h"
 
+#include "guiding/ascom_mount.h"
+#include "guiding/simulated_mount.h"
 #include "preview_image.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
@@ -113,7 +115,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
         if (!session_->isRunning()) return;
-        session_->requestLock({region.x(), region.y(), region.width(), region.height()});
+        session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
         statusBar()->showMessage("Locking on the selected region…", 3000);
     });
     connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
@@ -143,6 +145,8 @@ MainWindow::~MainWindow()
     if (histogramPanel_) disconnect(histogramPanel_, nullptr, this, nullptr);
     if (guidingDock_) disconnect(guidingDock_, nullptr, this, nullptr);
     if (guidingPanel_) disconnect(guidingPanel_, nullptr, this, nullptr);
+    if (guidingTimer_) guidingTimer_->stop();
+    saveGuidingSettings();
     saveDetectionSettings();
     saveDisplaySettings();
     if (bufferReadoutTimer_)
@@ -281,8 +285,81 @@ void MainWindow::setupGuidingPanel()
     tabifyDockWidget(displayDock_, guidingDock_);
     displayDock_->raise();
     menuBar()->actions().front()->menu()->addAction(guidingDock_->toggleViewAction());
+
+    simulatedPointing_ = std::make_shared<SimulatedPointing>(SimulatedPointing::Settings{});
+    const QSettings saved;
+    ascomDriver_ = saved.value("guiding/ascomDriver").toString();
+    guidingPanel_->setAscomAvailable(ascomAvailable());
+    guidingPanel_->setAscomDriver(ascomDriver_);
+    guidingPanel_->setMountKind(saved.value("guiding/mountKind", 0).toInt() == 1 && ascomAvailable()
+            ? GuidingPanel::MountKind::Ascom : GuidingPanel::MountKind::Simulated);
+    guidingPanel_->setTolerancePercent(std::clamp(saved.value("guiding/tolerancePercent", 3.0).toDouble(), 0.5, 20.0));
+
+    Guider& guider = session_->guider();
     connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
-    connect(guidingPanel_, &GuidingPanel::unlockRequested, this, [this] { session_->requestUnlock(); });
+    connect(guidingPanel_, &GuidingPanel::unlockRequested, this, [&guider] { guider.requestUnlock(); });
+    connect(guidingPanel_, &GuidingPanel::chooseDriverRequested, this, &MainWindow::onChooseMountDriver);
+    connect(guidingPanel_, &GuidingPanel::connectRequested, this, &MainWindow::onConnectMount);
+    connect(guidingPanel_, &GuidingPanel::disconnectRequested, this, [&guider] { guider.requestDisconnect(); });
+    connect(guidingPanel_, &GuidingPanel::calibrateRequested, this, [&guider] { guider.requestCalibration(); });
+    connect(guidingPanel_, &GuidingPanel::guidingRequested, this, [&guider](bool on) { guider.requestGuiding(on); });
+    connect(guidingPanel_, &GuidingPanel::toleranceChanged, this, [this] { sendTolerance(); saveGuidingSettings(); });
+    connect(guidingPanel_, &GuidingPanel::mountKindChanged, this, &MainWindow::saveGuidingSettings);
+
+    // A hung driver call publishes nothing, so the panel also asks once a second.
+    guidingTimer_ = new QTimer(this);
+    guidingTimer_->setInterval(1000);
+    connect(guidingTimer_, &QTimer::timeout, this, &MainWindow::onLockChanged);
+    guidingTimer_->start();
+}
+
+void MainWindow::saveGuidingSettings()
+{
+    if (!guidingPanel_) return;
+    QSettings saved;
+    saved.setValue("guiding/ascomDriver", ascomDriver_);
+    saved.setValue("guiding/mountKind", guidingPanel_->mountKind() == GuidingPanel::MountKind::Ascom ? 1 : 0);
+    saved.setValue("guiding/tolerancePercent", guidingPanel_->tolerancePercent());
+}
+
+// The tolerance is chosen as a share of the field and sent in frame pixels.
+void MainWindow::sendTolerance()
+{
+    if (frameShortSide_ <= 0) return;
+    session_->guider().setTolerance(guidingPanel_->tolerancePercent() / 100.0 * frameShortSide_);
+}
+
+void MainWindow::onChooseMountDriver()
+{
+    std::string error;
+    const auto chosen = chooseAscomTelescope(ascomDriver_.toStdString(), error);
+    if (!chosen)
+    {
+        statusBar()->showMessage(QString("ASCOM chooser: %1").arg(QString::fromStdString(error)), 8000);
+        return;
+    }
+    if (chosen->empty()) return;
+    ascomDriver_ = QString::fromStdString(*chosen);
+    guidingPanel_->setAscomDriver(ascomDriver_);
+    saveGuidingSettings();
+}
+
+void MainWindow::onConnectMount()
+{
+    Guider& guider = session_->guider();
+    if (guidingPanel_->mountKind() == GuidingPanel::MountKind::Simulated)
+    {
+        guider.requestConnect([pointing = simulatedPointing_] { return std::make_unique<SimulatedMount>(pointing); });
+        statusBar()->showMessage("Simulated mount: it moves the synthetic Moon. Use the Synthetic source.", 6000);
+        return;
+    }
+    if (ascomDriver_.isEmpty())
+    {
+        statusBar()->showMessage("Choose an ASCOM telescope driver first.", 5000);
+        return;
+    }
+    guider.requestConnect([progId = ascomDriver_.toStdString()] { return std::make_unique<AscomMount>(progId); });
+    statusBar()->showMessage(QString("Connecting to %1…").arg(ascomDriver_), 5000);
 }
 
 void MainWindow::onLockAtSelection()
@@ -290,20 +367,21 @@ void MainWindow::onLockAtSelection()
     const auto position = ui_->previewWidget->selectedPosition();
     if (!position || !session_->isRunning()) return;
     constexpr int side = GuidingPanel::kDefaultLockSide;
-    session_->requestLock({position->x() - side / 2, position->y() - side / 2, side, side});
+    session_->guider().requestLock({position->x() - side / 2, position->y() - side / 2, side, side});
     statusBar()->showMessage("Locking on the selected pixel…", 3000);
 }
 
 // The guider's status reaches the panel, the preview boxes, and the status bar.
 void MainWindow::onLockChanged()
 {
-    const LockStatus status = session_->lockStatus();
-    guidingPanel_->setStatus(status);
+    const GuiderStatus all = session_->guider().status();
+    guidingPanel_->setStatus(all);
+    const LockStatus& status = all.lock;
+    const QString guiding = all.guide.mode == GuideMode::Idle ? QString() : QString(" | %1").arg(guideModeName(all.guide.mode));
     if (status.state == LockState::Off)
     {
         ui_->previewWidget->setLockBoxes({}, {}, false);
-        lockLabel_->setText("Lock: off");
-        if (!status.message.empty()) statusBar()->showMessage(QString::fromStdString(status.message), 8000);
+        lockLabel_->setText("Lock: off" + guiding);
         return;
     }
     // The found box appears with the first search; green while the lock holds.
@@ -313,11 +391,11 @@ void MainWindow::onLockChanged()
     const bool valid = status.lastMatch && status.lastMatch->valid && status.state == LockState::Locked;
     ui_->previewWidget->setLockBoxes(locked, found, valid);
     if (status.state != LockState::Locked)
-        lockLabel_->setText(QString("Lock: %1").arg(lockStateName(status.state)));
+        lockLabel_->setText(QString("Lock: %1").arg(lockStateName(status.state)) + guiding);
     else if (status.estimateValid)
-        lockLabel_->setText(QString("Lock: dx %1, dy %2 px").arg(status.estimateDx, 0, 'f', 1).arg(status.estimateDy, 0, 'f', 1));
+        lockLabel_->setText(QString("Lock: dx %1, dy %2 px").arg(status.estimateDx, 0, 'f', 1).arg(status.estimateDy, 0, 'f', 1) + guiding);
     else
-        lockLabel_->setText("Lock: measuring");
+        lockLabel_->setText("Lock: measuring" + guiding);
 }
 
 void MainWindow::renderPreview()
@@ -581,6 +659,11 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     if (!recordingSelected())
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
+        // The simulated mount moves the painted Moon; it stays put while that mount is not connected.
+        source->setSceneOffset([pointing = simulatedPointing_] {
+            const auto offset = pointing->imageOffset(SimulatedPointing::Clock::now());
+            return std::pair{offset.x, offset.y};
+        });
         const int kind = displayPanel_->syntheticFormat();
         if (kind) source->setPixelLayout(PixelFormat::Mono16, kind == 3 ? 16 : 12,
             kind == 2 || kind == 4 ? BitAlignment::High : BitAlignment::Low,
@@ -858,6 +941,12 @@ void MainWindow::showLatestFrame()
     {
         updateFrameLabel(*frame);
         latestFrame_ = frame;
+        if (const int side = std::min(frame->width, frame->height); side != frameShortSide_)
+        {
+            frameShortSide_ = side;
+            guidingPanel_->setFrameShortSide(side);
+            sendTolerance();
+        }
         renderPreview();
         updateHistogram();
         if (packet.detection)

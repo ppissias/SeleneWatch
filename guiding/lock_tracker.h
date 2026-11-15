@@ -76,6 +76,10 @@ public:
     // stream started again). The estimate starts afresh; the lock stays.
     void discontinuity();
 
+    // The image has moved on purpose (a guide pulse): only matches from now
+    // on count towards the estimate. The lock and its timers stay.
+    void restartEstimate() { clearEstimate(); }
+
     // Searches frame when it is due. True when a search was made.
     bool step(const Frame& frame);
 

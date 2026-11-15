@@ -183,6 +183,47 @@ QString triggerFields(const ClipTrigger& trigger)
     return text;
 }
 
+// The guiding state nearest the first trigger, and every mount pulse whose
+// motion or settling overlaps the clip's frames.
+void writeGuidingLines(QTextStream& out, const EventClip& clip, const std::deque<GuidePulseRecord>& pulses,
+    const std::deque<GuideStateRecord>& states)
+{
+    const auto trigger = clip.triggers.front().triggerTime;
+    const GuideStateRecord* nearest = nullptr;
+    for (const GuideStateRecord& state : states)
+        if (!nearest || std::chrono::abs(state.time - trigger) < std::chrono::abs(nearest->time - trigger)) nearest = &state;
+    if (nearest && std::chrono::abs(nearest->time - trigger) <= std::chrono::seconds{2})
+    {
+        out << "guiding_at_first_trigger: state=\"" << QString::fromStdString(nearest->state) << "\" offset_dx="
+            << QString::number(nearest->dx, 'f', 2) << " offset_dy=" << QString::number(nearest->dy, 'f', 2)
+            << " offset_time=" << utcText(nearest->time) << "\n";
+    }
+    else
+    {
+        out << "guiding_at_first_trigger: no lock record within 2 s\n";
+    }
+
+    std::vector<const GuidePulseRecord*> inside;
+    if (!clip.frames.empty())
+    {
+        const auto first = clip.frames.front()->timestamp;
+        const auto last = clip.frames.back()->timestamp;
+        for (const GuidePulseRecord& pulse : pulses)
+        {
+            const auto end = pulse.start + std::chrono::milliseconds{pulse.milliseconds}
+                + std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::duration<double>(pulse.settleSeconds));
+            if (pulse.start <= last && end >= first) inside.push_back(&pulse);
+        }
+    }
+    out << "mount_pulses_in_clip: " << inside.size() << "\n";
+    for (const GuidePulseRecord* pulse : inside)
+    {
+        out << "mount_pulse: start=" << utcText(pulse->start) << " direction=" << QString::fromStdString(pulse->direction)
+            << " ms=" << pulse->milliseconds << " settle_seconds=" << pulse->settleSeconds
+            << " purpose=" << (pulse->calibration ? "calibration" : "guiding") << "\n";
+    }
+}
+
 } // namespace
 
 EventWriter::EventWriter(QObject* context, QString outputRoot, size_t maxQueuedBytes, Finished finished)
@@ -283,20 +324,34 @@ void EventWriter::logSessionStart(const StreamInfo& stream)
     ready_.notify_one();
 }
 
-void EventWriter::logGuiding(QString lines)
+void EventWriter::logGuiding(QString lines, std::optional<GuidePulseRecord> pulse, std::optional<GuideStateRecord> state)
 {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (ended_)
         {
-            ++usage_.guidingWriteFailures;
+            if (!lines.isEmpty()) ++usage_.guidingWriteFailures;
             return;
         }
         Job job;
+        job.guiding = true;
         job.guidingLines = std::move(lines);
+        job.pulse = std::move(pulse);
+        job.guideState = std::move(state);
         queue_.push_back(std::move(job));
     }
     ready_.notify_one();
+}
+
+bool EventWriter::duringMountCorrection(std::chrono::system_clock::time_point time) const
+{
+    for (const GuidePulseRecord& pulse : pulses_)
+    {
+        const auto end = pulse.start + std::chrono::milliseconds{pulse.milliseconds}
+            + std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::duration<double>(pulse.settleSeconds));
+        if (time >= pulse.start && time <= end) return true;
+    }
+    return false;
 }
 
 void EventWriter::shutdown()
@@ -380,10 +435,17 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
         }
 
         // Guiding lines are not part of the candidate record; a failure is counted.
-        if (!job.guidingLines.isEmpty())
+        // The records are kept for the clips that follow, newest last.
+        if (job.guiding)
         {
-            const bool written = appendLog(job.guidingLines, "guiding.txt");
-            if (!written)
+            // Each list keeps 15 minutes before its newest record; a recording's
+            // frame times can be years old.
+            constexpr auto kKeep = std::chrono::minutes{15};
+            if (job.pulse) pulses_.push_back(*job.pulse);
+            if (job.guideState) guideStates_.push_back(*job.guideState);
+            while (!pulses_.empty() && pulses_.front().start < pulses_.back().start - kKeep) pulses_.pop_front();
+            while (!guideStates_.empty() && guideStates_.front().time < guideStates_.back().time - kKeep) guideStates_.pop_front();
+            if (!job.guidingLines.isEmpty() && !appendLog(job.guidingLines, "guiding.txt"))
             {
                 std::lock_guard lock(mutex_);
                 ++usage_.guidingWriteFailures;
@@ -492,8 +554,10 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         for (const ClipTrigger& trigger : clip.triggers)
         {
             out << "trigger: " << triggerFields(trigger)
-                << " trigger_time=" << utcText(trigger.triggerTime) << "\n";
+                << " trigger_time=" << utcText(trigger.triggerTime)
+                << (duringMountCorrection(trigger.triggerTime) ? " during_mount_correction=yes" : "") << "\n";
         }
+        writeGuidingLines(out, clip, pulses_, guideStates_);
         out << "detector: per-pixel sigma / compact patch\n";
         out << "reference_policy: update background outside passing patch boxes plus one pixel; clip collection does not hold learning\n";
         out << "persistence_policy: adjacent/overlapping patches inherit state; separate patches trigger independently\n";
@@ -715,6 +779,7 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
         out << utcText(trigger.triggerTime) << " ";
         if (pending) out << (trigger.kind==TriggerKind::Manual ? "manual_pending " : "candidate_pending ");
         out << triggerFields(trigger)
+            << (duringMountCorrection(trigger.triggerTime) ? " during_mount_correction=yes" : "")
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;
         if (!pending) out << " " << outcome;

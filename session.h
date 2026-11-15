@@ -50,7 +50,7 @@ public:
         std::function<void()> cameraSettingsChanged;
         std::function<void(bool)> manualSaveHandled;
         std::function<void(const ClipWriteResult&)> clipWritten;
-        // The feature lock has a new status. Read it with lockStatus().
+        // The guider has a new status. Read it with guider().status().
         std::function<void()> lockChanged;
 
         // The recording has no more frames. Call stop() to finish.
@@ -101,11 +101,9 @@ public:
     void setDetectionSettings(const DetectionSettings& settings);
     void setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY);
 
-    // Context thread. The guider takes the lock on the next frame it is
-    // offered; the outcome arrives through lockChanged.
-    void requestLock(LockRegion region);
-    void requestUnlock();
-    [[nodiscard]] LockStatus lockStatus() const;
+    // The feature lock and mount guiding. The window sends requests through
+    // guider() and reads guider().status() when lockChanged arrives.
+    [[nodiscard]] Guider& guider() { return guider_; }
 
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
