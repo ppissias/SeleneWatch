@@ -39,9 +39,12 @@ struct WriterUsage
     size_t retainedBytes{0}, outstandingClips{0};
     uint64_t writtenBytes{0};
     double writeSeconds{0};
+    // Batches of guiding.txt lines that could not be written.
+    uint64_t guidingWriteFailures{0};
 };
 
-// Writes finished clips and the candidate log on a background thread.
+// Writes finished clips, the candidate log, and the guiding log on a
+// background thread.
 //
 // submit never blocks and never touches the disk. The writer owns its
 // backlog: queued and active clips share a byte allowance. A clip that does
@@ -72,6 +75,10 @@ public:
     // Only a failure to write it is reported.
     void logSessionStart(const StreamInfo& stream);
 
+    // Any thread. Queues finished lines for <outputRoot>/guiding.txt. A
+    // failure is counted in usage(), not reported as a clip result.
+    void logGuiding(QString lines);
+
     // Writes what is queued, then stops the thread.
     void shutdown();
     void setByteLimit(size_t bytes);
@@ -85,11 +92,13 @@ private:
         StreamInfo stream;
     };
 
-    // Work waiting for the writer: a session_start line, a clip, or a clip
-    // refused with a reason (it has no frames and only waits to be logged).
+    // Work waiting for the writer: a session_start line, guiding lines, a
+    // clip, or a clip refused with a reason (it has no frames and only waits
+    // to be logged).
     struct Job
     {
         std::optional<SessionStart> sessionStart;
+        QString guidingLines;
         EventClip clip;
         QString notSavedReason;
         bool containsTestSignal{false}; // Kept even when a refused clip drops its frames.
@@ -105,7 +114,7 @@ private:
     QString writeClip(EventClip& clip, QString& error);
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
-    bool appendLog(const QString& lines) const;
+    bool appendLog(const QString& lines, const QString& fileName = "candidates.txt") const;
 
     QObject* context_;
     const QString outputRoot_;

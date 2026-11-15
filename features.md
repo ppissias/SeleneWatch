@@ -594,3 +594,51 @@ A stop by rules 5 to 7 is not resumed automatically. The observer looks, and tur
 ### Order
 
 Part A needs the shared frames of Feature-7 and real recordings to try a lock on (Feature-6), and can start once those exist. It reuses the preview coordinate mapping that the blip of Feature-6 adds. Part B follows and needs no hardware. Part C needs the ASCOM Platform and is only meaningful with a camera (Feature-10). Parts A and B can run alongside Feature-9 and Feature-5.
+
+### Part A implementation — 15 November 2026
+
+Part A is built. Parts B and C are not started. No mount code exists yet.
+
+**Where it lives.** `guiding/` has one job, the lock, and depends only on frames: `FeatureLock` (template, lockability check, search), `LockTracker` (the steppable state of one lock: last found position, the median estimate, the lost-lock rule), and `Guider` (the guide thread, its newest-frame mailbox, requests, and the guiding log lines). The `Session` owns the `Guider`, beside the writer it feeds. It offers each published frame after detection and does nothing more when no lock is held or requested. The window has a **Guiding** dock (View → Guiding), lock and found boxes on the preview, and a `Lock:` readout in the status bar. It holds no lock state.
+
+**Choosing a region.** A click already selects a pixel for the test flash and the detection probe, so it stays that way. A **drag** of more than 5 screen pixels selects a region and locks on it at once. **Lock at selection** locks a 64 × 64 box centred on the selected pixel; this is the plan's "click for a default box". A lock taken while the window shows a slightly older preview frame uses the newest frame; the feature moves far less than a pixel in that time.
+
+**Lockability, as built.** All are measured on the binned template and reported in the panel and in `guide_lock`.
+- *Saturation:* refused when more than half the region's pixels are at the stream's highest code.
+- *Contrast:* the template's standard deviation divided by the pixel noise. The noise comes from a 3 × 3 operator that is a second difference across times a second difference down. Smooth shading and ramps give it almost nothing and white noise gives six times its standard deviation; the median of its magnitude is used. A first try with neighbouring-pixel differences counted crater detail as noise and refused good regions. The threshold is 3: with noise in template and frame, a perfect match then scores about 1 − 1/c² = 0.89, safely above `kMinLockScore`; a flat region measures about 1.
+- *Structure:* the eigenvalues of the summed gradient outer products, less the share the noise alone contributes. Refused when the weaker is below 0.1 of the stronger. Upright and tilted straight edges are refused with that reason.
+- The region is clipped to the frame and must be at least 8 × 8 binned pixels on each side, so a long thin strip is refused.
+
+**Searching, as built.** A Bayer mosaic is binned by an even factor of at least 2. The search base on a mosaic is kept at an even offset, so each block holds the same arrangement of colour sites as the template's blocks. Each search window's mean and variance come from integral images; the cross term is a plain loop over the template.
+
+**Starting values.** Measuring interval 0.2 s of *source* time, so a recording played fast measures as it did at the telescope, and the CPU limit only skips more frames. Estimate window 3 s, at least 3 valid matches. Track radius 24 px; after `kLockLostSeconds` = 2 s without a valid match the state becomes *lock lost, searching* with a 64 px radius around the last found position. A single match while searching could be a look-alike, so the lock resumes only when two consecutive matches agree within 3 px. After `kSearchSeconds` = 60 s of searching the state becomes *lock lost* and nothing more is measured until the observer locks again.
+
+**Across runs.** The lock survives Stop and Start, including the camera reopen when Monitoring starts. A restarted stream, a loop boundary, or a clock that goes back starts a fresh estimate and fresh timers. A frame of another size, format or colour pattern releases the lock with that reason.
+
+**Recorded.** `guiding.txt` sits beside `candidates.txt`. Like the candidate record, it is written only while Monitoring; Preview writes nothing. Lines carry the frame's UTC time: `guide_lock` (region, binning, contrast, structure, saturated share), `guide_refused`, `guide_state` (each change, with the reason), `guide_offset` (one per second of source time: state, region and binning, so the line stands alone when the lock was taken in Preview; latest dx, dy, score, valid; the estimate or `estimate=none`; samples) and `guide_unlock`. The writer appends them in order with its other work. A batch that cannot be written is counted in `WriterUsage::guidingWriteFailures` and shown in the Guiding dock. It is not reported as a broken candidate record.
+
+**Tests.** `SeleneWatchGuidingTests` (CTest `guiding`) uses a scene of 360 fixed pseudo-random crater-like blobs with noise. It does not use the synthetic source's texture, which repeats every 78 px.
+
+| Done-when item | Result |
+| --- | --- |
+| 1. Sub-pixel shift, Mono8 / 12-bit Mono16 / half brightness | worst error 0.020 / 0.017 / 0.041 px over five shifts up to 7.3 px (limit 0.1) |
+| also: 2 × 2 binned region; RGGB mosaic | 0.015 px; worst 0.053 px |
+| 2. Flat region; upright and tilted straight edge | refused for contrast; refused as one direction |
+| 3. Blank longer than `kLockLostSeconds`, then restored | Searching, no estimate; restored after two agreeing matches 36 px away; *lock lost* after 60 s of searching |
+
+The tests also cover the median rejecting one outlier, old matches leaving the window, a match on the window edge being invalid, restart and layout change, and the guider writing nothing in Preview and once per second in Monitoring. A window test drags a lock on the synthetic source, unlocks it, then locks again through the selected pixel; Preview leaves the output folder empty.
+
+**Real recordings (manual probe).** `SeleneWatchProbe lock INPUT OUTPUT.csv [X Y W H]` locks on the first frame and follows the feature at the guider's rate, reading only the frames it measures. Without a region, it picks the most lockable 64 × 64 box of a grid. Debug build:
+
+| Recording | Frames, span | Searches valid | Score min / median | Drift (linear fit) | Scatter about the fit | Search time |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2015.12.19 C9.25, `Moon_180548.avi`, 8-bit | 500, 27.6 s | 124 of 124 | 0.975 / 0.988 | +1.10, −0.82 px/s | 1.24, 1.49 px RMS | 24 ms |
+| 2015.12.21 8" Newtonian, `Moon_165104.ser`, 8-bit | 714, 38.7 s | 177 of 177 | 0.986 / 0.991 | −1.29, −0.44 px/s | 1.89, 2.44 px RMS | 24 ms |
+
+Findings for Part B:
+- The field drifted 1.4 px/s on both nights. At 0.33″/px that is about 0.45″/s, more than the Moon's declination drift alone. A feature in mid-frame would leave a 1296 px frame in about 8 minutes. This confirms the reason for guiding.
+- Single-frame seeing scatter is 1.2–2.4 px RMS. A tolerance box has to be several times this.
+- The 3 s median lags a steady drift by about half its window, here about 2 px. The control rule should allow for that lag, or estimate the rate, rather than shorten the window.
+- The widened 64 px search costs about seven times a tracking search. In a Debug build that is roughly 0.2 s per search, which is acceptable on the guide thread.
+
+Still open for Part A: the earthshine side (no recording yet), a terminator region over an hour (template refresh, see the open decisions), and a check by hand at the telescope with the ZWO camera.

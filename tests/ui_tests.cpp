@@ -57,6 +57,7 @@ private slots:
         panel.setMonitoring(false); QVERIFY(state->text().contains("Would trigger — capture OFF"));
     }
     void previewShowsWouldTriggerWithoutSaving();
+    void dragLocksOnAFeatureAndClickStillSelects();
     void livePanelInjectionEvidenceAndSavedSettings();
     void stretchARecordingWhileCapturingThenRestoreSettings();
     void saveARecordingManuallyThroughTheWindow();
@@ -102,6 +103,56 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
     QVERIFY(!histogram->isHidden());
     QVERIFY(histogram->findChild<QCheckBox*>("histogramFitRange")->isChecked());
     QVERIFY(!histogram->findChild<QCheckBox*>("histogramLogCounts")->isChecked());
+}
+
+// Feature-8 Part A: a drag locks, the readout follows, a click still selects a
+// pixel, and Preview writes no guiding record.
+void UiTest::dragLocksOnAFeatureAndClickStillSelects()
+{
+    QTemporaryDir dir;
+    {
+        MainWindow window(nullptr, dir.path()); window.show();
+        window.findChild<QDockWidget*>("guidingDock")->raise();
+        window.findChild<QPushButton*>("startButton")->click();
+        auto* preview = window.findChild<PreviewWidget*>();
+        QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 3000);
+        auto* state = window.findChild<QLabel*>("lockStateLabel");
+        auto* readout = window.findChild<QLabel*>("lockReadout");
+        auto* message = window.findChild<QLabel*>("lockMessageLabel");
+        QVERIFY(state->text().contains("Off"));
+
+        const QPoint from = preview->imageRect().center() - QPoint(30, 25);
+        const QPoint to = preview->imageRect().center() + QPoint(30, 25);
+        QSignalSpy regions(preview, &PreviewWidget::regionSelected);
+        QSignalSpy pixels(preview, &PreviewWidget::positionSelected);
+        QTest::mousePress(preview, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(preview, from + QPoint(12, 9));
+        QTest::mouseMove(preview, to);
+        QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
+        QCOMPARE(regions.size(), 1);
+        QCOMPARE(pixels.size(), 0);
+        QVERIFY(!preview->selectedPosition());
+        QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(readout->text().startsWith("Lock: dx"), 5000);
+        QVERIFY(window.findChild<QLabel*>("lockDriftLabel")->text().contains("median of"));
+
+        window.findChild<QPushButton*>("unlockButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(state->text().contains("Off"), 3000);
+        QCOMPARE(readout->text(), QString("Lock: off"));
+
+        auto* lockAtSelection = window.findChild<QPushButton*>("lockAtSelectionButton");
+        QVERIFY(!lockAtSelection->isEnabled());
+        QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
+        QCOMPARE(pixels.size(), 1);
+        QVERIFY(preview->selectedPosition());
+        QVERIFY(lockAtSelection->isEnabled());
+        lockAtSelection->click();
+        QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
+        QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
+        QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR) + "/preview-feature-lock.png"));
+        window.findChild<QPushButton*>("stopButton")->click();
+    }
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 }
 
 void UiTest::qhyRuntimeOverridePersistsAndRecovers()

@@ -30,6 +30,7 @@ add_library(selenewatch_core STATIC
     cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp
+    guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -79,7 +80,7 @@ endif()
 
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
-    histogram_panel.h histogram_panel.cpp
+    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
@@ -149,13 +150,19 @@ target_link_libraries(SeleneWatchZwoTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchZwoTests)
 add_test(NAME zwo COMMAND SeleneWatchZwoTests -o -,tap)
 
+add_executable(SeleneWatchGuidingTests tests/guiding_tests.cpp)
+target_link_libraries(SeleneWatchGuidingTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchGuidingTests)
+add_test(NAME guiding COMMAND SeleneWatchGuidingTests -o -,tap)
+
 add_executable(SeleneWatchQhyTests tests/qhy_tests.cpp)
 target_link_libraries(SeleneWatchQhyTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchQhyTests)
 add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
-add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp)
+add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
+    tools/lock_probe.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 

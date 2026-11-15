@@ -283,6 +283,22 @@ void EventWriter::logSessionStart(const StreamInfo& stream)
     ready_.notify_one();
 }
 
+void EventWriter::logGuiding(QString lines)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (ended_)
+        {
+            ++usage_.guidingWriteFailures;
+            return;
+        }
+        Job job;
+        job.guidingLines = std::move(lines);
+        queue_.push_back(std::move(job));
+    }
+    ready_.notify_one();
+}
+
 void EventWriter::shutdown()
 {
     if (!thread_.joinable())
@@ -361,6 +377,18 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             }
             job = std::move(queue_.front());
             queue_.pop_front();
+        }
+
+        // Guiding lines are not part of the candidate record; a failure is counted.
+        if (!job.guidingLines.isEmpty())
+        {
+            const bool written = appendLog(job.guidingLines, "guiding.txt");
+            if (!written)
+            {
+                std::lock_guard lock(mutex_);
+                ++usage_.guidingWriteFailures;
+            }
+            continue;
         }
 
         // A session_start line is reported only when it could not be written.
@@ -720,15 +748,16 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
     return appendLog(line);
 }
 
-// Appends to candidates.txt. False when the log cannot be written.
-bool EventWriter::appendLog(const QString& lines) const
+// Appends to candidates.txt, or to another log in the output folder. False
+// when the log cannot be written.
+bool EventWriter::appendLog(const QString& lines, const QString& fileName) const
 {
     if (!QDir().mkpath(outputRoot_))
     {
         return false;
     }
 
-    QFile log(QDir(outputRoot_).filePath("candidates.txt"));
+    QFile log(QDir(outputRoot_).filePath(fileName));
     if (!log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
     {
         return false;

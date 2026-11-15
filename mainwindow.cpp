@@ -3,6 +3,7 @@
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "histogram_panel.h"
+#include "guiding_panel.h"
 #include "camera_panel.h"
 #include "qhy_camera_panel.h"
 
@@ -65,12 +66,14 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
     notifications.ended = [this] { onPlaybackEnded(); };
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
+    notifications.lockChanged = [this] { onLockChanged(); };
     session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
     setupDetectionPanel();
     setupDisplayPanel();
     setupHistogramPanel();
+    setupGuidingPanel();
     // Only builds with the adapter and tests supplying a fake SDK get the camera entry and dock.
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
     if (cameraApi_)
@@ -106,6 +109,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     connect(ui_->previewWidget, &PreviewWidget::positionSelected, this, [this] {
         updateDetectionDisplay();
         updateBlipReadout();
+        updateControls();
+    });
+    connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
+        if (!session_->isRunning()) return;
+        session_->requestLock({region.x(), region.y(), region.width(), region.height()});
+        statusBar()->showMessage("Locking on the selected region…", 3000);
     });
     connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
     connect(ui_->sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
@@ -132,6 +141,8 @@ MainWindow::~MainWindow()
     if (displayPanel_) disconnect(displayPanel_, nullptr, this, nullptr);
     if (histogramDock_) disconnect(histogramDock_, nullptr, this, nullptr);
     if (histogramPanel_) disconnect(histogramPanel_, nullptr, this, nullptr);
+    if (guidingDock_) disconnect(guidingDock_, nullptr, this, nullptr);
+    if (guidingPanel_) disconnect(guidingPanel_, nullptr, this, nullptr);
     saveDetectionSettings();
     saveDisplaySettings();
     if (bufferReadoutTimer_)
@@ -260,6 +271,55 @@ void MainWindow::updateHistogram(bool force)
     lastHistogramTime_ = now;
 }
 
+void MainWindow::setupGuidingPanel()
+{
+    guidingPanel_ = new GuidingPanel(this);
+    guidingDock_ = new QDockWidget("Guiding", this);
+    guidingDock_->setObjectName("guidingDock");
+    guidingDock_->setWidget(guidingPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, guidingDock_);
+    tabifyDockWidget(displayDock_, guidingDock_);
+    displayDock_->raise();
+    menuBar()->actions().front()->menu()->addAction(guidingDock_->toggleViewAction());
+    connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
+    connect(guidingPanel_, &GuidingPanel::unlockRequested, this, [this] { session_->requestUnlock(); });
+}
+
+void MainWindow::onLockAtSelection()
+{
+    const auto position = ui_->previewWidget->selectedPosition();
+    if (!position || !session_->isRunning()) return;
+    constexpr int side = GuidingPanel::kDefaultLockSide;
+    session_->requestLock({position->x() - side / 2, position->y() - side / 2, side, side});
+    statusBar()->showMessage("Locking on the selected pixel…", 3000);
+}
+
+// The guider's status reaches the panel, the preview boxes, and the status bar.
+void MainWindow::onLockChanged()
+{
+    const LockStatus status = session_->lockStatus();
+    guidingPanel_->setStatus(status);
+    if (status.state == LockState::Off)
+    {
+        ui_->previewWidget->setLockBoxes({}, {}, false);
+        lockLabel_->setText("Lock: off");
+        if (!status.message.empty()) statusBar()->showMessage(QString::fromStdString(status.message), 8000);
+        return;
+    }
+    // The found box appears with the first search; green while the lock holds.
+    const QRect locked(status.region.x, status.region.y, status.region.width, status.region.height);
+    std::optional<QRectF> found;
+    if (status.lastMatch) found = QRectF(locked).translated(status.foundDx, status.foundDy);
+    const bool valid = status.lastMatch && status.lastMatch->valid && status.state == LockState::Locked;
+    ui_->previewWidget->setLockBoxes(locked, found, valid);
+    if (status.state != LockState::Locked)
+        lockLabel_->setText(QString("Lock: %1").arg(lockStateName(status.state)));
+    else if (status.estimateValid)
+        lockLabel_->setText(QString("Lock: dx %1, dy %2 px").arg(status.estimateDx, 0, 'f', 1).arg(status.estimateDy, 0, 'f', 1));
+    else
+        lockLabel_->setText("Lock: measuring");
+}
+
 void MainWindow::renderPreview()
 {
     if (!latestFrame_) return;
@@ -293,6 +353,8 @@ void MainWindow::setupStatusBar()
     candidatesLabel_ = new QLabel(this);
     bufferLabel_ = new QLabel(this);
     frameLabel_ = new QLabel("No frame yet", this);
+    lockLabel_ = new QLabel("Lock: off", this);
+    lockLabel_->setObjectName("lockReadout");
 
     statusLabel_->setMinimumWidth(150);
     fpsLabel_->setMinimumWidth(80);
@@ -307,6 +369,7 @@ void MainWindow::setupStatusBar()
     statusBar()->addPermanentWidget(candidatesLabel_);
     statusBar()->addPermanentWidget(bufferLabel_);
     statusBar()->addPermanentWidget(frameLabel_);
+    statusBar()->addPermanentWidget(lockLabel_);
 
     updateBufferReadout();
     updateCandidateReadout();
@@ -354,6 +417,7 @@ void MainWindow::updateControls()
         qhyDock_->setEnabled(qhySelected());
         qhyPanel_->setRunning(running && qhySelected(),running && (monitoring || pending));
     }
+    if (guidingPanel_) guidingPanel_->setAvailable(running, ui_->previewWidget->selectedPosition().has_value());
 }
 
 void MainWindow::updateBufferReadout()
@@ -372,6 +436,7 @@ void MainWindow::updateBufferReadout()
         .arg(history.seconds, 0, 'f', 1).arg(history.frames)
         .arg(memory.used / 1048576.0, 0, 'f', 1).arg(memory.limit / 1048576.0, 0, 'f', 0));
     if (displayPanel_) displayPanel_->showUsage(memory, history, writer);
+    if (guidingPanel_) guidingPanel_->setLogFailed(writer.guidingWriteFailures > 0);
 }
 
 void MainWindow::updateStreamReadout()

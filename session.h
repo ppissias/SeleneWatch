@@ -2,6 +2,7 @@
 
 #include "blip_injector.h"
 #include "event_capture.h"
+#include "guiding/guider.h"
 #include "recording/event_writer.h"
 #include "frame.h"
 #include "sources/frame_source.h"
@@ -19,11 +20,12 @@
 #include <optional>
 #include <string>
 
-// The frame path from a source to the capture, the writer, and the preview.
+// The frame path from a source to the capture, the writer, the preview, and
+// the feature lock.
 //
-// Owns the selected source, the capture, and the writer. On the source
-// thread it adds a requested test blip, publishes each frame, offers it to
-// the preview slot, and runs the capture. When the source says the next
+// Owns the selected source, the capture, the writer, and the guider. On the
+// source thread it adds a requested test blip, publishes each frame, offers
+// it to the preview slot and the guider, and runs the capture. When the source says the next
 // frame does not follow the previous one, it restarts the capture as Start
 // would. When a recording ends, it hands off the clip still being collected.
 //
@@ -48,6 +50,8 @@ public:
         std::function<void()> cameraSettingsChanged;
         std::function<void(bool)> manualSaveHandled;
         std::function<void(const ClipWriteResult&)> clipWritten;
+        // The feature lock has a new status. Read it with lockStatus().
+        std::function<void()> lockChanged;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -96,6 +100,12 @@ public:
     // Context thread. Copied by the source before the next frame.
     void setDetectionSettings(const DetectionSettings& settings);
     void setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY);
+
+    // Context thread. The guider takes the lock on the next frame it is
+    // offered; the outcome arrives through lockChanged.
+    void requestLock(LockRegion region);
+    void requestUnlock();
+    [[nodiscard]] LockStatus lockStatus() const;
 
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
@@ -159,6 +169,9 @@ private:
     std::atomic<bool> dropsKnown_{false};
     std::atomic<bool> sourceFinished_{false};
     bool running_{false};
+
+    // After the writer, which it feeds; stopped before the writer shuts down.
+    Guider guider_;
 
     // Declared last, so it is stopped and destroyed before what it feeds.
     std::unique_ptr<FrameSource> source_;

@@ -24,12 +24,14 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
               clip.stream = streamInfo_;
               writer_.submit(std::move(clip));
           }, {}, memory_)
+    , guider_(writer_, [this] { post(notifications_.lockChanged); })
 {
 }
 
 Session::~Session()
 {
     stop();
+    guider_.shutdown();
     writer_.shutdown();
 }
 
@@ -88,6 +90,8 @@ bool Session::start(QString& error, Mode mode)
     (void)previewSlot_.take();
 
     if (mode == Mode::Monitoring) writer_.logSessionStart(streamInfo_);
+    // A held lock carries over; its estimate starts again with this run.
+    guider_.discontinuity();
     source_->start(*this);
     running_ = true;
     return true;
@@ -239,6 +243,10 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
     displayRequest_.probeY = probeY;
 }
 
+void Session::requestLock(LockRegion region) { guider_.requestLock(region); }
+void Session::requestUnlock() { guider_.requestUnlock(); }
+LockStatus Session::lockStatus() const { return guider_.status(); }
+
 // From the moment the frame is held as a FramePtr it is published: nobody
 // writes it again. Test injection is the last write before publication.
 void Session::onFrame(std::shared_ptr<Frame> frame)
@@ -284,6 +292,8 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     capture_.setDetectionSettings(settings);
     capture_.onFrame(published, display);
     applyManualSave();
+    // The guider keeps only the newest frame and does nothing when no lock is wanted.
+    guider_.offer(published, mode_.load() == Mode::Monitoring);
 
     // The preview converts on the context thread. It is woken once per frame
     // it has not yet taken, and skips frames when it falls behind.
@@ -305,6 +315,7 @@ void Session::onDiscontinuity()
     applyManualSave();
     capture_.finishPartial("playback loop boundary");
     capture_.reset();
+    guider_.discontinuity();
 }
 
 void Session::onSettingsChanged(const StreamInfo& info, std::chrono::duration<double> settling)

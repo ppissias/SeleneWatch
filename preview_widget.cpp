@@ -3,6 +3,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 
+#include <algorithm>
 #include <utility>
 
 PreviewWidget::PreviewWidget(QWidget* parent)
@@ -11,7 +12,8 @@ PreviewWidget::PreviewWidget(QWidget* parent)
     setMinimumSize(320, 240);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setCursor(Qt::CrossCursor);
-    setToolTip("Click the image to place a test flash. Coordinates refer to the original frame.");
+    setToolTip("Click the image to select a pixel for a test flash. Drag a rectangle around a crater "
+        "or other detail to lock on it. Coordinates refer to the original frame.");
 }
 
 void PreviewWidget::setImage(QImage image)
@@ -30,7 +32,43 @@ void PreviewWidget::clear()
     overlay_ = {};
     detectionBox_ = {};
     selected_.reset();
+    lockBox_.reset();
+    foundBox_.reset();
+    pressPosition_.reset();
+    dragging_ = false;
     update();
+}
+
+void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid)
+{
+    lockBox_ = locked;
+    foundBox_ = found;
+    foundValid_ = foundValid;
+    update();
+}
+
+QRectF PreviewWidget::toWidget(const QRectF& frameRect) const
+{
+    const QRect image = imageRect();
+    const double sx = image.width() / static_cast<double>(image_.width());
+    const double sy = image.height() / static_cast<double>(image_.height());
+    return QRectF(image.x() + frameRect.x() * sx, image.y() + frameRect.y() * sy,
+        frameRect.width() * sx, frameRect.height() * sy);
+}
+
+QRect PreviewWidget::dragRegion(QPointF from, QPointF to) const
+{
+    const QRectF image = imageRect();
+    // The image's right and bottom edges belong to the next pixel, outside it.
+    auto clamp = [&](QPointF point) {
+        return QPointF(std::clamp(point.x(), image.left(), image.right() - 0.01),
+            std::clamp(point.y(), image.top(), image.bottom() - 0.01));
+    };
+    const auto a = framePosition(clamp(from));
+    const auto b = framePosition(clamp(to));
+    if (!a || !b) return {};
+    return QRect(QPoint(std::min(a->x(), b->x()), std::min(a->y(), b->y())),
+        QPoint(std::max(a->x(), b->x()), std::max(a->y(), b->y())));
 }
 
 void PreviewWidget::setDetectionOverlay(QImage image, QRect frameBox)
@@ -96,6 +134,27 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
                 detectionBox_.height() * image.height() / static_cast<double>(image_.height())));
         }
     }
+    if (lockBox_ || foundBox_ || dragging_)
+    {
+        painter.save();
+        painter.setClipRect(image);
+        if (lockBox_)
+        {
+            painter.setPen(QPen(QColor("#65e5ff"), 1, Qt::DashLine));
+            painter.drawRect(toWidget(*lockBox_));
+        }
+        if (foundBox_)
+        {
+            painter.setPen(QPen(foundValid_ ? QColor("#66ff88") : QColor("#ffaa33"), 2));
+            painter.drawRect(toWidget(*foundBox_));
+        }
+        if (dragging_ && pressPosition_)
+        {
+            painter.setPen(QPen(QColor("#65e5ff"), 1));
+            painter.drawRect(QRectF(*pressPosition_, dragPosition_).normalized());
+        }
+        painter.restore();
+    }
     if (selected_)
     {
         const QPointF centre(image.x() + (selected_->x() + 0.5) * image.width() / image_.width(),
@@ -115,18 +174,55 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
     }
 }
 
+// A press on the image waits for the release: a short one selects the
+// pressed pixel, a longer movement selects a region.
 void PreviewWidget::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton && framePosition(event->position()))
     {
-        const auto position = framePosition(event->position());
-        if (position)
-        {
-            selected_ = position;
-            update();
-            emit positionSelected(*position);
-            return;
-        }
+        pressPosition_ = event->position();
+        dragPosition_ = event->position();
+        dragging_ = false;
+        return;
     }
     QWidget::mousePressEvent(event);
+}
+
+void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (pressPosition_ && (event->buttons() & Qt::LeftButton))
+    {
+        dragPosition_ = event->position();
+        if ((dragPosition_ - *pressPosition_).manhattanLength() > kDragThreshold) dragging_ = true;
+        if (dragging_) update();
+        return;
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void PreviewWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton || !pressPosition_)
+    {
+        QWidget::mouseReleaseEvent(event);
+        return;
+    }
+    const QPointF press = *pressPosition_;
+    pressPosition_.reset();
+    if ((event->position() - press).manhattanLength() > kDragThreshold) dragging_ = true;
+    if (dragging_)
+    {
+        dragging_ = false;
+        update();
+        const QRect region = dragRegion(press, event->position());
+        if (!region.isEmpty()) emit regionSelected(region);
+        return;
+    }
+    const auto position = framePosition(press);
+    if (position)
+    {
+        selected_ = position;
+        update();
+        emit positionSelected(*position);
+    }
 }
