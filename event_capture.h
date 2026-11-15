@@ -32,8 +32,8 @@ public:
 
     EventCapture(CaptureSettings capture, CandidateStarted onCandidate, ClipReady onClip,
         DetectionSettings settings = {}, MemoryBudget budget = {});
-    // While stopped. The Session reserves working space before dividing the
-    // remaining payload allowance between history, collection, and writing.
+    // Clears capture state before applying limits for the next frame layout.
+    // Session uses the first delivered frame to size the working reserve.
     void configure(CaptureSettings capture, size_t clipBytes, size_t historyBytes);
 
     // Drops the ring, the detector state, and any clip still being collected.

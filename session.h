@@ -35,6 +35,7 @@
 class Session final : private FrameSourceListener
 {
 public:
+    // Preview analyses the stream with capture off. Monitoring also collects evidence clips.
     enum class Mode { Stopped, Preview, Monitoring };
     // Each one runs on the context object's thread, queued. Any may be empty.
     struct Notifications

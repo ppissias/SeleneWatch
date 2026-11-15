@@ -57,6 +57,7 @@ private:
     BudgetVector<uint8_t> visited_;
     BudgetVector<size_t> pending_;
     BudgetVector<uint8_t> protected_;
+    // Carries a passing patch across frames for spatial matching and confirmation.
     struct Patch
     {
         DetectionSummary measured;

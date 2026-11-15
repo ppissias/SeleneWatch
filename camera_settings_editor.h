@@ -8,6 +8,7 @@ class QSpinBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QTimer;
+// Requested raw format and ROI in output pixels after binning.
 struct CameraGeometry
 {
     int width{0},height{0},x{0},y{0},bin{1};
@@ -37,6 +38,7 @@ private:
     QComboBox *format_,*bin_;
     QSpinBox *width_,*height_,*x_,*y_;
     QFormLayout* controlForm_;
+    // The spin box uses display units. Scale converts its value back to SDK units.
     struct Control { QDoubleSpinBox* widget; double scale; };
     std::map<int,Control> controls_;
     QTimer* liveTimer_;

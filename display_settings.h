@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+// Preview tone mapping uses the high bits, a user window or levels estimated from the frame.
 enum class DisplayMode { Linear, Window, Auto };
 
 // Levels are fractions of the source's native sample range. These affect
@@ -19,4 +20,5 @@ struct DisplaySettings
     }
 };
 
+// Effective preview levels in native ADU. Auto-stretch measures the median.
 struct DisplayLevels { double black{0}, white{255}, median{0}; };

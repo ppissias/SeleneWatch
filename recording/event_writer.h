@@ -33,6 +33,7 @@ struct ClipWriteResult
     bool memoryLimited{false};
 };
 
+// Queued and active clip payload, outstanding clip count and cumulative write measurements.
 struct WriterUsage
 {
     size_t retainedBytes{0}, outstandingClips{0};

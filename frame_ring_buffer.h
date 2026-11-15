@@ -7,6 +7,8 @@
 #include <vector>
 #include <deque>
 
+// Snapshot of retained frame payloads and their source-time span.
+// memoryClamped records whether the byte allowance shortened the history.
 struct RingUsage
 {
     size_t frames{0}, bytes{0};

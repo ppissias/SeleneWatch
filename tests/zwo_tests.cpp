@@ -13,6 +13,7 @@
 #include <condition_variable>
 
 namespace {
+// Collects ASI frames, failures and live-setting notices from the source worker.
 class Receiver : public FrameSourceListener
 {
 public:
@@ -33,6 +34,7 @@ public:
 QString text(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly|QIODevice::Text)?QString::fromUtf8(f.readAll()):QString{}; }
 }
 
+// Exercises ASI capture, live readbacks and loss handling using a scripted SDK.
 class ZwoTest : public QObject
 {
     Q_OBJECT

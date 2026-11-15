@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+// Which derived detector map, if any, to show on the preview.
 enum class DetectionOverlay { None, Sigma, Noise };
 
 // A request for derived display data. It has no effect on trigger decisions.
@@ -39,12 +40,14 @@ struct DetectionSummary
     bool passed{false};
     bool triggered{false};
     bool firing{false};
+    bool patchSearchLimited{false}; // The count and box then describe the whole frame.
     bool overlaySkipped{false};
     uint64_t onsetFrameIndex{0};
     size_t newCandidates{0}, activePatches{0}, protectedPixels{0}, learningFrames{0};
     double longestActiveSeconds{0};
 };
 
+// A compact reading for the live history plot, timestamped by the source.
 struct DetectionHistoryPoint
 {
     std::chrono::system_clock::time_point time;

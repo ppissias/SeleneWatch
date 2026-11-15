@@ -21,10 +21,14 @@ Raw format, binning and ROI require **Apply format / ROI and restart Preview** b
 The Camera dock and Detection dock are visible together. Live readouts show:
 
 - peak sigma, K and percentage of the threshold, with the recent maximum;
-- selected patch pixels versus minimum/maximum, and bounding-box area per patch pixel versus the compactness limit;
+- selected patch pixels versus the size limits and bounding-box area per patch pixel versus the adjustable compactness limit;
 - noise floor in native ADU, peak position, and one-frame/two-frame persistence status;
 - the existing 10-second sigma history, sigma/noise maps, active patches and reference-learning diagnostics;
 - **Would trigger — capture OFF** in Preview, or **Candidate — capture ON** in Monitoring.
+
+The panel names the rejection that applies to the displayed patch. Below K, the peak readout remains available and the patch measurements appear once pixels reach K. A dense frame with too many threshold pixels is reported as a whole frame. **Background and noise** holds the reference learning time and the minimum noise bound. Settings are copied to each trigger and to the clip's measured peak.
+
+Open **View → Histogram** to check the original sample distribution in Preview or Monitoring. It refreshes from the GUI's latest frame up to five times per second while visible. The end-code percentages use the stream's declared sample range. **Fit range** adjusts the ADU axis and **Log counts** changes the vertical count scale.
 
 After a live camera edit, the history and model are invalidated. Preview shows **Settling** instead of meaningful threshold proximity for an estimate of twice the longer old/new exposure plus one second. Every received frame still enters the analysis path; during this interval the reference is reinitialised using reused, charged arrays, so a delayed brightness step cannot latch the old reference. The normal model then learns again. The SDK does not stamp individual frames with their settings, so this estimate is not proof of a frame's configuration. A long old exposure is also allowed to complete before the no-frame watchdog uses the shorter new exposure.
 

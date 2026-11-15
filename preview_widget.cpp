@@ -8,7 +8,7 @@
 PreviewWidget::PreviewWidget(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumSize(640, 480);
+    setMinimumSize(320, 240);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setCursor(Qt::CrossCursor);
     setToolTip("Click the image to place a test flash. Coordinates refer to the original frame.");

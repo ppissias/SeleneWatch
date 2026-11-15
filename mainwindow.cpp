@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "detection_panel.h"
 #include "display_panel.h"
+#include "histogram_panel.h"
 #include "camera_panel.h"
 #include "qhy_camera_panel.h"
 
@@ -69,6 +70,8 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupStatusBar();
     setupDetectionPanel();
     setupDisplayPanel();
+    setupHistogramPanel();
+    // Only builds with the adapter and tests supplying a fake SDK get the camera entry and dock.
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
     if (cameraApi_)
     {
@@ -127,6 +130,8 @@ MainWindow::~MainWindow()
     if (detectionPanel_) disconnect(detectionPanel_, nullptr, this, nullptr);
     if (displayDock_) disconnect(displayDock_, nullptr, this, nullptr);
     if (displayPanel_) disconnect(displayPanel_, nullptr, this, nullptr);
+    if (histogramDock_) disconnect(histogramDock_, nullptr, this, nullptr);
+    if (histogramPanel_) disconnect(histogramPanel_, nullptr, this, nullptr);
     saveDetectionSettings();
     saveDisplaySettings();
     if (bufferReadoutTimer_)
@@ -152,6 +157,9 @@ void MainWindow::setupDetectionPanel()
     settings.minPixels = saved.value("detection/minPixels", settings.minPixels).toInt();
     settings.maxPixels = saved.value("detection/maxPixels", settings.maxPixels).toInt();
     settings.oneFrame = saved.value("detection/oneFrame", settings.oneFrame).toBool();
+    settings.maxPatchBoxRatio = saved.value("detection/maxPatchBoxRatio", settings.maxPatchBoxRatio).toDouble();
+    settings.referenceTimeConstantSeconds = saved.value("detection/referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds).toDouble();
+    settings.minNoiseAdu = saved.value("detection/minNoiseAdu", settings.minNoiseAdu).toDouble();
     detectionPanel_->setSettings(settings.valid() ? settings : DetectionSettings{});
     session_->setDetectionSettings(detectionPanel_->settings());
     connect(detectionPanel_, &DetectionPanel::settingsChanged, this, [this] {
@@ -172,6 +180,9 @@ void MainWindow::saveDetectionSettings()
     saved.setValue("detection/minPixels", values.minPixels);
     saved.setValue("detection/maxPixels", values.maxPixels);
     saved.setValue("detection/oneFrame", values.oneFrame);
+    saved.setValue("detection/maxPatchBoxRatio", values.maxPatchBoxRatio);
+    saved.setValue("detection/referenceTimeConstantSeconds", values.referenceTimeConstantSeconds);
+    saved.setValue("detection/minNoiseAdu", values.minNoiseAdu);
     saved.sync();
 }
 
@@ -210,9 +221,43 @@ void MainWindow::saveDisplaySettings()
     saved.setValue("display/mode", static_cast<int>(display.mode));
     saved.setValue("display/black", display.black); saved.setValue("display/white", display.white);
     saved.setValue("display/invert", display.invert); saved.setValue("display/debayer", display.debayer);
+    saved.setValue("histogram/visible", !histogramDock_->isHidden());
+    saved.setValue("histogram/fitRange", histogramPanel_->fitRange());
+    saved.setValue("histogram/logCounts", histogramPanel_->logCounts());
     saved.setValue("capture/history", capture.historySeconds); saved.setValue("capture/post", capture.postSeconds);
     saved.setValue("capture/maxPost", capture.maxPostSeconds); saved.setValue("capture/memoryMiB", static_cast<int>(capture.memoryBytes / (1024 * 1024)));
     saved.sync();
+}
+
+void MainWindow::setupHistogramPanel()
+{
+    histogramPanel_ = new HistogramPanel(this);
+    histogramDock_ = new QDockWidget("Histogram", this);
+    histogramDock_->setObjectName("histogramDock");
+    histogramDock_->setWidget(histogramPanel_);
+    addDockWidget(Qt::BottomDockWidgetArea, histogramDock_);
+    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    menuBar()->actions().front()->menu()->addAction(histogramDock_->toggleViewAction());
+
+    const QSettings saved;
+    histogramPanel_->setOptions(saved.value("histogram/fitRange", false).toBool(),
+        saved.value("histogram/logCounts", true).toBool());
+    histogramDock_->setVisible(saved.value("histogram/visible", false).toBool());
+    connect(histogramDock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (visible) updateHistogram(true);
+    });
+    connect(histogramPanel_, &HistogramPanel::rangeChanged, this, [this] { updateHistogram(true); });
+}
+
+// Sample the latest preview frame at GUI cadence, with an immediate refresh on visibility or range changes.
+void MainWindow::updateHistogram(bool force)
+{
+    if (!latestFrame_ || !histogramDock_->isVisible()) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (!force && now - lastHistogramTime_ < std::chrono::milliseconds{200}) return;
+    histogramPanel_->setFrame(*latestFrame_);
+    lastHistogramTime_ = now;
 }
 
 void MainWindow::renderPreview()
@@ -509,6 +554,8 @@ void MainWindow::startStream(Session::Mode mode)
     session_->setSource(std::move(source));
     ui_->previewWidget->clear();
     latestFrame_.reset();
+    histogramPanel_->clear();
+    lastHistogramTime_ = {};
     detectionPanel_->setView({});
     session_->setCaptureSettings(displayPanel_->captureSettings());
     latestDetection_ = {};
@@ -747,6 +794,7 @@ void MainWindow::showLatestFrame()
         updateFrameLabel(*frame);
         latestFrame_ = frame;
         renderPreview();
+        updateHistogram();
         if (packet.detection)
         {
             const auto& view = *packet.detection;

@@ -26,6 +26,7 @@
 class RecordingSource final : public FrameSource
 {
 public:
+    // Playback pacing for the worker. Both modes use the recording's timestamps.
     enum class Speed
     {
         RealTime,

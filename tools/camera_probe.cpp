@@ -156,6 +156,7 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
         auto input=makeInput(config);
         CameraProbeReadback layout;
         QObject context; std::vector<ClipWriteResult> written;
+        // Hash a sampled frame before writing and find the same timestamp in the saved SER.
         struct Sample { std::chrono::system_clock::time_point time; QByteArray hash; bool matched{false}; };
         std::vector<Sample> samples;
         std::vector<double> detectorTimes;
@@ -272,6 +273,7 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
             Frame f; f.data.resize(reader.frameBytes());
             QFile note(result.folder+"/event.txt"); std::set<int> injected;
             std::map<int,uint64_t> indices;
+            // Trigger index and measured peak used to check recovery of the injected test flash.
             struct Candidate { uint64_t index; int x,y; };
             std::vector<Candidate> triggers;
             if (note.open(QIODevice::ReadOnly)) for (const auto& line:QString::fromUtf8(note.readAll()).split('\n'))

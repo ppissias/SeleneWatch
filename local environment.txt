@@ -111,6 +111,11 @@ Quick Start (PowerShell Shortcut)
     cmake --build out/build/debug
     .\out\build\debug\SeleneWatch.exe
 
+  For live cameras, launch the build with both SDKs from the same PowerShell window.
+    .\out\build\both-release\SeleneWatch.exe
+  With the stream stopped, choose ZWO ASI camera or QHY camera from Source at the top left.
+  The device list opens on the left. Use Refresh cameras if the device is missing.
+
 Command Line Build (Manual)
   Open a command prompt or PowerShell, then:
 

@@ -145,6 +145,12 @@ Four complete 500-frame recordings were checked with five independent one-frame 
 
 Methods, runtime, unchanged historical measurements, scientific limitations, and validation are in [docs/reference-and-manual-validation.md](docs/reference-and-manual-validation.md), with complete trial summaries in [docs/reference-rearming-measurements.json](docs/reference-rearming-measurements.json). A connected/overlapping transient inside an already active patch remains unresolved by spatial persistence; no blind warm-up interval or automatic threshold tuning was added.
 
+### Live threshold controls and rejection feedback — 15 November 2026
+
+The observer can adjust six numeric settings with sliders and exact entry, plus the existing one- or two-frame confirmation choice. The maximum bounding-box area per above-K pixel defaults to 4.0. The **Background and noise** section exposes the reference time constant (2.0 s) and the minimum noise floor (0.50 ADU). Their values apply at the next frame and are remembered with the other detector settings. The time constant controls future reference updates. Each trigger, candidate record and measured clip peak carries its own settings.
+
+The live panel distinguishes a peak below K, a patch outside the pixel bounds, a box-to-patch ratio above its limit, and a frame that exceeds the bounded patch search. It also shows the pending 1 / 2 frames state when two-frame confirmation is selected. The measure and measure-batch probes accept `maxPatchBoxRatio`, `referenceTimeConstantSeconds` and `minNoiseAdu` for replay calibration. Constructed tests show the corresponding changes in patch acceptance, noise-normalised response and background learning. Field calibration remains open. [Preview and Monitoring](docs/preview-monitoring.md)
+
 ### Out of this step
 
 - Limb fitting, registration, optical flow, and a separate transit detector. OpenCV is not a dependency of this feature.
@@ -244,6 +250,12 @@ Ten new core cases cover native low/high 12/16-bit contrast and evidence invaria
 Release preview conversion means (linear/window/auto): **1296×964 Mono8: 2.583 / 5.147 / 6.367 ms**; **1280×1024 RGB: 7.909 / 23.318 / 25.249 ms**; **1296×964 Mono16, 13 significant high bits: 3.233 / 14.622 / 14.051 ms**. Reading and QWidget composition are excluded. Buffered 128-repeat SER writes measured **3,641.71 / 4,283.34 / 3,863.77 MB/s**, respectively, including Qt flush but excluding display previews. These generated TEST clips exercise roughly 160/503/320 MB and are not sustained physical-disk guarantees. The measured headroom on the available 22.5/39.3 MB/s inputs does not justify increasing the conservative writer share. Full measurements are in [docs/feature-5-measurements.json](docs/feature-5-measurements.json).
 
 Acceptance **1, 3, 4, and 5 pass**. Item **2 is partial**: controls, native-bit handling, and constructed faint-detail visibility pass; a real earthshine recording remains unidentified in the survey. Auto-stretch of the sole Mono16 archive file shows noise, not usable lunar terrain. This shares Feature-9's field-data gap. No dependencies or license terms changed. The original proposal is preserved above; the feature has not moved into implemented history while that field check remains open.
+
+### Optional live histogram — 15 November 2026
+
+**View → Histogram** opens a dock below the preview. Its fixed bin array counts samples from the latest GUI frame up to five times per second when the dock is visible. The horizontal axis uses the declared native ADU range or the observed range with **Fit range** enabled. The vertical scale supports linear or logarithmic counts. The dock remembers visibility and the two scale options.
+
+Counts are calculated before display conversion and use the declared sample alignment. A single distribution combines Bayer sample codes or the stored RGB channels. The readout includes the exact observed range and the fractions at zero and at the maximum code. The maximum code follows the stream's declared layout and can be 65535 for a camera that preserves full RAW16 words. Tests cover high/low alignment, Bayer and RGB, endpoint counts, range fitting, and the optional dock in Preview. A bench check used the histogram during RAW8 and RAW16 Preview and Monitoring on the ASI120MM Mini. [Preview and Monitoring](docs/preview-monitoring.md)
 
 ### Out of this step
 

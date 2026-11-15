@@ -20,6 +20,7 @@ Frame scene(int dx = 0, int dy = 0, double gain = 1, double offset = 0)
 }
 }
 
+// Checks known translations, ambiguous scenes and the native-pixel comparison crop.
 class RegistrationTest : public QObject
 {
     Q_OBJECT

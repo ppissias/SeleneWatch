@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 
+// The image cleanup callback releases the charged storage when the final image copy is gone.
 QImage makeBudgetImage(int width, int height, QImage::Format format, MemoryBudget budget)
 {
     const int channels = format == QImage::Format_Grayscale8 ? 1 : format == QImage::Format_RGB888 ? 3 : 4;
@@ -20,6 +21,28 @@ QImage makeBudgetImage(int width, int height, QImage::Format format, MemoryBudge
 
 namespace {
 
+bool hasPreviewSamples(const Frame& frame)
+{
+    return frame.width > 0 && frame.height > 0 && bytesPerPixel(frame.format) != 0
+        && frame.data.size() == frameBytes(frame.width, frame.height, frame.format)
+        && frame.significantBits >= 1 && frame.significantBits <= 16;
+}
+
+int maximumCode(const Frame& frame)
+{
+    return frame.format == PixelFormat::Mono16 ? (1 << frame.significantBits) - 1 : 255;
+}
+
+int mono16Shift(const Frame& frame)
+{
+    return frame.alignment == BitAlignment::High ? 16 - frame.significantBits : 0;
+}
+
+int mono16Sample(const uint8_t* data, int shift)
+{
+    return (data[0] | (data[1] << 8)) >> shift;
+}
+
 // R=0, G=1, B=2 in each top-left 2x2 filter cell.
 int channelAt(BayerPattern pattern, int x, int y)
 {
@@ -35,8 +58,7 @@ double sampleAt(const Frame& frame, size_t index, int channel = -1)
         if (channel >= 0) return frame.data[3 * index + channel];
         return (frame.data[3 * index] + frame.data[3 * index + 1] + frame.data[3 * index + 2]) / 3.0;
     }
-    const int shift = frame.alignment == BitAlignment::High ? 16 - frame.significantBits : 0;
-    return (frame.data[2 * index] | (frame.data[2 * index + 1] << 8)) >> shift;
+    return mono16Sample(frame.data.data() + 2 * index, mono16Shift(frame));
 }
 
 double colourAt(const Frame& frame, int x, int y, int channel)
@@ -65,12 +87,10 @@ double midtones(double m, double value)
 
 QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings, DisplayLevels* levels)
 {
-    if (frame.width <= 0 || frame.height <= 0 || bytesPerPixel(frame.format) == 0
-        || frame.data.size() != frameBytes(frame.width, frame.height, frame.format)
-        || frame.significantBits < 1 || frame.significantBits > 16 || !settings.valid()
+    if (!hasPreviewSamples(frame) || !settings.valid()
         || static_cast<int>(frame.bayer) < 0 || static_cast<int>(frame.bayer) > 4) return {};
     const MemoryBudget budget = frame.data.get_allocator().budget;
-    const int maximum = frame.format == PixelFormat::Mono16 ? (1 << frame.significantBits) - 1 : 255;
+    const int maximum = maximumCode(frame);
     double black = settings.mode == DisplayMode::Window ? settings.black * maximum : 0;
     double white = settings.mode == DisplayMode::Window ? settings.white * maximum : maximum;
     double median = 0, m = 0.5;
@@ -122,4 +142,48 @@ QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings, Display
         }
     }
     return image;
+}
+
+PreviewHistogram frameToPreviewHistogram(const Frame& frame, bool fitRange)
+{
+    PreviewHistogram result;
+    if (!hasPreviewSamples(frame)) return result;
+
+    result.maximumCode = maximumCode(frame);
+    result.rangeMaximum = result.maximumCode;
+    result.observedMinimum = 65535;
+    const auto visitSamples = [&frame](const auto& visit) {
+        if (frame.format == PixelFormat::Mono16)
+        {
+            const int shift = mono16Shift(frame);
+            const auto* bytes = frame.data.data();
+            for (size_t i = 0; i < frame.data.size(); i += 2) visit(mono16Sample(bytes + i, shift));
+        }
+        else
+        {
+            for (uint8_t sample : frame.data) visit(sample);
+        }
+    };
+    const auto measure = [&result](int sample) {
+        ++result.sampleCount;
+        result.observedMinimum = std::min(result.observedMinimum, sample);
+        result.observedMaximum = std::max(result.observedMaximum, sample);
+        result.zeroCount += sample == 0;
+        result.maximumCodeCount += sample == result.maximumCode;
+    };
+    if (fitRange)
+    {
+        // Establish the observed bounds before counting into the fitted bins.
+        visitSamples(measure);
+        result.rangeMinimum = result.observedMinimum;
+        result.rangeMaximum = result.observedMaximum;
+    }
+    const int range = result.rangeMaximum - result.rangeMinimum + 1;
+    result.binCount = std::min(PreviewHistogram::maxBins, range);
+    visitSamples([&](int sample) {
+        if (!fitRange) measure(sample);
+        const int offset = std::clamp(sample, result.rangeMinimum, result.rangeMaximum) - result.rangeMinimum;
+        ++result.bins[static_cast<size_t>(offset * result.binCount / range)];
+    });
+    return result;
 }

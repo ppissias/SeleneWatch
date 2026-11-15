@@ -7,8 +7,10 @@
 #include <string>
 #include <vector>
 
+// ASI controls the adapter reads or sets to configure native capture.
 enum class ZwoControl { Exposure, Gain, Offset, Bandwidth, HighSpeed, Flip };
 
+// SDK range and current value in native units, with write and automatic-mode status.
 struct ZwoControlInfo
 {
     ZwoControl kind;
@@ -17,6 +19,7 @@ struct ZwoControlInfo
     bool writable{false}, automatic{false};
 };
 
+// Capabilities returned by SDK enumeration. Formats describe raw transport and sensorBits describes the ADC.
 struct ZwoCameraInfo
 {
     int id{-1}, width{0}, height{0}, sensorBits{0};
@@ -37,6 +40,7 @@ struct ZwoSettings
     bool operator==(const ZwoSettings&) const = default;
 };
 
+// Camera identity, capabilities and actual readbacks from one inspection or configuration.
 struct ZwoProfile
 {
     ZwoCameraInfo camera;

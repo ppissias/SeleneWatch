@@ -118,6 +118,7 @@ private:
 };
 }
 
+// Exercises manual save and capture mode transitions at controlled frame boundaries.
 class ManualCaptureTest : public QObject
 {
     Q_OBJECT

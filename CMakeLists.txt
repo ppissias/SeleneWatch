@@ -40,6 +40,7 @@ if(WIN32)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
+# Use the ASI import library and place the matching DLL and notice beside the build outputs.
 set(SELENEWATCH_ZWO_SDK_DIR "" CACHE PATH "Optional ZWO ASI SDK root, containing include and lib/x64")
 if(SELENEWATCH_ZWO_SDK_DIR)
     if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -61,6 +62,7 @@ if(SELENEWATCH_ZWO_SDK_DIR)
     add_dependencies(selenewatch_core selenewatch_zwo_runtime)
 endif()
 
+# Build against the QHY declarations. The adapter discovers the user's DLL at runtime.
 set(SELENEWATCH_QHY_SDK_DIR "" CACHE PATH "Optional QHY SDK root containing include/qhyccd.h")
 if(SELENEWATCH_QHY_SDK_DIR)
     if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -77,6 +79,7 @@ endif()
 
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
+    histogram_panel.h histogram_panel.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)

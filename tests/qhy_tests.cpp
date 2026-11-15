@@ -9,6 +9,7 @@
 #include <mutex>
 
 namespace {
+// Collects frames and failures from the QHY worker. The test polls through locked accessors.
 class Receiver : public FrameSourceListener
 {
 public:
@@ -27,6 +28,7 @@ QString readText(const QString& path)
     QFile file(path); return file.open(QIODevice::ReadOnly)?QString::fromUtf8(file.readAll()):QString{};
 }
 }
+// Exercises QHY lifecycle, native frame validation and evidence using a fake SDK.
 class QhyTest : public QObject
 {
     Q_OBJECT

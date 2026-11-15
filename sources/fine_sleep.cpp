@@ -10,6 +10,7 @@ FineSleepResolution::FineSleepResolution()
 {
 }
 
+// Release a timer request only when Windows accepted it in the constructor.
 FineSleepResolution::~FineSleepResolution()
 {
     if (held_)

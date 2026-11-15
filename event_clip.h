@@ -8,6 +8,7 @@
 #include <chrono>
 #include <vector>
 
+// How a trigger entered the clip, through detection or the observer's Save now request.
 enum class TriggerKind { Automatic, Manual };
 
 // One candidate inside a clip.

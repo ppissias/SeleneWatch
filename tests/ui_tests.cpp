@@ -15,6 +15,7 @@
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUuid>
+#include <QtGui/QAction>
 #include <QtGui/QFontDatabase>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -24,6 +25,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QToolButton>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -36,12 +38,14 @@ QString text(const QString& path)
 }
 }
 
+// Drives the offscreen window to check controls, saved preferences and capture workflows.
 class UiTest : public QObject
 {
     Q_OBJECT
 private slots:
     void init() { QSettings saved; saved.clear(); saved.sync(); }
     void controlsPreserveValidSizeLimits();
+    void detectionPanelExplainsPatchRejections();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
         DetectionPanel panel;
@@ -67,8 +71,17 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
     {
         MainWindow window(nullptr,dir.path()); window.show();
         window.findChild<QDockWidget*>("detectionDock")->raise();
+        auto* histogram = window.findChild<QDockWidget*>("histogramDock");
+        auto* samples = histogram->findChild<QLabel*>("histogramSampleRange");
+        QVERIFY(histogram->isHidden());
         window.findChild<QPushButton*>("startButton")->click();
         auto* preview=window.findChild<PreviewWidget*>();
+        QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+        QCOMPARE(samples->text(), QString("Waiting for frames"));
+        histogram->toggleViewAction()->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(samples->text().contains("At max code (255)"), 3000);
+        histogram->findChild<QCheckBox*>("histogramFitRange")->setChecked(true);
+        histogram->findChild<QCheckBox*>("histogramLogCounts")->setChecked(false);
         QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
         QTest::mouseClick(preview,Qt::LeftButton,Qt::NoModifier,preview->imageRect().center());
         window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(100);
@@ -84,6 +97,11 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
         window.findChild<QPushButton*>("stopButton")->click();
     }
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
+    MainWindow restored(nullptr, dir.path());
+    auto* histogram = restored.findChild<QDockWidget*>("histogramDock");
+    QVERIFY(!histogram->isHidden());
+    QVERIFY(histogram->findChild<QCheckBox*>("histogramFitRange")->isChecked());
+    QVERIFY(!histogram->findChild<QCheckBox*>("histogramLogCounts")->isChecked());
 }
 
 void UiTest::qhyRuntimeOverridePersistsAndRecovers()
@@ -298,6 +316,9 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
     QCOMPARE(panel->profile().current.width,64);
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),12.0);
+    auto* histogram = window.findChild<QDockWidget*>("histogramDock");
+    histogram->toggleViewAction()->trigger();
+    QTRY_VERIFY_WITH_TIMEOUT(histogram->findChild<QLabel*>("histogramSampleRange")->text().contains("At max code (65535)"), 3000);
     QVERIFY(!save->isEnabled());
     monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),3,3000);
@@ -411,14 +432,47 @@ void UiTest::controlsPreserveValidSizeLimits()
     QVERIFY(changed.count() >= 2);
     panel.findChild<QSlider*>("sigmaSlider")->setValue(600);
     QVERIFY(panel.settings().sigma > 6);
+    panel.findChild<QSlider*>("compactnessSlider")->setValue(600);
+    QVERIFY(panel.settings().maxPatchBoxRatio > 4);
+    panel.findChild<QToolButton*>("backgroundSettings")->click();
+    panel.findChild<QSlider*>("referenceTimeSlider")->setValue(600);
+    panel.findChild<QSlider*>("minimumNoiseSlider")->setValue(600);
+    QVERIFY(panel.settings().referenceTimeConstantSeconds > 2);
+    QVERIFY(panel.settings().minNoiseAdu > 0.5);
     QVERIFY(panel.settings().valid());
+}
+
+void UiTest::detectionPanelExplainsPatchRejections()
+{
+    DetectionPanel panel;
+    DetectionView view;
+    view.summary.ready = true;
+    view.summary.peakSigma = 5.0;
+    const auto* label = panel.findChild<QLabel*>("detectionState");
+    panel.setView(view);
+    QVERIFY(label->text().contains("Below K"));
+    view.summary.peakSigma = 10.0;
+    view.summary.brightPixels = 5;
+    view.summary.boxWidth = 3;
+    view.summary.boxHeight = 2;
+    panel.setView(view);
+    QVERIFY(label->text().contains("5 px, needs 8"));
+    view.summary.brightPixels = 9;
+    view.summary.boxWidth = view.summary.boxHeight = 9;
+    panel.setView(view);
+    QVERIFY(label->text().contains("Box / patch 9.00 exceeds 4.00"));
+    view.summary.brightPixels = 5000;
+    view.summary.patchSearchLimited = true;
+    panel.setView(view);
+    QVERIFY(label->text().contains("Too many pixels at K"));
+    QVERIFY(panel.findChild<QLabel*>("patchReading")->text().contains("across the frame"));
 }
 
 void UiTest::livePanelInjectionEvidenceAndSavedSettings()
 {
     QTemporaryDir output;
     QVERIFY(output.isValid());
-    DetectionSettings chosen{7.5, 9, 500, true};
+    DetectionSettings chosen{7.5, 9, 500, true, 5.25, 3.5, 0.75};
     {
         MainWindow window(nullptr, output.path());
         window.show();
@@ -434,6 +488,9 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         panel->findChild<QDoubleSpinBox*>("detectionSigma")->setValue(chosen.sigma);
         panel->findChild<QSpinBox*>("detectionMinPixels")->setValue(chosen.minPixels);
         panel->findChild<QSpinBox*>("detectionMaxPixels")->setValue(chosen.maxPixels);
+        panel->findChild<QDoubleSpinBox*>("detectionMaxBoxRatio")->setValue(chosen.maxPatchBoxRatio);
+        panel->findChild<QDoubleSpinBox*>("detectionReferenceTime")->setValue(chosen.referenceTimeConstantSeconds);
+        panel->findChild<QDoubleSpinBox*>("detectionMinNoise")->setValue(chosen.minNoiseAdu);
         start->click();
         window.findChild<QPushButton*>("monitoringButton")->click();
         QVERIFY(stop->isEnabled());
@@ -468,6 +525,7 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         })(), 10000);
         const QString metadata = text(QDir(clipFolder).filePath("event.txt"));
         QVERIFY(metadata.contains("sigma=7.5 min_pixels=9 max_pixels=500 one_frame=yes"));
+        QVERIFY(metadata.contains("max_patch_box_ratio=5.25 reference_time_constant_seconds=3.5 min_noise_adu=0.75"));
         QCOMPARE(metadata.count(" test_blip="), 1);
         SerReader reader;
         std::string error;

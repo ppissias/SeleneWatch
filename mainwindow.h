@@ -19,6 +19,7 @@ class RecordingSource;
 class SyntheticFrameSource;
 class DetectionPanel;
 class DisplayPanel;
+class HistogramPanel;
 class CameraPanel;
 class ZwoApi;
 class ZwoSource;
@@ -68,8 +69,10 @@ private:
     void updateDetectionDisplay();
     void saveDetectionSettings();
     void setupDisplayPanel();
+    void setupHistogramPanel();
     void saveDisplaySettings();
     void renderPreview();
+    void updateHistogram(bool force = false);
 
     // The source the controls describe. Null, with a message, when none can be made.
     std::unique_ptr<FrameSource> makeSource();
@@ -105,7 +108,10 @@ private:
     DetectionSummary latestDetection_;
     DisplayPanel* displayPanel_{nullptr};
     QDockWidget* displayDock_{nullptr};
+    HistogramPanel* histogramPanel_{nullptr};
+    QDockWidget* histogramDock_{nullptr};
     FramePtr latestFrame_;
+    std::chrono::steady_clock::time_point lastHistogramTime_{};
     std::shared_ptr<ZwoApi> cameraApi_;
     CameraPanel* cameraPanel_{nullptr};
     QDockWidget* cameraDock_{nullptr};

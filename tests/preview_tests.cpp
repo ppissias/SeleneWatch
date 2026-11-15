@@ -3,6 +3,7 @@
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
+// Checks selection coordinates through scaling and letterboxing, and verifies source image bytes.
 class PreviewWidgetTest : public QObject
 {
     Q_OBJECT

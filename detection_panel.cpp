@@ -1,17 +1,29 @@
 #include "detection_panel.h"
 #include "preview_image.h"
 
+#include <QtCore/QStringList>
 #include <QtGui/QPainter>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QToolButton>
+#include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
+
+namespace {
+double boxArea(const DetectionSummary& summary)
+{
+    return static_cast<double>(summary.boxWidth) * summary.boxHeight;
+}
+}
 
 // Logarithmic travel keeps small thresholds easy to place while a spin box
 // provides exact values. Green marks now; amber holds the recent maximum.
@@ -30,25 +42,37 @@ public:
             / std::log(upper_ / lower_)));
     }
     double number(int position) const { return lower_ * std::pow(upper_ / lower_, position / 1000.0); }
-    void markers(double now, double high) { now_ = position(now); high_ = position(high); update(); }
+    void markers(double now, double high = 0)
+    {
+        now_ = now > 0 ? position(now) : -1;
+        high_ = high > 0 ? position(high) : -1;
+        update();
+    }
 protected:
     void paintEvent(QPaintEvent* event) override
     {
         QSlider::paintEvent(event);
         QPainter painter(this);
         const auto x = [this](int value) { return 8 + value * (width() - 16) / 1000; };
-        painter.setPen(QPen(QColor("#008b83"), 2));
-        painter.drawLine(x(now_), height() / 2 - 6, x(now_), height() / 2 + 6);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor("#b37900"));
-        painter.drawPolygon(QPolygonF{QPointF(x(high_) - 4, height() - 1),
-            QPointF(x(high_) + 4, height() - 1), QPointF(x(high_), height() - 7)});
+        if (now_ >= 0)
+        {
+            painter.setPen(QPen(QColor("#008b83"), 2));
+            painter.drawLine(x(now_), height() / 2 - 6, x(now_), height() / 2 + 6);
+        }
+        if (high_ >= 0)
+        {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor("#b37900"));
+            painter.drawPolygon(QPolygonF{QPointF(x(high_) - 4, height() - 1),
+                QPointF(x(high_) + 4, height() - 1), QPointF(x(high_), height() - 7)});
+        }
     }
 private:
     double lower_, upper_;
-    int now_{0}, high_{0};
+    int now_{-1}, high_{-1};
 };
 
+// Plots peak sigma against K over the last ten seconds of source time.
 class PeakHistory : public QWidget
 {
 public:
@@ -90,7 +114,15 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("detectionPanel");
     setMinimumWidth(350);
-    auto* layout = new QGridLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget;
+    auto* layout = new QGridLayout(content);
+    scroll->setWidget(content);
+    outer->addWidget(scroll);
     layout->setColumnStretch(0, 1);
     sigma_ = new QDoubleSpinBox(this);
     sigma_->setObjectName("detectionSigma");
@@ -101,6 +133,15 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     sigmaSlider_ = new MeterSlider(0.1, 1000, this); sigmaSlider_->setObjectName("sigmaSlider");
     minSlider_ = new MeterSlider(1, 1'000'000, this); minSlider_->setObjectName("minimumSlider");
     maxSlider_ = new MeterSlider(1, 1'000'000, this); maxSlider_->setObjectName("maximumSlider");
+    compactness_ = new QDoubleSpinBox(this);
+    compactness_->setObjectName("detectionMaxBoxRatio");
+    compactness_->setRange(1.0, 1000.0);
+    compactness_->setDecimals(2);
+    compactness_->setSingleStep(0.1);
+    compactness_->setSuffix(" ×");
+    compactness_->setToolTip("Largest allowed bounding-box area divided by the number of pixels in the patch.");
+    compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), this);
+    compactnessSlider_->setObjectName("compactnessSlider");
     sigmaReading_ = new QLabel("Waiting for measurements", this); sigmaReading_->setObjectName("sigmaReading");
     sigmaReading_->setWordWrap(true);
     sizeReading_ = new QLabel("Patch: --", this); sizeReading_->setObjectName("patchReading"); sizeReading_->setWordWrap(true);
@@ -111,37 +152,83 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(minSlider_, 4, 0, 1, 2);
     layout->addWidget(new QLabel("Maximum patch", this), 5, 0); layout->addWidget(maximum_, 5, 1);
     layout->addWidget(maxSlider_, 6, 0, 1, 2);
-    layout->addWidget(sizeReading_, 7, 0, 1, 2);
+    layout->addWidget(new QLabel("Maximum box / patch", this), 7, 0);
+    layout->addWidget(compactness_, 7, 1);
+    layout->addWidget(compactnessSlider_, 8, 0, 1, 2);
+    layout->addWidget(sizeReading_, 9, 0, 1, 2);
     oneFrame_ = new QCheckBox("Allow a one-frame trigger", this); oneFrame_->setObjectName("oneFrameTrigger");
     oneFrame_->setToolTip("Off requires two consecutive passing frames. A single-frame flash can then be missed.");
-    layout->addWidget(oneFrame_, 8, 0, 1, 2);
+    layout->addWidget(oneFrame_, 10, 0, 1, 2);
     history_ = new PeakHistory(this); history_->setObjectName("peakHistory");
-    layout->addWidget(history_, 9, 0, 1, 2);
+    layout->addWidget(history_, 11, 0, 1, 2);
     state_ = new QLabel("Start a source to measure its noise.", this); state_->setObjectName("detectionState");
     state_->setWordWrap(true);
-    layout->addWidget(state_, 10, 0, 1, 2);
-    layout->addWidget(new QLabel("Preview overlay", this), 11, 0);
+    layout->addWidget(state_, 12, 0, 1, 2);
+    layout->addWidget(new QLabel("Preview overlay", this), 13, 0);
     overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
     overlay_->addItems({"None", "Sigma map", "Noise map"});
-    layout->addWidget(overlay_, 11, 1);
+    layout->addWidget(overlay_, 13, 1);
     mapScale_ = new QLabel("Overlays affect the display only.", this); mapScale_->setWordWrap(true);
-    layout->addWidget(mapScale_, 12, 0, 1, 2);
-    layout->setRowStretch(13, 1);
+    layout->addWidget(mapScale_, 14, 0, 1, 2);
+
+    auto* showBackground = new QToolButton(content);
+    showBackground->setObjectName("backgroundSettings");
+    showBackground->setText("Background and noise");
+    showBackground->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    showBackground->setArrowType(Qt::RightArrow);
+    showBackground->setCheckable(true);
+    layout->addWidget(showBackground, 15, 0, 1, 2);
+    auto* background = new QWidget(content);
+    auto* model = new QFormLayout(background);
+    model->setContentsMargins(0, 0, 0, 0);
+    referenceTime_ = new QDoubleSpinBox(background);
+    referenceTime_->setObjectName("detectionReferenceTime");
+    referenceTime_->setRange(0.05, 300.0);
+    referenceTime_->setSuffix(" s");
+    referenceTime_->setSingleStep(0.1);
+    referenceTime_->setToolTip("Time constant for background learning. Lower values follow brightness changes faster.");
+    referenceSlider_ = new MeterSlider(referenceTime_->minimum(), referenceTime_->maximum(), background);
+    referenceSlider_->setObjectName("referenceTimeSlider");
+    minimumNoise_ = new QDoubleSpinBox(background);
+    minimumNoise_->setObjectName("detectionMinNoise");
+    minimumNoise_->setRange(0.01, 65535.0);
+    minimumNoise_->setSuffix(" ADU");
+    minimumNoise_->setSingleStep(0.1);
+    minimumNoise_->setToolTip("Lower bound for estimated noise in native sample units.");
+    noiseSlider_ = new MeterSlider(minimumNoise_->minimum(), minimumNoise_->maximum(), background);
+    noiseSlider_->setObjectName("minimumNoiseSlider");
+    model->addRow("Reference time", referenceTime_);
+    model->addRow(referenceSlider_);
+    model->addRow("Minimum noise", minimumNoise_);
+    model->addRow(noiseSlider_);
+    layout->addWidget(background, 16, 0, 1, 2);
+    layout->setRowStretch(17, 1);
+    background->hide();
+    connect(showBackground, &QToolButton::toggled, this, [showBackground, background](bool shown) {
+        showBackground->setArrowType(shown ? Qt::DownArrow : Qt::RightArrow);
+        background->setVisible(shown);
+    });
 
     connect(sigma_, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(minimum_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(maximum_, &QSpinBox::valueChanged, this, [this] { controlsChanged(true); });
+    for (auto* spin : {compactness_, referenceTime_, minimumNoise_})
+        connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(oneFrame_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
     connect(sigmaSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) sigma_->setValue(sigmaSlider_->number(p)); });
     connect(minSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimum_->setValue(static_cast<int>(std::round(minSlider_->number(p)))); });
     connect(maxSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) maximum_->setValue(static_cast<int>(std::round(maxSlider_->number(p)))); });
+    connect(compactnessSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) compactness_->setValue(compactnessSlider_->number(p)); });
+    connect(referenceSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) referenceTime_->setValue(referenceSlider_->number(p)); });
+    connect(noiseSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimumNoise_->setValue(noiseSlider_->number(p)); });
     connect(overlay_, &QComboBox::currentIndexChanged, this, [this] { emit displayChanged(); });
     setSettings({});
 }
 
 DetectionSettings DetectionPanel::settings() const
 {
-    return {sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked()};
+    return {sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
+        compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
 }
 
 void DetectionPanel::setSettings(const DetectionSettings& settings)
@@ -150,9 +237,15 @@ void DetectionPanel::setSettings(const DetectionSettings& settings)
     updating_ = true;
     sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.maxPixels);
     oneFrame_->setChecked(settings.oneFrame);
+    compactness_->setValue(settings.maxPatchBoxRatio);
+    referenceTime_->setValue(settings.referenceTimeConstantSeconds);
+    minimumNoise_->setValue(settings.minNoiseAdu);
     sigmaSlider_->setValue(sigmaSlider_->position(sigma_->value()));
     minSlider_->setValue(minSlider_->position(minimum_->value()));
     maxSlider_->setValue(maxSlider_->position(maximum_->value()));
+    compactnessSlider_->setValue(compactnessSlider_->position(compactness_->value()));
+    referenceSlider_->setValue(referenceSlider_->position(referenceTime_->value()));
+    noiseSlider_->setValue(noiseSlider_->position(minimumNoise_->value()));
     updating_ = false;
 }
 
@@ -175,26 +268,41 @@ QImage DetectionPanel::overlayImage() const { return overlayImage_; }
 void DetectionPanel::setView(const DetectionView& view)
 {
     const auto& summary = view.summary;
-    latest_=summary; settling_=view.settling;
+    latest_ = summary;
+    settling_ = view.settling;
+    const bool measuring = summary.ready && !view.settling;
+    const bool hasPatch = measuring && summary.brightPixels > 0 && !summary.patchSearchLimited;
     double high = 0;
     int big = 0;
     for (const auto& point : view.history) { high = std::max(high, point.peakSigma); big = std::max(big, point.brightPixels); }
-    sigmaSlider_->markers(summary.peakSigma, high);
-    minSlider_->markers(summary.brightPixels, big);
-    maxSlider_->markers(summary.brightPixels, big);
-    const double threshold=std::max(0.1,summary.settings.sigma);
-    sigmaReading_->setText(QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
-        .arg(summary.peakSigma,0,'f',1).arg(threshold,0,'f',1).arg(100*summary.peakSigma/threshold,0,'f',0).arg(high,0,'f',1));
-    const double compactness=static_cast<double>(summary.boxWidth)*summary.boxHeight/std::max(1,summary.brightPixels);
-    sizeReading_->setText(QString("Patch %1 px; allowed %2–%3 px. Recent high %4.\nBox / patch %5; maximum %6.")
-        .arg(summary.brightPixels).arg(summary.settings.minPixels).arg(summary.settings.maxPixels).arg(big)
-        .arg(compactness,0,'f',1).arg(kMaxPatchBoxRatio,0,'f',1));
-    updateDecision();
-    if (view.settling || !summary.ready)
+    const int patchPixels = hasPatch ? summary.brightPixels : 0;
+    const double compactness = hasPatch ? boxArea(summary) / patchPixels : 0;
+    sigmaSlider_->markers(measuring ? summary.peakSigma : 0, measuring ? high : 0);
+    minSlider_->markers(patchPixels, measuring ? big : 0);
+    maxSlider_->markers(patchPixels, measuring ? big : 0);
+    compactnessSlider_->markers(compactness);
+    noiseSlider_->markers(measuring ? summary.noiseFloor : 0);
+    if (measuring)
+    {
+        const double threshold = summary.settings.sigma;
+        sigmaReading_->setText(QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
+            .arg(summary.peakSigma, 0, 'f', 1).arg(threshold, 0, 'f', 1)
+            .arg(100 * summary.peakSigma / threshold, 0, 'f', 0).arg(high, 0, 'f', 1));
+        if (hasPatch)
+            sizeReading_->setText(QString("Patch %1 px (allowed %2–%3 px). Recent high %4.\nBox / patch %5. Maximum %6.")
+                .arg(patchPixels).arg(summary.settings.minPixels).arg(summary.settings.maxPixels).arg(big)
+                .arg(compactness, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2));
+        else if (summary.patchSearchLimited)
+            sizeReading_->setText(QString("%1 px at or above K across the frame.").arg(summary.brightPixels));
+        else
+            sizeReading_->setText("Patch size and shape appear when pixels reach K.");
+    }
+    else
     {
         sigmaReading_->setText(view.settling?"Settling after camera change — relearning before threshold feedback.":"Learning the reference — waiting for measurements.");
-        sizeReading_->setText(QString("Allowed patch: %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
+        sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
     }
+    updateDecision();
     history_->setView(view);
     overlayImage_ = {};
     if (!view.map || overlay() == DetectionOverlay::None)
@@ -256,10 +364,30 @@ void DetectionPanel::updateDecision()
         state_->setText(QString("Learning reference (%1 frame(s)). Capture %2.").arg(summary.learningFrames).arg(monitoring_?"ON":"OFF"));
         return;
     }
-    const QString decision=summary.passed?(summary.firing?(monitoring_?"Candidate — capture ON":"Would trigger — capture OFF")
-        :"Passing; persistence 1 / 2 frames") :"Quiet / patch rejected";
-    state_->setText(QString("Noise floor %1 ADU; peak (%2, %3).\n%4   Detector %5 ms/frame\n%6 active patches; longest %7 s. Background learning outside %8 protected pixels.\n%9")
-        .arg(summary.noiseFloor,0,'f',2).arg(summary.peakX).arg(summary.peakY).arg(decision)
-        .arg(summary.processingMs,0,'f',2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels)
+    QString decision;
+    if (summary.firing)
+        decision = monitoring_ ? "Candidate — capture ON" : "Would trigger — capture OFF";
+    else if (summary.passed)
+        decision = "Passing patch (1 / 2 frames)";
+    else if (summary.patchSearchLimited)
+        decision = "Too many pixels at K to measure individual patches";
+    else if (!summary.brightPixels)
+        decision = "Below K";
+    else
+    {
+        QStringList reasons;
+        const int pixels = summary.brightPixels;
+        if (pixels < summary.settings.minPixels)
+            reasons << QString("%1 px, needs %2").arg(pixels).arg(summary.settings.minPixels);
+        else if (pixels > summary.settings.maxPixels)
+            reasons << QString("%1 px, maximum %2").arg(pixels).arg(summary.settings.maxPixels);
+        if (boxArea(summary) > summary.settings.maxPatchBoxRatio * pixels)
+            reasons << QString("Box / patch %1 exceeds %2")
+                .arg(boxArea(summary) / pixels, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2);
+        decision = reasons.join(" · ");
+    }
+    state_->setText(QString("Noise floor %1 ADU (minimum %2). Peak (%3, %4).\n%5   Detector %6 ms/frame\nActive patches %7. Longest %8 s. Background learning outside %9 protected pixels.\n%10")
+        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
+        .arg(decision).arg(summary.processingMs,0,'f',2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels)
         .arg(summary.settings.oneFrame?"One passing frame can trigger.":"Two consecutive passing frames required."));
 }

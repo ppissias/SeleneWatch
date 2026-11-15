@@ -29,6 +29,7 @@ bool aliases(const QString& a,const QString& b)
     std::error_code error;
     return std::filesystem::equivalent(std::filesystem::path(a.toStdWString()),std::filesystem::path(b.toStdWString()),error);
 }
+// One independent capture pipeline for a sigma and injection choice, with its measured results.
 struct Trial
 {
     double sigma;

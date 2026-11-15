@@ -4,6 +4,7 @@
 #include <cassert>
 #include <mutex>
 
+// Counters and limit shared by copies of the budget, guarded by one mutex.
 struct MemoryBudget::State
 {
     explicit State(size_t ceiling) : limit(ceiling) {}
@@ -31,6 +32,7 @@ void MemoryBudget::release(size_t bytes) const
     state_->used -= bytes;
 }
 
+// Install a new ceiling only if it covers all buffers still held by readers and the writer.
 bool MemoryBudget::setLimit(size_t bytes)
 {
     if (!state_) { state_ = std::make_shared<State>(bytes); return true; }

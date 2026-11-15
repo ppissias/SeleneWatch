@@ -4,6 +4,8 @@
 
 #include <vector>
 
+// Integer shift for sampling the current frame. Positive offsets read right or down.
+// peakGap compares the best coarse score with the best distant coarse match.
 struct FrameTranslation
 {
     int dx{0}, dy{0};
@@ -26,7 +28,9 @@ public:
     [[nodiscard]] FrameTranslation estimate(const Frame& frame);
     [[nodiscard]] int margin() const { return margin_; }
 private:
+    // Sample location and its reference value, centered about the grid mean.
     struct Point { int x, y; float reference; };
+    // Reference samples and their squared deviations summed for correlation normalization.
     struct Grid { std::vector<Point> points; double energy{0}; };
     static Grid grid(const std::vector<float>& image, int width, int height, int margin, int step);
     static double score(const Grid& reference, const std::vector<float>& image, int width, int dx, int dy);

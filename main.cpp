@@ -6,6 +6,7 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    // These names identify the persistent Qt settings for camera, detection and display preferences.
     QCoreApplication::setOrganizationName("SeleneWatch");
     QCoreApplication::setApplicationName("SeleneWatch");
 

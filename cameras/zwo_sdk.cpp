@@ -48,6 +48,8 @@ PixelFormat format(ASI_IMG_TYPE type)
     if (type==ASI_IMG_RAW16) return PixelFormat::Mono16;
     return PixelFormat::RGB888; // An inspected processed mode, never accepted for capture.
 }
+// Maps ASI functions and status codes into the application's raw camera API.
+// ZwoSource manages the open and streaming lifetime through this adapter.
 class ZwoSdk final : public ZwoApi
 {
 public:

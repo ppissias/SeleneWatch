@@ -27,6 +27,7 @@
 
 namespace {
 
+// Recognizes aliases and hard links before a probe opens an output file.
 bool sameFile(const QString& first, const QString& second)
 {
     std::error_code error;
@@ -50,6 +51,7 @@ bool writeJson(const QString& path, const QJsonDocument& document)
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.flush();
 }
 
+// Reads the first frame of each listed recording for a thumbnail and layout manifest.
 int survey(const QString& listPath, const QString& output)
 {
     QFile list(listPath);
@@ -86,6 +88,7 @@ int survey(const QString& listPath, const QString& output)
     return 0;
 }
 
+// Bounded recording segment shared by calibration runs over identical source frames.
 struct CachedRecording
 {
     std::vector<FramePtr> frames;
@@ -121,14 +124,21 @@ std::optional<CachedRecording> load(const QString& input, const QJsonObject& con
     return cached;
 }
 
+// Replay a cached segment through EventCapture and record decisions for each frame.
 int measure(const QString& input, const QString& output, const QJsonObject& config, const CachedRecording& cached)
 {
     QTextStream err(stderr);
     const auto& frames = cached.frames;
     const int count = static_cast<int>(frames.size());
     const int start = cached.start;
-    const DetectionSettings settings{config.value("sigma").toDouble(6), config.value("minPixels").toInt(8),
-        config.value("maxPixels").toInt(400), config.value("oneFrame").toBool(true)};
+    DetectionSettings settings;
+    settings.sigma = config.value("sigma").toDouble(settings.sigma);
+    settings.minPixels = config.value("minPixels").toInt(settings.minPixels);
+    settings.maxPixels = config.value("maxPixels").toInt(settings.maxPixels);
+    settings.oneFrame = config.value("oneFrame").toBool(settings.oneFrame);
+    settings.maxPatchBoxRatio = config.value("maxPatchBoxRatio").toDouble(settings.maxPatchBoxRatio);
+    settings.referenceTimeConstantSeconds = config.value("referenceTimeConstantSeconds").toDouble(settings.referenceTimeConstantSeconds);
+    settings.minNoiseAdu = config.value("minNoiseAdu").toDouble(settings.minNoiseAdu);
     if (!settings.valid()) { err << "Invalid trigger settings\n"; return 1; }
     const int x = config.value("x").toInt(frames[0]->width / 2);
     const int y = config.value("y").toInt(frames[0]->height / 2);
@@ -231,7 +241,9 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
     QJsonObject report{{"input", input}, {"frames", count}, {"startFrame", start}, {"width", frames[0]->width},
         {"height", frames[0]->height}, {"format", pixelFormatName(frames[0]->format)}, {"significantBits", frames[0]->significantBits},
         {"frameTimeMeaning", QString::fromStdString(info.frameTime)}, {"settings", QJsonObject{{"sigma", settings.sigma},
-        {"minPixels", settings.minPixels}, {"maxPixels", settings.maxPixels}, {"oneFrame", settings.oneFrame}}},
+        {"minPixels", settings.minPixels}, {"maxPixels", settings.maxPixels}, {"oneFrame", settings.oneFrame},
+        {"maxPatchBoxRatio", settings.maxPatchBoxRatio}, {"referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds},
+        {"minNoiseAdu", settings.minNoiseAdu}}},
         {"x", x}, {"y", y}, {"candidates", candidates}, {"backgroundCandidates", background}, {"candidatePositions", candidatePositions},
         {"candidatePatches", candidatePatches}, {"originalCentreAdu", originalCentre},
         {"streamSeconds", seconds}, {"backgroundCandidatesPerMinute", seconds > 0 ? background * 60 / seconds : 0},
@@ -247,6 +259,7 @@ int measure(const QString& input, const QString& output, const QJsonObject& conf
     return 0;
 }
 
+// Time each preview conversion mode using the same cached frames.
 int profileDisplay(const QString& input, const QString& output, const CachedRecording& cached)
 {
     if (sameFile(input, output) || !QDir().mkpath(QFileInfo(output).absolutePath())) return 1;

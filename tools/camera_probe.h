@@ -13,6 +13,7 @@ class QCoreApplication;
 // before returning. No camera is opened by CTest.
 int runCameraProbe(QCoreApplication& app, const QStringList& args, std::shared_ptr<ZwoApi> api);
 
+// Native layout and metadata used to verify clips produced by a diagnostic run.
 struct CameraProbeReadback
 {
     QJsonObject metadata;
@@ -20,6 +21,7 @@ struct CameraProbeReadback
     PixelFormat format{PixelFormat::Mono8};
     BayerPattern bayer{BayerPattern::None};
 };
+// Source and readback function supplied by the vendor-specific probe to the shared runner.
 struct CameraProbeInput
 {
     std::unique_ptr<FrameSource> source;

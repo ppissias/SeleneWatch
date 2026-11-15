@@ -127,7 +127,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         for (size_t i = 0; i < pixels; i += step) grid_.push_back(samples.at(i) - mean_[i]);
         const float centre = median(grid_);
         for (float& value : grid_) value = std::abs(value - centre);
-        summary_.noiseFloor = std::max(0.5, 1.4826 * median(grid_));
+        summary_.noiseFloor = std::max(settings_.minNoiseAdu, 1.4826 * median(grid_));
 
         int left = width_, top = height_, right = -1, bottom = -1;
         thresholdPixels_.clear(); thresholdSigma_.clear();
@@ -177,10 +177,6 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
             summary_.boxX = left; summary_.boxY = top;
             summary_.boxWidth = right - left + 1; summary_.boxHeight = bottom - top + 1;
         }
-        const double boxArea = static_cast<double>(summary_.boxWidth) * summary_.boxHeight;
-        summary_.passed = summary_.brightPixels >= settings_.minPixels && summary_.brightPixels <= settings_.maxPixels
-            && boxArea <= kMaxPatchBoxRatio * summary_.brightPixels;
-
         std::vector<Patch> current;
         DetectionSummary best = summary_;
         int bestPriority = -1;
@@ -188,7 +184,8 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         // flash. Split the sparse threshold pixels into 8-connected patches.
         // Dense changes are rejected before this work; its storage/work is
         // bounded by max(4096, four times the observer's maximum patch size).
-        if (static_cast<size_t>(summary_.brightPixels) <= sparseLimit && !thresholdPixels_.empty())
+        summary_.patchSearchLimited = static_cast<size_t>(summary_.brightPixels) > sparseLimit;
+        if (!summary_.patchSearchLimited && !thresholdPixels_.empty())
         {
             visited_.assign(thresholdPixels_.size(), 0);
             for (size_t seed = 0; seed < thresholdPixels_.size(); ++seed)
@@ -217,7 +214,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                     }
                 }
                 const bool passes = count >= settings_.minPixels && count <= settings_.maxPixels
-                    && static_cast<double>(x1 - x0 + 1) * (y1 - y0 + 1) <= kMaxPatchBoxRatio * count;
+                    && static_cast<double>(x1 - x0 + 1) * (y1 - y0 + 1) <= settings_.maxPatchBoxRatio * count;
                 DetectionSummary measured = summary_;
                 measured.passed = passes;
                 measured.brightPixels = count; measured.boxX = x0; measured.boxY = y0;
@@ -276,7 +273,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
     copyContext(strongest_);
     awaitingUpdate_ = true;
     previousTime_ = frame.timestamp;
-    history_.push_back({frame.timestamp, summary_.peakSigma, summary_.brightPixels});
+    history_.push_back({frame.timestamp, summary_.peakSigma, summary_.patchSearchLimited ? 0 : summary_.brightPixels});
     while (!history_.empty() && (history_.size() > 4096
         || frame.timestamp - history_.front().time > std::chrono::seconds{10})) history_.pop_front();
     summary_.processingMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -296,7 +293,7 @@ void FlashDetector::updateReference(const Frame& frame)
         const auto started=std::chrono::steady_clock::now();
         const Samples samples{frame, format_==PixelFormat::Mono16 && alignment_==BitAlignment::High?16-bits_:0};
         const float alpha=static_cast<float>(std::max(1.0/static_cast<double>(learnedFrames_+1),
-            -std::expm1(-frameInterval_/kReferenceTimeConstantSeconds)));
+            -std::expm1(-frameInterval_/settings_.referenceTimeConstantSeconds)));
         for (size_t i=0;i<mean_.size();++i)
         {
             if (protected_[i]) continue;

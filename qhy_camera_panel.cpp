@@ -54,6 +54,7 @@ void QhyCameraPanel::chooseRuntime()
         "QHY runtime (qhyccd.dll)");
     if (!path.isEmpty()) setRuntimeOverride(path);
 }
+// Remember the observer's chosen DLL path for the next discovery.
 void QhyCameraPanel::setRuntimeOverride(QString path)
 {
     if (running_) return;
@@ -64,6 +65,7 @@ void QhyCameraPanel::setRuntimeOverride(QString path)
     saved.sync();
     refresh();
 }
+// Resolve the runtime and scan only while the panel can use the disconnected SDK.
 void QhyCameraPanel::refresh()
 {
     if (running_) return;
@@ -113,6 +115,7 @@ QhySettings QhyCameraPanel::settings() const
     return s;
 }
 void QhyCameraPanel::showActual(const QhyProfile& p) { profile_=p;showProfile();setRunning(running_,monitoring_); }
+// A live readback updates the status while preserving the values being edited.
 void QhyCameraPanel::showLiveActual(const QhyProfile& p) { profile_=p;updateReadback(); }
 void QhyCameraPanel::showProfile()
 {

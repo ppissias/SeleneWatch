@@ -7,14 +7,20 @@
 #include <string>
 #include <vector>
 
+// Manual QHY controls exposed by the adapter when the camera supports them.
 enum class QhyControl { Exposure, Gain, Offset, UsbTraffic, TransferSpeed };
+
+// One control's range, step and current value in SDK units. Exposure uses microseconds.
 struct QhyControlInfo
 {
     QhyControl kind;
     std::string name;
     double minimum{0}, maximum{0}, step{1}, value{0};
 };
+// SDK discovery identifier and model name used to select a camera.
 struct QhyDevice { std::string id, name; };
+
+// Discovered capabilities. Sensor bit depth describes the ADC and may differ from transport depth.
 struct QhyCameraInfo
 {
     QhyDevice device;
@@ -31,6 +37,7 @@ struct QhySettings
     PixelFormat format{PixelFormat::Mono8};
     std::map<QhyControl,double> controls;
 };
+// Snapshot of device capabilities, SDK version and the settings read back from the camera.
 struct QhyProfile
 {
     QhyCameraInfo camera;
@@ -38,6 +45,7 @@ struct QhyProfile
     QhySettings current;
     std::vector<QhyControlInfo> controls;
 };
+// Live-read result. Geometry and channel count describe the delivered buffer when ready is true.
 struct QhyRead
 {
     bool ready{false};

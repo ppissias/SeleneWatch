@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 
+// Select the reader by extension and let it validate the recording's contents.
 std::unique_ptr<RecordingReader> openRecordingReader(const std::filesystem::path& path,
     double fallbackFps, std::string& error)
 {

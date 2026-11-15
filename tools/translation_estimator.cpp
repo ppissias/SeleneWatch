@@ -67,6 +67,7 @@ void TranslationEstimator::read(const Frame& frame)
     }
 }
 
+// Cache the centered reference values and energy once for each search resolution.
 TranslationEstimator::Grid TranslationEstimator::grid(const std::vector<float>& image, int width, int height, int margin, int step)
 {
     Grid result;
@@ -103,6 +104,7 @@ FrameTranslation TranslationEstimator::estimate(const Frame& frame)
     read(frame);
     FrameTranslation best;
     double coarseBest = -2;
+    // A coarse match in native pixel coordinates, retained to check for competing peaks.
     struct Candidate { int x,y; double score; };
     std::vector<Candidate> coarseScores;
     const int extent = maxShift_ / kBin;

@@ -39,9 +39,15 @@ private:
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
     MeterSlider* maxSlider_;
+    MeterSlider* compactnessSlider_;
+    MeterSlider* referenceSlider_;
+    MeterSlider* noiseSlider_;
     QDoubleSpinBox* sigma_;
     QSpinBox* minimum_;
     QSpinBox* maximum_;
+    QDoubleSpinBox* compactness_;
+    QDoubleSpinBox* referenceTime_;
+    QDoubleSpinBox* minimumNoise_;
     QCheckBox* oneFrame_;
     QComboBox* overlay_;
     QLabel* sigmaReading_;

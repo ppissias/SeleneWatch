@@ -98,6 +98,7 @@ bool SerWriter::write(const char* bytes, qint64 count, QString& error)
     return true;
 }
 
+// Write a provisional header and establish the sample layout for all frames in this clip.
 bool SerWriter::start(const Frame& layout, const std::string& camera, QString& error, bool testSource)
 {
     if (started_ || !output_.isWritable() || output_.isSequential() || output_.pos() != 0)
@@ -159,6 +160,7 @@ bool SerWriter::append(const Frame& frame, QString& error)
     return true;
 }
 
+// Flush the UTC trailer before finalizing the test declaration and frame count.
 bool SerWriter::finish(QString& error)
 {
     if (!started_ || failed_ || finished_ || times_.empty())

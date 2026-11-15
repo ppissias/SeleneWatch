@@ -146,6 +146,13 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
     out << "bayer_pattern: " << bayerPatternName(first.bayer) << "\n";
 }
 
+QString detectorModelFields(const DetectionSettings& settings)
+{
+    return QString(" max_patch_box_ratio=%1 reference_time_constant_seconds=%2 min_noise_adu=%3")
+        .arg(settings.maxPatchBoxRatio, 0, 'g', 17).arg(settings.referenceTimeConstantSeconds, 0, 'g', 17)
+        .arg(settings.minNoiseAdu, 0, 'g', 17);
+}
+
 QString triggerFields(const ClipTrigger& trigger)
 {
     QString text = QString("onset_frame_index=%1 trigger_frame_index=%2")
@@ -168,6 +175,7 @@ QString triggerFields(const ClipTrigger& trigger)
         text += QString(" kind=automatic active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
             .arg(trigger.activePatches).arg(trigger.protectedPixels).arg(trigger.learningFrames).arg(trigger.longestActiveSeconds,0,'g',17);
     }
+    text += detectorModelFields(trigger.settings);
     if (trigger.continuesPreviousClip)
     {
         text += " continues_previous_clip";
@@ -461,8 +469,11 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         out << "detector: per-pixel sigma / compact patch\n";
         out << "reference_policy: update background outside passing patch boxes plus one pixel; clip collection does not hold learning\n";
         out << "persistence_policy: adjacent/overlapping patches inherit state; separate patches trigger independently\n";
-        out << "reference_time_constant_seconds: " << kReferenceTimeConstantSeconds << "\n";
-        out << "max_patch_box_ratio: " << kMaxPatchBoxRatio << "\n";
+        const auto& firstSettings = clip.triggers.front().settings;
+        out << "detector_settings_scope: first trigger\n";
+        out << "reference_time_constant_seconds: " << QString::number(firstSettings.referenceTimeConstantSeconds, 'g', 17) << "\n";
+        out << "max_patch_box_ratio: " << QString::number(firstSettings.maxPatchBoxRatio, 'g', 17) << "\n";
+        out << "min_noise_adu: " << QString::number(firstSettings.minNoiseAdu, 'g', 17) << "\n";
         out << "frames_before: " << clip.framesBefore << "\n";
         out << "frames_after: " << clip.framesAfter << "\n";
         out << "capture_history_seconds: " << clip.captureSettings.historySeconds << "\n";
@@ -630,7 +641,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
                 << ") box=(" << clip.peak.boxX << "," << clip.peak.boxY << "," << clip.peak.boxWidth << "," << clip.peak.boxHeight << ")\n";
             out << "peak_settings: sigma=" << QString::number(clip.peak.settings.sigma, 'g', 17)
                 << " min_pixels=" << clip.peak.settings.minPixels << " max_pixels=" << clip.peak.settings.maxPixels
-                << " one_frame=" << (clip.peak.settings.oneFrame ? "yes" : "no") << "\n";
+                << " one_frame=" << (clip.peak.settings.oneFrame ? "yes" : "no")
+                << detectorModelFields(clip.peak.settings) << "\n";
             out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
         out.flush();

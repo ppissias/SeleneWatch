@@ -19,6 +19,7 @@ uint64_t word(const QByteArray& bytes, int offset, int count)
     return value;
 }
 
+// Simulates a full disk by accepting writes only up to a set byte position.
 class LimitedBuffer : public QBuffer
 {
 public:
@@ -34,6 +35,7 @@ protected:
 
 } // namespace
 
+// Checks exact SER bytes and timestamps, test declarations and interrupted writes.
 class SerWriterTest : public QObject
 {
     Q_OBJECT

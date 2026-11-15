@@ -147,7 +147,7 @@ The ASI SDK provides cumulative losses but no per-exposure frame ID. Published i
 | --- | --- | --- |
 | Source thread | Acquisition, the test signal, publication, ring push, detection, clip assembly (`EventCapture`) | Wait on disk, on the GUI, or on the mount |
 | Writer thread | All disk writes: finished clips, the candidate log, the guide log. Its own bounded queue | Touch the ring; block the thread that submits |
-| GUI thread | Preview conversion, controls, status | Sit on the frame path; the preview takes the latest frame and skips the rest |
+| GUI thread | Preview conversion, optional native sample histogram, controls, status | Sit on the frame path; the preview takes the latest frame and skips the rest |
 | Guide thread (Feature-8) | The lock template, shift measurements, the guiding decision, and the mount connection | Sit on the frame path; it takes the latest frame and skips the rest |
 
 Each piece of mutable state has one owner. `Session` touches `EventCapture` on the source thread, or while that thread is joined or not yet started. Threads meet through published read-only frames, the one-slot mailboxes for the preview and the guider, the test-blip request slot, and the writer's queue. Results travel to the window as notifications. Nothing on the frame path waits for the window or reads state the window keeps.

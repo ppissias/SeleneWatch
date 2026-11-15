@@ -56,6 +56,7 @@ QString contents(const QString& path)
 
 } // namespace
 
+// Checks detector decisions, background learning and recorded settings with known test signals.
 class DetectionTest : public QObject
 {
     Q_OBJECT
@@ -67,6 +68,7 @@ private slots:
     void nativeMono16AndBayerKeepSubPreviewSignals();
     void localNoiseNormalizesTwoDifferentHalves();
     void settingsAffectTheNextFrame();
+    void adjustableModelSettingsReachTheDetector();
     void overlaysChangeNoPixelsOrDecisions();
     void capturedSettingsAndPeakRemainAtTheirOriginalValues();
     void aOneFrameBlipThroughSessionIsSaved();
@@ -382,6 +384,49 @@ void DetectionTest::settingsAffectTheNextFrame()
     QVERIFY(persistent.firing());
 }
 
+void DetectionTest::adjustableModelSettingsReachTheDetector()
+{
+    FlashDetector defaultShape, relaxedShape;
+    observe(defaultShape, flat(0));
+    observe(relaxedShape, flat(0));
+    Frame diagonal = flat(1);
+    for (size_t i = 0; i < 10; ++i) diagonal.data[(5 + i) * 64 + 10 + i] += 20;
+    DetectionSettings settings;
+    settings.maxPatchBoxRatio = 10;
+    relaxedShape.setSettings(settings);
+    QVERIFY(!observe(defaultShape, diagonal));
+    QCOMPARE(defaultShape.summary().brightPixels, 10);
+    QVERIFY(observe(relaxedShape, diagonal));
+
+    FlashDetector defaultNoise, lowerNoise;
+    observe(defaultNoise, flat(0));
+    observe(lowerNoise, flat(0));
+    Frame faint = flat(1);
+    patch(faint, 20, 20, 3, 1);
+    settings = {};
+    settings.minNoiseAdu = 0.125;
+    lowerNoise.setSettings(settings);
+    QVERIFY(!observe(defaultNoise, faint));
+    QVERIFY(observe(lowerNoise, faint));
+    QCOMPARE(lowerNoise.summary().noiseFloor, 0.125);
+
+    settings = {};
+    settings.sigma = 1000;
+    FlashDetector slow(settings);
+    settings.referenceTimeConstantSeconds = 0.5;
+    FlashDetector fast(settings);
+    observe(slow, flat(0));
+    observe(fast, flat(0));
+    Frame step = flat(1, 110);
+    step.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1};
+    for (auto* detector : {&slow, &fast}) QVERIFY(!observe(*detector, step));
+    step.frameIndex = 2;
+    step.timestamp += std::chrono::seconds{1};
+    for (auto* detector : {&slow, &fast}) QVERIFY(!observe(*detector, step));
+    QCOMPARE(slow.summary().peakAdu, 5.0);
+    QVERIFY(fast.summary().peakAdu < 2.0);
+}
+
 void DetectionTest::overlaysChangeNoPixelsOrDecisions()
 {
     FlashDetector plain, decorated;
@@ -406,16 +451,17 @@ void DetectionTest::overlaysChangeNoPixelsOrDecisions()
 void DetectionTest::capturedSettingsAndPeakRemainAtTheirOriginalValues()
 {
     std::vector<EventClip> clips;
-    EventCapture capture(CaptureSettings{5, 0.99, 10}, [] {}, [&](EventClip clip) { clips.push_back(std::move(clip)); });
+    const DetectionSettings original{6, 8, 400, true, 2.5, 4, 0.75};
+    EventCapture capture(CaptureSettings{5, 0.99, 10}, [] {}, [&](EventClip clip) { clips.push_back(std::move(clip)); }, original);
     capture.onFrame(std::make_shared<const Frame>(flat(0)));
     Frame flash = flat(1); patch(flash, 20, 20, 3, 20);
     capture.onFrame(std::make_shared<const Frame>(flash));
-    capture.setDetectionSettings({100, 64, 900, false});
+    capture.setDetectionSettings({100, 64, 900, false, 8, 1, 0.125});
     for (int i = 2; i < 34; ++i) capture.onFrame(std::make_shared<const Frame>(flat(static_cast<uint64_t>(i))));
     QCOMPARE(clips.size(), size_t{1});
     QCOMPARE(clips[0].triggers.size(), size_t{1});
-    QCOMPARE(clips[0].triggers[0].settings.sigma, 6.0);
-    QVERIFY(clips[0].triggers[0].settings.oneFrame);
+    QCOMPARE(clips[0].triggers[0].settings, original);
+    QCOMPARE(clips[0].peak.settings, original);
     QCOMPARE(clips[0].peak.frameIndex, uint64_t{1});
     QCOMPARE(clips[0].peakDifference[20 * 64 + 20], 20.0f);
 
@@ -430,6 +476,8 @@ void DetectionTest::capturedSettingsAndPeakRemainAtTheirOriginalValues()
     QVERIFY(text.contains("sigma=6 min_pixels=8 max_pixels=400 one_frame=yes"));
     QVERIFY(text.contains("peak_preview_frame_index: 1\n"));
     QVERIFY(text.contains("peak_settings: sigma=6 min_pixels=8 max_pixels=400 one_frame=yes"));
+    QVERIFY(text.contains("detector_settings_scope: first trigger\nreference_time_constant_seconds: 4\nmax_patch_box_ratio: 2.5\nmin_noise_adu: 0.75\n"));
+    QCOMPARE(text.count("max_patch_box_ratio=2.5 reference_time_constant_seconds=4 min_noise_adu=0.75"), 2);
     QVERIFY(QFile::exists(QDir(results[0].folder).filePath("03_diff_annotated.png")));
 }
 

@@ -16,6 +16,7 @@ void FrameRingBuffer::configure(size_t maxBytes, double seconds)
 
 void FrameRingBuffer::push(FramePtr frame)
 {
+    // Drop the evicted references after releasing the ring lock.
     std::vector<FramePtr> leaving;
     std::lock_guard lock(mutex_);
     bytes_ += frame->data.capacity();
@@ -34,6 +35,7 @@ void FrameRingBuffer::push(FramePtr frame)
 
 void FrameRingBuffer::clear()
 {
+    // Swapping under the lock leaves any buffer destruction to the caller outside it.
     std::deque<FramePtr> leaving;
     std::lock_guard lock(mutex_);
     leaving.swap(frames_);

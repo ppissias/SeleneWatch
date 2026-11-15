@@ -9,6 +9,7 @@
 #include <optional>
 #include <vector>
 
+// Byte layout of the delivered pixels. Frame also records sample depth and alignment.
 enum class PixelFormat
 {
     Mono8,

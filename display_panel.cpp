@@ -88,6 +88,7 @@ void DisplayPanel::setCaptureSettings(CaptureSettings value)
     memory_->setValue(static_cast<int>(value.memoryBytes / (1024 * 1024)));
 }
 
+// Map the stored level fractions onto the incoming frame's native ADU range.
 void DisplayPanel::setNativeMaximum(int maximum)
 {
     updating_ = true; maximum_ = maximum;
@@ -96,6 +97,7 @@ void DisplayPanel::setNativeMaximum(int maximum)
     setDisplaySettings(display_);
 }
 
+// Keep black below white as the observer moves either end of the window.
 void DisplayPanel::levelsChanged(bool whiteChanged)
 {
     if (updating_) return;

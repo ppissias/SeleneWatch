@@ -8,12 +8,14 @@
 #include <utility>
 #include <vector>
 
+// Current and peak charged bytes, the ceiling and refused allocations since the last limit reset.
 struct MemoryUsage
 {
     size_t used{0}, limit{0}, peak{0};
     size_t refused{0};
 };
 
+// Signals that the application payload ceiling refused an allocation.
 class MemoryLimitError : public std::runtime_error
 {
 public:

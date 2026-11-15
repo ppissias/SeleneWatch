@@ -89,11 +89,13 @@ private:
 
 } // namespace
 
+// Checks native preview and histogram values, shared memory admission and timed capture.
 class DisplayCaptureTest : public QObject
 {
     Q_OBJECT
 private slots:
     void nativeLevelsRevealFaintSamplesWithoutChangingEvidence();
+    void histogramCountsNativeSamplesAndCodeExtremes();
     void allBayerPatternsInterpolateOnlyForDisplay();
     void syntheticNativeLayoutsExposeAFaintTestField();
     void oneBudgetFollowsCopiesMapsAndSharedImages();
@@ -135,6 +137,64 @@ void DisplayCaptureTest::nativeLevelsRevealFaintSamplesWithoutChangingEvidence()
     }
 }
 
+void DisplayCaptureTest::histogramCountsNativeSamplesAndCodeExtremes()
+{
+    for (int bits : {12, 16}) for (auto alignment : {BitAlignment::Low, BitAlignment::High})
+    {
+        Frame frame;
+        frame.width = frame.height = 2;
+        frame.format = PixelFormat::Mono16;
+        frame.significantBits = bits;
+        frame.alignment = alignment;
+        frame.bayer = BayerPattern::RGGB;
+        const int maximum = (1 << bits) - 1;
+        const int shift = alignment == BitAlignment::High ? 16 - bits : 0;
+        for (int code : {0, 1, maximum - 1, maximum})
+        {
+            const int word = code << shift;
+            frame.data.push_back(static_cast<uint8_t>(word & 255));
+            frame.data.push_back(static_cast<uint8_t>(word >> 8));
+        }
+        const auto raw = frame.data;
+        const auto histogram = frameToPreviewHistogram(frame, false);
+        QCOMPARE(histogram.maximumCode, maximum);
+        QCOMPARE(histogram.rangeMaximum, maximum);
+        QCOMPARE(histogram.sampleCount, uint64_t{4});
+        QCOMPARE(histogram.zeroCount, uint64_t{1});
+        QCOMPARE(histogram.maximumCodeCount, uint64_t{1});
+        QCOMPARE(histogram.bins.front(), uint64_t{2});
+        QCOMPARE(histogram.bins.back(), uint64_t{2});
+        QCOMPARE(frame.data, raw);
+    }
+    Frame rgb;
+    rgb.width = 2;
+    rgb.height = 1;
+    rgb.format = PixelFormat::RGB888;
+    rgb.data = {0, 127, 255, 7, 7, 255};
+    const auto colour = frameToPreviewHistogram(rgb, false);
+    QCOMPARE(colour.sampleCount, uint64_t{6});
+    QCOMPARE(colour.bins[7], uint64_t{2});
+    QCOMPARE(colour.zeroCount, uint64_t{1});
+    QCOMPARE(colour.maximumCodeCount, uint64_t{2});
+
+    Frame faint;
+    faint.width = 6;
+    faint.height = 1;
+    faint.data = {18, 19, 19, 20, 20, 20};
+    const auto fit = frameToPreviewHistogram(faint, true);
+    QCOMPARE(fit.maximumCode, 255);
+    QCOMPARE(fit.rangeMinimum, 18);
+    QCOMPARE(fit.rangeMaximum, 20);
+    QCOMPARE(fit.binCount, 3);
+    QCOMPARE(fit.bins[0], uint64_t{1});
+    QCOMPARE(fit.bins[2], uint64_t{3});
+    QCOMPARE(fit.zeroCount + fit.maximumCodeCount, uint64_t{0});
+    faint.data.assign(6, 19);
+    const auto uniform = frameToPreviewHistogram(faint, true);
+    QCOMPARE(uniform.binCount, 1);
+    QCOMPARE(uniform.bins.front(), uint64_t{6});
+}
+
 void DisplayCaptureTest::allBayerPatternsInterpolateOnlyForDisplay()
 {
     constexpr int cell[][4] = {{0,1,1,2}, {1,0,2,1}, {1,2,0,1}, {2,1,1,0}};
@@ -162,6 +222,7 @@ void DisplayCaptureTest::syntheticNativeLayoutsExposeAFaintTestField()
 {
     for (int bits : {12, 16}) for (auto alignment : {BitAlignment::Low, BitAlignment::High})
     {
+        // Retains the first generated frame for inspection after the worker has joined.
         struct Listener : FrameSourceListener
         {
             FramePtr frame;

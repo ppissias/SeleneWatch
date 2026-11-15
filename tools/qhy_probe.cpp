@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 namespace {
+// Keep the opaque discovery identifier separate from the unresolved serial number.
 QJsonObject profileJson(const QhyProfile& p)
 {
     QJsonArray controls;
@@ -42,6 +43,7 @@ int runQhyProbe(QCoreApplication& app,QStringList args,std::shared_ptr<QhyApi> a
                 {"runtimePath",api->loadedRuntimePath()}}).toJson();
             QFile output(args[2]);return output.open(QIODevice::WriteOnly|QIODevice::NewOnly) && output.write(bytes)==bytes.size() && output.flush()?0:1;
         }
+        // Resolve QHY-specific settings before handing capture and verification to the common runner.
         return runCameraProbeCommand(app,args,[api](const QJsonObject& config) {
             if (config.value("readDelayMs").toInt()!=0) throw std::invalid_argument("QHY QA read-delay mode is not implemented");
             const auto devices=api->devices();

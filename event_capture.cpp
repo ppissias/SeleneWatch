@@ -25,6 +25,7 @@ void EventCapture::reset(bool releaseDetectorBuffers)
     manualTail_.reset();
 }
 
+// Disarming hands off the available clip. Arming reconfirms ongoing patches in Monitoring.
 void EventCapture::setMonitoring(bool monitoring)
 {
     if (monitoring_ == monitoring) return;
@@ -59,6 +60,7 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
     const bool firing = detector_.firing();
     if (!detector_.candidates().empty())
     {
+        // A new clip takes the current frame from the ring. An open clip appends it here.
         const bool starting = !collecting_;
         if (collecting_)
         {
@@ -93,6 +95,7 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
             if (firing) { beginClip(currentTrigger(detector_.summary(),true)); rememberPeak(*frame); }
             if (manualTail)
             {
+                // Preserve the original manual request as collection continues in the next clip.
                 auto continuation=*manualTail_;
                 continuation.continuesPreviousClip=true;
                 continuation.triggerFrameIndex=frame->frameIndex; continuation.triggerTime=frame->timestamp;
@@ -114,6 +117,7 @@ const DetectionSummary& EventCapture::detectionSummary() const { return detector
 const std::vector<DetectionSummary>& EventCapture::detectionCandidates() const { return detector_.candidates(); }
 DetectionView EventCapture::detectionView() const { return detector_.view(); }
 
+// Keep the observer's request time and the latest retained source frame time separately.
 bool EventCapture::saveNow(std::chrono::system_clock::time_point requestedAt)
 {
     if (!monitoring_) return false;

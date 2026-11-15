@@ -27,6 +27,7 @@ CameraPanel::CameraPanel(std::shared_ptr<ZwoApi> api,QWidget* parent):QWidget(pa
     connect(editor_,&CameraSettingsEditor::liveControlsRequested,this,&CameraPanel::liveControlsRequested);
     setRunning(false);
 }
+// Discovery and inspection run while stopped. The source worker owns SDK access during capture.
 void CameraPanel::refresh()
 {
     if (running_) return;
@@ -58,6 +59,7 @@ ZwoSettings CameraPanel::settings() const
     return s;
 }
 void CameraPanel::showActual(const ZwoProfile& p) { profile_=p; showProfile(); setRunning(running_,monitoring_); }
+// Update the measured values while leaving the observer's edits in the form.
 void CameraPanel::showLiveActual(const ZwoProfile& p) { profile_=p; updateReadback(); }
 void CameraPanel::showProfile()
 {

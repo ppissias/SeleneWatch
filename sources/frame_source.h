@@ -41,7 +41,7 @@ protected:
     ~FrameSourceListener() = default;
 };
 
-// A source of frames: the synthetic generator or a recording, later a camera.
+// Common frame source for the synthetic generator, recordings and live cameras.
 //
 // open() prepares the source and says what it will deliver. start() runs a
 // worker thread that delivers frames to the listener until stop(), the end
@@ -64,7 +64,7 @@ public:
     // Stops and joins the worker. Safe to call when it is not running.
     virtual void stop() = 0;
 
-    // While stopped. Both sources allocate their frame pixels from this pool.
+    // While stopped. Frame allocations from this source use the supplied budget.
     void setMemoryBudget(MemoryBudget budget) { pool_.setMemoryBudget(std::move(budget)); }
 protected:
     FramePool pool_;

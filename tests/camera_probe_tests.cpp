@@ -33,6 +33,7 @@ QJsonObject shortRun()
 }
 }
 
+// Runs the bench and soak workflow against fake SDKs to verify capture and progress reports.
 class CameraProbeTest : public QObject
 {
     Q_OBJECT

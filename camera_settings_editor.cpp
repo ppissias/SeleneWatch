@@ -9,6 +9,7 @@
 CameraSettingsEditor::CameraSettingsEditor(int widthStep,int heightStep,QWidget* parent)
     : QWidget(parent),widthStep_(widthStep),heightStep_(heightStep)
 {
+    // Coalesce a burst of edits into one live SDK request.
     liveTimer_=new QTimer(this); liveTimer_->setSingleShot(true); liveTimer_->setInterval(180);
     connect(liveTimer_,&QTimer::timeout,this,[this] { if (liveEditing_) emit liveControlsRequested(); });
     auto* form=new QFormLayout(this);
@@ -43,6 +44,7 @@ CameraGeometry CameraSettingsEditor::requestedGeometry() const
     return {width_->value(),height_->value(),x_->value(),y_->value(),bin_->currentData().toInt(),
         static_cast<PixelFormat>(format_->currentData().toInt())};
 }
+// A queued edit belongs to the controls being replaced.
 void CameraSettingsEditor::clearControls()
 {
     liveTimer_->stop();
@@ -53,6 +55,7 @@ void CameraSettingsEditor::addControl(int id,const QString& name,double minimum,
     double scale,const QString& suffix,bool writable)
 {
     auto* input=new QDoubleSpinBox(this);input->setObjectName(QString("cameraControl%1").arg(id));
+    // Preserve the precision of the native step and actual readback after scaling.
     int decimals=0;
     for (double number : {1.0/scale,step/scale,minimum/scale,maximum/scale,value/scale})
     {
@@ -77,6 +80,7 @@ std::map<int,double> CameraSettingsEditor::controlValues() const
     for(const auto& [id,control]:controls_) result[id]=control.widget->value()*control.scale;
     return result;
 }
+// Constrain the ROI origin and extent to the sensor dimensions at the selected bin.
 void CameraSettingsEditor::updateBounds()
 {
     if(updating_ || sensorWidth_<=0 || sensorHeight_<=0) return;
