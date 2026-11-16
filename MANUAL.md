@@ -86,7 +86,12 @@ Choose **Recording file**, press **Open…**, and pick a file.
   - YUY2, which is reduced to its brightness channel and marked as converted.
 
   Compressed AVI files are refused with a message.
-- A **FireCapture log** (`.txt`) next to the file supplies the UTC start time, exposure and gain when it names that file. Otherwise frames get nominal times from the start and the **Target FPS**.
+- A **FireCapture log** (`.txt`) next to the file supplies the UTC start time, exposure and gain when it names that file.
+- An AVI file stores no frame times, so its frames get nominal times: the start time (or zero without a log) plus the frame's number at the frame rate.
+  - FireCapture writes the rate at the start of a capture, rounded, into the AVI header, and the camera can run far slower. When FireCapture's log gives its **Duration** to the millisecond and counts the same number of frames as the file holds, the frames are spread evenly over that duration instead.
+  - Otherwise the header's rate is used, or the **Target FPS** when the header states none.
+  - The clip metadata (`frame_rate`, `frame_time`) says which.
+- An AVI file whose capture stopped before it wrote an index is read by walking through it. The walk stops where the file holds no more frames, and the clip metadata (`frame_index`) says how many bytes were left unread.
 - Frames that the capture program recorded as dropped stay as gaps in the frame numbers.
 
 **Speed:** **Real time** follows the recording's own frame times. **Fast** runs the detector through the file as quickly as the computer allows, which is useful for tuning. You can change the speed while the file plays. The history and clip windows are measured in the recording's own time, so they do not change with speed.

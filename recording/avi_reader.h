@@ -32,12 +32,17 @@
 // Frames are found through the file's index, so that opening a large file
 // from a slow disk does not seek once per frame: the OpenDML index of a file
 // in several RIFF parts, else the AVI 1.0 index (idx1), else by walking the
-// movi lists.
+// movi lists. A walk stops at bytes that cannot be a chunk: a capture that
+// stopped early can leave the rest of a reserved file as zeros, and those
+// bytes are reported as not read.
 //
 // AVI stores no frame times. A frame's time is a start time plus its
-// position at the header's frame rate. The start time comes from
-// FireCapture's log beside the file; without one it is unknown and the
-// times count from zero.
+// position at the frame rate. The start time comes from FireCapture's log
+// beside the file; without one it is unknown and the times count from zero.
+// The rate is the log's mean when the log gives its Duration to the
+// millisecond and counts the frames the file holds: FireCapture writes the
+// rate at the start of a capture, rounded, into the header, and the camera
+// can fall far behind it. Otherwise the rate is the header's.
 class AviReader final : public RecordingReader
 {
 public:
@@ -57,6 +62,14 @@ public:
     [[nodiscard]] const std::string& indexUsed() const;
 
 private:
+    // Where the frame rate comes from.
+    enum class RateSource
+    {
+        Header,
+        FireCaptureLog,
+        Window
+    };
+
     // How a frame is stored in the file.
     enum class Layout
     {
@@ -94,6 +107,7 @@ private:
     void findFramesInMovi(uint64_t from, uint64_t to, std::vector<FrameChunk>& frames, int depth);
     bool isFrameChunk(uint32_t id) const;
     bool keepFrames(const std::vector<FrameChunk>& frames, std::string& error);
+    void chooseFrameRate(double fallbackFps);
 
     std::ifstream file_;
     std::string pathText_;
@@ -119,14 +133,20 @@ private:
     bool bottomUp_{false};
     size_t stride_{0};
     size_t storedBytes_{0};
+    double headerRate_{0.0};
     double frameRate_{0.0};
-    bool rateFromFile_{false};
+    RateSource rateSource_{RateSource::Header};
+    // Why the log's duration was not used, when it has one.
+    std::string logRateRefused_;
 
     // Where each frame's data starts, and its number among all frame chunks.
     std::vector<uint64_t> frames_;
     std::vector<uint64_t> numbers_;
+    int frameChunks_{0};
     int emptyChunks_{0};
     int framesBeyondEnd_{0};
+    // Bytes at the end of movi lists that a walk found to hold no chunk.
+    uint64_t unreadMoviBytes_{0};
     std::string indexUsed_;
     std::optional<FireCaptureLog> log_;
     std::vector<uint8_t> raw_;

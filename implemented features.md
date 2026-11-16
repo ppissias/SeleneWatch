@@ -664,3 +664,24 @@ Feature-6 is complete. Done-when items 4 and 6 pass automated checks, and item 9
 - Siril opened five constructed layout clips and a six-frame sample of the observer's 16-bit SER, agreeing on size, type, depth, frame counts, UTC start, and ordered timestamps. All validation output was written outside the archive.
 - A dedicated writer was killed with 67,109,042 bytes in its partial SER. Its pending record survived; the header count was zero and no completion marker existed.
 - The 714-frame lunar SER produced the same candidates at frames 316 and 664. Release source processing/collection took 15,922 ms in this run, total including writer drain 15,931 ms. The residual writer wait was 9 ms. A six-frame 1296×964 Mono16 sample including previews took 78 ms to write and shut down. USB/cache effects limit comparison of total playback times.
+
+### Follow-up — 16 November 2026: the AVI frame rate, and files without an index
+
+Both items under Part B's "Seen while testing, for later" are settled.
+
+**The frame rate from FireCapture's log.** The question left open was what FireCapture's `End` marks. FireCapture's SER files carry their own frame times and have the same log beside them, so they answer it. On the 24 lunar SER files with a log in `2015.12.21 Moon 8 Newt`, the last frame's own time is 38 to 57 ms before `End(UT)`, about one frame interval (54.6 ms), and the first is within 47 ms of `Start(UT)`. Spacing the frames evenly from `Start` at `Duration / Frames captured` put every frame within 80 ms of its recorded time; the mean difference per file was −20 to +16 ms. On two ISS captures whose rate varied, the same rule was off by up to 1.2 s and 5.8 s, so the times stay "nominal, not measured".
+
+The headers are worse. FireCapture writes the rate at the start of a capture into the header, rounded to a whole number: 18 fps where the logs show 18.0 to 18.3, and also 18 fps for `2018.08.21 moon mars saturn\moon\raw\Moon_220119.avi`, whose log shows 175 frames in 47.625 s (`FPS (avg.)=3`). Timed at the header's rate, that file's last frame came 38 s early. `Moon_200059.avi`'s came 0.9 s late.
+
+- `AviReader` uses `Frames captured / Duration` when the log gives `Duration` to the millisecond (FireCapture 2.4 and 2.5) and `Frames captured` equals the file's frame chunks, empty ones included. Otherwise it uses the header's rate, and says why when the log counts other frames. FireCapture 2.2 writes whole seconds, too coarse to time frames by.
+- `frame_rate` names the source, for example `18.163 fps, the mean in FireCapture's log Moon_200059.txt (1883 frames captured in its Duration of 103.672 s); the AVI header states 18.000 fps`. `frame_time` adds that the frames are spread evenly over the log's Duration.
+- An AVI frame time is rounded to the nearest clock tick instead of truncated, so frame 3 at 25 fps is at 120 ms, not one tick before.
+- In the archive, 99 AVI files take their rate from the log. No log disagreed with its file's frame count.
+
+**Files without an index.** `dark_00017.AVI` is 2.1 GB and holds 308 frames, 1.2 GB. The remaining 936 MB of its `movi` list are zeros: the capture program reserved the file and stopped early, without writing an index. The walk read every 8 bytes of zeros as an empty chunk, 117 million of them. That, not a seek per frame, was the 47 s.
+
+- A chunk id is four printable ASCII characters. The walk stops at anything else, and `frame_index` records the bytes left unread.
+- From the USB disk, `dark_00017.AVI` now opens in 2.2 s and `dark_00024.AVI` in 1.5 s, with the same 308 and 201 frames. Opening still runs on the window thread.
+- All 352 archive AVI files were opened again with the changed reader: the same 350 open, each through the same index and with the same frame count as before, and every first and last frame reads. The median opening time is 26 ms.
+
+**Tests.** Two reader tests are new: a walk that stops at reserved zero bytes and reports them, with an empty chunk before them; and a log that gives the mean rate, with the two cases where it is not used (another frame count, and whole seconds).

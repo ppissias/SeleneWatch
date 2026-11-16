@@ -105,6 +105,35 @@ std::optional<sys_days> dayFromDdMmYy(const std::string& text)
     return sys_days{date};
 }
 
+// "103.672s" as seconds: up to seven digits, a point, three digits, and "s".
+std::optional<double> millisecondDuration(const std::string& text)
+{
+    if (text.size() < 6 || text.size() > 12 || text.back() != 's')
+    {
+        return std::nullopt;
+    }
+    const size_t point = text.size() - 5;
+    int whole = 0;
+    int milliseconds = 0;
+    if (text[point] != '.' || !digitsAt(text, 0, point, whole) || !digitsAt(text, point + 1, 3, milliseconds))
+    {
+        return std::nullopt;
+    }
+    const double seconds = (whole * 1000.0 + milliseconds) / 1000.0;
+    return seconds > 0 ? std::optional<double>(seconds) : std::nullopt;
+}
+
+// A whole number of at most nine digits.
+std::optional<int> wholeNumber(const std::string& text)
+{
+    int value = 0;
+    if (text.empty() || text.size() > 9 || !digitsAt(text, 0, text.size(), value))
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
 std::optional<system_clock::time_point> startUtc(const std::map<std::string, std::string>& values)
 {
     const auto value = [&values](const char* key) -> std::string {
@@ -198,5 +227,7 @@ std::optional<FireCaptureLog> readFireCaptureLog(const std::filesystem::path& re
     log.shutter = values["Shutter"];
     log.gain = values["Gain"];
     log.startUtc = startUtc(values);
+    log.durationSeconds = millisecondDuration(values["Duration"]);
+    log.framesCaptured = wholeNumber(values["Frames captured"]);
     return log;
 }

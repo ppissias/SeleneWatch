@@ -21,6 +21,13 @@ struct FireCaptureLog
     // When the capture started, in UTC. Empty unless the log gives Date,
     // Start, and Start(UT), with Date as ddMMyy.
     std::optional<std::chrono::system_clock::time_point> startUtc;
+
+    // Duration (End minus Start) in seconds, only when it is written to the
+    // millisecond ("103.672s"). FireCapture 2.2 writes whole seconds.
+    std::optional<double> durationSeconds;
+
+    // "Frames captured".
+    std::optional<int> framesCaptured;
 };
 
 // Reads the log beside a recording. Empty when there is none, when the text

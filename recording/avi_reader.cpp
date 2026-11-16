@@ -85,6 +85,21 @@ std::string compressionText(uint32_t code)
     return "'" + text + "'";
 }
 
+// A RIFF chunk id is four printable ASCII characters. Other bytes, such as
+// the zeros of space a capture program reserved, are not a chunk.
+bool isFourCc(uint32_t id)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        const uint32_t c = (id >> (8 * i)) & 0xFF;
+        if (c < 0x20 || c > 0x7E)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // "00db", "00dc", ... for stream number n.
 uint32_t streamChunkId(int stream, char first, char second)
 {
@@ -146,22 +161,6 @@ bool AviReader::open(const std::filesystem::path& path, double fallbackFps, std:
         return false;
     }
 
-    if (scale_ > 0 && rate_ > 0)
-    {
-        frameRate_ = static_cast<double>(rate_) / static_cast<double>(scale_);
-        rateFromFile_ = true;
-    }
-    else if (microSecPerFrame_ > 0)
-    {
-        frameRate_ = 1'000'000.0 / static_cast<double>(microSecPerFrame_);
-        rateFromFile_ = true;
-    }
-    else
-    {
-        frameRate_ = std::max(1.0, fallbackFps);
-        rateFromFile_ = false;
-    }
-
     // An idx1 covers only the first RIFF part, so a file of several parts
     // without an OpenDML index is walked.
     std::vector<FrameChunk> frames;
@@ -190,7 +189,49 @@ bool AviReader::open(const std::filesystem::path& path, double fallbackFps, std:
 
     raw_.resize(storedBytes_);
     log_ = readFireCaptureLog(path);
+    chooseFrameRate(fallbackFps);
     return true;
+}
+
+// FireCapture writes the rate at the start of a capture into the header,
+// rounded to a whole number: 18 fps for a camera that ran at 18.3, and also
+// for one that fell to 3.6. Its log has the span and the frame count. On
+// FireCapture's SER files of the Moon, whose frames carry their own times,
+// frame n came within 80 ms of Start + n x Duration / Frames captured, and
+// End one frame interval after the last frame; AVI frames are spaced so.
+void AviReader::chooseFrameRate(double fallbackFps)
+{
+    if (scale_ > 0 && rate_ > 0)
+    {
+        headerRate_ = static_cast<double>(rate_) / static_cast<double>(scale_);
+    }
+    else if (microSecPerFrame_ > 0)
+    {
+        headerRate_ = 1'000'000.0 / static_cast<double>(microSecPerFrame_);
+    }
+
+    if (log_ && log_->durationSeconds && log_->framesCaptured)
+    {
+        if (*log_->framesCaptured == frameChunks_)
+        {
+            frameRate_ = *log_->framesCaptured / *log_->durationSeconds;
+            rateSource_ = RateSource::FireCaptureLog;
+            return;
+        }
+        logRateRefused_ = std::format("FireCapture's log {} counts {} frames captured but the file holds {} frame "
+            "chunks, so its Duration is not used", log_->fileName, *log_->framesCaptured, frameChunks_);
+    }
+
+    if (headerRate_ > 0)
+    {
+        frameRate_ = headerRate_;
+        rateSource_ = RateSource::Header;
+    }
+    else
+    {
+        frameRate_ = std::max(1.0, fallbackFps);
+        rateSource_ = RateSource::Window;
+    }
 }
 
 bool AviReader::readAt(uint64_t offset, void* bytes, size_t count)
@@ -218,7 +259,7 @@ bool AviReader::readChunk(uint64_t at, uint64_t end, Chunk& chunk)
     chunk.id = u32(header);
     chunk.size = u32(header + 4);
     chunk.dataAt = at + sizeof(header);
-    return true;
+    return isFourCc(chunk.id);
 }
 
 void AviReader::readTopLevel(uint64_t from, uint64_t to, bool firstPart)
@@ -527,6 +568,14 @@ void AviReader::findFramesInMovi(uint64_t from, uint64_t to, std::vector<FrameCh
         }
         at = chunk.dataAt + chunk.size + (chunk.size & 1);
     }
+
+    // Stopped before the end at bytes that are not a chunk, or that could not
+    // be read. Stepping through 900 MB of zeros eight bytes at a time took a
+    // minute from a USB disk.
+    if (at + 8 <= to)
+    {
+        unreadMoviBytes_ += to - at;
+    }
 }
 
 bool AviReader::isFrameChunk(uint32_t id) const
@@ -538,6 +587,7 @@ bool AviReader::keepFrames(const std::vector<FrameChunk>& frames, std::string& e
 {
     frames_.clear();
     numbers_.clear();
+    frameChunks_ = static_cast<int>(frames.size());
     emptyChunks_ = 0;
     framesBeyondEnd_ = 0;
     for (size_t i = 0; i < frames.size(); ++i)
@@ -599,8 +649,9 @@ uint64_t AviReader::frameNumber(int index) const
 // AVI timing is by position: frame n is shown n frame intervals after the start.
 std::chrono::system_clock::time_point AviReader::frameTime(int index) const
 {
+    // To the nearest tick of the clock: 3 / 25 s is a hair under 0.12 s as a double.
     const auto start = log_ && log_->startUtc ? *log_->startUtc : std::chrono::system_clock::time_point{};
-    return start + std::chrono::duration_cast<std::chrono::system_clock::duration>(
+    return start + std::chrono::round<std::chrono::system_clock::duration>(
         std::chrono::duration<double>(static_cast<double>(frameNumber(index)) / frameRate_));
 }
 
@@ -619,14 +670,33 @@ StreamInfo AviReader::describe() const
         info.gain = log_->gain;
     }
 
-    info.frameRate = rateFromFile_
-        ? std::format("{:.3f} fps, from the AVI header", frameRate_)
-        : std::format("{:.3f} fps, the rate set in the window; the AVI header states none", frameRate_);
+    switch (rateSource_)
+    {
+    case RateSource::FireCaptureLog:
+        info.frameRate = std::format("{:.3f} fps, the mean in FireCapture's log {} ({} frames captured in its "
+            "Duration of {:.3f} s); {}", frameRate_, log_->fileName, *log_->framesCaptured, *log_->durationSeconds,
+            headerRate_ > 0 ? std::format("the AVI header states {:.3f} fps", headerRate_)
+                            : std::string("the AVI header states none"));
+        break;
+    case RateSource::Header:
+        info.frameRate = std::format("{:.3f} fps, from the AVI header", frameRate_);
+        break;
+    case RateSource::Window:
+        info.frameRate = std::format("{:.3f} fps, the rate set in the window; the AVI header states none", frameRate_);
+        break;
+    }
+    if (!logRateRefused_.empty())
+    {
+        info.frameRate += "; " + logRateRefused_;
+    }
 
     const std::string start = log_ && log_->startUtc
         ? std::format("the start time in FireCapture's log {} (Date, Start, and Start(UT))", log_->fileName)
         : std::string("an unknown start time counted from zero");
-    info.frameTime = std::format("nominal, not measured: {} plus the frame's number at the frame rate", start);
+    const std::string spacing = rateSource_ == RateSource::FireCaptureLog
+        ? ", which spreads the frames evenly over the log's Duration"
+        : "";
+    info.frameTime = std::format("nominal, not measured: {} plus the frame's number at the frame rate{}", start, spacing);
 
     info.frameIndex = "the frame's number among the file's frame chunks, from 0";
     if (emptyChunks_ > 0)
@@ -638,6 +708,12 @@ StreamInfo AviReader::describe() const
     if (framesBeyondEnd_ > 0)
     {
         info.frameIndex += std::format("; the file ends before {} more frames its index names", framesBeyondEnd_);
+    }
+    if (unreadMoviBytes_ > 0)
+    {
+        info.frameIndex += std::format("; the file has no index, and the walk through it stopped at {} bytes at the "
+            "end of its frame list that hold no chunk and were not read (a capture that stops early can leave its "
+            "reserved space as zeros)", unreadMoviBytes_);
     }
 
     const std::string turned = bottomUp_ ? "rows turned the right way up" : "";

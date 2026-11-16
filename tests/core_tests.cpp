@@ -430,6 +430,10 @@ struct AviFileSpec
 
     // An empty chunk, a frame dropped during capture, follows each of these frames.
     std::vector<int> emptyChunkAfter;
+
+    // Zero bytes at the end of the first movi list: space a capture program
+    // reserved and did not fill.
+    int reservedZeroBytes = 0;
 };
 
 int bitsPerPixel(AviFileSpec::Kind kind)
@@ -632,6 +636,10 @@ QString writeAviFile(const QString& dir, const QString& name, const AviFileSpec&
             }
             const qsizetype ixAt = riff.chunk("ix00", ix);
             standardIndexes.push_back({ixAt, static_cast<int>(partFrames.size()), static_cast<int>(ix.size() + 8)});
+        }
+        if (part == 0)
+        {
+            riff.bytes.append(QByteArray(spec.reservedZeroBytes, '\0'));
         }
         riff.endList();  // movi
 
@@ -856,8 +864,10 @@ private slots:
     void readsBgr24SplitIntoTwoRiffParts();
     void readsThroughIdx1RelativeAndAbsolute();
     void walksAFileWithoutIndex();
+    void walkStopsAtSpaceThatHoldsNoChunk();
     void refusesWhatItCannotPlay();
     void fireCaptureLogSuppliesStartAndSettings();
+    void fireCaptureLogGivesTheMeanRate();
     void ignoresLogsThatCannotGiveTheStart();
 };
 
@@ -1907,6 +1917,42 @@ void AviReaderTest::walksAFileWithoutIndex()
     }
 }
 
+// A capture that stopped early, before writing an index, leaves the rest of
+// its reserved file as zeros. The walk stops there and says so.
+void AviReaderTest::walkStopsAtSpaceThatHoldsNoChunk()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.index = AviFileSpec::Index::None;
+    spec.frames = patternFrames(3, 15);
+    spec.emptyChunkAfter = {0};
+    spec.reservedZeroBytes = 4096;
+    const QString path = writeAviFile(dir.path(), "stopped.avi", spec);
+
+    AviReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+    QCOMPARE(QString::fromStdString(reader.indexUsed()), QString("movi walk"));
+    QCOMPARE(reader.frameCount(), 3);
+    QCOMPARE(reader.frameNumber(2), static_cast<uint64_t>(3));
+
+    const std::vector<Frame> frames = readAllAviFrames(reader);
+    for (size_t i = 0; i < frames.size(); ++i)
+    {
+        QCOMPARE(frames[i].data, spec.frames[i]);
+    }
+    const QString frameIndex = QString::fromStdString(reader.describe().frameIndex);
+    QVERIFY2(frameIndex.contains("stopped at 4096 bytes"), qPrintable(frameIndex));
+
+    // A file that ends at its last chunk says nothing of the kind.
+    spec.reservedZeroBytes = 0;
+    AviReader whole;
+    QVERIFY2(whole.open(fsPath(writeAviFile(dir.path(), "whole.avi", spec)), 30.0, error), error.c_str());
+    QVERIFY(!QString::fromStdString(whole.describe().frameIndex).contains("stopped"));
+}
+
 void AviReaderTest::refusesWhatItCannotPlay()
 {
     QTemporaryDir dir;
@@ -1981,6 +2027,54 @@ void AviReaderTest::fireCaptureLogSuppliesStartAndSettings()
     QCOMPARE(QString::fromStdString(info.gain), QString("510"));
     QCOMPARE(QString::fromStdString(info.frameRate), QString("25.000 fps, from the AVI header"));
     QVERIFY(QString::fromStdString(info.frameTime).contains("FireCapture's log night.txt"));
+}
+
+// FireCapture writes its rate into the header rounded; its log has the span.
+// Four frames in Duration 0.200 s are 20 fps, not the header's 25: frame n is
+// at Start + n x 50 ms. A log that counts other frames than the file holds,
+// or gives whole seconds, leaves the header's rate.
+void AviReaderTest::fireCaptureLogGivesTheMeanRate()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AviFileSpec spec;
+    spec.rate = 25;
+    spec.frames = patternFrames(4, 15);
+    const auto log = [](const QString& frames, const QString& duration) {
+        return "FireCapture v2.4  Settings\nFilename=clip.avi\nDate=261015\nStart=200059.270\nStart(UT)=190059.270\n"
+               "Duration=" + duration + "\nFrames captured=" + frames + "\nDate_format=ddMMyy\n";
+    };
+    const QString path = writeAviFile(dir.path(), "clip.avi", spec);
+    const QString logPath = QDir(dir.path()).filePath("clip.txt");
+    const sys_days day = year{2015} / October / 26;
+    const system_clock::time_point start = day + hours{19} + seconds{59} + milliseconds{270};
+
+    QVERIFY(writeTextFile(logPath, log("4", "0.200s")));
+    AviReader reader;
+    std::string error;
+    QVERIFY2(reader.open(fsPath(path), 30.0, error), error.c_str());
+    QVERIFY(reader.frameTime(0) == start);
+    QVERIFY(reader.frameTime(3) == start + milliseconds{150});
+    StreamInfo info = reader.describe();
+    QCOMPARE(QString::fromStdString(info.frameRate),
+        QString("20.000 fps, the mean in FireCapture's log clip.txt (4 frames captured in its Duration of 0.200 s); "
+                "the AVI header states 25.000 fps"));
+    QVERIFY(QString::fromStdString(info.frameTime).contains("spreads the frames evenly"));
+
+    QVERIFY(writeTextFile(logPath, log("5", "0.200s")));
+    AviReader otherCount;
+    QVERIFY2(otherCount.open(fsPath(path), 30.0, error), error.c_str());
+    QVERIFY(otherCount.frameTime(3) == start + milliseconds{120});
+    info = otherCount.describe();
+    QVERIFY2(QString::fromStdString(info.frameRate).startsWith("25.000 fps, from the AVI header; FireCapture's log "
+        "clip.txt counts 5 frames captured but the file holds 4 frame chunks"), info.frameRate.c_str());
+    QVERIFY(!QString::fromStdString(info.frameTime).contains("evenly"));
+
+    QVERIFY(writeTextFile(logPath, log("4", "1s")));
+    AviReader wholeSeconds;
+    QVERIFY2(wholeSeconds.open(fsPath(path), 30.0, error), error.c_str());
+    QCOMPARE(QString::fromStdString(wholeSeconds.describe().frameRate), QString("25.000 fps, from the AVI header"));
 }
 
 // FireCapture 2.2 gives only the local start. A log that names another file
