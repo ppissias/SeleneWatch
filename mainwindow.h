@@ -66,6 +66,9 @@ private slots:
 
 private:
     void setupStatusBar();
+    // The status bar's message line. A message stays until the next one,
+    // or for timeoutMs when that is above zero.
+    void showMessage(const QString& text, int timeoutMs = 0);
     void startStream(Session::Mode mode);
     void setupDetectionPanel();
     void updateDetectionDisplay();
@@ -145,6 +148,10 @@ private:
 
     QString recordingPath_;
 
+    // The status bar: a line for messages, with the readouts below it, so
+    // neither takes the other's width.
+    QLabel* messageLabel_{nullptr};
+    QTimer* messageTimer_{nullptr};
     QLabel* statusLabel_{nullptr};
     QLabel* fpsLabel_{nullptr};
     QLabel* framesLabel_{nullptr};

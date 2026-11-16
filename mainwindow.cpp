@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "detection_panel.h"
 #include "display_panel.h"
+#include "elided_label.h"
 #include "histogram_panel.h"
 #include "guiding_panel.h"
 #include "camera_panel.h"
@@ -20,9 +21,12 @@
 #include <QtCore/QSettings>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QFrame>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QStatusBar>
+#include <QtWidgets/QVBoxLayout>
 
 #include <filesystem>
 #include <algorithm>
@@ -58,12 +62,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         if (camera_) cameraPanel_->showLiveActual(camera_->actualProfile());
         else if (qhyCamera_) qhyPanel_->showLiveActual(qhyCamera_->actualProfile());
         else return;
-        statusBar()->showMessage("Camera controls read back. Preview is settling and relearning.",4000);
+        showMessage("Camera controls read back. Preview is settling and relearning.",4000);
     };
     notifications.manualSaveHandled = [this](bool saved) {
         if (saved) { ++manualCaptures_; updateCandidateReadout(); }
         updateControls();
-        statusBar()->showMessage(saved ? "Manual capture marked; collecting following frames." : "Manual capture unavailable: no frames acquired.",5000);
+        showMessage(saved ? "Manual capture marked; collecting following frames." : "Manual capture unavailable: no frames acquired.",5000);
     };
     notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
     notifications.ended = [this] { onPlaybackEnded(); };
@@ -116,7 +120,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
         if (!session_->isRunning()) return;
         session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
-        statusBar()->showMessage("Locking on the selected region…", 3000);
+        showMessage("Locking on the selected region…", 3000);
     });
     connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
     connect(ui_->sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
@@ -335,7 +339,7 @@ void MainWindow::onChooseMountDriver()
     const auto chosen = chooseAscomTelescope(ascomDriver_.toStdString(), error);
     if (!chosen)
     {
-        statusBar()->showMessage(QString("ASCOM chooser: %1").arg(QString::fromStdString(error)), 8000);
+        showMessage(QString("ASCOM chooser: %1").arg(QString::fromStdString(error)), 8000);
         return;
     }
     if (chosen->empty()) return;
@@ -350,16 +354,16 @@ void MainWindow::onConnectMount()
     if (guidingPanel_->mountKind() == GuidingPanel::MountKind::Simulated)
     {
         guider.requestConnect([pointing = simulatedPointing_] { return std::make_unique<SimulatedMount>(pointing); });
-        statusBar()->showMessage("Simulated mount: it moves the synthetic Moon. Use the Synthetic source.", 6000);
+        showMessage("Simulated mount: it moves the synthetic Moon. Use the Synthetic source.", 6000);
         return;
     }
     if (ascomDriver_.isEmpty())
     {
-        statusBar()->showMessage("Choose an ASCOM telescope driver first.", 5000);
+        showMessage("Choose an ASCOM telescope driver first.", 5000);
         return;
     }
     guider.requestConnect([progId = ascomDriver_.toStdString()] { return std::make_unique<AscomMount>(progId); });
-    statusBar()->showMessage(QString("Connecting to %1…").arg(ascomDriver_), 5000);
+    showMessage(QString("Connecting to %1…").arg(ascomDriver_), 5000);
 }
 
 void MainWindow::onLockAtSelection()
@@ -368,7 +372,7 @@ void MainWindow::onLockAtSelection()
     if (!position || !session_->isRunning()) return;
     constexpr int side = GuidingPanel::kDefaultLockSide;
     session_->guider().requestLock({position->x() - side / 2, position->y() - side / 2, side, side});
-    statusBar()->showMessage("Locking on the selected pixel…", 3000);
+    showMessage("Locking on the selected pixel…", 3000);
 }
 
 // The guider's status reaches the panel, the preview boxes, and the status bar.
@@ -408,7 +412,7 @@ void MainWindow::renderPreview()
         ui_->previewWidget->setImage(std::move(image));
         displayPanel_->showLevels(levels);
     }
-    catch (const MemoryLimitError&) { statusBar()->showMessage("Preview skipped: RAM ceiling reached"); }
+    catch (const MemoryLimitError&) { showMessage("Preview skipped: RAM ceiling reached"); }
 }
 
 void MainWindow::updateDetectionDisplay()
@@ -424,16 +428,27 @@ void MainWindow::setupStatusBar()
     modeLabel_=new QLabel(this); modeLabel_->setObjectName("captureModeLabel");
     modeLabel_->setWordWrap(true); modeLabel_->setMargin(8);
     ui_->verticalLayout->insertWidget(2,modeLabel_);
-    statusLabel_ = new QLabel("Status: Idle", this);
-    fpsLabel_ = new QLabel("FPS: --", this);
-    framesLabel_ = new QLabel("Frames: 0", this);
+    // Messages carry folder paths and error reasons, so they get the whole
+    // width; a path that still does not fit keeps both of its ends.
+    messageLabel_ = new ElidedLabel({}, Qt::ElideMiddle);
+    messageLabel_->setObjectName("statusMessage");
+    messageLabel_->setMinimumHeight(messageLabel_->fontMetrics().height());  // no jump when a message appears
+    messageTimer_ = new QTimer(this);
+    messageTimer_->setSingleShot(true);
+    connect(messageTimer_, &QTimer::timeout, this, [this] { messageLabel_->clear(); });
+
+    statusLabel_ = new ElidedLabel("Status: Idle");
+    fpsLabel_ = new ElidedLabel("FPS: --");
+    framesLabel_ = new ElidedLabel("Frames: 0");
     framesLabel_->setObjectName("framesReadout");
-    candidatesLabel_ = new QLabel(this);
-    bufferLabel_ = new QLabel(this);
-    frameLabel_ = new QLabel("No frame yet", this);
-    lockLabel_ = new QLabel("Lock: off", this);
+    candidatesLabel_ = new ElidedLabel;
+    bufferLabel_ = new ElidedLabel;
+    frameLabel_ = new ElidedLabel("No frame yet");
+    lockLabel_ = new ElidedLabel("Lock: off");
     lockLabel_->setObjectName("lockReadout");
 
+    // Room for the usual values, so the readouts do not shift as numbers
+    // change. A longer text widens its readout while the window has room.
     statusLabel_->setMinimumWidth(150);
     fpsLabel_->setMinimumWidth(80);
     framesLabel_->setMinimumWidth(100);
@@ -441,16 +456,43 @@ void MainWindow::setupStatusBar()
     bufferLabel_->setMinimumWidth(210);
     frameLabel_->setMinimumWidth(160);
 
-    statusBar()->addPermanentWidget(statusLabel_);
-    statusBar()->addPermanentWidget(fpsLabel_);
-    statusBar()->addPermanentWidget(framesLabel_);
-    statusBar()->addPermanentWidget(candidatesLabel_);
-    statusBar()->addPermanentWidget(bufferLabel_);
-    statusBar()->addPermanentWidget(frameLabel_);
-    statusBar()->addPermanentWidget(lockLabel_);
+    auto* readouts = new QHBoxLayout;
+    readouts->setContentsMargins(0, 0, 0, 0);
+    readouts->setSpacing(8);
+    const QList<QLabel*> labels{statusLabel_, fpsLabel_, framesLabel_, candidatesLabel_, bufferLabel_, frameLabel_, lockLabel_};
+    for (QLabel* label : labels)
+    {
+        if (label != labels.front())
+        {
+            auto* separator = new QFrame;
+            separator->setFrameShape(QFrame::VLine);
+            separator->setFrameShadow(QFrame::Sunken);
+            readouts->addWidget(separator);
+        }
+        readouts->addWidget(label);
+    }
+    readouts->addStretch(1);
+
+    auto* area = new QWidget(this);
+    auto* rows = new QVBoxLayout(area);
+    rows->setContentsMargins(4, 0, 0, 0);
+    rows->setSpacing(1);
+    rows->addWidget(messageLabel_);
+    rows->addLayout(readouts);
+    statusBar()->setStyleSheet("QStatusBar::item { border: none; }");
+    statusBar()->addPermanentWidget(area, 1);
 
     updateBufferReadout();
     updateCandidateReadout();
+}
+
+void MainWindow::showMessage(const QString& text, int timeoutMs)
+{
+    messageLabel_->setText(text);
+    if (timeoutMs > 0)
+        messageTimer_->start(timeoutMs);
+    else
+        messageTimer_->stop();
 }
 
 bool MainWindow::recordingSelected() const
@@ -645,14 +687,14 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
 
     if (qhySelected())
     {
-        if (!qhyPanel_->hasCamera()) { statusBar()->showMessage("Connect a QHY camera and refresh its list");return {}; }
+        if (!qhyPanel_->hasCamera()) { showMessage("Connect a QHY camera and refresh its list");return {}; }
         auto source=std::make_unique<QhySource>(qhyApi_,qhyPanel_->profile(),qhyPanel_->settings());
         qhyCamera_=source.get();return source;
     }
 
     if (cameraSelected())
     {
-        if (!cameraPanel_->hasCamera()) { statusBar()->showMessage("Connect an ASI camera and refresh its list"); return {}; }
+        if (!cameraPanel_->hasCamera()) { showMessage("Connect an ASI camera and refresh its list"); return {}; }
         auto source=std::make_unique<ZwoSource>(cameraApi_,cameraPanel_->profile(),cameraPanel_->settings());
         camera_=source.get(); return source;
     }
@@ -674,7 +716,7 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
 
     if (recordingPath_.isEmpty())
     {
-        statusBar()->showMessage("Choose a recording file first");
+        showMessage("Choose a recording file first");
         return nullptr;
     }
 
@@ -717,7 +759,7 @@ void MainWindow::startStream(Session::Mode mode)
         recording_ = nullptr;
         camera_ = nullptr;
         qhyCamera_ = nullptr;
-        statusBar()->showMessage(QString("Cannot start: %1").arg(error));
+        showMessage(QString("Cannot start: %1").arg(error));
         updateControls();
         updateStatusLabel();
         return;
@@ -738,7 +780,7 @@ void MainWindow::startStream(Session::Mode mode)
     fpsLabel_->setText("FPS: --");
     updateCandidateReadout();
     updateBufferReadout();
-    statusBar()->clearMessage();
+    showMessage({});
 
     bufferReadoutTimer_->start();
     updateControls();
@@ -852,7 +894,7 @@ bool MainWindow::validateCameraSettings()
     }
     catch (const std::exception& ex)
     {
-        statusBar()->showMessage(QString::fromUtf8(ex.what()));
+        showMessage(QString::fromUtf8(ex.what()));
         return false;
     }
 }
@@ -869,14 +911,14 @@ void MainWindow::onApplyCamera()
     {
         ZwoSource source(cameraApi_,cameraPanel_->profile(),cameraPanel_->settings());
         std::string error;
-        if (source.open(error)) { cameraPanel_->showActual(source.actualProfile()); statusBar()->showMessage("Camera settings read back; ready to Start",5000); }
-        else statusBar()->showMessage(QString::fromStdString(error));
+        if (source.open(error)) { cameraPanel_->showActual(source.actualProfile()); showMessage("Camera settings read back; ready to Start",5000); }
+        else showMessage(QString::fromStdString(error));
     }
     else
     {
         QhySource source(qhyApi_,qhyPanel_->profile(),qhyPanel_->settings());std::string error;
-        if (source.open(error)) { qhyPanel_->showActual(source.actualProfile());statusBar()->showMessage("QHY settings read back; ready to Start",5000); }
-        else statusBar()->showMessage(QString::fromStdString(error));
+        if (source.open(error)) { qhyPanel_->showActual(source.actualProfile());showMessage("QHY settings read back; ready to Start",5000); }
+        else showMessage(QString::fromStdString(error));
     }
     updateControls();
 }
@@ -889,7 +931,7 @@ void MainWindow::onApplyLiveCamera()
         if (camera_) camera_->requestLiveControls(cameraPanel_->settings().controls);
         else if (qhyCamera_) qhyCamera_->requestLiveControls(qhyPanel_->settings().controls);
     }
-    catch (const std::exception& ex) { statusBar()->showMessage(QString::fromUtf8(ex.what())); }
+    catch (const std::exception& ex) { showMessage(QString::fromUtf8(ex.what())); }
 }
 
 void MainWindow::onInjectFlashClicked()
@@ -911,7 +953,7 @@ void MainWindow::onInjectBlipClicked()
         ui_->blipAmplitudeSpinBox->value(), ui_->blipFramesSpinBox->value()};
     if (session_->requestBlip(settings))
     {
-        statusBar()->showMessage("Test flash requested");
+        showMessage("Test flash requested");
     }
     updateBlipReadout();
 }
@@ -954,7 +996,7 @@ void MainWindow::showLatestFrame()
             const auto& view = *packet.detection;
             latestDetection_ = view.summary;
             try { detectionPanel_->setView(view); }
-            catch (const MemoryLimitError&) { statusBar()->showMessage("Overlay skipped: RAM ceiling reached"); }
+            catch (const MemoryLimitError&) { showMessage("Overlay skipped: RAM ceiling reached"); }
             if (detectionDock_->isVisible())
                 ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
                     {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});
@@ -967,13 +1009,13 @@ void MainWindow::onCandidateStarted()
 {
     ++candidates_;
     updateCandidateReadout();
-    statusBar()->showMessage(QString("Candidate %1 detected").arg(candidates_));
+    showMessage(QString("Candidate %1 detected").arg(candidates_));
 }
 
 void MainWindow::onSaveNowClicked()
 {
     if (session_->requestManualSave())
-        statusBar()->showMessage("Manual capture requested",3000);
+        showMessage("Manual capture requested",3000);
     updateControls();
 }
 
@@ -989,11 +1031,11 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
     {
         ++clipsNotSaved_;
         updateCandidateReadout();
-        statusBar()->showMessage(QString("Clip not saved: %1").arg(result.notSaved));
+        showMessage(QString("Clip not saved: %1").arg(result.notSaved));
     }
     else if (!result.folder.isEmpty())
     {
-        statusBar()->showMessage(result.memoryLimited ? "Clip saved at RAM limit: " + result.folder : result.folder);
+        showMessage(result.memoryLimited ? "Clip saved at RAM limit: " + result.folder : result.folder);
     }
 
     updateStatusLabel();
@@ -1008,7 +1050,7 @@ void MainWindow::onPlaybackEnded()
     }
     playbackEnded_ = true;
     finishStream();
-    statusBar()->showMessage("Playback finished");
+    showMessage("Playback finished");
 }
 
 void MainWindow::onSourceFailed(const QString& message)
@@ -1019,5 +1061,5 @@ void MainWindow::onSourceFailed(const QString& message)
     }
     sourceFailed_ = true;
     finishStream();
-    statusBar()->showMessage(message);
+    showMessage(message);
 }

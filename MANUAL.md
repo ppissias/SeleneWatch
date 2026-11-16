@@ -56,14 +56,17 @@ From top to bottom:
   - **Detection**, **Display and capture**, and **Guiding** share the right-hand side as tabs.
   - **Camera** (ZWO) and **QHY camera** appear on the left when that camera is the source.
   - **Histogram** opens below the preview.
-- **Status bar** (bottom), from left to right:
-  - the latest message;
-  - **Status**;
-  - **FPS**, and **Frames** with the camera's reported dropped frames;
-  - **Candidates**;
-  - **History** and **RAM** use;
-  - the frame size and format;
-  - **Lock**: the drift readout, and whether guiding is active.
+- **Status bar** (bottom), in two lines:
+  - the latest message, on a line of its own so that a folder path or an error reason has the whole width. A text that still does not fit is shortened with "…"; hover over it to read all of it.
+  - the readouts, from left to right:
+    - **Status**;
+    - **FPS**, and **Frames** with the camera's reported dropped frames;
+    - **Candidates**;
+    - **History** and **RAM** use;
+    - the frame size and format;
+    - **Lock**: the drift readout, and whether guiding is active.
+
+    A readout that does not fit is shortened the same way.
 
 ---
 

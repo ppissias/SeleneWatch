@@ -1,6 +1,7 @@
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "camera_panel.h"
+#include "elided_label.h"
 #include "tests/fake_zwo_api.h"
 #include "tests/fake_qhy_api.h"
 #include "qhy_camera_panel.h"
@@ -17,6 +18,7 @@
 #include <QtCore/QUuid>
 #include <QtGui/QAction>
 #include <QtGui/QFontDatabase>
+#include <QtGui/QHelpEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -26,6 +28,7 @@
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QToolButton>
+#include <QtWidgets/QToolTip>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -46,6 +49,7 @@ private slots:
     void init() { QSettings saved; saved.clear(); saved.sync(); }
     void controlsPreserveValidSizeLimits();
     void detectionPanelExplainsPatchRejections();
+    void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
         DetectionPanel panel;
@@ -103,6 +107,36 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
     QVERIFY(!histogram->isHidden());
     QVERIFY(histogram->findChild<QCheckBox*>("histogramFitRange")->isChecked());
     QVERIFY(!histogram->findChild<QCheckBox*>("histogramLogCounts")->isChecked());
+}
+
+// A message has the status bar's first line to itself, above the readouts,
+// so the readouts cannot squeeze it. A text too long for its label is
+// shortened on screen only; the whole text stays the label's text and is its
+// tool tip.
+void UiTest::statusMessagesHaveTheirOwnLine()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    auto* source = window.findChild<QComboBox*>("sourceComboBox");
+    source->setCurrentIndex(source->findData("recording"));
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* message = window.findChild<QLabel*>("statusMessage");
+    QVERIFY(message);
+    QCOMPARE(message->text(), QString("Choose a recording file first"));
+    const auto* frames = window.findChild<QLabel*>("framesReadout");
+    QVERIFY(message->mapTo(&window, QPoint()).y() + message->height() <= frames->mapTo(&window, QPoint()).y());
+    QVERIFY(message->width() > frames->mapTo(&window, QPoint()).x() + frames->width() - message->mapTo(&window, QPoint()).x());
+
+    const QString longText = "Clip saved: " + QString(40, 'x') + "/2026-11-16T21-04-05Z-candidate";
+    ElidedLabel label(longText, Qt::ElideMiddle);
+    label.resize(label.minimumSizeHint().width() * 2, label.sizeHint().height());
+    label.show();
+    QVERIFY(label.minimumSizeHint().width() < label.fontMetrics().horizontalAdvance(longText));
+    QCOMPARE(label.text(), longText);
+    QHelpEvent help(QEvent::ToolTip, QPoint(5, 5), label.mapToGlobal(QPoint(5, 5)));
+    QVERIFY(QApplication::sendEvent(&label, &help));
+    QTRY_COMPARE(QToolTip::text(), longText);
 }
 
 // Feature-8 Part A: a drag locks, the readout follows, a click still selects a
