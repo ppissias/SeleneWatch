@@ -1,4 +1,5 @@
 #include "display_panel.h"
+#include "readout_label.h"
 
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -10,6 +11,14 @@
 
 #include <algorithm>
 #include <cmath>
+
+namespace {
+QString levelsText(double black, double white)
+{
+    return QString("Display: %1 to %2 ADU.\nDisplay changes never alter raw evidence or detection.")
+        .arg(black, 0, 'f', 1).arg(white, 0, 'f', 1);
+}
+}
 
 DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
 {
@@ -29,8 +38,10 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
     invert_ = new QCheckBox("Invert brightness", this); invert_->setObjectName("displayInvert");
     debayer_ = new QCheckBox("Show Bayer colour", this); debayer_->setObjectName("displayDebayer");
     form->addRow(invert_); form->addRow(debayer_);
-    levels_ = new QLabel("Display only; raw evidence and detection are unchanged.", this);
-    levels_->setWordWrap(true); levels_->setObjectName("displayLevels"); form->addRow(levels_);
+    // Room for the widest levels, so the capture settings below stay put.
+    levels_ = new ReadoutLabel({levelsText(65535.0, 65535.0)}, this);
+    levels_->setText("Display only; raw evidence and detection are unchanged.");
+    levels_->setObjectName("displayLevels"); form->addRow(levels_);
     auto* heading = new QLabel("Capture settings (next Start)", this); form->addRow(heading);
     history_ = new QDoubleSpinBox(this); history_->setObjectName("historySeconds");
     post_ = new QDoubleSpinBox(this); post_->setObjectName("postSeconds");
@@ -120,8 +131,7 @@ void DisplayPanel::setRunning(bool running, bool recording)
 
 void DisplayPanel::showLevels(DisplayLevels value)
 {
-    levels_->setText(QString("Display: %1 to %2 ADU.\nDisplay changes never alter raw evidence or detection.")
-        .arg(value.black, 0, 'f', 1).arg(value.white, 0, 'f', 1));
+    levels_->setText(levelsText(value.black, value.white));
 }
 
 void DisplayPanel::showUsage(MemoryUsage memory, RingUsage history, WriterUsage writer)

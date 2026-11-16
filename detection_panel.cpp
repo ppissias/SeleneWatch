@@ -1,5 +1,6 @@
 #include "detection_panel.h"
 #include "preview_image.h"
+#include "readout_label.h"
 
 #include <QtCore/QStringList>
 #include <QtGui/QPainter>
@@ -22,6 +23,79 @@ namespace {
 double boxArea(const DetectionSummary& summary)
 {
     return static_cast<double>(summary.boxWidth) * summary.boxHeight;
+}
+
+const QString kSettlingReading = "Settling after camera change — relearning before threshold feedback.";
+const QString kSettlingState = "Preview capture is OFF. Settling is an estimate; Monitoring starts fresh with verified camera settings.";
+const QString kOverlaySkipped = "Overlay skipped: RAM ceiling reached. Detection continues.";
+
+QString peakText(double peak, double threshold, double high)
+{
+    return QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
+        .arg(peak, 0, 'f', 1).arg(threshold, 0, 'f', 1).arg(100 * peak / threshold, 0, 'f', 0).arg(high, 0, 'f', 1);
+}
+
+QString patchText(int pixels, int high, double boxRatio, const DetectionSettings& settings)
+{
+    return QString("Patch %1 px (allowed %2–%3 px). Recent high %4.\nBox / patch %5. Maximum %6.")
+        .arg(pixels).arg(settings.minPixels).arg(settings.maxPixels).arg(high)
+        .arg(boxRatio, 0, 'f', 2).arg(settings.maxPatchBoxRatio, 0, 'f', 2);
+}
+
+QString decisionText(const DetectionSummary& summary, bool monitoring)
+{
+    if (summary.firing) return monitoring ? "Candidate — capture ON" : "Would trigger — capture OFF";
+    if (summary.passed) return "Passing patch (1 / 2 frames)";
+    if (summary.patchSearchLimited) return "Too many pixels at K to measure individual patches";
+    if (!summary.brightPixels) return "Below K";
+    QStringList reasons;
+    const int pixels = summary.brightPixels;
+    if (pixels < summary.settings.minPixels)
+        reasons << QString("%1 px, needs %2").arg(pixels).arg(summary.settings.minPixels);
+    else if (pixels > summary.settings.maxPixels)
+        reasons << QString("%1 px, maximum %2").arg(pixels).arg(summary.settings.maxPixels);
+    if (boxArea(summary) > summary.settings.maxPatchBoxRatio * pixels)
+        reasons << QString("Box / patch %1 exceeds %2")
+            .arg(boxArea(summary) / pixels, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2);
+    return reasons.join(" · ");
+}
+
+QString stateText(const DetectionSummary& summary, const QString& decision)
+{
+    return QString("Noise floor %1 ADU (minimum %2). Peak (%3, %4).\n%5   Detector %6 ms/frame\nActive patches %7. Longest %8 s. Background learning outside %9 protected pixels.\n%10")
+        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
+        .arg(decision).arg(summary.processingMs, 0, 'f', 2).arg(summary.activePatches).arg(summary.longestActiveSeconds, 0, 'f', 1)
+        .arg(summary.protectedPixels)
+        .arg(summary.settings.oneFrame ? "One passing frame can trigger." : "Two consecutive passing frames required.");
+}
+
+QString noiseScaleText(double scale)
+{
+    return QString("Noise colour scale: 0 to %1 ADU (95th percentile). Display only.").arg(scale, 0, 'f', 2);
+}
+
+// The widest values the readouts are expected to show, with both reasons to
+// reject a patch, so the readouts can keep room for them.
+DetectionSummary widestSummary()
+{
+    DetectionSummary summary;
+    summary.ready = true;
+    summary.settings.sigma = 100.0;
+    summary.settings.minPixels = 99;
+    summary.settings.maxPixels = 9999;
+    summary.settings.maxPatchBoxRatio = 9.99;
+    summary.settings.minNoiseAdu = 99.99;
+    summary.settings.oneFrame = false;
+    summary.noiseFloor = 999.99;
+    summary.peakSigma = 9999.9;
+    summary.peakX = summary.peakY = 9999;
+    summary.brightPixels = 99999;
+    summary.boxWidth = summary.boxHeight = 9999;
+    summary.processingMs = 99.99;
+    summary.activePatches = 99;
+    summary.longestActiveSeconds = 99.9;
+    summary.protectedPixels = 9'999'999;
+    return summary;
 }
 }
 
@@ -142,9 +216,17 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     compactness_->setToolTip("Largest allowed bounding-box area divided by the number of pixels in the patch.");
     compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), this);
     compactnessSlider_->setObjectName("compactnessSlider");
-    sigmaReading_ = new QLabel("Waiting for measurements", this); sigmaReading_->setObjectName("sigmaReading");
-    sigmaReading_->setWordWrap(true);
-    sizeReading_ = new QLabel("Patch: --", this); sizeReading_->setObjectName("patchReading"); sizeReading_->setWordWrap(true);
+    // The readouts keep room for their longest texts, so the controls below
+    // them stay where they are while the texts change.
+    const DetectionSummary widest = widestSummary();
+    sigmaReading_ = new ReadoutLabel({peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma), kSettlingReading}, this);
+    sigmaReading_->setObjectName("sigmaReading");
+    sigmaReading_->setText("Waiting for measurements");
+    // A measured patch is at most a few thousand pixels; the recent high
+    // counts pixels at K across the frame, which can be most of it.
+    sizeReading_ = new ReadoutLabel({patchText(widest.settings.maxPixels, 9'999'999, 99.99, widest.settings)}, this);
+    sizeReading_->setObjectName("patchReading");
+    sizeReading_->setText("Patch: --");
     layout->addWidget(new QLabel("Sensitivity K", this), 0, 0); layout->addWidget(sigma_, 0, 1);
     layout->addWidget(sigmaSlider_, 1, 0, 1, 2);
     layout->addWidget(sigmaReading_, 2, 0, 1, 2);
@@ -161,14 +243,16 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(oneFrame_, 10, 0, 1, 2);
     history_ = new PeakHistory(this); history_->setObjectName("peakHistory");
     layout->addWidget(history_, 11, 0, 1, 2);
-    state_ = new QLabel("Start a source to measure its noise.", this); state_->setObjectName("detectionState");
-    state_->setWordWrap(true);
+    state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)), kSettlingState}, this);
+    state_->setObjectName("detectionState");
+    state_->setText("Start a source to measure its noise.");
     layout->addWidget(state_, 12, 0, 1, 2);
     layout->addWidget(new QLabel("Preview overlay", this), 13, 0);
     overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
     overlay_->addItems({"None", "Sigma map", "Noise map"});
     layout->addWidget(overlay_, 13, 1);
-    mapScale_ = new QLabel("Overlays affect the display only.", this); mapScale_->setWordWrap(true);
+    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, this);
+    mapScale_->setText("Overlays affect the display only.");
     layout->addWidget(mapScale_, 14, 0, 1, 2);
 
     auto* showBackground = new QToolButton(content);
@@ -284,14 +368,9 @@ void DetectionPanel::setView(const DetectionView& view)
     noiseSlider_->markers(measuring ? summary.noiseFloor : 0);
     if (measuring)
     {
-        const double threshold = summary.settings.sigma;
-        sigmaReading_->setText(QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
-            .arg(summary.peakSigma, 0, 'f', 1).arg(threshold, 0, 'f', 1)
-            .arg(100 * summary.peakSigma / threshold, 0, 'f', 0).arg(high, 0, 'f', 1));
+        sigmaReading_->setText(peakText(summary.peakSigma, summary.settings.sigma, high));
         if (hasPatch)
-            sizeReading_->setText(QString("Patch %1 px (allowed %2–%3 px). Recent high %4.\nBox / patch %5. Maximum %6.")
-                .arg(patchPixels).arg(summary.settings.minPixels).arg(summary.settings.maxPixels).arg(big)
-                .arg(compactness, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2));
+            sizeReading_->setText(patchText(patchPixels, big, compactness, summary.settings));
         else if (summary.patchSearchLimited)
             sizeReading_->setText(QString("%1 px at or above K across the frame.").arg(summary.brightPixels));
         else
@@ -299,7 +378,7 @@ void DetectionPanel::setView(const DetectionView& view)
     }
     else
     {
-        sigmaReading_->setText(view.settling?"Settling after camera change — relearning before threshold feedback.":"Learning the reference — waiting for measurements.");
+        sigmaReading_->setText(view.settling ? kSettlingReading : "Learning the reference — waiting for measurements.");
         sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
     }
     updateDecision();
@@ -307,7 +386,7 @@ void DetectionPanel::setView(const DetectionView& view)
     overlayImage_ = {};
     if (!view.map || overlay() == DetectionOverlay::None)
     {
-        mapScale_->setText(summary.overlaySkipped ? "Overlay skipped: RAM ceiling reached. Detection continues." : "Overlays affect the display only.");
+        mapScale_->setText(summary.overlaySkipped ? kOverlaySkipped : "Overlays affect the display only.");
         return;
     }
     const auto& map = *view.map;
@@ -341,7 +420,7 @@ void DetectionPanel::setView(const DetectionView& view)
     }
     mapScale_->setText(map.kind == DetectionOverlay::Sigma
         ? QString("Red: at or above K (%1 sigma). Display only.").arg(scale, 0, 'f', 1)
-        : QString("Noise colour scale: 0 to %1 ADU (95th percentile). Display only.").arg(scale, 0, 'f', 2));
+        : noiseScaleText(scale));
 }
 
 void DetectionPanel::setMonitoring(bool monitoring)
@@ -355,39 +434,9 @@ void DetectionPanel::updateDecision()
 {
     const auto& summary=latest_;
     if (settling_)
-    {
-        state_->setText("Preview capture is OFF. Settling is an estimate; Monitoring starts fresh with verified camera settings.");
-        return;
-    }
-    if (!summary.ready)
-    {
+        state_->setText(kSettlingState);
+    else if (!summary.ready)
         state_->setText(QString("Learning reference (%1 frame(s)). Capture %2.").arg(summary.learningFrames).arg(monitoring_?"ON":"OFF"));
-        return;
-    }
-    QString decision;
-    if (summary.firing)
-        decision = monitoring_ ? "Candidate — capture ON" : "Would trigger — capture OFF";
-    else if (summary.passed)
-        decision = "Passing patch (1 / 2 frames)";
-    else if (summary.patchSearchLimited)
-        decision = "Too many pixels at K to measure individual patches";
-    else if (!summary.brightPixels)
-        decision = "Below K";
     else
-    {
-        QStringList reasons;
-        const int pixels = summary.brightPixels;
-        if (pixels < summary.settings.minPixels)
-            reasons << QString("%1 px, needs %2").arg(pixels).arg(summary.settings.minPixels);
-        else if (pixels > summary.settings.maxPixels)
-            reasons << QString("%1 px, maximum %2").arg(pixels).arg(summary.settings.maxPixels);
-        if (boxArea(summary) > summary.settings.maxPatchBoxRatio * pixels)
-            reasons << QString("Box / patch %1 exceeds %2")
-                .arg(boxArea(summary) / pixels, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2);
-        decision = reasons.join(" · ");
-    }
-    state_->setText(QString("Noise floor %1 ADU (minimum %2). Peak (%3, %4).\n%5   Detector %6 ms/frame\nActive patches %7. Longest %8 s. Background learning outside %9 protected pixels.\n%10")
-        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
-        .arg(decision).arg(summary.processingMs,0,'f',2).arg(summary.activePatches).arg(summary.longestActiveSeconds,0,'f',1).arg(summary.protectedPixels)
-        .arg(summary.settings.oneFrame?"One passing frame can trigger.":"Two consecutive passing frames required."));
+        state_->setText(stateText(summary, decisionText(summary, monitoring_)));
 }

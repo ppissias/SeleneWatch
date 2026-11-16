@@ -1,5 +1,6 @@
 #include "histogram_panel.h"
 #include "preview_image.h"
+#include "readout_label.h"
 
 #include <QtGui/QPainter>
 #include <QtWidgets/QCheckBox>
@@ -9,6 +10,14 @@
 
 #include <algorithm>
 #include <cmath>
+
+namespace {
+QString sampleRangeText(int minimum, int maximum, const QString& atZero, int maximumCode, const QString& atMaximum)
+{
+    return QString("Samples %1–%2 ADU   ·   At 0 %3   ·   At max code (%4) %5")
+        .arg(minimum).arg(maximum).arg(atZero).arg(maximumCode).arg(atMaximum);
+}
+}
 
 // Paints one native-sample histogram snapshot and its selected count scale on the GUI thread.
 class HistogramPlot final : public QWidget
@@ -81,10 +90,11 @@ HistogramPanel::HistogramPanel(QWidget* parent) : QWidget(parent)
 {
     auto* layout = new QVBoxLayout(this);
     auto* controls = new QHBoxLayout;
-    sampleRange_ = new QLabel("Waiting for frames", this);
+    // Room for the widest line, so the plot keeps its height while the numbers change.
+    sampleRange_ = new ReadoutLabel({sampleRangeText(65535, 65535, "100.00%", 65535, "100.00%")}, this);
     sampleRange_->setObjectName("histogramSampleRange");
-    sampleRange_->setWordWrap(true);
     sampleRange_->setTextFormat(Qt::PlainText);
+    sampleRange_->setText("Waiting for frames");
     sampleRange_->setToolTip("Counts use the original samples. The highest code is based on the stream's declared sample range.");
     fitRange_ = new QCheckBox("Fit range", this);
     fitRange_->setObjectName("histogramFitRange");
@@ -119,9 +129,8 @@ void HistogramPanel::setFrame(const Frame& frame)
         const double value = 100.0 * static_cast<double>(count) / total;
         return count > 0 && value < 0.01 ? QString("<0.01%") : QString::number(value, 'f', 2) + '%';
     };
-    sampleRange_->setText(QString("Samples %1–%2 ADU   ·   At 0 %3   ·   At max code (%4) %5")
-        .arg(histogram.observedMinimum).arg(histogram.observedMaximum)
-        .arg(percent(histogram.zeroCount)).arg(histogram.maximumCode).arg(percent(histogram.maximumCodeCount)));
+    sampleRange_->setText(sampleRangeText(histogram.observedMinimum, histogram.observedMaximum,
+        percent(histogram.zeroCount), histogram.maximumCode, percent(histogram.maximumCodeCount)));
 }
 
 void HistogramPanel::clear()

@@ -2,6 +2,7 @@
 #include "display_panel.h"
 #include "camera_panel.h"
 #include "elided_label.h"
+#include "guiding_panel.h"
 #include "tests/fake_zwo_api.h"
 #include "tests/fake_qhy_api.h"
 #include "qhy_camera_panel.h"
@@ -49,6 +50,7 @@ private slots:
     void init() { QSettings saved; saved.clear(); saved.sync(); }
     void controlsPreserveValidSizeLimits();
     void detectionPanelExplainsPatchRejections();
+    void readoutsKeepTheControlsBelowInPlace();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
@@ -571,6 +573,99 @@ void UiTest::detectionPanelExplainsPatchRejections()
     panel.setView(view);
     QVERIFY(label->text().contains("Too many pixels at K"));
     QVERIFY(panel.findChild<QLabel*>("patchReading")->text().contains("across the frame"));
+}
+
+// The readouts keep room for their longest texts, so the controls below them
+// stay where they are while the texts change, at the narrowest panel and a
+// wide one.
+void UiTest::readoutsKeepTheControlsBelowInPlace()
+{
+    const auto positions = [](QWidget* panel, const QList<QWidget*>& widgets) {
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        QList<int> y;
+        for (const QWidget* widget : widgets) y << widget->mapTo(panel, QPoint()).y();
+        return y;
+    };
+    for (const int width : {350, 700})
+    {
+        DetectionPanel detection;
+        detection.resize(width, 1600);
+        detection.show();
+        const QList<QWidget*> belowReadouts{detection.findChild<QSpinBox*>("detectionMinPixels"),
+            detection.findChild<QCheckBox*>("oneFrameTrigger"), detection.findChild<QComboBox*>("detectionOverlay"),
+            detection.findChild<QToolButton*>("backgroundSettings")};
+        const QList<int> start = positions(&detection, belowReadouts);
+        DetectionView view;
+        view.settling = true;
+        detection.setView(view);
+        QCOMPARE(positions(&detection, belowReadouts), start);
+        view.settling = false;
+        view.summary.learningFrames = 12;
+        detection.setView(view);
+        QCOMPARE(positions(&detection, belowReadouts), start);
+        view.summary.ready = true;
+        view.summary.peakSigma = 5.2;
+        detection.setView(view);
+        QCOMPARE(positions(&detection, belowReadouts), start);
+        view.summary.peakSigma = 41.7;
+        view.summary.brightPixels = 9;
+        view.summary.boxWidth = view.summary.boxHeight = 9;
+        view.summary.overlaySkipped = true;
+        detection.setView(view);
+        QVERIFY(detection.findChild<QLabel*>("patchReading")->text().contains("Box / patch"));
+        QCOMPARE(positions(&detection, belowReadouts), start);
+        view.summary.brightPixels = 5000;
+        view.summary.patchSearchLimited = true;
+        detection.setView(view);
+        QCOMPARE(positions(&detection, belowReadouts), start);
+
+        GuidingPanel guiding;
+        guiding.resize(width, 1600);
+        guiding.show();
+        const QList<QWidget*> belowLock{guiding.findChild<QPushButton*>("lockAtSelectionButton"),
+            guiding.findChild<QPushButton*>("connectMountButton"), guiding.findChild<QPushButton*>("calibrateButton"),
+            guiding.findChild<QDoubleSpinBox*>("toleranceSpinBox"), guiding.findChild<QPushButton*>("guideButton")};
+        const QList<int> idle = positions(&guiding, belowLock);
+        GuiderStatus status;
+        status.lock.state = LockState::Locked;
+        status.lock.region = {600, 420, 64, 64};
+        status.lock.quality.contrast = 48;
+        status.lock.quality.structureRatio = 0.62;
+        status.lock.lastMatch = LockMatch{1.25, -0.5, 0.973, true, {}};
+        status.lock.estimateValid = true;
+        status.lock.estimateDx = 1.2;
+        status.lock.estimateDy = -0.4;
+        status.lock.estimateSamples = 6;
+        guiding.setStatus(status);
+        QCOMPARE(positions(&guiding, belowLock), idle);
+        status.lock.state = LockState::Searching;
+        status.lock.lastMatch = LockMatch{14.5, -22.0, 0.31, false, "match score 0.31 below 0.50"};
+        status.lock.message = "No valid match for 3 s (match score 0.31 below 0.50). Searching within 60 pixels.";
+        guiding.setStatus(status);
+        QCOMPARE(positions(&guiding, belowLock), idle);
+        status.lock.state = LockState::Locked;
+        status.lock.message.clear();
+        status.guide.mountConnected = true;
+        status.guide.mountName = "Simulated mount";
+        status.guide.mount.connected = status.guide.mount.tracking = status.guide.mount.canPulseGuide = true;
+        status.guide.mount.guideRateRa = status.guide.mount.guideRateDec = 0.0021;
+        status.guide.mode = GuideMode::Calibrating;
+        status.guide.calibrationProgress = "taking up declination backlash (2.5 s)";
+        guiding.setStatus(status);
+        QCOMPARE(positions(&guiding, belowLock), idle);
+        GuideCalibration calibration;
+        calibration.west = {0.004, 0.001};
+        calibration.north = {-0.001, 0.004};
+        calibration.arcsecPerPixel = 1.85;
+        status.guide.calibration = calibration;
+        status.guide.guideSpeedPixelsPerFrame = 0.12;
+        status.guide.mode = GuideMode::Guiding;
+        status.guide.pulses = 12;
+        status.guide.lastPulse = GuidePulse{GuideDirection::West, 340};
+        guiding.setStatus(status);
+        QVERIFY(guiding.findChild<QLabel*>("guidingLabel")->text().contains("12 pulses"));
+        QCOMPARE(positions(&guiding, belowLock), idle);
+    }
 }
 
 void UiTest::livePanelInjectionEvidenceAndSavedSettings()

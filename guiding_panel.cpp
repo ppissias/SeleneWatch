@@ -1,4 +1,5 @@
 #include "guiding_panel.h"
+#include "readout_label.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QTimeZone>
@@ -9,6 +10,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QVBoxLayout>
 
 #include <cmath>
@@ -43,6 +45,146 @@ QLabel* wrapped(QWidget* parent, const char* objectName = nullptr)
     return label;
 }
 
+// A readout that keeps room for its longest texts; see ReadoutLabel.
+QLabel* readout(QWidget* parent, const char* objectName, const QStringList& longest)
+{
+    auto* label = new ReadoutLabel(longest, parent);
+    if (objectName) label->setObjectName(objectName);
+    return label;
+}
+
+QString driftText(const LockStatus& lock, std::optional<double> arcsecPerPixel)
+{
+    if (lock.estimateValid)
+    {
+        QString text = QString("dx %1 px, dy %2 px (median of %3)")
+                           .arg(signedPixels(lock.estimateDx), signedPixels(lock.estimateDy)).arg(lock.estimateSamples);
+        if (arcsecPerPixel)
+            text += QString("; %1″").arg(std::hypot(lock.estimateDx, lock.estimateDy) * *arcsecPerPixel, 0, 'f', 1);
+        return text;
+    }
+    if (lock.state == LockState::Off) return "—";
+    return lock.state == LockState::Locked ? "Collecting measurements" : "No estimate while the lock is lost";
+}
+
+QString matchText(const std::optional<LockMatch>& match)
+{
+    if (!match) return "—";
+    QString text = QString("dx %1, dy %2 px, score %3").arg(signedPixels(match->dx), signedPixels(match->dy))
+                       .arg(match->score, 0, 'f', 3);
+    if (!match->valid) text += " — not used: " + QString::fromStdString(match->reason);
+    return text;
+}
+
+QString regionText(const LockStatus& lock)
+{
+    if (lock.state == LockState::Off) return "—";
+    return QString("%1, %2, %3 x %4 px, binned %5 x %5; contrast %6, structure %7")
+        .arg(lock.region.x).arg(lock.region.y).arg(lock.region.width).arg(lock.region.height)
+        .arg(lock.binning).arg(lock.quality.contrast, 0, 'f', 0).arg(lock.quality.structureRatio, 0, 'f', 2);
+}
+
+QString mountText(const GuideStatus& guide)
+{
+    if (guide.mountNotResponding)
+    {
+        return "<span style='color:#ff6060'><b>Mount not responding.</b> A driver call has not returned. "
+               "Acquisition and detection continue.</span>";
+    }
+    if (!guide.mountConnected)
+    {
+        return guide.mountError.empty() ? QString("Not connected")
+                                        : "<span style='color:#ff6060'>" + QString::fromStdString(guide.mountError).toHtmlEscaped() + "</span>";
+    }
+    const MountState& m = guide.mount;
+    QString text = QString("<b>%1</b>: %2, %3, %4, pier %5")
+                       .arg(QString::fromStdString(guide.mountName).toHtmlEscaped(),
+                           m.tracking ? "tracking" : "<span style='color:#ff6060'>not tracking</span>",
+                           m.slewing ? "<span style='color:#ff6060'>slewing</span>" : "not slewing",
+                           m.parked ? "<span style='color:#ff6060'>parked</span>" : "not parked",
+                           pierSideName(m.pierSide));
+    if (!m.canPulseGuide) text += ", <span style='color:#ff6060'>cannot pulse-guide</span>";
+    if (m.altAzimuth) text += ", <span style='color:#ff6060'>alt-azimuth</span>";
+    if (m.guideRateRa && m.guideRateDec)
+        text += QString("; guide rate RA %1, Dec %2").arg(siderealMultiple(*m.guideRateRa), siderealMultiple(*m.guideRateDec));
+    if (!guide.mountError.empty())
+        text += "<br><span style='color:#ff6060'>" + QString::fromStdString(guide.mountError).toHtmlEscaped() + "</span>";
+    return text;
+}
+
+QString calibrationText(const GuideStatus& guide)
+{
+    if (guide.mode == GuideMode::Calibrating) return "Calibrating: " + QString::fromStdString(guide.calibrationProgress);
+    if (!guide.calibration) return "Not calibrated";
+    const GuideCalibration& c = *guide.calibration;
+    QString text = QString("West %1; north %2; axes %3° apart; drift %4 px/s; pier %5")
+                       .arg(rateText(c.west), rateText(c.north)).arg(c.axisAngleDegrees, 0, 'f', 0)
+                       .arg(c.drift.length(), 0, 'f', 2).arg(pierSideName(c.pierSide));
+    if (guide.guideSpeedPixelsPerFrame > 0)
+        text += QString("; a pulse moves %1 px per frame").arg(guide.guideSpeedPixelsPerFrame, 0, 'f', 2);
+    if (c.arcsecPerPixel) text += QString("; %1″ per px").arg(*c.arcsecPerPixel, 0, 'f', 2);
+    return text;
+}
+
+QString guidingText(const GuideStatus& guide)
+{
+    QString text = guideModeName(guide.mode);
+    text[0] = text[0].toUpper();
+    if (guide.mode == GuideMode::Guiding)
+        text = QString("<b>Guiding</b>: RA error %1 px, Dec error %2 px")
+                   .arg(signedPixels(guide.raErrorPixels), signedPixels(guide.decErrorPixels));
+    if (guide.pulses > 0 && guide.lastPulse)
+    {
+        text += QString("; %1 pulses, last %2 %3 ms at %4 UTC")
+                    .arg(guide.pulses)
+                    .arg(guideDirectionName(guide.lastPulse->direction))
+                    .arg(guide.lastPulse->milliseconds)
+                    .arg(QDateTime::fromMSecsSinceEpoch(std::chrono::duration_cast<std::chrono::milliseconds>(
+                             guide.lastPulseTime.time_since_epoch()).count(), QTimeZone::UTC).toString("HH:mm:ss"));
+    }
+    return text;
+}
+
+// The widest values the readouts are expected to show in a session, so they
+// can keep room for them: offsets within the lock's search radius, pulses of
+// at most 1.5 s, a few arcseconds per pixel. A rare state (a mount error, a
+// mount that cannot guide) may still take more.
+GuiderStatus widestStatus()
+{
+    GuiderStatus status;
+    LockStatus& lock = status.lock;
+    lock.state = LockState::Searching;
+    lock.region = {1279, 1023, 512, 512};
+    lock.binning = 8;
+    lock.quality.contrast = 999;
+    lock.quality.structureRatio = 0.99;
+    lock.estimateValid = true;
+    lock.estimateDx = lock.estimateDy = -99.99;
+    lock.estimateSamples = 99;
+    // The longest reason FeatureLock gives for a match it does not use.
+    lock.lastMatch = LockMatch{-99.99, -99.99, 0.999, false, "the best match is on the edge of the search window"};
+
+    GuideStatus& guide = status.guide;
+    guide.mountConnected = true;
+    guide.mountName = "Celestron Telescope Driver";
+    guide.mount.connected = true;
+    guide.mount.tracking = true;
+    guide.mount.canPulseGuide = true;
+    guide.mount.guideRateRa = guide.mount.guideRateDec = 0.0042;
+    guide.mode = GuideMode::Guiding;
+    GuideCalibration calibration;
+    calibration.west = calibration.north = ImageVector{-0.01414, -0.01414};
+    calibration.drift = ImageVector{-0.99, -0.99};
+    calibration.axisAngleDegrees = 179;
+    calibration.arcsecPerPixel = 2.99;
+    guide.calibration = calibration;
+    guide.guideSpeedPixelsPerFrame = 0.25;
+    guide.raErrorPixels = guide.decErrorPixels = -99.99;
+    guide.pulses = 9999;
+    guide.lastPulse = GuidePulse{GuideDirection::North, 1500};
+    return status;
+}
+
 } // namespace
 
 GuidingPanel::GuidingPanel(QWidget* parent)
@@ -53,13 +195,16 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* hint = new QLabel("Drag a rectangle on the image around a crater or other detail to lock on it, "
         "or click a pixel and press <b>Lock at selection</b>. The lock measures how far the field drifts.", lockBox);
     hint->setWordWrap(true);
+    // The readouts keep room for their longest texts, and the lock message
+    // for two lines, so the controls below them stay where they are.
+    const GuiderStatus widest = widestStatus();
     state_ = wrapped(lockBox, "lockStateLabel");
-    drift_ = wrapped(lockBox, "lockDriftLabel");
+    drift_ = readout(lockBox, "lockDriftLabel", {driftText(widest.lock, widest.guide.calibration->arcsecPerPixel)});
     drift_->setToolTip("Median of the valid offsets of the last few seconds of source time, "
         "relative to where the feature was locked. Positive is right and down in the frame.");
-    match_ = wrapped(lockBox, "lockMatchLabel");
-    region_ = wrapped(lockBox);
-    message_ = wrapped(lockBox, "lockMessageLabel");
+    match_ = readout(lockBox, "lockMatchLabel", {matchText(widest.lock.lastMatch)});
+    region_ = readout(lockBox, nullptr, {regionText(widest.lock)});
+    message_ = readout(lockBox, "lockMessageLabel", {ReadoutLabel::blankLines(2)});
     message_->setStyleSheet("color: #e0a030;");
     logProblem_ = new QLabel("guiding.txt could not be written. Guiding continues; its record is incomplete.", lockBox);
     logProblem_->setWordWrap(true);
@@ -101,7 +246,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     connectButton_->setObjectName("connectMountButton");
     disconnectButton_ = new QPushButton("Disconnect", mountBox);
     disconnectButton_->setObjectName("disconnectMountButton");
-    mountState_ = wrapped(mountBox, "mountStateLabel");
+    mountState_ = readout(mountBox, "mountStateLabel", {mountText(widest.guide), mountText(GuideStatus{.mountNotResponding = true})});
     auto* driverRow = new QHBoxLayout;
     driverRow->addWidget(chooseButton_);
     driverRow->addWidget(driver_, 1);
@@ -123,7 +268,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     calibrateButton_ = new QPushButton("Calibrate", guideBox);
     calibrateButton_->setObjectName("calibrateButton");
     calibrateButton_->setToolTip("Pulses west, east, north (after taking up backlash), and south, and measures how the image moves.");
-    calibration_ = wrapped(guideBox, "calibrationLabel");
+    calibration_ = readout(guideBox, "calibrationLabel", {calibrationText(widest.guide)});
     tolerance_ = new QDoubleSpinBox(guideBox);
     tolerance_->setObjectName("toleranceSpinBox");
     tolerance_->setRange(0.5, 20.0);
@@ -136,7 +281,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     toleranceReadout_ = wrapped(guideBox);
     guideButton_ = new QPushButton("Start guiding", guideBox);
     guideButton_->setObjectName("guideButton");
-    guiding_ = wrapped(guideBox, "guidingLabel");
+    guiding_ = readout(guideBox, "guidingLabel", {guidingText(widest.guide)});
     guideMessage_ = wrapped(guideBox, "guideMessageLabel");
     guideMessage_->setStyleSheet("color: #e0a030;");
     auto* toleranceRow = new QHBoxLayout;
@@ -156,7 +301,17 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     guideLayout->addLayout(guideForm);
     guideLayout->addWidget(guideMessage_);
 
-    auto* layout = new QVBoxLayout(this);
+    // The readouts keep room for long texts, so the panel scrolls when the
+    // dock is shorter than all of it, instead of squeezing the readouts.
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
+    scroll->setWidget(content);
+    outer->addWidget(scroll);
     layout->addWidget(lockBox);
     layout->addWidget(mountBox);
     layout->addWidget(guideBox);
@@ -186,124 +341,25 @@ GuidingPanel::GuidingPanel(QWidget* parent)
 void GuidingPanel::setStatus(const GuiderStatus& status)
 {
     const LockStatus& lock = status.lock;
-    locked_ = lock.state != LockState::Off;
-    unlockButton_->setEnabled(locked_);
-    QString state = lockStateName(lock.state);
-    state[0] = state[0].toUpper();
-    state_->setText("<b>" + state + "</b>");
-
-    if (lock.estimateValid)
-    {
-        QString text = QString("dx %1 px, dy %2 px (median of %3)")
-                           .arg(signedPixels(lock.estimateDx), signedPixels(lock.estimateDy)).arg(lock.estimateSamples);
-        if (arcsecPerPixel_)
-            text += QString("; %1″").arg(std::hypot(lock.estimateDx, lock.estimateDy) * *arcsecPerPixel_, 0, 'f', 1);
-        drift_->setText(text);
-    }
-    else if (locked_)
-    {
-        drift_->setText(lock.state == LockState::Locked ? "Collecting measurements" : "No estimate while the lock is lost");
-    }
-    else
-    {
-        drift_->setText("—");
-    }
-
-    if (lock.lastMatch)
-    {
-        const LockMatch& match = *lock.lastMatch;
-        QString text = QString("dx %1, dy %2 px, score %3").arg(signedPixels(match.dx), signedPixels(match.dy))
-                           .arg(match.score, 0, 'f', 3);
-        if (!match.valid) text += " — not used: " + QString::fromStdString(match.reason);
-        match_->setText(text);
-    }
-    else
-    {
-        match_->setText("—");
-    }
-
-    if (locked_)
-    {
-        region_->setText(QString("%1, %2, %3 x %4 px, binned %5 x %5; contrast %6, structure %7")
-            .arg(lock.region.x).arg(lock.region.y).arg(lock.region.width).arg(lock.region.height)
-            .arg(lock.binning).arg(lock.quality.contrast, 0, 'f', 0).arg(lock.quality.structureRatio, 0, 'f', 2));
-    }
-    else
-    {
-        region_->setText("—");
-    }
-    message_->setText(QString::fromStdString(lock.message));
-    message_->setVisible(!lock.message.empty());
-
     const GuideStatus& guide = status.guide;
+    locked_ = lock.state != LockState::Off;
     connected_ = guide.mountConnected;
     mode_ = guide.mode;
     calibrated_ = guide.calibration.has_value();
     arcsecPerPixel_ = guide.calibration ? guide.calibration->arcsecPerPixel : std::nullopt;
 
-    if (guide.mountNotResponding)
-    {
-        mountState_->setText("<span style='color:#ff6060'><b>Mount not responding.</b> A driver call has not returned. "
-                             "Acquisition and detection continue.</span>");
-    }
-    else if (!guide.mountConnected)
-    {
-        mountState_->setText(guide.mountError.empty() ? QString("Not connected")
-                                                      : "<span style='color:#ff6060'>" + QString::fromStdString(guide.mountError).toHtmlEscaped() + "</span>");
-    }
-    else
-    {
-        const MountState& m = guide.mount;
-        QString text = QString("<b>%1</b>: %2, %3, %4, pier %5")
-                           .arg(QString::fromStdString(guide.mountName).toHtmlEscaped(),
-                               m.tracking ? "tracking" : "<span style='color:#ff6060'>not tracking</span>",
-                               m.slewing ? "<span style='color:#ff6060'>slewing</span>" : "not slewing",
-                               m.parked ? "<span style='color:#ff6060'>parked</span>" : "not parked",
-                               pierSideName(m.pierSide));
-        if (!m.canPulseGuide) text += ", <span style='color:#ff6060'>cannot pulse-guide</span>";
-        if (m.altAzimuth) text += ", <span style='color:#ff6060'>alt-azimuth</span>";
-        if (m.guideRateRa && m.guideRateDec)
-            text += QString("; guide rate RA %1, Dec %2").arg(siderealMultiple(*m.guideRateRa), siderealMultiple(*m.guideRateDec));
-        if (!guide.mountError.empty())
-            text += "<br><span style='color:#ff6060'>" + QString::fromStdString(guide.mountError).toHtmlEscaped() + "</span>";
-        mountState_->setText(text);
-    }
+    unlockButton_->setEnabled(locked_);
+    QString state = lockStateName(lock.state);
+    state[0] = state[0].toUpper();
+    state_->setText("<b>" + state + "</b>");
+    drift_->setText(driftText(lock, arcsecPerPixel_));
+    match_->setText(matchText(lock.lastMatch));
+    region_->setText(regionText(lock));
+    message_->setText(QString::fromStdString(lock.message));
 
-    if (guide.mode == GuideMode::Calibrating)
-    {
-        calibration_->setText("Calibrating: " + QString::fromStdString(guide.calibrationProgress));
-    }
-    else if (guide.calibration)
-    {
-        const GuideCalibration& c = *guide.calibration;
-        QString text = QString("West %1; north %2; axes %3° apart; drift %4 px/s; pier %5")
-                           .arg(rateText(c.west), rateText(c.north)).arg(c.axisAngleDegrees, 0, 'f', 0)
-                           .arg(c.drift.length(), 0, 'f', 2).arg(pierSideName(c.pierSide));
-        if (guide.guideSpeedPixelsPerFrame > 0)
-            text += QString("; a pulse moves %1 px per frame").arg(guide.guideSpeedPixelsPerFrame, 0, 'f', 2);
-        if (c.arcsecPerPixel) text += QString("; %1″ per px").arg(*c.arcsecPerPixel, 0, 'f', 2);
-        calibration_->setText(text);
-    }
-    else
-    {
-        calibration_->setText("Not calibrated");
-    }
-
-    QString guiding = guideModeName(guide.mode);
-    guiding[0] = guiding[0].toUpper();
-    if (guide.mode == GuideMode::Guiding)
-        guiding = QString("<b>Guiding</b>: RA error %1 px, Dec error %2 px")
-                      .arg(signedPixels(guide.raErrorPixels), signedPixels(guide.decErrorPixels));
-    if (guide.pulses > 0 && guide.lastPulse)
-    {
-        guiding += QString("; %1 pulses, last %2 %3 ms at %4 UTC")
-                       .arg(guide.pulses)
-                       .arg(guideDirectionName(guide.lastPulse->direction))
-                       .arg(guide.lastPulse->milliseconds)
-                       .arg(QDateTime::fromMSecsSinceEpoch(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                guide.lastPulseTime.time_since_epoch()).count(), QTimeZone::UTC).toString("HH:mm:ss"));
-    }
-    guiding_->setText(guiding);
+    mountState_->setText(mountText(guide));
+    calibration_->setText(calibrationText(guide));
+    guiding_->setText(guidingText(guide));
     guideMessage_->setText(QString::fromStdString(guide.message));
     guideMessage_->setVisible(!guide.message.empty());
     updateMountControls();
