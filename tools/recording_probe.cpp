@@ -8,6 +8,7 @@
 #include "tools/lock_probe.h"
 #include "tools/guide_probe.h"
 #include "tools/pulse_probe.h"
+#include "tools/overview_probe.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -33,13 +34,18 @@ int main(int argc, char** argv)
     const QStringList args = app.arguments();
     if (args.size() < 3)
     {
-        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json | register INPUT OUTPUT [CONFIG.json] | rearm INPUT OUTPUT.json CONFIG.json | lock INPUT OUTPUT.csv [X Y WIDTH HEIGHT] | guide-sim OUTPUT [SECONDS] | ascom PROGID OUTPUT.txt | guide-pulses INPUT OUTPUT.json K[,K...] [FRAME_LIMIT]\n";
+        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json | register INPUT OUTPUT [CONFIG.json] | rearm INPUT OUTPUT.json CONFIG.json | lock INPUT OUTPUT.csv [X Y WIDTH HEIGHT] | guide-sim OUTPUT [SECONDS] | ascom PROGID OUTPUT.txt | guide-pulses INPUT OUTPUT.json K[,K...] [FRAME_LIMIT] | overview INPUT OUTPUT.png [FIRST [COUNT [K]]]\n";
         return 2;
     }
     const QString mode = args[1];
     if (mode == "survey" || mode == "measure" || mode == "measure-batch" || mode == "profile" || mode == "register" || mode == "rearm")
     {
         try { return mode=="rearm"?runRearmingProbe(args):runDetectionProbe(args); }
+        catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
+    }
+    if (mode == "overview")
+    {
+        try { return runOverviewProbe(args); }
         catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
     }
     if (mode == "lock" || mode == "guide-sim" || mode == "ascom" || mode == "guide-pulses")

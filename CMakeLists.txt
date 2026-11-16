@@ -29,7 +29,7 @@ add_library(selenewatch_core STATIC
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
     cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
-    recording/avi_reader.cpp recording/event_writer.cpp
+    recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
@@ -148,6 +148,12 @@ target_link_libraries(SeleneWatchDisplayTests PRIVATE selenewatch_core Qt6::Test
 selenewatch_compile_options(SeleneWatchDisplayTests)
 add_test(NAME display_capture COMMAND SeleneWatchDisplayTests -o -,tap)
 
+add_executable(SeleneWatchOverviewTests tests/overview_tests.cpp)
+target_link_libraries(SeleneWatchOverviewTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchOverviewTests)
+add_test(NAME overview COMMAND SeleneWatchOverviewTests -o -,tap)
+set_tests_properties(overview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchRegistrationTests)
@@ -176,7 +182,7 @@ add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
-    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp)
+    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 

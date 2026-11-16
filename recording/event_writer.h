@@ -140,6 +140,9 @@ private:
     void deliver(const ClipWriteResult& result);
 
     QString writeClip(EventClip& clip, QString& error);
+    // Writer thread. Saves the clip's overview (Feature-12) in its folder and
+    // returns its metadata line, or why it was not written.
+    QString writeOverview(const EventClip& clip, const QString& folder) const;
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
     bool appendLog(const QString& lines, const QString& fileName = "candidates.txt") const;

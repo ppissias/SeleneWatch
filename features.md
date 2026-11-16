@@ -722,3 +722,295 @@ Part B's finding asked whether field motion and guide pulses disturb the detecto
 - **The synthetic finding does not carry over.** The recordings' controls, with their own drift and seeing, are quiet at K 18 and 24. The synthetic scene's sharp, noise-free rims make it far more sensitive to motion than a real frame.
 
 So for guiding, marking is enough on this evidence, and neither rate offsets nor registration is needed. Sunlit terrain, whole-pixel steps and a simulated cadence are its limits. The first guided session under the Moon, on earthshine, is still the check of Done-when item 9.
+
+---
+
+## Feature-11 — Sky watch
+
+*Proposed on 16 November 2026, from a discussion with the observer.*
+
+The same camera, ring, detector and clips can watch the open sky: a camera with a wide lens, left outside for a night, saving anything that happens. Fireballs and meteors, aircraft, satellites and lightning are what it is for.
+
+The lunar design treats most of these as false positives (PROJECT_DESCRIPTION.md, Section 3), and its settings reject them on purpose. A meteor crossing the frame at an angle is too spread out for the box test. A bright one is larger than the maximum patch. A frame where much of the image brightens at once is never split into patches. Watching the sky also brings problems the Moon does not have: stars drift past a fixed camera, the ground has lights and trees, and an unattended night can fill a disk.
+
+So SeleneWatch gets a second mode. **Moon** is the program as it is today. **Sky** changes what watching the sky needs and nothing else.
+
+### What shapes the design
+
+1. **Moon mode does not change.** Its settings, its detector and its clips stay exactly as they are, so lunar results and the measurements of Feature-9 still hold. Each Sky behaviour below is off in Moon mode.
+2. **One pipeline.** Sky mode uses the same sources, ring, detector, writer and evidence rules. It adds settings and a few behaviours; it is not a second program.
+3. **The mode is on record.** Every clip and every candidate line says which mode recorded it, with the Sky settings in force.
+4. **A night outside runs unattended.** Nobody watches the window, so the program must not fill the disk or record one star all night.
+
+### Part A — the mode and its settings
+
+- A **Target** choice, Moon or Sky, on the Detection panel. It changes only while the stream is stopped, because both the detection and the capture settings change with it.
+- Each mode keeps its own detection and capture settings. Switching never changes the other mode's values. The settings saved today become Moon's, so nothing changes for an observer who never picks Sky.
+- The Guiding tab is off in Sky mode.
+- `event.txt` and `candidates.txt` record `mode=moon` or `mode=sky`.
+
+Starting values for Sky, to be checked on the first nights:
+
+| Setting | Moon (today) | Sky |
+| --- | --- | --- |
+| Sensitivity K | 6 | 6 |
+| Maximum patch | 400 px | 3000 px |
+| Maximum box / patch | 4× | 30× |
+| Allow a one-frame trigger | on | on |
+| Pre-event history | 5 s | 3 s |
+| Quiet tail | 3 s | 5 s |
+| Maximum after trigger | 10 s | 20 s |
+
+- **Box / patch 30×.** A 45° streak 30 px long and 3 px wide is about 90 pixels in a box of about 24 × 24, near 6×. At the same angle the ratio grows with the streak's length, so 30× passes a streak of about 180 px.
+- **Quiet tail 5 s.** A fireball's flare and repeated lightning strokes stay in one clip.
+- **Maximum after trigger 20 s.** At full frame (1280 × 960, 8 bits, 30 fps) a clip grows by about 37 MB a second. Its history and 20 s fit the clip's share of the default 2 GiB RAM ceiling. A longer event continues in a linked clip.
+
+### Part B — a trigger for large brightenings
+
+Lightning and a fireball's flare light a large part of the frame at once. Today such a frame cannot fire. When more pixels pass K than four times the maximum patch (and at least 4096), the frame is not split into patches. A smaller bright area is still larger than the maximum patch. On the Moon this is right, because seeing, haze and cloud do the same.
+
+In Sky mode a frame also fires when the pixels at or above K are at least `kBrighteningShare` of the unmasked frame (starting value 2%). This is a new trigger kind, `brightening`, recorded with the share, the median rise in ADU, and the median rise in units of the noise. One frame is enough, because a lightning stroke can last a single frame.
+
+- While the share stays above the limit, the frame counts as activity, so the quiet tail runs from the last bright frame. Repeated strokes inside the quiet tail stay in one clip.
+- The background does not learn a brightening frame, so the flash does not raise the noise estimate for the frames after it. A brightening that lasts longer than the release limit of Part C is learned like a patch.
+- Slow changes such as twilight, moonrise and thin cloud are learned by the background as they happen and do not reach K.
+- A change larger than the maximum patch but smaller than the share fires nothing. That is where moving cloud usually falls. The first nights set both numbers.
+- Masked pixels (Part D) are not counted.
+
+### Part C — release slow drifters
+
+A patch that is firing is not learned into the background. That is what keeps a long event on the Moon from fading into it. On a fixed camera the stars move. A bright star or planet can fire on its leading edge and then keep firing as it drifts, and the clips would continue until it leaves the frame.
+
+In Sky mode, a patch that has kept firing for longer than `kSkyReleaseSeconds` (starting value 20 s) is no longer protected, and its pixels are learned with the normal time constant. An aircraft or a satellite crosses each pixel faster than the background learns, so it keeps firing after the release. A star drifts slowly enough to fade into the background, and its clip ends one quiet tail later. The clip records the release and its time.
+
+Part C is needed only for a camera that does not track. On a tracking mount the stars stay still (see the open decisions).
+
+### Part D — a detection mask
+
+The ground, trees, buildings, street lights and passing cars do not belong to the sky. The observer drags rectangles on the preview to exclude them, and the masked area is shaded on the preview.
+
+- Masked pixels are not tested and do not count towards a patch or a brightening.
+- They are still recorded in the SER file unchanged (Evidence rule 1).
+- The mask belongs to the Sky settings, and each clip lists its rectangles.
+- Rectangles come first. A polygon follows only if a horizon needs it.
+
+### Part E — a night unattended
+
+- **Disk reserve.** Before a clip is written, the writer checks the free space on the output drive. Below `kDiskReserveBytes` (starting value 10 GiB, editable) the clip is not written. Its candidates are still logged, with `not_saved=disk reserve` (Evidence rule 5). The window says that saving has stopped and how much space is left. Today the program has no such check: a full disk shows only as failed writes, and a full system drive harms the rest of the computer.
+- **Linked clips without repeated history.** Today a clip that continues a long event starts with the frames then in the ring, so it repeats up to a whole pre-event history from the clip before. An aircraft in view for two minutes makes several linked clips, and the repeats add up. In Sky mode a continuing clip starts at the frame after the last frame of the clip before, and its metadata names that clip.
+- **The whole path in one picture.** The previews written today show one moment: the baseline, the peak frame, and its difference. A meteor in the peak frame is a short segment of its path. Feature-12's overview draws everything that changed during the clip on one frame, so a meteor, an aircraft or a satellite shows as its whole path. Sky mode adds nothing of its own here; it relies on that overview.
+
+### Evidence
+
+Sky mode changes no pixel and writes evidence the same way, so the evidence rules stand. Each clip records the mode, the mask, the release limit, the brightening share, and any release or brightening (rule 8). A clip refused for the disk reserve still has its candidates logged (rule 5).
+
+### Done when
+
+1. A test switches modes: each keeps its own settings, Moon's are the ones saved before this feature, and clips and candidate lines name the mode.
+2. A test moves a 3-pixel-wide streak at 45° across a synthetic sky at 20 px per frame. Sky with its starting values records it as one clip from entry to exit. Moon with its starting values does not fire; that is the documented difference, not a fault.
+3. A test brightens 40% of the frame for one frame, three times, 0.3 s apart. Sky records one clip with three brightening triggers, and the noise estimate after the last stroke is within 10% of the one before the first. Moon records nothing. A brightness ramp over ten minutes fires nothing in either mode.
+4. A test drifts a bright point at 0.2 px per second, as a fixed camera sees a star. Once it fires, it is released after the limit, and its clip ends one quiet tail later. A point moving 5 px per frame keeps firing past the limit until it leaves the frame.
+5. A test flashes inside and outside a masked rectangle. Only the outside flash fires, and the SER frames hold the masked pixels unchanged.
+6. A test sets the free space below the reserve, through a seam in place of the drive. The clip is not written, its candidates are logged with `not_saved=disk reserve`, and the window says that saving stopped.
+7. A test keeps an event firing for 50 s with a 20 s maximum. The linked clips' frame indices are contiguous and do not overlap, and each names the clip before.
+8. A test moves a point across a synthetic sky in Sky mode: the clip's overview (Feature-12) shows a line along its whole path, with the trigger marked.
+9. By hand, a night outside with the ASI120MM Mini and a wide lens: the clips by kind, the disk used per hour, whether a star or planet stayed firing, and whether the starting values hold.
+
+### Out of this step
+
+- Starting and stopping at dusk and dawn.
+- Changing exposure and gain as the sky brightens and darkens.
+- Sorting clips by kind (meteor, aircraft, satellite, lightning) from speed, duration and blinking.
+- Satellite predictions, astrometric calibration of the lens, meteor trajectories, and triangulation with other stations. The UTC frame times already recorded are what those need.
+- Polygon masks.
+
+### Open decisions
+
+- **Fixed camera or on the mount.** On the tracking mount the stars stay still and Part C can wait. A fixed camera needs it from the start.
+- **Camera and lens.** The starting values in Part A assume the ASI120MM Mini with a wide lens. Another lens changes how far a meteor moves per frame and how fast the stars drift.
+- **Disk reserve in Moon mode.** Proposed: yes. It changes nothing until the disk is nearly full.
+- **Repeated history in Moon mode.** Moon's linked clips repeat the history on purpose, so each clip stands on its own. Sky stops this. Whether Moon follows is the observer's choice.
+- **Release in Moon mode.** Not proposed. The camera follows the Moon, and a lunar event does not last 20 s.
+
+### Order
+
+Part A comes first, and the others build on it. Part E's disk reserve has no dependency and can be built before the rest, for both modes. Parts B, C and D are independent of each other. Feature-12 is built before this feature, so the first sky clips already have overviews.
+
+---
+
+## Feature-12 — An overview of every clip
+
+*Proposed on 16 November 2026, from a discussion with the observer.*
+
+A night can leave dozens of clips, and each has to be judged by a person: a flash on the earthshine, a plane, a hot pixel, a guide pulse. The observer needs to see at a glance what triggered, where, how it changed, and when. The clip's previews do not show that today.
+
+- `01_baseline.png` is the last frame before the onset. `02_event_peak.png` is the frame with the strongest patch, with no mark on it.
+- `03_diff_annotated.png` is that frame's difference from the background, with a red box one pixel wide around the strongest patch and its sigma in the corner. A flash patch can be 3 × 3 pixels in a 1280 × 960 frame. The box disappears in a thumbnail and is hard to find at full size.
+- `01` and `02` are converted linearly over the whole sample range. On a 12- or 16-bit frame the earthshine is almost black, and a faint flash hardly shows.
+- Only the strongest patch is marked. Other triggers in the same clip are not.
+- No image carries the time, the frame number, or the clip's flags (during a mount correction, dropped frames, test signal).
+- Each image is one moment. A flash appearing and fading, or the path of a moving object, cannot be seen.
+- A dark silhouette, such as a plane, the ISS or a bird in front of the sunlit Moon, does not show in a difference that keeps only rises.
+
+### What shapes the design
+
+1. **One image per clip, `00_overview.png`, readable as a thumbnail and at full size.** The existing three previews stay as they are.
+2. **The same layout for every clip.** The contents adapt to what happened: a flash, a moving object, a silhouette, or a manual save in which nothing is found.
+3. **It is made from the clip's own frames.** A manual save, a clip that continues a long event, and the history before a trigger are covered the same way. The overview does not depend on what the detector held in memory.
+4. **It is a display image, not evidence** (Evidence rule 3). The writer makes it while the clip's frames are still in memory, with its own conversion beside the writer code, and charges its buffers to the memory budget.
+
+### The picture
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│  Main view: the peak frame, stretched so the earthshine       │
+│  shows. Rises orange, falls blue, over the image. Each        │
+│  trigger in a thick box with ticks pointing at it, numbered.  │
+├──────────┬──────────┬──────────┬──────────┬──────────┬────────┤
+│ before   │  −0.03 s │   0.00 s │  +0.07 s │  after   │ change │
+│ (crop)   │  (crop)  │  (peak)  │  (crop)  │  (crop)  │ (peak) │
+├──────────┴──────────┴──────────┴──────────┴──────────┴────────┤
+│ 2026-11-16 21:43:07.512 UTC · frame 18 342 · automatic · Moon │
+│ 9.8 σ · 14 px · 3 frames, 0.10 s · during mount correction    │
+└───────────────────────────────────────────────────────────────┘
+```
+
+**Activity.** What changed is measured from the clip's frames with the detector's own per-pixel model: a running mean and variance with the detector's time constant, and its noise floor. The first second of the clip only learns. After that, a pixel is active on a frame when it rises or falls by at least K times its noise, with K taken from the clip's first trigger (the detector's current K for a manual save). For each frame the overview keeps how many pixels rose and fell, where they are, and how far they spread. For each pixel it keeps the largest rise and the largest fall over the clip. A slow drift of the image, unguided, is learned by the running mean as it is by the detector, so it does not paint every crater edge.
+
+**Main view.** The peak frame is the frame with the most activity, or the detector's peak frame when there is one. It is stretched with the display's automatic stretch, so the earthshine and the sky show, and scaled to at most 1280 pixels wide.
+
+- Pixels that rose by at least K are drawn in orange, and pixels that fell by at least K in blue. The stronger the change, the more opaque the colour, so the frame shows through. A flash is an orange dot, a meteor an orange line, a plane against the Moon a blue band with orange dots for its lights, the ISS a thin blue line.
+- Each trigger is marked after scaling, so the marks keep their size: a box at least 24 pixels across with a margin around the patch, four ticks pointing at it from outside, and its number when there are several.
+- In Sky mode the masked area (Feature-11) is hatched.
+
+**Film strip.** Up to six cells, each a crop enlarged without smoothing, so single pixels stay visible.
+
+- The cells are the frame before the activity starts, up to three frames spread over the activity (always including the peak), and the frame after it ends. The last cell is the change at the peak, rises orange and falls blue.
+- Each crop is centred where the activity is on that frame, so the strip follows a moving object. A crop covers the activity's spread with a margin, and is at least 32 pixels across. For a flash every crop is in the same place, and the strip shows it appear and fade.
+- Each cell is labelled with its time from the first trigger and its frame number.
+
+**Caption.**
+
+- The UTC time and frame number of the first trigger, the trigger kind (automatic, manual, a continuation), the mode, and the number of triggers.
+- The peak in sigma, the patch size in pixels, and how many frames the activity lasted and for how long.
+- For activity that moved more than a few pixels: its direction and speed in pixels per second, and in arcseconds per second when the image scale is known.
+- Flags: during mount correction, dropped frames inside the clip, test signal, a clip limited by RAM.
+- When no activity is found, for example in a manual save, the caption says so, and the main view is the save's frame with no marks.
+
+### Also for recordings and old clips
+
+`SeleneWatchProbe overview <SER file> <PNG file>` makes the same picture for any SER file, without triggers. The tests use it, and the observer can use it on archive recordings and on clips written before this feature. It writes only where it is told, never into a clip folder (Evidence rule 7).
+
+### Evidence
+
+The overview changes no pixel and no evidence file. It is listed in the clip's metadata like the other previews, with the frame it shows as its main view and the K it used. Unlike the other three previews, whose failure fails the clip today, an overview that cannot be made (for example when the memory budget refuses its buffers) leaves a complete clip, with the reason in its metadata. A review aid must not cost the evidence.
+
+### Done when
+
+1. A test fires a one-frame 3 × 3 flash on a dim Mono16 scene. The overview exists, its mark is at least 24 pixels across at full size and still visible when the image is scaled to 320 pixels wide, the strip shows the flash appear and fade in the same place, and the caption gives the UTC time, frame number and sigma.
+2. A test moves a bright point across the frame. The main view shows an orange line along its whole path, the strip's crops follow it, and the caption's speed is within 10% of the true speed.
+3. A test moves a dark disk across a bright scene and saves it with Save now. The main view shows a blue path, and the strip shows the disk.
+4. A test saves a clip with Save now while nothing happens. The overview says that no activity was found.
+5. A test drifts the scene at 1 pixel per second with no event. The main view marks almost nothing: fewer than 0.1% of the pixels.
+6. A test with two separate triggers in one clip marks and numbers both.
+7. A test runs the writer under a tight memory budget. The overview's buffers are charged to it, and a refusal leaves a complete clip with the failure noted.
+8. The probe command makes an overview of an archive recording.
+9. Measured: the time the overview adds to writing a 10 s full-frame clip, in Release, recorded here.
+10. By hand: the overviews of real lunar clips, reviewed by the observer.
+
+### Out of this step
+
+- A browser for the clips in the window (Stage 12).
+- An index of a night's overviews in one page or contact sheet.
+- Animated previews.
+
+### Order
+
+This feature comes before Feature-11 and Feature-13, so the clips they produce are reviewed with it from the start.
+
+### Implementation — 16 November 2026
+
+Built. Done-when items 1 to 9 pass; item 10, the observer's review of real lunar clips, is open.
+
+**Where it lives.** `recording/clip_overview` measures the activity and draws the picture; it knows nothing of clips or triggers. `EventWriter::writeOverview` turns a clip into an `OverviewRequest` (the first trigger's K and model, its onset, the detector's peak frame, the trigger boxes, and the caption lines) and saves `00_overview.png` after `event.ser` is closed and before the frames are released. `event.txt` gets an `overview:` line: the main frame, K, the active frames and the changed pixels, or why it was not written. `SeleneWatchProbe overview` (`tools/overview_probe`) makes the picture of any recording. No dependency was added.
+
+**Changes from the proposal, and why.**
+
+- **Learning.** The overview learns for the first second of the clip, or until the first trigger's onset if that comes sooner. A clip whose trigger falls in its first second would otherwise show nothing.
+- **A run stays in one place.** The first picture of an archive recording (the mare file, K 6) chained the seeing on 29 frames across 3.6 s into one run and reported a motion of 76 px/s. A frame now joins a run only when its activity is within 48 pixels, or four times its spread, of the run's nearest frame; activity elsewhere in between is passed over. A motion is reported only for a run of three frames or more, because two frames can be seeing on neighbouring edges (the RGB file showed this). The run on the mare is now one frame.
+- **The change cell** shows the clip's change around the peak, not the peak frame's change alone. For a flash they are the same; for a moving object it shows the path through the crop.
+- **No arcseconds per second.** The writer does not know the image scale. It stays open until the scale is known to the writer (the guiding calibration, or an entered focal length).
+- **Scale.** A frame narrower than 640 pixels is enlarged by a whole factor; one wider than 1280 is reduced, and each picture pixel then takes the strongest change in the block it covers, so a one-pixel flash survives.
+- **Colour.** The main view is debayered as the display does. The strip averages a Bayer mosaic over its 2 × 2 cells, so the filter pattern does not show when enlarged. The activity is measured on the mosaic, as the detector measures it.
+
+**Tests.** A new suite, `overview` (8 tests): a one-frame 3 × 3 flash on a dim Mono16 scene, marked and visible in a 320-pixel thumbnail, with the strip before, at and after it in one place (item 1); a 3 × 3 point at 90 px/s, its path coloured end to end and its speed within 10% (item 2); a dark disk on a bright scene without a trigger, reported as a fall at 120 px/s (item 3); a Save now with nothing in it (item 4); a textured scene drifting 1 px/s, under 0.1% of pixels marked (item 5); two triggers, both marked (item 6); the writer saving the overview beside the evidence; and a budget that refuses the overview's buffers, leaving a complete clip that says `overview: not written: RAM limit` (item 7). Two older writer tests now count four PNG files in a clip folder instead of three. All 13 suites pass in Debug and Release.
+
+**Measured** (Release, Ryzen 9 9955HX, one writer thread; item 9):
+
+| Recording | Frames | Overview |
+| --- | --- | --- |
+| `2015.10.26 Moon/raw/Moon_200059.avi`, 1296 × 964 Mono8 | 150 / 300 / 450 | 238 / 465 / 636 ms |
+| `2012.11.25 moon 25.11.2012/raw/alccd5_00023.AVI`, 1280 × 1024 RGB888 | 300 | 574 to 657 ms |
+
+About 1.4 ms a frame at 1.25 megapixels, so a full-frame clip of 5 s history and 10 s after the trigger at 30 fps adds about 0.6 s to its write. Item 8: the probe made the pictures above, and `SeleneWatchProbe capture` on the crater-rim recording (`2015.12.21 Moon 8 Newt`, K 6) wrote three clips, each with its overview. Their 76, 29 and 32 numbered marks, scattered along the crater rims, show at a glance that those clips are seeing.
+
+---
+
+## Feature-13 — A trigger for darkening
+
+*Proposed on 16 November 2026, from a discussion with the observer.*
+
+The detector counts a pixel only when it gets brighter. That is right for an impact flash. But a plane, the ISS, a satellite or a bird in front of the sunlit Moon is a dark silhouette, and the pixels it covers get darker. Today such a transit is never a candidate. Only its bright parts can fire: a plane's lights against the earthshine, the sunlit ISS beside the Moon, or by chance the shimmer from a plane's exhaust along a crater edge. Transits are among the events the project means to record (PROJECT_DESCRIPTION.md, Section 3), and the observer can catch an unexpected one today only with Save now.
+
+### What shapes the design
+
+1. **The same test with the sign reversed.** A pixel counts as dark when it falls by at least K times its own noise, measured by the same per-pixel model. Dark pixels form their own patches. A rising patch and a falling patch are never merged, even when they touch, because a moving object makes both and each is reported for what it is.
+2. **Silhouettes are larger than flashes.** At the observer's 0.33″ per pixel, the ISS at 400 km is about 170 pixels across. A plane 40 km away is several hundred pixels across, and one overhead is larger than the 7′ field. A bird near the telescope is far out of focus: a large, faint, soft shadow. Dark patches have their own maximum size and box ratio.
+3. **They cross fast.** The ISS crosses a 7′ field in about a tenth of a second, three or four frames at 30 fps. A plane takes from a few frames to about a second. The persistence rule stays as it is: one frame, or two consecutive frames.
+4. **It is measured on recordings before it changes Moon mode.** Seeing darkens a crater edge as often as it brightens it, so the dark side may fire as often as the bright side does on sunlit terrain. Darkening is off by default in both modes until the measurement in Part C decides.
+
+### Part A — dark patches
+
+- A checkbox, **Also trigger on darkening**, in the Detection panel, saved per mode (Feature-11).
+- Falling pixels at or above K form 8-connected patches, tested against **Minimum patch** (shared with the bright side), **Maximum dark patch** (starting value 20 000 px) and **Maximum dark box / patch** (starting value 10×).
+- The persistence rule, the one-frame option, and the following of a moving patch from frame to frame are those of bright patches.
+- A firing dark patch is protected from learning like a bright one, so a silhouette that stops in the field is not learned as background at once. Feature-11's release limit applies to it in Sky mode.
+- The search for dark patches has its own bound, like the bright one: four times the maximum dark patch, and at least 4096 pixels.
+- The trigger is recorded as `darkening`, with the size, the box, the deepest fall in sigma and in ADU, and the position of the deepest pixel.
+- The Detection panel's readouts show the dark side beside the bright side: the deepest fall in sigma, and the size of the largest dark patch.
+
+### Part B — large darkenings
+
+A silhouette larger than the maximum dark patch, such as a plane overhead or a bird filling the field, darkens a large share of the frame. Feature-11 Part B adds a trigger for a large share that rises; this part adds the same for a share that falls, `kDarkeningShare` of the unmasked frame. It is off by default in both modes, because a cloud edge crossing the field does the same, and the first measurements decide whether it is worth having.
+
+### Part C — measurement on recordings
+
+The probe that measured guide corrections (`docs/guide-pulse-detector.md`) runs the same five archive recordings with darkening on, at K 6, 12, 18 and 24.
+
+- The count of dark candidates against bright candidates, per recording and per K, after start-up.
+- A synthetic silhouette injected into the same recordings: a dark ellipse at the size of the ISS and of a distant plane, crossing in 3 and in 15 frames, at several depths. The share of crossings that fire, per K.
+- The result is written in `docs/darkening-trigger.md`, with every count in a JSON file beside it, and summarised here. It decides whether darkening is on by default in Moon mode, and the starting values of the dark limits.
+
+### Evidence
+
+Darkening changes no pixel. A dark trigger is a candidate like any other: it is logged in `candidates.txt` with its kind, saved as a clip, and described in `event.txt` with the dark limits in force (rules 5 and 8).
+
+### Done when
+
+1. A test darkens a 5 × 5 patch for two frames on a bright synthetic scene. With darkening on, it fires as `darkening`; with it off, nothing fires. The existing flash tests pass unchanged.
+2. A test moves a dark disk 40 pixels across a bright scene at 30 pixels per frame. One clip, with its triggers recorded as `darkening`.
+3. A test puts a rise and a fall side by side on one frame. Two patches, one of each kind, never merged.
+4. A test darkens 30% of the frame for three frames with the large-darkening trigger on: one trigger. A darkening over 30 s fires nothing.
+5. A test fills the frame with dark pixels beyond the search bound. The search stops at the bound and says so, as the bright search does.
+6. The overview (Feature-12) of a dark trigger shows the path in blue.
+7. Part C is measured and recorded, and the defaults are set from it.
+8. By hand: a real transit, a plane or a predicted ISS pass, recorded and reviewed.
+
+### Out of this step
+
+- Telling a plane, a satellite, a bird and a cloud apart.
+- Predicting ISS and satellite transits, and recording around a predicted time. That is continuous recording (PROJECT_DESCRIPTION.md, Section 7).
+
+### Order
+
+After Feature-12, so dark triggers are reviewed with the overview. Part A and its tests first, then Part C on recordings, then the defaults. Part B shares its code with Feature-11 Part B and is built after it.

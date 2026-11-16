@@ -1,5 +1,6 @@
 #include "recording/event_writer.h"
 #include "preview_image.h"
+#include "recording/clip_overview.h"
 #include "recording/ser_writer.h"
 #include "selenewatch_version.h"
 
@@ -181,6 +182,53 @@ QString triggerFields(const ClipTrigger& trigger)
         text += " continues_previous_clip";
     }
     return text;
+}
+
+double seconds(std::chrono::system_clock::duration duration)
+{
+    return std::chrono::duration<double>(duration).count();
+}
+
+QString captionTime(std::chrono::system_clock::time_point time)
+{
+    return utcDateTime(time).toString("yyyy-MM-dd HH:mm:ss.zzz") + " UTC";
+}
+
+// The overview's lines about the clip: when and how it was triggered, the
+// first trigger's measurement, the clip's extent, and its flags.
+QStringList overviewCaption(const EventClip& clip, bool duringCorrection)
+{
+    const ClipTrigger& first = clip.triggers.front();
+    QStringList lines;
+    QString heading = QString("%1 · frame %2 · %3").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
+        .arg(first.kind == TriggerKind::Manual ? "Save now" : "automatic trigger");
+    if (clip.triggers.size() > 1) heading += QString(" · %1 triggers, numbered").arg(clip.triggers.size());
+    if (first.continuesPreviousClip) heading += " · continues the previous clip";
+    lines << heading;
+    if (first.kind == TriggerKind::Manual)
+        lines << QString("Requested at %1 · K %2").arg(captionTime(first.requestedAt)).arg(first.settings.sigma, 0, 'g', 4);
+    else
+        lines << QString("Peak %1 σ · %2 px in a %3 × %4 box at (%5, %6) · K %7, patch %8 to %9 px")
+            .arg(first.peakSigma, 0, 'f', 1).arg(first.brightPixelCount).arg(first.boxWidth).arg(first.boxHeight)
+            .arg(first.peakX).arg(first.peakY).arg(first.settings.sigma, 0, 'g', 4)
+            .arg(first.settings.minPixels).arg(first.settings.maxPixels);
+
+    const auto start = clip.frames.front()->timestamp;
+    uint64_t dropped = 0;
+    for (size_t i = 1; i < clip.frames.size(); ++i)
+        if (clip.frames[i]->frameIndex > clip.frames[i - 1]->frameIndex + 1)
+            dropped += clip.frames[i]->frameIndex - clip.frames[i - 1]->frameIndex - 1;
+    lines << QString("Clip: %1 frames, %2 s, from %3 s before the trigger · ended: %4")
+        .arg(clip.frames.size()).arg(seconds(clip.frames.back()->timestamp - start), 0, 'f', 2)
+        .arg(seconds(first.triggerTime - start), 0, 'f', 2).arg(QString::fromStdString(clip.endReason));
+    QStringList flags;
+    if (duringCorrection) flags << "during mount correction";
+    if (dropped) flags << QString("%1 dropped frames").arg(dropped);
+    if (containsTestSignal(clip)) flags << "contains a test signal";
+    if (clip.endReason == "clip memory allowance") flags << "ended by the RAM allowance";
+    if (!flags.isEmpty()) lines << "Flags: " + flags.join(" · ");
+    lines << "Source: " + orUnknown(clip.stream.source);
+    return lines;
 }
 
 // The guiding state nearest the first trigger, and every mount pulse whose
@@ -644,6 +692,11 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         usage_.writeSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - writeStarted).count();
     }
 
+    // Feature-12: the overview needs every frame, so it is made before the
+    // frames are released. A review aid must not cost the evidence: when it
+    // cannot be made, the clip is still complete and says why.
+    const QString overviewNote = writeOverview(clip, folder);
+
     const uint64_t onset = clip.triggers.front().onsetFrameIndex;
     FramePtr baseline;
     for (const FramePtr& frame : clip.frames)
@@ -737,6 +790,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
                 << detectorModelFields(clip.peak.settings) << "\n";
             out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
+        out << "overview: " << overviewNote << "\n";
         out.flush();
         if (out.status() != QTextStream::Ok || !note.flush())
         {
@@ -761,6 +815,43 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         return {};
     }
     return folder;
+}
+
+QString EventWriter::writeOverview(const EventClip& clip, const QString& folder) const
+{
+    const ClipTrigger& first = clip.triggers.front();
+    OverviewRequest request;
+    request.sigma = first.settings.sigma;
+    request.referenceTimeConstantSeconds = first.settings.referenceTimeConstantSeconds;
+    request.minNoiseAdu = first.settings.minNoiseAdu;
+    request.minPixels = first.settings.minPixels;
+    request.onsetFrameIndex = first.onsetFrameIndex;
+    if (clip.peak.ready) request.peakFrameIndex = clip.peak.frameIndex;
+    request.referenceTime = first.triggerTime;
+    bool duringCorrection = false;
+    for (const ClipTrigger& trigger : clip.triggers)
+    {
+        if (trigger.kind == TriggerKind::Automatic && trigger.boxWidth > 0 && trigger.boxHeight > 0)
+            request.marks.push_back(QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight));
+        duringCorrection = duringCorrection || duringMountCorrection(trigger.triggerTime);
+    }
+    request.caption = overviewCaption(clip, duringCorrection);
+    try
+    {
+        const ClipOverview overview = makeClipOverview(clip.frames, request, clip.frames.front()->data.get_allocator().budget);
+        if (!overview.image.save(QDir(folder).filePath("00_overview.png"), "PNG"))
+            return "not written: could not save 00_overview.png";
+        return QString("00_overview.png main_frame_index=%1 sigma=%2 active_frames=%3 changed_pixels=%4; display only, not evidence")
+            .arg(overview.mainFrameIndex).arg(request.sigma, 0, 'g', 17).arg(overview.activeFrames).arg(overview.changedPixels);
+    }
+    catch (const MemoryLimitError&)
+    {
+        return "not written: RAM limit";
+    }
+    catch (const std::exception& ex)
+    {
+        return QString("not written: %1").arg(QString::fromUtf8(ex.what()));
+    }
 }
 
 // One line per candidate, saved or not. False when the log cannot be written.

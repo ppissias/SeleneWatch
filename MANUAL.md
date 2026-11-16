@@ -244,8 +244,15 @@ Each clip folder is named by its UTC trigger time, for example `20261115-143156-
 | --- | --- |
 | `event.ser` | The frames, lossless and exactly as delivered, at their native bit depth, with per-frame UTC times |
 | `event.txt` | Everything needed to interpret the clip, listed below |
+| `00_overview.png` | The clip at a glance; see below. A display image, not evidence. |
 | `01_baseline.png`, `02_event_peak.png`, `03_diff_annotated.png` | Quick-look previews for review. Display images only, not evidence. |
 
+**The overview** (`00_overview.png`) is the picture to start a review with:
+- **Top:** the peak frame, stretched so the earthshine shows. Everything that changed during the clip is drawn over it: rises in orange, falls in blue. A flash is an orange dot, a meteor an orange line, and a plane or the ISS crossing the sunlit Moon a blue band. Each trigger has a yellow box with ticks pointing at it, numbered when there are several, so it can be found even in a thumbnail.
+- **Strip:** enlarged crops of the frame before the activity, its first frame, the peak, its last frame and the frame after, each with its time from the trigger. The crops follow a moving object. The last cell shows the change around the peak.
+- **Caption:** the UTC time and frame number, the trigger's measurement, the clip's length and why it ended, flags such as *during mount correction* or *dropped frames*, and a line describing the activity: how many frames it lasted, its strongest rise or fall, and whether it stayed in place or moved, with its speed.
+
+Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
 `event.txt` contains:
 - the camera and its settings, and the stream description;
 - each trigger, with its detector settings;

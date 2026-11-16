@@ -2895,7 +2895,8 @@ void EventWriterTest::writesMetadataAndCandidateLog()
     QVERIFY(text.contains("0000 4 " + utcText(triggerTime - milliseconds{33}) + " ser_utc_ticks="));
     QVERIFY(text.contains("0001 5 " + utcText(triggerTime) + " ser_utc_ticks="));
     QVERIFY(text.trimmed().endsWith("complete: yes"));
-    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), static_cast<qsizetype>(3));
+    // The overview (Feature-12) and the three single-moment previews.
+    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), static_cast<qsizetype>(4));
 
     const QStringList lines = candidateLines(root.path());
     QCOMPARE(lines.size(), static_cast<qsizetype>(1));
@@ -3118,7 +3119,7 @@ void EventWriterTest::captureToWriterEndToEnd()
     std::string error;
     QVERIFY2(reader.open(fsPath(QDir(results[0].folder).filePath("event.ser")), 30, error), error.c_str());
     QCOMPARE(reader.frameCount(), 5 + 1 + 1 + kPostEventFrames);
-    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), qsizetype{3});
+    QCOMPARE(QDir(results[0].folder).entryList(QStringList() << "*.png").size(), qsizetype{4});
     QCOMPARE(candidateLines(root.path()).size(), static_cast<qsizetype>(2));
 }
 
