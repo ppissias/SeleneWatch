@@ -6,6 +6,7 @@
 #include "capture_settings.h"
 
 #include <chrono>
+#include <optional>
 #include <vector>
 
 // How a trigger entered the clip, through detection or the observer's Save now request.
@@ -33,6 +34,20 @@ struct ClipTrigger
     TriggerKind kind{TriggerKind::Automatic};
     std::chrono::system_clock::time_point requestedAt{}; // Host UTC for a manual request.
     std::chrono::system_clock::time_point requestSourceTime{}; // Original application time, retained across continuations.
+
+    // What fired an automatic trigger: a patch, or a large share of the frame
+    // (Feature-11), with that share and the frame's median difference.
+    ChangeKind change{ChangeKind::Rise};
+    double share{0};
+    double medianDifferenceAdu{0};
+};
+
+// A patch or large change in the clip that reached the release limit and
+// from then on was learned into the background (Feature-11).
+struct ReleaseRecord
+{
+    uint64_t frameIndex{0};
+    std::chrono::system_clock::time_point time{};
 };
 
 // Frames kept around one or more candidates, oldest first.
@@ -60,6 +75,11 @@ struct EventClip
     // Frames before and after the first trigger frame.
     int framesBefore{0};
     int framesAfter{0};
+
+    std::vector<ReleaseRecord> releases;
+    // When this clip continues a long event: the first trigger time of the
+    // clip before, which names that clip's folder.
+    std::optional<std::chrono::system_clock::time_point> continuesClipTriggeredAt;
 
     // What the source said about its stream. Added when the clip is handed
     // to the writer.

@@ -52,6 +52,11 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
     memory_ = new QSpinBox(this); memory_->setObjectName("memoryMiB"); memory_->setRange(16, 65536); memory_->setSuffix(" MiB");
     form->addRow("Pre-event history", history_); form->addRow("Quiet tail", post_);
     form->addRow("Maximum after trigger", maxPost_); form->addRow("RAM ceiling", memory_);
+    reserve_ = new QDoubleSpinBox(this); reserve_->setObjectName("diskReserveGiB");
+    reserve_->setRange(0, 100000); reserve_->setDecimals(0); reserve_->setSuffix(" GiB"); reserve_->setSpecialValueText("None");
+    reserve_->setToolTip("A clip is not written when it would leave less than this free on the output drive. "
+        "Its candidates are still logged.");
+    form->addRow("Disk reserve", reserve_);
     format_ = new QComboBox(this); format_->setObjectName("syntheticFormat");
     format_->addItems({"Mono8", "Mono12, low bits", "Mono12, high bits", "Mono16", "Bayer RGGB, 12 high"});
     form->addRow("Synthetic pixels", format_);
@@ -75,7 +80,8 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
 DisplaySettings DisplayPanel::displaySettings() const { return display_; }
 CaptureSettings DisplayPanel::captureSettings() const
 {
-    return {history_->value(), post_->value(), maxPost_->value(), static_cast<size_t>(memory_->value()) * 1024 * 1024};
+    return {history_->value(), post_->value(), maxPost_->value(), static_cast<size_t>(memory_->value()) * 1024 * 1024,
+        target_, static_cast<uint64_t>(reserve_->value()) * 1024 * 1024 * 1024};
 }
 int DisplayPanel::syntheticFormat() const { return format_->currentIndex(); }
 
@@ -97,6 +103,8 @@ void DisplayPanel::setCaptureSettings(CaptureSettings value)
     if (!value.valid()) return;
     history_->setValue(value.historySeconds); maxPost_->setValue(value.maxPostSeconds); post_->setValue(value.postSeconds);
     memory_->setValue(static_cast<int>(value.memoryBytes / (1024 * 1024)));
+    reserve_->setValue(static_cast<double>(value.diskReserveBytes / (uint64_t{1024} * 1024 * 1024)));
+    target_ = value.target;
 }
 
 // Map the stored level fractions onto the incoming frame's native ADU range.
@@ -125,7 +133,8 @@ void DisplayPanel::levelsChanged(bool whiteChanged)
 
 void DisplayPanel::setRunning(bool running, bool recording)
 {
-    for (auto* widget : {static_cast<QWidget*>(history_), static_cast<QWidget*>(post_), static_cast<QWidget*>(maxPost_), static_cast<QWidget*>(memory_)}) widget->setEnabled(!running);
+    for (auto* widget : {static_cast<QWidget*>(history_), static_cast<QWidget*>(post_), static_cast<QWidget*>(maxPost_),
+            static_cast<QWidget*>(memory_), static_cast<QWidget*>(reserve_)}) widget->setEnabled(!running);
     format_->setEnabled(!running && !recording);
 }
 

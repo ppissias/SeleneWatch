@@ -18,7 +18,9 @@
 // after the configured quiet interval, maximum interval after its first
 // trigger, or collection byte allowance. A candidate that fires while a clip is
 // open joins that clip. If the detector is still firing when a clip reaches
-// its cap, the next clip starts at once and overlaps the one just ended.
+// its cap, the next clip starts at once. On the Moon it starts with the ring's
+// history and overlaps the one just ended; in Sky mode it starts with the
+// next frame (Feature-11).
 //
 // The Session calls onFrame, reset, and finishPartial: on the source thread
 // while the source runs, and on the window thread only while the source
@@ -61,7 +63,8 @@ public:
     [[nodiscard]] RingUsage historyUsage() const;
 
 private:
-    void beginClip(const ClipTrigger& trigger);
+    // Without history the clip starts empty and takes the next frames.
+    void beginClip(const ClipTrigger& trigger, bool withHistory = true);
     void handOff(std::string reason);
     void rememberPeak(const Frame& frame);
     [[nodiscard]] ClipTrigger currentTrigger(const DetectionSummary& measured, bool continuation) const;

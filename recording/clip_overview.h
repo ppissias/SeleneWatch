@@ -46,6 +46,8 @@ struct OverviewRequest
     std::optional<std::chrono::system_clock::time_point> referenceTime;
     // Trigger boxes in frame pixels, marked and numbered in this order.
     std::vector<QRect> marks;
+    // Areas the detector leaves out (Feature-11): not measured, and hatched.
+    std::vector<QRect> mask;
     // Lines about the clip, printed above the line the overview adds.
     QStringList caption;
 };

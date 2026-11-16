@@ -15,7 +15,8 @@ class QCheckBox;
 class QLabel;
 
 // GUI-owned display settings and stopped-session capture settings. The
-// preview reads the former; Session copies the latter only at Start.
+// preview reads the former; Session copies the latter only at Start. The
+// capture settings shown belong to one target (Feature-11), which they keep.
 class DisplayPanel : public QWidget
 {
     Q_OBJECT
@@ -49,6 +50,8 @@ private:
     QDoubleSpinBox* post_;
     QDoubleSpinBox* maxPost_;
     QSpinBox* memory_;
+    QDoubleSpinBox* reserve_;
+    Target target_{Target::Moon};
     QLabel* levels_;
     QLabel* usage_;
 };

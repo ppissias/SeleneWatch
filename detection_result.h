@@ -20,9 +20,21 @@ struct DetectionDisplayRequest
     bool makeMap{false};
 };
 
+// What a measurement found: a compact patch that rose, or a large share of
+// the frame that rose at once (Feature-11, Sky mode).
+enum class ChangeKind { Rise, LargeRise };
+
 // Measurements of one frame in native ADU and per-pixel noise units.
 struct DetectionSummary
 {
+    ChangeKind change{ChangeKind::Rise};
+    // A large change: the share of the unmasked pixels at K, and the
+    // frame's median difference from the background.
+    double share{0};
+    double medianDifferenceAdu{0};
+    // Patches, or a large change, that reached the release limit on this
+    // frame and are now learned into the background.
+    size_t newlyReleased{0};
     DetectionSettings settings;
     uint64_t frameIndex{0};
     std::chrono::system_clock::time_point time{};

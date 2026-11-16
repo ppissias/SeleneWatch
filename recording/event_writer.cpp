@@ -7,7 +7,9 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
+#include <QtCore/QStorageInfo>
 #include <QtCore/QTextStream>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
@@ -147,11 +149,44 @@ void writeStreamLines(QTextStream& out, const EventClip& clip)
     out << "bayer_pattern: " << bayerPatternName(first.bayer) << "\n";
 }
 
+// The mask's rectangles as x,y,width,height, separated by semicolons.
+QString maskText(const DetectionMask& mask)
+{
+    QStringList rects;
+    for (int i = 0; i < mask.count; ++i)
+    {
+        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
+        rects << QString("%1,%2,%3,%4").arg(rect.x).arg(rect.y).arg(rect.width).arg(rect.height);
+    }
+    return rects.join(';');
+}
+
+// The model settings, and the Sky settings (Feature-11) when they are on.
 QString detectorModelFields(const DetectionSettings& settings)
 {
-    return QString(" max_patch_box_ratio=%1 reference_time_constant_seconds=%2 min_noise_adu=%3")
+    QString text = QString(" max_patch_box_ratio=%1 reference_time_constant_seconds=%2 min_noise_adu=%3")
         .arg(settings.maxPatchBoxRatio, 0, 'g', 17).arg(settings.referenceTimeConstantSeconds, 0, 'g', 17)
         .arg(settings.minNoiseAdu, 0, 'g', 17);
+    if (settings.brighteningShare > 0) text += QString(" brightening_share=%1").arg(settings.brighteningShare, 0, 'g', 17);
+    if (settings.releaseSeconds > 0) text += QString(" release_seconds=%1").arg(settings.releaseSeconds, 0, 'g', 17);
+    if (!settings.mask.empty()) text += " mask=" + maskText(settings.mask);
+    return text;
+}
+
+// The free bytes on the drive that holds a folder, or of its nearest
+// existing parent before the folder is made.
+std::optional<uint64_t> freeBytesAt(const QString& folder)
+{
+    QString at = QDir::cleanPath(QDir(folder).absolutePath());
+    while (!QFileInfo::exists(at))
+    {
+        const QString parent = QFileInfo(at).path();
+        if (parent == at) return std::nullopt;
+        at = parent;
+    }
+    QStorageInfo storage(at);
+    if (!storage.isValid() || !storage.isReady()) return std::nullopt;
+    return static_cast<uint64_t>(storage.bytesAvailable());
 }
 
 QString triggerFields(const ClipTrigger& trigger)
@@ -173,7 +208,12 @@ QString triggerFields(const ClipTrigger& trigger)
         .arg(trigger.settings.oneFrame ? "yes" : "no").arg(trigger.peakSigma, 0, 'g', 17)
         .arg(trigger.noiseFloor, 0, 'g', 17).arg(trigger.peakX).arg(trigger.peakY)
         .arg(trigger.boxX).arg(trigger.boxY).arg(trigger.boxWidth).arg(trigger.boxHeight);
-        text += QString(" kind=automatic active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
+        if (trigger.change == ChangeKind::LargeRise)
+            text += QString(" kind=brightening share=%1 median_difference_adu=%2")
+                .arg(trigger.share, 0, 'g', 17).arg(trigger.medianDifferenceAdu, 0, 'g', 17);
+        else
+            text += " kind=automatic";
+        text += QString(" active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
             .arg(trigger.activePatches).arg(trigger.protectedPixels).arg(trigger.learningFrames).arg(trigger.longestActiveSeconds,0,'g',17);
     }
     text += detectorModelFields(trigger.settings);
@@ -200,13 +240,18 @@ QStringList overviewCaption(const EventClip& clip, bool duringCorrection)
 {
     const ClipTrigger& first = clip.triggers.front();
     QStringList lines;
-    QString heading = QString("%1 · frame %2 · %3").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
-        .arg(first.kind == TriggerKind::Manual ? "Save now" : "automatic trigger");
-    if (clip.triggers.size() > 1) heading += QString(" · %1 triggers, numbered").arg(clip.triggers.size());
+    const bool large = first.kind == TriggerKind::Automatic && first.change == ChangeKind::LargeRise;
+    QString heading = QString("%1 · frame %2 · %3 · %4 mode").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
+        .arg(first.kind == TriggerKind::Manual ? "Save now" : large ? "large brightening" : "automatic trigger")
+        .arg(clip.captureSettings.target == Target::Sky ? "Sky" : "Moon");
+    if (clip.triggers.size() > 1) heading += QString(" · %1 triggers").arg(clip.triggers.size());
     if (first.continuesPreviousClip) heading += " · continues the previous clip";
     lines << heading;
     if (first.kind == TriggerKind::Manual)
         lines << QString("Requested at %1 · K %2").arg(captionTime(first.requestedAt)).arg(first.settings.sigma, 0, 'g', 4);
+    else if (large)
+        lines << QString("%1% of the frame at K at once, median rise %2 ADU · K %3")
+            .arg(100 * first.share, 0, 'f', 1).arg(first.medianDifferenceAdu, 0, 'f', 1).arg(first.settings.sigma, 0, 'g', 4);
     else
         lines << QString("Peak %1 σ · %2 px in a %3 × %4 box at (%5, %6) · K %7, patch %8 to %9 px")
             .arg(first.peakSigma, 0, 'f', 1).arg(first.brightPixelCount).arg(first.boxWidth).arg(first.boxHeight)
@@ -279,6 +324,7 @@ EventWriter::EventWriter(QObject* context, QString outputRoot, size_t maxQueuedB
     , outputRoot_(std::move(outputRoot))
     , maxQueuedBytes_(maxQueuedBytes)
     , finished_(std::move(finished))
+    , freeSpace_(freeBytesAt)
 {
     thread_ = std::jthread([this](std::stop_token stopToken) {
         run(stopToken);
@@ -294,6 +340,29 @@ void EventWriter::setByteLimit(size_t bytes)
 {
     std::lock_guard lock(mutex_);
     maxQueuedBytes_ = bytes;
+}
+
+void EventWriter::setFreeSpace(FreeSpace freeSpace)
+{
+    std::lock_guard lock(mutex_);
+    freeSpace_ = std::move(freeSpace);
+}
+
+bool EventWriter::belowDiskReserve(const Job& job, ClipWriteResult& result) const
+{
+    const uint64_t reserve = job.clip.captureSettings.diskReserveBytes;
+    if (reserve == 0) return false;
+    FreeSpace freeSpace;
+    {
+        std::lock_guard lock(mutex_);
+        freeSpace = freeSpace_;
+    }
+    const auto free = freeSpace ? freeSpace(outputRoot_) : std::nullopt;
+    if (!free || *free >= reserve + job.payloadBytes) return false;
+    result.notSaved = "disk reserve";
+    result.diskReserve = true;
+    result.freeBytes = *free;
+    return true;
 }
 
 WriterUsage EventWriter::usage() const
@@ -534,6 +603,10 @@ ClipWriteResult EventWriter::process(Job& job)
     {
         result.notSaved = job.notSavedReason;
     }
+    else if (belowDiskReserve(job, result))
+    {
+        // The candidates are logged below, as not saved.
+    }
     else
     {
         // One clip that cannot be written is one failed clip. The writer goes on.
@@ -596,6 +669,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
     {
         QTextStream out(&note);
         out << "software: SeleneWatch " << SELENEWATCH_VERSION << "\n";
+        out << "mode: " << targetName(clip.captureSettings.target) << "\n";
         writeStreamLines(out, clip);
         writeTestSignalLines(out, clip);
         out << "triggers: " << clip.triggers.size() << "\n";
@@ -625,6 +699,11 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         out << "collection_byte_limit: " << clip.collectionByteLimit << "\n";
         out << "writer_byte_limit: " << clip.writerByteLimit << "\n";
         out << "collection_end: " << QString::fromStdString(clip.endReason) << "\n";
+        out << "disk_reserve_bytes: " << clip.captureSettings.diskReserveBytes << "\n";
+        if (clip.continuesClipTriggeredAt)
+            out << "continues_clip: " << utcStamp(*clip.continuesClipTriggeredAt) << "\n";
+        for (const ReleaseRecord& release : clip.releases)
+            out << "released_to_background: frame_index=" << release.frameIndex << " utc=" << utcText(release.time) << "\n";
         out << "difference_memory_limited: " << (clip.previewLimited ? "yes" : "no") << "\n";
         out << "frames:\n";
         for (size_t i = 0; i < clip.frames.size(); ++i)
@@ -829,11 +908,19 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder)
     if (clip.peak.ready) request.peakFrameIndex = clip.peak.frameIndex;
     request.referenceTime = first.triggerTime;
     bool duringCorrection = false;
+    // A large brightening covers much of the frame; it is not marked.
     for (const ClipTrigger& trigger : clip.triggers)
     {
-        if (trigger.kind == TriggerKind::Automatic && trigger.boxWidth > 0 && trigger.boxHeight > 0)
+        if (trigger.kind == TriggerKind::Automatic && trigger.change == ChangeKind::Rise
+            && trigger.boxWidth > 0 && trigger.boxHeight > 0)
             request.marks.push_back(QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight));
         duringCorrection = duringCorrection || duringMountCorrection(trigger.triggerTime);
+    }
+    const DetectionMask& mask = first.settings.mask;
+    for (int i = 0; i < mask.count; ++i)
+    {
+        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
+        request.mask.push_back(QRect(rect.x, rect.y, rect.width, rect.height));
     }
     request.caption = overviewCaption(clip, duringCorrection);
     try
@@ -870,6 +957,7 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
         out << utcText(trigger.triggerTime) << " ";
         if (pending) out << (trigger.kind==TriggerKind::Manual ? "manual_pending " : "candidate_pending ");
         out << triggerFields(trigger)
+            << " mode=" << targetName(clip.captureSettings.target)
             << (duringMountCorrection(trigger.triggerTime) ? " during_mount_correction=yes" : "")
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;

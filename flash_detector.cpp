@@ -37,7 +37,8 @@ FlashDetector::FlashDetector(DetectionSettings settings, MemoryBudget budget)
     : budget_(std::move(budget)), mean_(BudgetAllocator<float>(budget_)), variance_(BudgetAllocator<float>(budget_)),
       grid_(BudgetAllocator<float>(budget_)), thresholdPixels_(BudgetAllocator<size_t>(budget_)),
       thresholdSigma_(BudgetAllocator<float>(budget_)), visited_(BudgetAllocator<uint8_t>(budget_)),
-      pending_(BudgetAllocator<size_t>(budget_)), protected_(BudgetAllocator<uint8_t>(budget_))
+      pending_(BudgetAllocator<size_t>(budget_)), protected_(BudgetAllocator<uint8_t>(budget_)),
+      masked_(BudgetAllocator<uint8_t>(budget_))
 {
     setSettings(settings);
 }
@@ -70,7 +71,10 @@ void FlashDetector::reset(bool releaseBuffers)
         visited_ = BudgetVector<uint8_t>(visited_.get_allocator());
         pending_ = BudgetVector<size_t>(pending_.get_allocator());
         protected_ = BudgetVector<uint8_t>(protected_.get_allocator());
+        masked_ = BudgetVector<uint8_t>(masked_.get_allocator());
     }
+    maskBuiltFor_ = {}; maskWidth_ = maskHeight_ = 0; unmaskedPixels_ = 0;
+    brightening_ = false; brighteningOnset_ = 0; brighteningSeconds_ = 0; holdAll_ = false;
     active_.clear(); candidates_.clear(); awaitingUpdate_ = false;
     history_.clear(); map_.reset();
     learnedFrames_ = 0;
@@ -115,16 +119,39 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         for (size_t i = 0; i < pixels; ++i) mean_[i] = samples.at(i);
         active_.clear();
         history_.clear();
+        brightening_ = false; holdAll_ = false;
     }
     else
     {
         summary_.ready = true;
+        // Feature-11: the mask as pixels, rebuilt when it or the frame changes.
+        if (settings_.mask != maskBuiltFor_ || maskWidth_ != width_ || maskHeight_ != height_)
+        {
+            masked_.assign(settings_.mask.empty() ? 0 : pixels, 0);
+            for (int r = 0; r < settings_.mask.count; ++r)
+            {
+                const MaskRect& rect = settings_.mask.rects[static_cast<size_t>(r)];
+                const int x0 = std::clamp(rect.x, 0, width_), x1 = std::clamp(rect.x + rect.width, 0, width_);
+                for (int y = std::max(0, rect.y); y < std::min(height_, rect.y + rect.height); ++y)
+                    std::fill(masked_.begin() + static_cast<ptrdiff_t>(y) * width_ + x0,
+                        masked_.begin() + static_cast<ptrdiff_t>(y) * width_ + x1, uint8_t{1});
+            }
+            unmaskedPixels_ = pixels - static_cast<size_t>(std::count(masked_.begin(), masked_.end(), uint8_t{1}));
+            maskBuiltFor_ = settings_.mask; maskWidth_ = width_; maskHeight_ = height_;
+        }
+        const bool masking = !masked_.empty();
+        const auto isMasked = [&](size_t i) { return masking && masked_[i]; };
+
         // Median absolute deviation on a bounded grid. Removing the median
         // difference keeps a uniform brightness step out of the noise floor.
+        // Masked pixels are left out unless the mask covers the whole grid.
         grid_.clear();
         grid_.reserve(4096);
         const size_t step = std::max(size_t{1}, (pixels + 4095) / 4096);
-        for (size_t i = 0; i < pixels; i += step) grid_.push_back(samples.at(i) - mean_[i]);
+        for (size_t i = 0; i < pixels; i += step)
+            if (!isMasked(i)) grid_.push_back(samples.at(i) - mean_[i]);
+        if (grid_.empty())
+            for (size_t i = 0; i < pixels; i += step) grid_.push_back(samples.at(i) - mean_[i]);
         const float centre = median(grid_);
         for (float& value : grid_) value = std::abs(value - centre);
         summary_.noiseFloor = std::max(settings_.minNoiseAdu, 1.4826 * median(grid_));
@@ -153,6 +180,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                 const double delta = samples.at(i) - mean_[i];
                 const double sigma = delta / noise;
                 if (map) map->values[i] = static_cast<float>(display.overlay == DetectionOverlay::Noise ? noise : std::max(0.0, sigma));
+                if (isMasked(i)) continue;
                 if (sigma > summary_.peakSigma)
                 {
                     summary_.peakSigma = sigma; summary_.peakAdu = delta;
@@ -177,6 +205,9 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
             summary_.boxX = left; summary_.boxY = top;
             summary_.boxWidth = right - left + 1; summary_.boxHeight = bottom - top + 1;
         }
+        // The whole frame's measurement, before it is replaced by the best patch.
+        const DetectionSummary whole = summary_;
+        size_t newlyReleased = 0;
         std::vector<Patch> current;
         DetectionSummary best = summary_;
         int bestPriority = -1;
@@ -246,10 +277,17 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                     measured = patch.measured;
                     if (!strongest_.passed || measured.peakSigma>strongest_.peakSigma) strongest_=measured;
                     if (measured.triggered) candidates_.push_back(measured);
+                    // Feature-11: past the release limit a patch is learned
+                    // like the background. A star drifting past a fixed camera
+                    // then fades; a plane moves on faster than it is learned.
+                    const double release = settings_.releaseSeconds;
+                    const bool released = release > 0 && patch.seconds >= release;
+                    if (released && patch.seconds - frameInterval_ < release) ++newlyReleased;
                     current.push_back(std::move(patch));
-                    for (int py=std::max(0,y0-1); py<=std::min(height_-1,y1+1); ++py)
-                        std::fill(protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::max(0,x0-1),
-                            protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::min(width_,x1+2),uint8_t{1});
+                    if (!released)
+                        for (int py=std::max(0,y0-1); py<=std::min(height_-1,y1+1); ++py)
+                            std::fill(protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::max(0,x0-1),
+                                protected_.begin()+static_cast<ptrdiff_t>(py)*width_+std::min(width_,x1+2),uint8_t{1});
                 }
                 const int priority = measured.triggered?3:measured.firing?2:passes?1:0;
                 if (priority>bestPriority || (priority==bestPriority && measured.peakSigma>best.peakSigma))
@@ -257,11 +295,46 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
             }
             summary_ = best;
         }
+
+        // Feature-11: a large brightening, when a set share of the unmasked
+        // frame is at K at once. One frame is enough: a lightning stroke can
+        // be one frame. While it lasts the whole frame is held from learning,
+        // so a flash does not raise the noise of the frames after it.
+        const bool large = settings_.brighteningShare > 0 && unmaskedPixels_ > 0
+            && static_cast<double>(whole.brightPixels) >= settings_.brighteningShare * static_cast<double>(unmaskedPixels_);
+        if (large)
+        {
+            if (!brightening_) { brighteningOnset_ = frame.frameIndex; brighteningSeconds_ = 0; }
+            else brighteningSeconds_ += frameInterval_;
+            DetectionSummary measured = whole;
+            measured.change = ChangeKind::LargeRise;
+            measured.share = static_cast<double>(whole.brightPixels) / static_cast<double>(unmaskedPixels_);
+            measured.medianDifferenceAdu = centre;
+            measured.passed = true;
+            measured.triggered = !brightening_;
+            measured.firing = true;
+            measured.onsetFrameIndex = brighteningOnset_;
+            brightening_ = true;
+            const double release = settings_.releaseSeconds;
+            const bool released = release > 0 && brighteningSeconds_ >= release;
+            if (released && brighteningSeconds_ - frameInterval_ < release) ++newlyReleased;
+            holdAll_ = !released;
+            if (measured.triggered) candidates_.push_back(measured);
+            summary_ = measured;
+        }
+        else
+        {
+            brightening_ = false;
+            holdAll_ = false;
+        }
+        summary_.newlyReleased = newlyReleased;
         active_ = std::move(current);
         map_ = std::move(map);
     }
     summary_.newCandidates = candidates_.size(); summary_.activePatches = active_.size();
-    summary_.protectedPixels = static_cast<size_t>(std::count(protected_.begin(),protected_.end(),uint8_t{1}));
+    // A held brightening protects every pixel, so nothing learns this frame.
+    summary_.protectedPixels = holdAll_ ? mean_.size()
+        : static_cast<size_t>(std::count(protected_.begin(),protected_.end(),uint8_t{1}));
     summary_.learningFrames = learnedFrames_;
     for (const auto& patch:active_) summary_.longestActiveSeconds=std::max(summary_.longestActiveSeconds,patch.seconds);
     const auto copyContext=[this](DetectionSummary& candidate) {

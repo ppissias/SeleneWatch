@@ -16,6 +16,12 @@
 // elsewhere keeps learning, including while a clip is open. Measurement and
 // learning are separate so capture can retain the actual pre-update difference.
 // Display requests only produce derived data; they never change decisions.
+//
+// Feature-11 adds three settings, all off on the Moon. Masked pixels are not
+// tested and do not count. A frame where a set share of the unmasked pixels
+// is at K fires as a large brightening, and the whole frame is held from
+// learning while it lasts. A patch or brightening that fires longer than the
+// release limit is learned like the background.
 class FlashDetector
 {
 public:
@@ -57,6 +63,17 @@ private:
     BudgetVector<uint8_t> visited_;
     BudgetVector<size_t> pending_;
     BudgetVector<uint8_t> protected_;
+    // Feature-11: the mask as pixels, built for one mask and frame size.
+    BudgetVector<uint8_t> masked_;
+    DetectionMask maskBuiltFor_;
+    int maskWidth_{0}, maskHeight_{0};
+    size_t unmaskedPixels_{0};
+    // A large brightening in progress: since which frame, for how long, and
+    // whether the whole frame is held from learning.
+    bool brightening_{false};
+    uint64_t brighteningOnset_{0};
+    double brighteningSeconds_{0};
+    bool holdAll_{false};
     // Carries a passing patch across frames for spatial matching and confirmation.
     struct Patch
     {

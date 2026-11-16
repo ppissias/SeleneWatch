@@ -174,6 +174,20 @@ The **Display and capture** tab offers three display modes:
 
 For every pixel, SeleneWatch learns the usual brightness and how much that pixel normally varies (its noise), from the last few seconds. A pixel stands out when the new frame is brighter than usual by more than **K** times its own noise. A candidate needs a compact group of such neighbouring pixels (a *patch*), not a single hot pixel. Bright moving edges and big changes are rejected by the size and shape limits. While a patch is active, the background keeps learning everywhere else, and new separate patches are still caught.
 
+### Watching the Moon or the sky
+
+**Watching**, at the top of the Detection panel, chooses **The Moon** or **The sky**. Change it while stopped. Each keeps its own detection and capture settings, so tuning one never changes the other. Every clip and candidate line records which one it was recorded in (`mode: moon` or `mode: sky`).
+
+**The sky** is for a camera with a wide lens watching the open sky for meteors and fireballs, aircraft, satellites and lightning. Its starting values differ from the Moon's: patches up to 3000 px, a box / patch ratio up to 30 so a meteor streak at an angle passes, 3 s of history, a 5 s quiet tail and 20 s at most after a trigger. It adds three settings:
+
+| Control | Meaning | Starting value |
+| --- | --- | --- |
+| **Large brightening** | A frame fires when this share of the unmasked frame rises by K at once, as with lightning or a fireball's flare. Repeated strokes within the quiet tail stay in one clip. Slow changes such as twilight are learned and do not fire. | 2 % of the frame |
+| **Learn a patch after** | A patch that keeps firing this long is learned into the background. A star or planet drifting past a fixed camera then stops firing; aircraft and satellites move on faster and keep firing. | 20 s |
+| **Mask** | Areas left out of detection: the ground, trees, street lights. Turn on **Draw mask** and drag rectangles on the preview; **Clear** removes them all. Up to 16 rectangles. Masked pixels are still recorded in the clips. | None |
+
+Guiding is for the Moon and is off while the sky is watched.
+
 ### Controls (View → Detection)
 
 | Control | Meaning | Starting value |
@@ -227,8 +241,11 @@ Set these under **Display and capture → Capture settings** before pressing Sta
 | **Quiet tail** | Seconds kept after activity stops | 3 s |
 | **Maximum after trigger** | Longest a single clip continues after its trigger; longer activity continues in a new, linked clip | 10 s |
 | **RAM ceiling** | Memory for frames, analysis and clips waiting to be written | 2048 MiB |
+| **Disk reserve** | Free space to keep on the output drive. Below it, clips are not written; their candidates are still logged as *not saved: disk reserve*, and the status bar says saving has stopped. | 10 GiB |
 
-The status bar shows how much history is actually held and how much RAM is in use. At high frame rates or large frames, the RAM ceiling may hold less than the requested history; the clip metadata then says why collection ended. If the writer falls behind and its share is full, a clip that does not fit is not saved, but its candidate is still logged as *not saved*.
+These are the Moon's defaults; the sky has its own (see section 7). The status bar shows how much history is actually held and how much RAM is in use. At high frame rates or large frames, the RAM ceiling may hold less than the requested history; the clip metadata then says why collection ended. If the writer falls behind and its share is full, a clip that does not fit is not saved, but its candidate is still logged as *not saved*.
+
+When an event lasts longer than **Maximum after trigger**, it continues in a new clip whose `event.txt` names the clip before (`continues_clip:`). On the Moon each such clip starts with its own history, so it stands on its own. On the sky it starts with the next frame, so a plane crossing for minutes is not saved twice.
 
 ---
 
@@ -254,6 +271,7 @@ Each clip folder is named by its UTC trigger time, for example `20261115-143156-
 
 Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
 `event.txt` contains:
+- whether the Moon or the sky was watched;
 - the camera and its settings, and the stream description;
 - each trigger, with its detector settings;
 - test-signal marks;
@@ -389,6 +407,8 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | **Start monitoring** is greyed out | The source has ended or failed, or a mode change is still in progress. |
 | A recording is refused | Compressed AVI files are not supported. Convert to SER or uncompressed AVI. |
 | "RAM ceiling …" messages | Lower the history or the frame size, or raise **RAM ceiling** before starting. |
+| "Saving stopped: … below the disk reserve" | The output drive is nearly full. Free some space or move older clips; candidates are logged meanwhile. Lower **Disk reserve** only if you are sure the drive can take it. |
+| On the sky, clips all night of one star | It drifts past a fixed camera. Check that **Learn a patch after** is not *Never*, or put the camera on a tracking mount. |
 | Too many candidates | Raise **K**, lower **Maximum patch**, or turn off one-frame triggers. Use the sigma map to see what fires. |
 | Lock refused: "one direction only" | Choose a region with craters or detail in two directions, not a straight edge. |
 | Calibration fails: "does not respond" | The mount is not moving the image. Check that the right driver is connected, that the mount accepts guide pulses, and that the guide rate is not tiny. With a simulator and a real camera this is expected. |
@@ -411,5 +431,7 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Calibration and guiding | Automated tests and a full simulated run; ASCOM checked against the ASCOM telescope simulator |
 | A real mount under the Moon | **Pending** |
 | Detector settings for real observing | Partial; tuning on real earthshine data is pending |
+| Watching the sky | Automated tests with constructed meteors, lightning, drifting stars and masks; **a night outside is pending**, and its starting values are first guesses |
+| The clip overview | Automated tests; checked on archive lunar recordings |
 
 Details are in [features.md](features.md), [implemented features.md](implemented%20features.md), and the validation notes in [docs](docs/).

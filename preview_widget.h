@@ -6,6 +6,7 @@
 #include <QtWidgets/QWidget>
 
 #include <optional>
+#include <vector>
 
 // Displays a frame fitted to the widget, with a selected pixel marked on
 // the screen only. The same image rectangle controls painting and input,
@@ -28,6 +29,8 @@ public:
     void setDetectionOverlay(QImage image, QRect frameBox);
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
+    // Frame coordinates. The detection mask (Feature-11), drawn hatched.
+    void setMask(std::vector<QRect> mask);
     [[nodiscard]] std::optional<QPoint> selectedPosition() const;
     [[nodiscard]] std::optional<QPoint> framePosition(QPointF widgetPosition) const;
     [[nodiscard]] QRect imageRect() const;
@@ -54,6 +57,7 @@ private:
     std::optional<QRect> lockBox_;
     std::optional<QRectF> foundBox_;
     bool foundValid_{false};
+    std::vector<QRect> mask_;
     // A left press on the image, and whether it has become a drag.
     std::optional<QPointF> pressPosition_;
     QPointF dragPosition_;

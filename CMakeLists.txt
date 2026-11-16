@@ -154,6 +154,12 @@ selenewatch_compile_options(SeleneWatchOverviewTests)
 add_test(NAME overview COMMAND SeleneWatchOverviewTests -o -,tap)
 set_tests_properties(overview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(SeleneWatchSkyTests tests/sky_tests.cpp)
+target_link_libraries(SeleneWatchSkyTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchSkyTests)
+add_test(NAME sky COMMAND SeleneWatchSkyTests -o -,tap)
+set_tests_properties(sky PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchRegistrationTests)

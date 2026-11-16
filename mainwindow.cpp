@@ -11,6 +11,7 @@
 #include "guiding/ascom_mount.h"
 #include "guiding/simulated_mount.h"
 #include "preview_image.h"
+#include "target_defaults.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
 
@@ -39,6 +40,51 @@ constexpr int kFastEntry = 1;
 
 constexpr int kSyntheticWidth = 640;
 constexpr int kSyntheticHeight = 480;
+
+constexpr uint64_t kGiB = uint64_t{1024} * 1024 * 1024;
+
+// Where a target's settings are saved. The Moon keeps the keys used before
+// Sky mode existed, so an observer who never picks Sky sees no change.
+QString settingsPrefix(Target target)
+{
+    return target == Target::Sky ? "sky/" : "";
+}
+
+// The mask as saved: x,y,width,height for each rectangle, separated by semicolons.
+QString maskToText(const DetectionMask& mask)
+{
+    QStringList rects;
+    for (int i = 0; i < mask.count; ++i)
+    {
+        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
+        rects << QString("%1,%2,%3,%4").arg(rect.x).arg(rect.y).arg(rect.width).arg(rect.height);
+    }
+    return rects.join(';');
+}
+
+DetectionMask maskFromText(const QString& text)
+{
+    DetectionMask mask;
+    for (const QString& item : text.split(';', Qt::SkipEmptyParts))
+    {
+        const QStringList numbers = item.split(',');
+        if (numbers.size() != 4 || mask.count >= DetectionMask::kMaxRects) continue;
+        const MaskRect rect{numbers[0].toInt(), numbers[1].toInt(), numbers[2].toInt(), numbers[3].toInt()};
+        if (rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0) mask.rects[static_cast<size_t>(mask.count++)] = rect;
+    }
+    return mask;
+}
+
+std::vector<QRect> maskRects(const DetectionMask& mask)
+{
+    std::vector<QRect> rects;
+    for (int i = 0; i < mask.count; ++i)
+    {
+        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
+        rects.emplace_back(rect.x, rect.y, rect.width, rect.height);
+    }
+    return rects;
+}
 
 } // namespace
 
@@ -80,6 +126,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupDisplayPanel();
     setupHistogramPanel();
     setupGuidingPanel();
+    applyTarget();
     // Only builds with the adapter and tests supplying a fake SDK get the camera entry and dock.
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
     if (cameraApi_)
@@ -118,7 +165,14 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         updateControls();
     });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
-        if (!session_->isRunning()) return;
+        // Feature-11: in Sky mode a drag draws the mask, and guiding is off.
+        if (detectionPanel_->drawingMask())
+        {
+            if (!detectionPanel_->addMaskRect(region))
+                showMessage(QString("The mask is full: %1 rectangles. Clear it to start again.").arg(DetectionMask::kMaxRects), 5000);
+            return;
+        }
+        if (target_ == Target::Sky || !session_->isRunning()) return;
         session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
         showMessage("Locking on the selected region…", 3000);
     });
@@ -170,19 +224,17 @@ void MainWindow::setupDetectionPanel()
     addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
     auto* view = menuBar()->addMenu("View");
     view->addAction(detectionDock_->toggleViewAction());
-    QSettings saved;
-    DetectionSettings settings;
-    settings.sigma = saved.value("detection/sigma", settings.sigma).toDouble();
-    settings.minPixels = saved.value("detection/minPixels", settings.minPixels).toInt();
-    settings.maxPixels = saved.value("detection/maxPixels", settings.maxPixels).toInt();
-    settings.oneFrame = saved.value("detection/oneFrame", settings.oneFrame).toBool();
-    settings.maxPatchBoxRatio = saved.value("detection/maxPatchBoxRatio", settings.maxPatchBoxRatio).toDouble();
-    settings.referenceTimeConstantSeconds = saved.value("detection/referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds).toDouble();
-    settings.minNoiseAdu = saved.value("detection/minNoiseAdu", settings.minNoiseAdu).toDouble();
-    detectionPanel_->setSettings(settings.valid() ? settings : DetectionSettings{});
+    target_ = QSettings().value("target", 0).toInt() == 1 ? Target::Sky : Target::Moon;
+    detectionPanel_->setTarget(target_);
+    detectionPanel_->setSettings(savedDetectionSettings(target_));
     session_->setDetectionSettings(detectionPanel_->settings());
     connect(detectionPanel_, &DetectionPanel::settingsChanged, this, [this] {
         session_->setDetectionSettings(detectionPanel_->settings());
+        ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
+    });
+    connect(detectionPanel_, &DetectionPanel::targetRequested, this, &MainWindow::onTargetRequested);
+    connect(detectionPanel_, &DetectionPanel::maskDrawingChanged, this, [this](bool drawing) {
+        if (drawing) showMessage("Drag rectangles on the preview to leave them out of detection.", 5000);
     });
     connect(detectionPanel_, &DetectionPanel::displayChanged, this, &MainWindow::updateDetectionDisplay);
     connect(detectionDock_, &QDockWidget::visibilityChanged, this, &MainWindow::updateDetectionDisplay);
@@ -190,19 +242,109 @@ void MainWindow::setupDetectionPanel()
     resize(1340, 820);
 }
 
+DetectionSettings MainWindow::savedDetectionSettings(Target target)
+{
+    const QSettings saved;
+    const QString key = settingsPrefix(target) + "detection/";
+    DetectionSettings settings = defaultDetectionSettings(target);
+    settings.sigma = saved.value(key + "sigma", settings.sigma).toDouble();
+    settings.minPixels = saved.value(key + "minPixels", settings.minPixels).toInt();
+    settings.maxPixels = saved.value(key + "maxPixels", settings.maxPixels).toInt();
+    settings.oneFrame = saved.value(key + "oneFrame", settings.oneFrame).toBool();
+    settings.maxPatchBoxRatio = saved.value(key + "maxPatchBoxRatio", settings.maxPatchBoxRatio).toDouble();
+    settings.referenceTimeConstantSeconds = saved.value(key + "referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds).toDouble();
+    settings.minNoiseAdu = saved.value(key + "minNoiseAdu", settings.minNoiseAdu).toDouble();
+    if (target == Target::Sky)
+    {
+        settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
+        settings.releaseSeconds = saved.value(key + "releaseSeconds", settings.releaseSeconds).toDouble();
+        settings.mask = maskFromText(saved.value(key + "mask").toString());
+    }
+    return settings.valid() ? settings : defaultDetectionSettings(target);
+}
+
 void MainWindow::saveDetectionSettings()
 {
     if (!detectionPanel_) return;
     const auto values = detectionPanel_->settings();
+    const QString key = settingsPrefix(detectionPanel_->target()) + "detection/";
     QSettings saved;
-    saved.setValue("detection/sigma", values.sigma);
-    saved.setValue("detection/minPixels", values.minPixels);
-    saved.setValue("detection/maxPixels", values.maxPixels);
-    saved.setValue("detection/oneFrame", values.oneFrame);
-    saved.setValue("detection/maxPatchBoxRatio", values.maxPatchBoxRatio);
-    saved.setValue("detection/referenceTimeConstantSeconds", values.referenceTimeConstantSeconds);
-    saved.setValue("detection/minNoiseAdu", values.minNoiseAdu);
+    saved.setValue(key + "sigma", values.sigma);
+    saved.setValue(key + "minPixels", values.minPixels);
+    saved.setValue(key + "maxPixels", values.maxPixels);
+    saved.setValue(key + "oneFrame", values.oneFrame);
+    saved.setValue(key + "maxPatchBoxRatio", values.maxPatchBoxRatio);
+    saved.setValue(key + "referenceTimeConstantSeconds", values.referenceTimeConstantSeconds);
+    saved.setValue(key + "minNoiseAdu", values.minNoiseAdu);
+    if (detectionPanel_->target() == Target::Sky)
+    {
+        saved.setValue(key + "brighteningShare", values.brighteningShare);
+        saved.setValue(key + "releaseSeconds", values.releaseSeconds);
+        saved.setValue(key + "mask", maskToText(values.mask));
+    }
     saved.sync();
+}
+
+CaptureSettings MainWindow::savedCaptureSettings(Target target)
+{
+    const QSettings saved;
+    const QString key = settingsPrefix(target) + "capture/";
+    CaptureSettings capture = defaultCaptureSettings(target);
+    capture.historySeconds = saved.value(key + "history", capture.historySeconds).toDouble();
+    capture.postSeconds = saved.value(key + "post", capture.postSeconds).toDouble();
+    capture.maxPostSeconds = saved.value(key + "maxPost", capture.maxPostSeconds).toDouble();
+    capture.memoryBytes = static_cast<size_t>(std::clamp(saved.value(key + "memoryMiB", 2048).toInt(), 16, 65536)) * 1024 * 1024;
+    capture.diskReserveBytes = static_cast<uint64_t>(std::clamp(
+        saved.value(key + "diskReserveGiB", static_cast<qulonglong>(capture.diskReserveBytes / kGiB)).toLongLong(), 0LL, 100000LL)) * kGiB;
+    return capture.valid() ? capture : defaultCaptureSettings(target);
+}
+
+void MainWindow::saveCaptureSettings()
+{
+    if (!displayPanel_) return;
+    const auto capture = displayPanel_->captureSettings();
+    const QString key = settingsPrefix(capture.target) + "capture/";
+    QSettings saved;
+    saved.setValue(key + "history", capture.historySeconds);
+    saved.setValue(key + "post", capture.postSeconds);
+    saved.setValue(key + "maxPost", capture.maxPostSeconds);
+    saved.setValue(key + "memoryMiB", static_cast<int>(capture.memoryBytes / (1024 * 1024)));
+    saved.setValue(key + "diskReserveGiB", static_cast<qulonglong>(capture.diskReserveBytes / kGiB));
+    saved.sync();
+}
+
+void MainWindow::onTargetRequested(Target target)
+{
+    // The choice is disabled while running; a late request is undone.
+    if (session_->isRunning() || target == target_)
+    {
+        detectionPanel_->setTarget(target_);
+        return;
+    }
+    // Keep the old target's settings before the panels take the new ones.
+    saveDetectionSettings();
+    saveCaptureSettings();
+    target_ = target;
+    QSettings().setValue("target", target == Target::Sky ? 1 : 0);
+    detectionPanel_->setTarget(target_);
+    detectionPanel_->setSettings(savedDetectionSettings(target_));
+    displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+    session_->setDetectionSettings(detectionPanel_->settings());
+    applyTarget();
+    showMessage(target_ == Target::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
+        : "Watching the Moon: the Moon's settings are loaded.", 6000);
+}
+
+void MainWindow::applyTarget()
+{
+    const bool sky = target_ == Target::Sky;
+    ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
+    if (guidingPanel_)
+    {
+        if (sky) session_->guider().requestUnlock();
+        guidingPanel_->setEnabled(!sky);
+        guidingDock_->setWindowTitle(sky ? "Guiding (Moon only)" : "Guiding");
+    }
 }
 
 void MainWindow::setupDisplayPanel()
@@ -220,12 +362,7 @@ void MainWindow::setupDisplayPanel()
     display.black = saved.value("display/black", 0).toDouble(); display.white = saved.value("display/white", 1).toDouble();
     display.invert = saved.value("display/invert", false).toBool(); display.debayer = saved.value("display/debayer", true).toBool();
     displayPanel_->setDisplaySettings(display.valid() ? display : DisplaySettings{});
-    CaptureSettings capture;
-    capture.historySeconds = saved.value("capture/history", 5).toDouble();
-    capture.postSeconds = saved.value("capture/post", 3).toDouble();
-    capture.maxPostSeconds = saved.value("capture/maxPost", 10).toDouble();
-    capture.memoryBytes = static_cast<size_t>(std::clamp(saved.value("capture/memoryMiB", 2048).toInt(), 16, 65536)) * 1024 * 1024;
-    displayPanel_->setCaptureSettings(capture.valid() ? capture : CaptureSettings{});
+    displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
     connect(displayPanel_, &DisplayPanel::displayChanged, this, &MainWindow::renderPreview);
     displayDock_->raise();
     updateBufferReadout();
@@ -235,7 +372,6 @@ void MainWindow::saveDisplaySettings()
 {
     if (!displayPanel_) return;
     const auto display = displayPanel_->displaySettings();
-    const auto capture = displayPanel_->captureSettings();
     QSettings saved;
     saved.setValue("display/mode", static_cast<int>(display.mode));
     saved.setValue("display/black", display.black); saved.setValue("display/white", display.white);
@@ -243,9 +379,8 @@ void MainWindow::saveDisplaySettings()
     saved.setValue("histogram/visible", !histogramDock_->isHidden());
     saved.setValue("histogram/fitRange", histogramPanel_->fitRange());
     saved.setValue("histogram/logCounts", histogramPanel_->logCounts());
-    saved.setValue("capture/history", capture.historySeconds); saved.setValue("capture/post", capture.postSeconds);
-    saved.setValue("capture/maxPost", capture.maxPostSeconds); saved.setValue("capture/memoryMiB", static_cast<int>(capture.memoryBytes / (1024 * 1024)));
     saved.sync();
+    saveCaptureSettings();
 }
 
 void MainWindow::setupHistogramPanel()
@@ -519,6 +654,7 @@ void MainWindow::updateControls()
     ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!running);
+    if (detectionPanel_) detectionPanel_->setTargetEditable(!running);
     ui_->openFileButton->setEnabled(!running && recording);
     ui_->loopCheckBox->setEnabled(!running && recording);
     ui_->loopSecondsSpinBox->setEnabled(!running && recording && ui_->loopCheckBox->isChecked());
@@ -1027,7 +1163,17 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
         recordFailed_ = true;
     }
 
-    if (!result.notSaved.isEmpty())
+    if (result.diskReserve)
+    {
+        // Feature-11: saving stops before the drive fills. The candidates are still logged.
+        ++clipsNotSaved_;
+        updateCandidateReadout();
+        showMessage(QString("Saving stopped: %1 GiB free on the output drive, below the disk reserve of %2 GiB. "
+            "Candidates are still logged.")
+            .arg(static_cast<double>(result.freeBytes) / kGiB, 0, 'f', 1)
+            .arg(static_cast<double>(displayPanel_->captureSettings().diskReserveBytes) / kGiB, 0, 'f', 0));
+    }
+    else if (!result.notSaved.isEmpty())
     {
         ++clipsNotSaved_;
         updateCandidateReadout();

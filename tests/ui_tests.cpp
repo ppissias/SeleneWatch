@@ -51,6 +51,7 @@ private slots:
     void controlsPreserveValidSizeLimits();
     void detectionPanelExplainsPatchRejections();
     void readoutsKeepTheControlsBelowInPlace();
+    void eachTargetKeepsItsOwnSettings();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
@@ -573,6 +574,65 @@ void UiTest::detectionPanelExplainsPatchRejections()
     panel.setView(view);
     QVERIFY(label->text().contains("Too many pixels at K"));
     QVERIFY(panel.findChild<QLabel*>("patchReading")->text().contains("across the frame"));
+}
+
+// Feature-11: Moon and Sky keep their own detection and capture settings.
+// The Moon's are saved under the keys used before Sky mode existed, and
+// guiding is off while the sky is watched.
+void UiTest::eachTargetKeepsItsOwnSettings()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    auto* panel = window.findChild<DetectionPanel*>();
+    auto* display = window.findChild<DisplayPanel*>();
+    auto* guiding = window.findChild<GuidingPanel*>();
+    auto* choice = panel->findChild<QComboBox*>("targetChoice");
+    auto* sigma = panel->findChild<QDoubleSpinBox*>("detectionSigma");
+    QCOMPARE(panel->target(), Target::Moon);
+    QVERIFY(choice->isEnabled());
+    QVERIFY(guiding->isEnabled());
+    QCOMPARE(panel->settings().brighteningShare, 0.0);
+    QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{10} * 1024 * 1024 * 1024);
+    sigma->setValue(7);
+
+    choice->setCurrentIndex(1);
+    QCOMPARE(panel->target(), Target::Sky);
+    QVERIFY(panel->findChild<QWidget*>("skySettings")->isVisibleTo(panel));
+    QCOMPARE(panel->settings().sigma, 6.0);
+    QCOMPARE(panel->settings().maxPixels, 3000);
+    QCOMPARE(panel->settings().maxPatchBoxRatio, 30.0);
+    QCOMPARE(panel->settings().brighteningShare, 0.02);
+    QCOMPARE(panel->settings().releaseSeconds, 20.0);
+    QCOMPARE(display->captureSettings().target, Target::Sky);
+    QCOMPARE(display->captureSettings().postSeconds, 5.0);
+    QCOMPARE(display->captureSettings().maxPostSeconds, 20.0);
+    QVERIFY(!guiding->isEnabled());
+    // The Moon's settings were saved under their old keys on the way out.
+    QCOMPARE(QSettings().value("detection/sigma").toDouble(), 7.0);
+    QCOMPARE(QSettings().value("target").toInt(), 1);
+
+    // A mask drawn on the sky, and a Sky K.
+    panel->findChild<QToolButton*>("drawMask")->setChecked(true);
+    QVERIFY(panel->addMaskRect(QRect(0, 400, 640, 80)));
+    QCOMPARE(panel->settings().mask.count, 1);
+    sigma->setValue(9);
+
+    choice->setCurrentIndex(0);
+    QCOMPARE(panel->settings().sigma, 7.0);
+    QCOMPARE(panel->settings().maxPixels, 400);
+    QCOMPARE(panel->settings().brighteningShare, 0.0);
+    QVERIFY(panel->settings().mask.empty());
+    QVERIFY(!panel->drawingMask());
+    QCOMPARE(display->captureSettings().target, Target::Moon);
+    QCOMPARE(display->captureSettings().maxPostSeconds, 10.0);
+    QVERIFY(guiding->isEnabled());
+    QCOMPARE(QSettings().value("sky/detection/sigma").toDouble(), 9.0);
+    QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,400,640,80"));
+
+    choice->setCurrentIndex(1);
+    QCOMPARE(panel->settings().sigma, 9.0);
+    QCOMPARE(panel->settings().mask.count, 1);
+    QCOMPARE(panel->settings().mask.rects[0], (MaskRect{0, 400, 640, 80}));
 }
 
 // The readouts keep room for their longest texts, so the controls below them

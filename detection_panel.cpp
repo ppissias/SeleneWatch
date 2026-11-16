@@ -9,6 +9,7 @@
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGridLayout>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
@@ -44,6 +45,9 @@ QString patchText(int pixels, int high, double boxRatio, const DetectionSettings
 
 QString decisionText(const DetectionSummary& summary, bool monitoring)
 {
+    if (summary.change == ChangeKind::LargeRise)
+        return QString("Large brightening, %1% of the frame at K — %2")
+            .arg(100 * summary.share, 0, 'f', 1).arg(monitoring ? "capture ON" : "capture OFF");
     if (summary.firing) return monitoring ? "Candidate — capture ON" : "Would trigger — capture OFF";
     if (summary.passed) return "Passing patch (1 / 2 frames)";
     if (summary.patchSearchLimited) return "Too many pixels at K to measure individual patches";
@@ -194,9 +198,58 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
     auto* content = new QWidget;
-    auto* layout = new QGridLayout(content);
+    auto* column = new QVBoxLayout(content);
     scroll->setWidget(content);
     outer->addWidget(scroll);
+
+    // Feature-11: what is watched, and the settings only the sky needs.
+    auto* targetRow = new QHBoxLayout;
+    targetRow->addWidget(new QLabel("Watching", content));
+    target_ = new QComboBox(content);
+    target_->setObjectName("targetChoice");
+    target_->addItems({"The Moon", "The sky"});
+    target_->setToolTip("Each target keeps its own detection and capture settings. Changes only while stopped.");
+    targetRow->addWidget(target_, 1);
+    column->addLayout(targetRow);
+    sky_ = new QWidget(content);
+    sky_->setObjectName("skySettings");
+    auto* skyForm = new QFormLayout(sky_);
+    skyForm->setContentsMargins(0, 0, 0, 0);
+    brightening_ = new QDoubleSpinBox(sky_);
+    brightening_->setObjectName("brighteningShare");
+    brightening_->setRange(0, 100); brightening_->setDecimals(1); brightening_->setSingleStep(0.5);
+    brightening_->setSuffix(" % of frame"); brightening_->setSpecialValueText("Off");
+    brightening_->setToolTip("A frame fires when this share of the unmasked pixels rises by K at once: lightning, a fireball's flare.");
+    release_ = new QDoubleSpinBox(sky_);
+    release_->setObjectName("releaseSeconds");
+    release_->setRange(0, 3600); release_->setDecimals(0); release_->setSuffix(" s"); release_->setSpecialValueText("Never");
+    release_->setToolTip("A patch that keeps firing this long is learned into the background, so a star drifting past "
+        "a fixed camera stops firing. Aircraft and satellites move on faster and keep firing.");
+    skyForm->addRow("Large brightening", brightening_);
+    skyForm->addRow("Learn a patch after", release_);
+    auto* maskRow = new QHBoxLayout;
+    maskLabel_ = new QLabel(sky_);
+    maskLabel_->setObjectName("maskSummary");
+    drawMask_ = new QToolButton(sky_);
+    drawMask_->setObjectName("drawMask");
+    drawMask_->setText("Draw mask");
+    drawMask_->setCheckable(true);
+    drawMask_->setToolTip("While on, a rectangle dragged on the preview is left out of detection: the ground, trees, lights.");
+    clearMask_ = new QToolButton(sky_);
+    clearMask_->setObjectName("clearMask");
+    clearMask_->setText("Clear");
+    maskRow->addWidget(maskLabel_, 1);
+    maskRow->addWidget(drawMask_);
+    maskRow->addWidget(clearMask_);
+    skyForm->addRow(maskRow);
+    column->addWidget(sky_);
+    sky_->hide();
+
+    auto* grid = new QWidget(content);
+    auto* layout = new QGridLayout(grid);
+    layout->setContentsMargins(0, 0, 0, 0);
+    column->addWidget(grid);
+    column->addStretch(1);
     layout->setColumnStretch(0, 1);
     sigma_ = new QDoubleSpinBox(this);
     sigma_->setObjectName("detectionSigma");
@@ -306,19 +359,83 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(referenceSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) referenceTime_->setValue(referenceSlider_->number(p)); });
     connect(noiseSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimumNoise_->setValue(noiseSlider_->number(p)); });
     connect(overlay_, &QComboBox::currentIndexChanged, this, [this] { emit displayChanged(); });
+    connect(target_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (!updating_) emit targetRequested(index == 1 ? Target::Sky : Target::Moon);
+    });
+    for (auto* spin : {brightening_, release_})
+        connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
+    connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
+    connect(clearMask_, &QToolButton::clicked, this, [this] {
+        mask_ = {};
+        showMask();
+        emit settingsChanged();
+    });
     setSettings({});
 }
 
 DetectionSettings DetectionPanel::settings() const
 {
-    return {sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
+    DetectionSettings values{sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
         compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
+    if (target() == Target::Sky)
+    {
+        values.brighteningShare = brightening_->value() / 100;
+        values.releaseSeconds = release_->value();
+        values.mask = mask_;
+    }
+    return values;
+}
+
+Target DetectionPanel::target() const
+{
+    return current_;
+}
+
+void DetectionPanel::setTarget(Target target)
+{
+    current_ = target;
+    const bool updating = updating_;
+    updating_ = true;
+    target_->setCurrentIndex(target == Target::Sky ? 1 : 0);
+    updating_ = updating;
+    sky_->setVisible(target == Target::Sky);
+    if (target != Target::Sky) drawMask_->setChecked(false);
+}
+
+void DetectionPanel::setTargetEditable(bool editable)
+{
+    target_->setEnabled(editable);
+}
+
+bool DetectionPanel::addMaskRect(QRect rect)
+{
+    if (target() != Target::Sky || rect.isEmpty() || mask_.count >= DetectionMask::kMaxRects) return false;
+    mask_.rects[static_cast<size_t>(mask_.count++)] = {rect.x(), rect.y(), rect.width(), rect.height()};
+    showMask();
+    emit settingsChanged();
+    return true;
+}
+
+bool DetectionPanel::drawingMask() const
+{
+    return drawMask_->isChecked();
+}
+
+void DetectionPanel::showMask()
+{
+    maskLabel_->setText(mask_.empty() ? QString("No mask")
+        : QString("Mask: %1 of %2 rectangles").arg(mask_.count).arg(DetectionMask::kMaxRects));
+    clearMask_->setEnabled(!mask_.empty());
 }
 
 void DetectionPanel::setSettings(const DetectionSettings& settings)
 {
     if (!settings.valid()) return;
     updating_ = true;
+    brightening_->setValue(100 * settings.brighteningShare);
+    release_->setValue(settings.releaseSeconds);
+    mask_ = settings.mask;
+    showMask();
     sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.maxPixels);
     oneFrame_->setChecked(settings.oneFrame);
     compactness_->setValue(settings.maxPatchBoxRatio);

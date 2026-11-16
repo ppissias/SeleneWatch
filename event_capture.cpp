@@ -84,6 +84,7 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
     if (collecting_)
     {
         rememberPeak(*frame);
+        if (detector_.summary().newlyReleased) clip_.releases.push_back({frame->frameIndex, frame->timestamp});
         if (firing) lastFiringTime_ = frame->timestamp;
         const double quiet = std::chrono::duration<double>(frame->timestamp - lastFiringTime_).count();
         const double after = std::chrono::duration<double>(frame->timestamp - clip_.triggers.front().triggerTime).count();
@@ -91,8 +92,18 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
         else if (after >= captureSettings_.maxPostSeconds || clip_.payloadBytes >= maxClipBytes_)
         {
             const bool manualTail = manualTail_ && std::chrono::duration<double>(frame->timestamp-manualTail_->triggerTime).count()<captureSettings_.postSeconds;
+            const auto previous = clip_.triggers.front().triggerTime;
+            // On the Moon each clip of a long event starts with its own
+            // history, so it stands on its own. In Sky mode an aircraft can
+            // stay for minutes, so the next clip starts after this one.
+            const bool withHistory = captureSettings_.target != Target::Sky;
             handOff(after >= captureSettings_.maxPostSeconds ? "maximum post-event interval" : "clip memory allowance");
-            if (firing) { beginClip(currentTrigger(detector_.summary(),true)); rememberPeak(*frame); }
+            if (firing)
+            {
+                beginClip(currentTrigger(detector_.summary(),true), withHistory);
+                clip_.continuesClipTriggeredAt = previous;
+                if (withHistory) rememberPeak(*frame);
+            }
             if (manualTail)
             {
                 // Preserve the original manual request as collection continues in the next clip.
@@ -100,7 +111,12 @@ void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest displa
                 continuation.continuesPreviousClip=true;
                 continuation.triggerFrameIndex=frame->frameIndex; continuation.triggerTime=frame->timestamp;
                 if (collecting_) clip_.triggers.push_back(continuation);
-                else { beginClip(continuation); lastFiringTime_=manualTail_->triggerTime; }
+                else
+                {
+                    beginClip(continuation, withHistory);
+                    clip_.continuesClipTriggeredAt = previous;
+                    lastFiringTime_=manualTail_->triggerTime;
+                }
             }
         }
     }
@@ -137,14 +153,14 @@ bool EventCapture::saveNow(std::chrono::system_clock::time_point requestedAt)
     return true;
 }
 
-void EventCapture::beginClip(const ClipTrigger& trigger)
+void EventCapture::beginClip(const ClipTrigger& trigger, bool withHistory)
 {
     collecting_ = true;
     clip_ = EventClip(budget_);
     clip_.captureSettings = captureSettings_;
     clip_.historyByteLimit = maxHistoryBytes_; clip_.collectionByteLimit = maxClipBytes_;
-    clip_.availableHistorySeconds = ring_.usage().seconds;
-    clip_.frames = ring_.stored();
+    clip_.availableHistorySeconds = withHistory ? ring_.usage().seconds : 0;
+    if (withHistory) clip_.frames = ring_.stored();
     for (const auto& frame : clip_.frames) clip_.payloadBytes += frame->data.capacity();
     clip_.triggers.push_back(trigger);
     clip_.framesBefore = clip_.frames.empty() ? 0 : static_cast<int>(clip_.frames.size()) - 1;
@@ -161,6 +177,7 @@ ClipTrigger EventCapture::currentTrigger(const DetectionSummary& measured, bool 
     trigger.boxWidth = measured.boxWidth; trigger.boxHeight = measured.boxHeight;
     trigger.activePatches=measured.activePatches; trigger.protectedPixels=measured.protectedPixels;
     trigger.learningFrames=measured.learningFrames; trigger.longestActiveSeconds=measured.longestActiveSeconds;
+    trigger.change=measured.change; trigger.share=measured.share; trigger.medianDifferenceAdu=measured.medianDifferenceAdu;
     return trigger;
 }
 

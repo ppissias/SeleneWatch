@@ -72,7 +72,16 @@ private:
     void startStream(Session::Mode mode);
     void setupDetectionPanel();
     void updateDetectionDisplay();
+    // Feature-11: each target's detection and capture settings are saved
+    // apart. The Moon keeps the keys used before the choice existed.
+    [[nodiscard]] static DetectionSettings savedDetectionSettings(Target target);
+    [[nodiscard]] static CaptureSettings savedCaptureSettings(Target target);
+    // Save the panels' settings under the target they belong to.
     void saveDetectionSettings();
+    void saveCaptureSettings();
+    void onTargetRequested(Target target);
+    // Guiding, the preview's mask, and the drag on the preview follow the target.
+    void applyTarget();
     void setupDisplayPanel();
     void setupHistogramPanel();
     void setupGuidingPanel();
@@ -117,6 +126,8 @@ private:
     std::unique_ptr<Session> session_;
     DetectionPanel* detectionPanel_{nullptr};
     QDockWidget* detectionDock_{nullptr};
+    // What is watched. The detection and display panels hold its settings.
+    Target target_{Target::Moon};
     DetectionSummary latestDetection_;
     DisplayPanel* displayPanel_{nullptr};
     QDockWidget* displayDock_{nullptr};

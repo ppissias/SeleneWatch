@@ -836,6 +836,40 @@ Sky mode changes no pixel and writes evidence the same way, so the evidence rule
 
 Part A comes first, and the others build on it. Part E's disk reserve has no dependency and can be built before the rest, for both modes. Parts B, C and D are independent of each other. Feature-12 is built before this feature, so the first sky clips already have overviews.
 
+### Implementation — 16 November 2026
+
+Built. Done-when items 1 to 8 pass; item 9, a night outside, is open. The open decisions were taken as proposed: Part C is built (it costs nothing on a tracking mount), the disk reserve applies to both modes, the Moon keeps repeating the history in linked clips, and the release limit is off on the Moon.
+
+**Where it lives.**
+
+- `Target` (Moon, Sky) and the disk reserve are capture settings, since both change only at Start; `CaptureSettings{}` has no reserve, and the window's default is 10 GiB. The large-brightening share, the release limit and the mask are detection settings, so every trigger records the values in force. They are zero or empty on the Moon, which is what makes Moon mode the detector as it was. The mask is a fixed array of up to 16 rectangles, because every measurement carries a copy of its settings. `target_defaults.h` holds each target's starting values.
+- `FlashDetector` builds the mask as pixels when it or the frame size changes. Masked pixels are left out of the threshold, the peak, the patches and the noise-floor grid. A large brightening is a new `ChangeKind`, `LargeRise`; while it lasts every pixel is held from learning. A patch, or a brightening, that reaches the release limit is no longer protected, and the frame reports it as newly released.
+- `EventCapture` records each release in the clip. In Sky mode a clip that continues a long event starts with the next frame. In both modes it records the first trigger time of the clip before, which `event.txt` prints as `continues_clip:` with that clip's folder name.
+- `EventWriter` checks the free space before each clip, through a replaceable query (`setFreeSpace`) that tests use. Below the reserve the result is `not_saved=disk reserve` with the free bytes, and the window says saving has stopped. `event.txt` gets `mode:`, `disk_reserve_bytes:`, the releases, and the Sky settings on each trigger line when they are on (`brightening_share=`, `release_seconds=`, `mask=`). A brightening is `kind=brightening` with its `share=` and `median_difference_adu=`. Every `candidates.txt` line gets `mode=`.
+- The window keeps each target's settings in its own `QSettings` group. The Moon keeps the keys used before (`detection/…`, `capture/…`); the sky's are under `sky/`. The Detection panel's choice box only asks for another target: the window saves the old target's settings first, then loads the new ones. Otherwise a switch from Sky to Moon would have saved the Sky settings with their Sky parts already emptied. The Sky controls and the mask buttons show only in Sky mode; the preview hatches the mask, and a drag adds a rectangle while **Draw mask** is on. In Sky mode the guiding panel is disabled, its tab reads "Guiding (Moon only)", and a drag never requests a lock.
+- The overview (Feature-12) leaves the mask out of its measurement and hatches it, does not mark a large brightening (it covers much of the frame), and names the mode in its caption.
+
+**Changes from the proposal.**
+
+- The **median rise** recorded with a brightening is the frame's median difference from the background, the same number the noise floor removes.
+- The **track image** of Part E became Feature-12's overview, which shows the whole path in every mode.
+- A linked clip names the clip before by that clip's first trigger time, which is its folder name unless the name was taken.
+
+**Tests.** A new suite, `sky` (8 tests), and one window test:
+
+- **Streak (items 2 and 8):** a 3-pixel-wide streak at 45°, 20 px a frame: one Sky clip from entry to exit, nothing on the Moon, and an overview whose path covers the whole diagonal.
+- **Lightning (item 3):** three strokes over 40% of the frame, 0.3 s apart: one Sky clip with three `brightening` triggers, the struck area's noise unchanged afterwards, and the Sky settings and `mode=sky` in the records.
+- **Twilight (item 3):** a ramp from 10 to 200 ADU over ten minutes fires nothing in either mode.
+- **Drifting star (item 4):** released at the limit, and its clip ends one quiet tail later. A moving light keeps firing past the limit until it leaves the frame. Both use a 3 s limit to keep the test short.
+- **Mask (item 5):** a flash on the masked ground does not fire, one in the sky does, and the SER frame holds the masked pixels byte for byte.
+- **Disk reserve (item 6):** the clip is refused and logged with `not_saved=disk reserve`, and written when there is room.
+- **Linked clips (item 7):** in Sky mode they are contiguous and do not overlap; on the Moon they repeat the history. Each names the clip before.
+- **Window (item 1):** each target keeps its own settings and defaults, the Moon's under the old keys, the mask saved and restored, and guiding off in Sky mode.
+
+All 14 suites pass in Debug and Release. By hand, the Release window in Sky mode showed the Sky controls, the hatched mask on the preview, the Sky capture defaults with the 10 GiB reserve, and the "Guiding (Moon only)" tab.
+
+**A finding about the Moon, unchanged by this feature.** In the lightning test the Moon, which has no brightening trigger, recorded 18 candidates on the third stroke. Each stroke is learned on the Moon, so the struck area's noise estimate rises. By the third stroke the area is only just above K, and it breaks into small patches that pass the size test. Thin cloud clearing from the Moon could do the same. The Moon's behaviour was left as it was; whether it needs a rule is a question for the earthshine measurements of Feature-9.
+
 ---
 
 ## Feature-12 — An overview of every clip

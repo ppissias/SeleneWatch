@@ -146,6 +146,21 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
     // The current frame's changed pixels, for its centre and spread.
     BudgetVector<size_t> changedAt{BudgetAllocator<size_t>(budget)};
     BudgetVector<float> changedSigma{BudgetAllocator<float>(budget)};
+    // The detector's mask: those pixels are neither measured nor in the noise floor.
+    BudgetVector<uint8_t> masked{BudgetAllocator<uint8_t>(budget)};
+    if (!request.mask.empty())
+    {
+        masked.assign(pixels, 0);
+        const QRect frameRect(0, 0, first.width, first.height);
+        for (const QRect& rect : request.mask)
+        {
+            const QRect inside = rect.intersected(frameRect);
+            for (int y = inside.top(); y <= inside.bottom(); ++y)
+                std::fill(masked.begin() + static_cast<ptrdiff_t>(y) * first.width + inside.left(),
+                    masked.begin() + static_cast<ptrdiff_t>(y) * first.width + inside.right() + 1, uint8_t{1});
+        }
+    }
+    const auto isMasked = [&masked](size_t i) { return !masked.empty() && masked[i]; };
 
     for (size_t i = 0; i < pixels; ++i) mean[i] = sampleAt(first, i, shift);
     size_t learned = 1;
@@ -181,7 +196,10 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
         // bounded grid, with the median difference removed.
         grid.clear();
         const size_t step = std::max(size_t{1}, (pixels + 4095) / 4096);
-        for (size_t i = 0; i < pixels; i += step) grid.push_back(sampleAt(frame, i, shift) - mean[i]);
+        for (size_t i = 0; i < pixels; i += step)
+            if (!isMasked(i)) grid.push_back(sampleAt(frame, i, shift) - mean[i]);
+        if (grid.empty())
+            for (size_t i = 0; i < pixels; i += step) grid.push_back(sampleAt(frame, i, shift) - mean[i]);
         const float centre = median(grid);
         for (float& value : grid) value = std::abs(value - centre);
         const double floor = std::max(request.minNoiseAdu, 1.4826 * median(grid));
@@ -196,7 +214,7 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
         for (size_t i = 0; i < pixels; ++i)
         {
             const float delta = sampleAt(frame, i, shift) - mean[i];
-            if (!record.learning)
+            if (!record.learning && !isMasked(i))
             {
                 const float noiseVariance = std::max(variance[i], floorVariance);
                 if (delta * delta >= k * k * noiseVariance)
@@ -628,6 +646,13 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
     }
 
     QPainter painter(&canvas);
+    // The mask, hatched: the detector did not look there.
+    for (const QRect& rect : request.mask)
+    {
+        const QRectF area(rect.x() * scaleX, rect.y() * scaleY, rect.width() * scaleX, rect.height() * scaleY);
+        painter.fillRect(area, QColor(0, 0, 0, 110));
+        painter.fillRect(area, QBrush(QColor(200, 60, 60, 150), Qt::BDiagPattern));
+    }
     painter.setRenderHint(QPainter::Antialiasing);
     for (size_t m = 0; m < request.marks.size(); ++m)
     {

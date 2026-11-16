@@ -13,7 +13,8 @@ PreviewWidget::PreviewWidget(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setCursor(Qt::CrossCursor);
     setToolTip("Click the image to select a pixel for a test flash. Drag a rectangle around a crater "
-        "or other detail to lock on it. Coordinates refer to the original frame.");
+        "or other detail to lock on it. In Sky mode, with Draw mask on, a dragged rectangle is left out "
+        "of detection. Coordinates refer to the original frame.");
 }
 
 void PreviewWidget::setImage(QImage image)
@@ -44,6 +45,12 @@ void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRec
     lockBox_ = locked;
     foundBox_ = found;
     foundValid_ = foundValid;
+    update();
+}
+
+void PreviewWidget::setMask(std::vector<QRect> mask)
+{
+    mask_ = std::move(mask);
     update();
 }
 
@@ -133,6 +140,20 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
                 detectionBox_.width() * image.width() / static_cast<double>(image_.width()),
                 detectionBox_.height() * image.height() / static_cast<double>(image_.height())));
         }
+    }
+    if (!mask_.empty())
+    {
+        painter.save();
+        painter.setClipRect(image);
+        for (const QRect& rect : mask_)
+        {
+            const QRectF area = toWidget(rect);
+            painter.fillRect(area, QColor(0, 0, 0, 90));
+            painter.fillRect(area, QBrush(QColor(220, 70, 70, 160), Qt::BDiagPattern));
+            painter.setPen(QPen(QColor(220, 70, 70), 1));
+            painter.drawRect(area);
+        }
+        painter.restore();
     }
     if (lockBox_ || foundBox_ || dragging_)
     {

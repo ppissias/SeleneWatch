@@ -32,6 +32,11 @@ struct ClipWriteResult
     // or the writer thread has ended. Later candidates are not on record.
     bool recordFailed{false};
     bool memoryLimited{false};
+
+    // The clip was not written because the output drive had less free space
+    // than the clip's disk reserve (Feature-11). freeBytes is what was free.
+    bool diskReserve{false};
+    uint64_t freeBytes{0};
 };
 
 // A guide pulse, kept by the writer to mark candidates that fall inside a
@@ -78,10 +83,16 @@ struct WriterUsage
 // where it came from. One clip that fails to write is one failed clip; the
 // writer goes on to the next. Each result is reported through Finished on
 // the context object's thread.
+//
+// Before a clip is written, the free space on the output drive is checked
+// against the clip's disk reserve. Below it, the clip is not written and its
+// candidates are logged with not_saved=disk reserve.
 class EventWriter
 {
 public:
     using Finished = std::function<void(const ClipWriteResult& result)>;
+    // The free bytes on the drive holding a folder, or none when unknown.
+    using FreeSpace = std::function<std::optional<uint64_t>(const QString& folder)>;
 
     // context and finished must be valid for the writer's lifetime.
     EventWriter(QObject* context, QString outputRoot, size_t maxQueuedBytes, Finished finished);
@@ -107,6 +118,8 @@ public:
     // Writes what is queued, then stops the thread.
     void shutdown();
     void setByteLimit(size_t bytes);
+    // Before the first submit. Replaces the drive query, for tests.
+    void setFreeSpace(FreeSpace freeSpace);
     [[nodiscard]] WriterUsage usage() const;
 
 private:
@@ -143,6 +156,9 @@ private:
     // Writer thread. Saves the clip's overview (Feature-12) in its folder and
     // returns its metadata line, or why it was not written.
     QString writeOverview(const EventClip& clip, const QString& folder) const;
+    // Writer thread. True, with the result filled in, when writing the clip
+    // would go below its disk reserve.
+    bool belowDiskReserve(const Job& job, ClipWriteResult& result) const;
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
     bool appendLog(const QString& lines, const QString& fileName = "candidates.txt") const;
@@ -153,6 +169,7 @@ private:
     const QString outputRoot_;
     size_t maxQueuedBytes_;
     Finished finished_;
+    FreeSpace freeSpace_;
 
     mutable std::mutex mutex_;
     std::condition_variable ready_;
