@@ -352,7 +352,7 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 
 **Evidence.** Every pulse is logged in `guiding.txt` while Monitoring. A candidate whose trigger falls during a pulse, or the settle time after it, is marked `during_mount_correction=yes`, and its `event.txt` lists the pulses inside the clip. The candidate is still saved; the mark tells the reviewer the image was moving.
 
-> **Watch this on your first guided session.** Steady field drift and guide pulses move bright edges, which the detector may notice. On the synthetic test scene, drift alone caused triggers. Check how often candidates appear while guiding on real data before trusting an unattended session.
+> **Watch this on your first guided session.** Guide pulses move bright edges, which the detector may notice. On recorded lunar frames moved the way corrections move the image, at a K where the unmoved field was quiet (12 to 24), corrections at the allowed speed added at most one candidate in any run, always inside a marked window. At K 6 they added many, almost all marked. The synthetic test scene is sharper and triggers on drift alone. Check how often candidates appear while guiding on your own data before trusting an unattended session. The measurements are in [docs/guide-pulse-detector.md](docs/guide-pulse-detector.md).
 
 ---
 

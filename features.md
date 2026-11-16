@@ -710,3 +710,15 @@ Checked by hand with `SeleneWatchProbe ascom ASCOM.OmniSim.Telescope OUTPUT.txt`
 - Safety rule 3 correctly reported "not tracking", so the guider would have refused to pulse.
 
 Still open for Part C, by hand: connecting through the chooser in the window; EQMOD with the observer's mount; and calibrate and guide under the Moon. There, check the readout and `guiding.txt` against what the mount did. With OmniSim and a camera the image does not respond to the mount, so calibration correctly fails with "does not respond".
+
+### Guide corrections and the detector on recordings — 16 November 2026
+
+Part B's finding asked whether field motion and guide pulses disturb the detector on real data. Before the first guided session, `SeleneWatchProbe guide-pulses` measured it on five archive recordings: mare, terminator, crater rim, the largest RGB file, and a 104 s mare-and-limb file. It moves a crop of every frame the way corrections move the image, in whole pixels, every 6 s, at 0.05 to 1 px per frame for 0.3 or 1.5 s, and compares the candidates with an unmoved control in the same windows, at K 6, 12, 18 and 24. Method, tables and limits: [docs/guide-pulse-detector.md](docs/guide-pulse-detector.md); every count: [docs/guide-pulse-measurements.json](docs/guide-pulse-measurements.json).
+
+- **At K 12 to 24, corrections at the allowed speeds add almost nothing.** In 648 corrections, no trial had more than one candidate above its control, each extra one fell inside a window the writer marks `during_mount_correction=yes`, and no trial or control had a candidate after a window. At K 18 and 24 nothing fired after start-up, even at four times the speed limit.
+- **At K 6, every recording already fires unmoved** (35 to 435 candidates after start-up). Corrections add more, almost all inside the marked windows: 114 against 27 on the mare at the strongest allowed correction. After the windows, trials stay within the control's own range, so the 1 s settle time is long enough here.
+- **The 0.25 px per frame limit stays.** At 1 px per frame, the mare and the crater rim fire at K 12.
+- **The patch size and shape rules carry part of the protection.** On the RGB file the peak rose to 37.8 σ during corrections (control 13.3 σ) without a candidate.
+- **The synthetic finding does not carry over.** The recordings' controls, with their own drift and seeing, are quiet at K 18 and 24. The synthetic scene's sharp, noise-free rims make it far more sensitive to motion than a real frame.
+
+So for guiding, marking is enough on this evidence, and neither rate offsets nor registration is needed. Sunlit terrain, whole-pixel steps and a simulated cadence are its limits. The first guided session under the Moon, on earthshine, is still the check of Done-when item 9.
