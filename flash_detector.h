@@ -22,6 +22,11 @@
 // is at K fires as a large brightening, and the whole frame is held from
 // learning while it lasts. A patch or brightening that fires longer than the
 // release limit is learned like the background.
+//
+// Feature-13 adds the same tests with the sign reversed, off by default:
+// dark patches with their own size limits, and a large darkening. Rising
+// and falling patches are searched and followed apart. The clip's peak
+// preview stays the strongest rising patch.
 class FlashDetector
 {
 public:
@@ -68,12 +73,20 @@ private:
     DetectionMask maskBuiltFor_;
     int maskWidth_{0}, maskHeight_{0};
     size_t unmaskedPixels_{0};
-    // A large brightening in progress: since which frame, for how long, and
-    // whether the whole frame is held from learning.
-    bool brightening_{false};
-    uint64_t brighteningOnset_{0};
-    double brighteningSeconds_{0};
+    // A large brightening or darkening in progress: since which frame and
+    // for how long. While one is held, the whole frame is held from learning.
+    struct LargeChange
+    {
+        bool active{false};
+        uint64_t onset{0};
+        double seconds{0};
+    };
+    LargeChange brightening_, darkening_;
     bool holdAll_{false};
+    // Feature-13: the dark side's threshold pixels and its active patches,
+    // kept apart from the rising ones so the two are never merged.
+    BudgetVector<size_t> darkPixels_;
+    BudgetVector<float> darkSigma_;
     // Carries a passing patch across frames for spatial matching and confirmation.
     struct Patch
     {
@@ -82,6 +95,7 @@ private:
         double seconds{0};
     };
     std::vector<Patch> active_;
+    std::vector<Patch> activeDark_;
     std::vector<DetectionSummary> candidates_;
     size_t learnedFrames_{0};
     std::deque<DetectionHistoryPoint> history_;

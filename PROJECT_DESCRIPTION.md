@@ -302,9 +302,12 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | 7 | **A measured trigger.** Per-pixel noise, live controls, overlays, and measurements on the observer's recordings | Feature-9 | Implemented; field calibration partial |
 | 8 | **Seeing the faint side.** Display stretch, Bayer colour, source-time windows and a shared image/analysis byte ceiling | Feature-5 | Implemented; real-earthshine display check pending |
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Both adapters and manual save implemented. QHY hardware and observing checks pending. |
-| 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Proposed |
+| 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Built; a real mount under the Moon is pending |
+| — | **An overview of every clip.** One picture per clip: what changed, where, when, and the clip's flags | Feature-12 | Built; review of real clips pending |
+| — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside pending |
+| — | **A trigger for darkening.** Dark patches and large darkenings, for transits in front of the sunlit Moon; off by default after measurement on recordings | Feature-13 | Built; a real transit pending |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | To be written | Planned |
-| 12 | **Later.** More camera families as observers bring the hardware; registration, transit detection, event browser, export | To be written | Planned |
+| 12 | **Later.** More camera families as observers bring the hardware; registration, transit tracking, event browser, export | To be written | Planned |
 
 Each stage ends with something that can be used or measured, and one feature is one stage.
 

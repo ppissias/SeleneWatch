@@ -51,6 +51,18 @@ struct DetectionSettings
     double releaseSeconds{0};
     DetectionMask mask;
 
+    // Feature-13, off in both modes until it is measured on recordings. A
+    // pixel that falls by at least K times its noise is dark. Dark pixels
+    // form their own patches, never merged with rising ones, with their own
+    // size and shape limits: a plane or the ISS against the sunlit Moon is
+    // far larger than a flash. Minimum patch and persistence are shared.
+    bool darkening{false};
+    int maxDarkPixels{20000};
+    double maxDarkBoxRatio{10.0};
+    // A frame where at least this share of the unmasked pixels falls by K
+    // at once fires as a large darkening. Zero is off.
+    double darkeningShare{0};
+
     [[nodiscard]] bool valid() const
     {
         return std::isfinite(sigma) && sigma > 0 && minPixels >= 1 && maxPixels >= minPixels
@@ -58,7 +70,9 @@ struct DetectionSettings
             && std::isfinite(referenceTimeConstantSeconds) && referenceTimeConstantSeconds > 0
             && std::isfinite(minNoiseAdu) && minNoiseAdu > 0 && minNoiseAdu <= 65535.0
             && std::isfinite(brighteningShare) && brighteningShare >= 0 && brighteningShare <= 1
-            && std::isfinite(releaseSeconds) && releaseSeconds >= 0 && mask.valid();
+            && std::isfinite(releaseSeconds) && releaseSeconds >= 0 && mask.valid()
+            && maxDarkPixels >= 1 && std::isfinite(maxDarkBoxRatio) && maxDarkBoxRatio >= 1.0
+            && std::isfinite(darkeningShare) && darkeningShare >= 0 && darkeningShare <= 1;
     }
     bool operator==(const DetectionSettings&) const = default;
 };

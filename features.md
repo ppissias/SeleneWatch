@@ -1048,3 +1048,42 @@ Darkening changes no pixel. A dark trigger is a candidate like any other: it is 
 ### Order
 
 After Feature-12, so dark triggers are reviewed with the overview. Part A and its tests first, then Part C on recordings, then the defaults. Part B shares its code with Feature-11 Part B and is built after it.
+
+### Implementation — 16 November 2026
+
+Parts A and B are built; Part C is measured below. Done-when items 1 to 6 pass; item 8, a real transit, is open.
+
+**Where it lives.**
+
+- `DetectionSettings` gains `darkening`, `maxDarkPixels`, `maxDarkBoxRatio` and `darkeningShare`, saved per target. All are off by default in both modes, so the detector is unchanged unless the observer turns them on.
+- `FlashDetector`'s threshold pass also collects the pixels that fall by K, with their own search bound. One patch search now serves both signs: it is given a sign's pixels, its limits and its patches from the frame before, so a rising and a falling patch are never merged and each is followed only by its own kind. Rises go through exactly the steps they went through before; every earlier detector test passes unchanged.
+- A dark patch is a `ChangeKind::Fall`. Its pixel count, `peakSigma` and `peakAdu` describe the fall: its size, its depth in sigma and its (negative) difference. It is protected from learning like a bright patch, and the release limit applies to it. The clip's peak preview stays the strongest rising patch, because `03_diff_annotated.png` shows a positive difference; a clip of falls gets its picture from the overview.
+- The large brightening of Feature-11 and the large darkening share one rule, with a state each. Either one holds the whole frame from learning while it lasts.
+- The frame reports the dark pixels, the deepest fall, the largest dark patch, and whether the dark search was stopped at its bound. The Detection panel shows these under its darkening controls, at the bottom of the panel, rather than beside the bright readouts as proposed; that keeps the bright readouts' reserved room unchanged.
+- `event.txt` and `candidates.txt` record a dark patch as `kind=darkening fall_adu=…`, a large darkening as `kind=large_darkening share=… median_difference_adu=…`, and the dark settings when they are on (`darkening=yes max_dark_pixels=… max_dark_box_ratio=…`, `darkening_share=…`). The overview marks dark patches like bright ones and names the trigger in its caption.
+
+**Tests.** A new suite, `darkening` (5 tests):
+
+- **One dark patch (item 1):** a 5 × 5 patch darkened for two frames fires once, as `Fall`, with its size, box and depth, only when darkening is on.
+- **A crossing (items 2 and 6):** a dark disk 40 pixels across crosses at 30 px a frame and makes one clip of `Fall` triggers. Its overview reports a fall that moved, with the path in blue, and `event.txt` records `kind=darkening` and the dark settings.
+- **Rise and fall together (item 3):** a rise and a fall touching on one frame are two candidates, one of each kind.
+- **Large darkening (item 4):** 30% of the frame darkened for three frames fires once as `LargeFall`. A darkening of 25% over 30 s fires nothing.
+- **Search bound (item 5):** 5000 dark pixels with a 100-pixel maximum dark patch stop the dark search, and the frame says so. A flash elsewhere in the frame still fires.
+
+The window test also checks that darkening is saved per target. All 15 suites pass in Debug and Release.
+
+**Two findings from writing the tests.**
+
+- In a small test frame a large darkening can also pass as a dark patch: 30% of 100 × 100 is 3000 pixels, under the 20 000-pixel limit. At full frame the 5% share is about 61 000 pixels, far above the limit, so one darkening does not fire twice there.
+- When half the frame darkens, the frame's noise floor, a robust median, rises with it, and a flash elsewhere is no longer at K. That is the noise floor doing its job. It means a very large darkening deafens the detector for that frame.
+
+### Part C, measured on recordings — 16 November 2026
+
+`SeleneWatchProbe darkening` ran the five archive recordings of `docs/guide-pulse-detector.md` with darkening on, at K 6, 12, 18 and 24. It also injected elliptical silhouettes crossing the frame: 60 × 24 and 160 × 60 px, in 3 and in 15 frames, at depths of 30%, 60% and 90%. Method, tables and limits: [docs/darkening-trigger.md](docs/darkening-trigger.md); every count: [docs/darkening-measurements.json](docs/darkening-measurements.json).
+
+- **At K 12 and above, darkening adds nothing to an unchanged field.** No control and no injected run had a dark candidate outside the crossings.
+- **At K 6, the dark side fires less than the bright side, but not never:** 1 to 170 dark candidates against 77 to 514 rising ones. That is up to half again as many on the terminator and the long recording.
+- **A near-black silhouette is caught at K 12.** At 90% depth every crossing fired on four of the five recordings, at both sizes and both speeds; the long one caught 52 of 68. At 60% depth K 12 still catches most; at 30% only the RGB recording caught any.
+- **The defaults it sets.** Darkening stays off in both modes, because at the default K of 6 it adds candidates and Moon mode is to behave as before. An observer who wants transits turns it on, at K 12 or more on sunlit fields. The dark limits keep 20 000 px and 10×. Large darkening stays off, with nothing yet to measure it on.
+
+Done-when item 7 is met. The archive holds no earthshine and no real transit, so a real transit (item 8) remains the test.

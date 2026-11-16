@@ -160,6 +160,12 @@ selenewatch_compile_options(SeleneWatchSkyTests)
 add_test(NAME sky COMMAND SeleneWatchSkyTests -o -,tap)
 set_tests_properties(sky PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(SeleneWatchDarkeningTests tests/darkening_tests.cpp)
+target_link_libraries(SeleneWatchDarkeningTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchDarkeningTests)
+add_test(NAME darkening COMMAND SeleneWatchDarkeningTests -o -,tap)
+set_tests_properties(darkening PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchRegistrationTests)
@@ -188,7 +194,7 @@ add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
-    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp)
+    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp tools/darkening_probe.cpp)
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 

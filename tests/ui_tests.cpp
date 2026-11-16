@@ -594,8 +594,14 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().brighteningShare, 0.0);
     QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{10} * 1024 * 1024 * 1024);
     sigma->setValue(7);
+    // Feature-13: darkening is off by default, and saved per target like the rest.
+    auto* darkening = panel->findChild<QCheckBox*>("darkeningTrigger");
+    QVERIFY(!darkening->isChecked());
+    darkening->setChecked(true);
+    QVERIFY(panel->settings().darkening);
 
     choice->setCurrentIndex(1);
+    QVERIFY(!panel->settings().darkening);
     QCOMPARE(panel->target(), Target::Sky);
     QVERIFY(panel->findChild<QWidget*>("skySettings")->isVisibleTo(panel));
     QCOMPARE(panel->settings().sigma, 6.0);
@@ -619,6 +625,8 @@ void UiTest::eachTargetKeepsItsOwnSettings()
 
     choice->setCurrentIndex(0);
     QCOMPARE(panel->settings().sigma, 7.0);
+    QVERIFY(panel->settings().darkening);
+    QCOMPARE(QSettings().value("detection/darkening").toBool(), true);
     QCOMPARE(panel->settings().maxPixels, 400);
     QCOMPARE(panel->settings().brighteningShare, 0.0);
     QVERIFY(panel->settings().mask.empty());

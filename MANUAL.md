@@ -199,8 +199,11 @@ Guiding is for the Moon and is off while the sky is watched.
 | **Background and noise → Reference time** | How quickly the learned background follows changes | 2.0 s |
 | **Background and noise → Minimum noise** | The smallest noise assumed for any pixel, in ADU | 0.5 ADU |
 | **Preview overlay** | **Sigma map** (pixels at or above K in red) or **Noise map** (local noise in ADU), on screen only | None |
+| **Also trigger on darkening** | Also fire when a patch gets *darker* by K: a plane, the ISS or a bird crossing the sunlit Moon. Dark patches never merge with bright ones. | Off |
+| **Maximum dark patch** / **Maximum dark box / patch** | Size and shape limits for dark patches. Silhouettes are much larger than flashes; **Minimum patch**, **K** and the one-frame rule are shared. | 20000 px / 10 × |
+| **Large darkening** | Fire when this share of the frame darkens by K at once: a plane or bird filling the field. A cloud edge does the same. | Off |
 
-Changes apply from the next frame. Every saved candidate records the settings it was found with.
+Changes apply from the next frame. Every saved candidate records the settings it was found with. A darkening candidate is recorded as `kind=darkening`; its overview shows the path in blue.
 
 ### Reading the panel
 
@@ -208,6 +211,7 @@ Changes apply from the next frame. Every saved candidate records the settings it
 - **Patch** shows the size and shape of the strongest patch against the limits, and names the check it failed when it is rejected.
 - **Would trigger — capture OFF** in Preview, or **Candidate — capture ON** in Monitoring, shows the detector firing.
 - Clicking a pixel in the preview makes the panel and the test-flash readout report the noise at that pixel.
+- With darkening on, the bottom of the panel shows the deepest fall in sigma and the largest dark patch against its limits.
 
 The starting values are not a calibrated recommendation. Tune them on your own recordings (next section).
 
@@ -433,5 +437,6 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Detector settings for real observing | Partial; tuning on real earthshine data is pending |
 | Watching the sky | Automated tests with constructed meteors, lightning, drifting stars and masks; **a night outside is pending**, and its starting values are first guesses |
 | The clip overview | Automated tests; checked on archive lunar recordings |
+| Darkening (transits) | Automated tests; measured on five archive recordings with injected silhouettes: at K 12 it adds nothing to an unchanged field and catches near-black crossings on four of the five. **A real transit is pending.** |
 
 Details are in [features.md](features.md), [implemented features.md](implemented%20features.md), and the validation notes in [docs](docs/).

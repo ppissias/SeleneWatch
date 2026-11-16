@@ -22,7 +22,8 @@ class PeakHistory;
 // Feature-11: the target, Moon or Sky, is chosen at the top. In Sky mode the
 // panel also shows the large-brightening share, the release limit and the
 // mask. Its settings carry those only in Sky mode; on the Moon they are off.
-// The window owns which settings belong to which target.
+// The window owns which settings belong to which target. Feature-13 adds the
+// darkening controls at the bottom, in both modes.
 class DetectionPanel : public QWidget
 {
     Q_OBJECT
@@ -82,6 +83,12 @@ private:
     QToolButton* drawMask_;
     QToolButton* clearMask_;
     DetectionMask mask_;
+    // Feature-13: darkening, in both modes.
+    QCheckBox* darkening_;
+    QSpinBox* maxDark_;
+    QDoubleSpinBox* darkBox_;
+    QDoubleSpinBox* darkShare_;
+    QLabel* darkReading_;
     QLabel* sigmaReading_;
     QLabel* sizeReading_;
     QLabel* state_;

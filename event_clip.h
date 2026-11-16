@@ -35,11 +35,14 @@ struct ClipTrigger
     std::chrono::system_clock::time_point requestedAt{}; // Host UTC for a manual request.
     std::chrono::system_clock::time_point requestSourceTime{}; // Original application time, retained across continuations.
 
-    // What fired an automatic trigger: a patch, or a large share of the frame
-    // (Feature-11), with that share and the frame's median difference.
+    // What fired an automatic trigger: a patch that rose or fell (Feature-13),
+    // or a large share of the frame (Feature-11), with that share and the
+    // frame's median difference. peakAdu is the strongest pixel's difference
+    // from the background, negative for a fall.
     ChangeKind change{ChangeKind::Rise};
     double share{0};
     double medianDifferenceAdu{0};
+    double peakAdu{0};
 };
 
 // A patch or large change in the clip that reached the release limit and

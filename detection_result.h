@@ -20,9 +20,9 @@ struct DetectionDisplayRequest
     bool makeMap{false};
 };
 
-// What a measurement found: a compact patch that rose, or a large share of
-// the frame that rose at once (Feature-11, Sky mode).
-enum class ChangeKind { Rise, LargeRise };
+// What a measurement found: a compact patch that rose or fell (Feature-13),
+// or a large share of the frame that rose (Feature-11) or fell at once.
+enum class ChangeKind { Rise, LargeRise, Fall, LargeFall };
 
 // Measurements of one frame in native ADU and per-pixel noise units.
 struct DetectionSummary
@@ -35,6 +35,15 @@ struct DetectionSummary
     // Patches, or a large change, that reached the release limit on this
     // frame and are now learned into the background.
     size_t newlyReleased{0};
+    // Feature-13, with darkening on: pixels that fell by K, the deepest fall
+    // in units of the noise, the largest dark patch, and whether the dark
+    // pixels were too many to split into patches. For a dark patch,
+    // brightPixels, peakSigma and peakAdu describe the fall: its size, its
+    // depth in sigma, and its (negative) difference in ADU.
+    int darkPixels{0};
+    double deepestSigma{0};
+    int largestDarkPatch{0};
+    bool darkSearchLimited{false};
     DetectionSettings settings;
     uint64_t frameIndex{0};
     std::chrono::system_clock::time_point time{};

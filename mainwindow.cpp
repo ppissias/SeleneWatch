@@ -254,6 +254,10 @@ DetectionSettings MainWindow::savedDetectionSettings(Target target)
     settings.maxPatchBoxRatio = saved.value(key + "maxPatchBoxRatio", settings.maxPatchBoxRatio).toDouble();
     settings.referenceTimeConstantSeconds = saved.value(key + "referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds).toDouble();
     settings.minNoiseAdu = saved.value(key + "minNoiseAdu", settings.minNoiseAdu).toDouble();
+    settings.darkening = saved.value(key + "darkening", settings.darkening).toBool();
+    settings.maxDarkPixels = saved.value(key + "maxDarkPixels", settings.maxDarkPixels).toInt();
+    settings.maxDarkBoxRatio = saved.value(key + "maxDarkBoxRatio", settings.maxDarkBoxRatio).toDouble();
+    settings.darkeningShare = saved.value(key + "darkeningShare", settings.darkeningShare).toDouble();
     if (target == Target::Sky)
     {
         settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
@@ -276,6 +280,10 @@ void MainWindow::saveDetectionSettings()
     saved.setValue(key + "maxPatchBoxRatio", values.maxPatchBoxRatio);
     saved.setValue(key + "referenceTimeConstantSeconds", values.referenceTimeConstantSeconds);
     saved.setValue(key + "minNoiseAdu", values.minNoiseAdu);
+    saved.setValue(key + "darkening", values.darkening);
+    saved.setValue(key + "maxDarkPixels", values.maxDarkPixels);
+    saved.setValue(key + "maxDarkBoxRatio", values.maxDarkBoxRatio);
+    saved.setValue(key + "darkeningShare", values.darkeningShare);
     if (detectionPanel_->target() == Target::Sky)
     {
         saved.setValue(key + "brighteningShare", values.brighteningShare);

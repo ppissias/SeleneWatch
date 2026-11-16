@@ -170,6 +170,11 @@ QString detectorModelFields(const DetectionSettings& settings)
     if (settings.brighteningShare > 0) text += QString(" brightening_share=%1").arg(settings.brighteningShare, 0, 'g', 17);
     if (settings.releaseSeconds > 0) text += QString(" release_seconds=%1").arg(settings.releaseSeconds, 0, 'g', 17);
     if (!settings.mask.empty()) text += " mask=" + maskText(settings.mask);
+    // Feature-13, when on.
+    if (settings.darkening)
+        text += QString(" darkening=yes max_dark_pixels=%1 max_dark_box_ratio=%2")
+            .arg(settings.maxDarkPixels).arg(settings.maxDarkBoxRatio, 0, 'g', 17);
+    if (settings.darkeningShare > 0) text += QString(" darkening_share=%1").arg(settings.darkeningShare, 0, 'g', 17);
     return text;
 }
 
@@ -208,11 +213,19 @@ QString triggerFields(const ClipTrigger& trigger)
         .arg(trigger.settings.oneFrame ? "yes" : "no").arg(trigger.peakSigma, 0, 'g', 17)
         .arg(trigger.noiseFloor, 0, 'g', 17).arg(trigger.peakX).arg(trigger.peakY)
         .arg(trigger.boxX).arg(trigger.boxY).arg(trigger.boxWidth).arg(trigger.boxHeight);
-        if (trigger.change == ChangeKind::LargeRise)
-            text += QString(" kind=brightening share=%1 median_difference_adu=%2")
+        // For a fall, the pixel count, peak_sigma and peak describe the dark
+        // patch: its size, its depth in sigma, and its deepest pixel.
+        switch (trigger.change)
+        {
+        case ChangeKind::Rise: text += " kind=automatic"; break;
+        case ChangeKind::Fall: text += QString(" kind=darkening fall_adu=%1").arg(-trigger.peakAdu, 0, 'g', 17); break;
+        case ChangeKind::LargeRise:
+        case ChangeKind::LargeFall:
+            text += QString(" kind=%1 share=%2 median_difference_adu=%3")
+                .arg(trigger.change == ChangeKind::LargeRise ? "brightening" : "large_darkening")
                 .arg(trigger.share, 0, 'g', 17).arg(trigger.medianDifferenceAdu, 0, 'g', 17);
-        else
-            text += " kind=automatic";
+            break;
+        }
         text += QString(" active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
             .arg(trigger.activePatches).arg(trigger.protectedPixels).arg(trigger.learningFrames).arg(trigger.longestActiveSeconds,0,'g',17);
     }
@@ -240,18 +253,27 @@ QStringList overviewCaption(const EventClip& clip, bool duringCorrection)
 {
     const ClipTrigger& first = clip.triggers.front();
     QStringList lines;
-    const bool large = first.kind == TriggerKind::Automatic && first.change == ChangeKind::LargeRise;
+    const bool manual = first.kind == TriggerKind::Manual;
+    const bool large = !manual && (first.change == ChangeKind::LargeRise || first.change == ChangeKind::LargeFall);
+    const QString kind = manual ? "Save now"
+        : first.change == ChangeKind::LargeRise ? "large brightening"
+        : first.change == ChangeKind::LargeFall ? "large darkening"
+        : first.change == ChangeKind::Fall ? "darkening" : "automatic trigger";
     QString heading = QString("%1 · frame %2 · %3 · %4 mode").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
-        .arg(first.kind == TriggerKind::Manual ? "Save now" : large ? "large brightening" : "automatic trigger")
-        .arg(clip.captureSettings.target == Target::Sky ? "Sky" : "Moon");
+        .arg(kind).arg(clip.captureSettings.target == Target::Sky ? "Sky" : "Moon");
     if (clip.triggers.size() > 1) heading += QString(" · %1 triggers").arg(clip.triggers.size());
     if (first.continuesPreviousClip) heading += " · continues the previous clip";
     lines << heading;
-    if (first.kind == TriggerKind::Manual)
+    if (manual)
         lines << QString("Requested at %1 · K %2").arg(captionTime(first.requestedAt)).arg(first.settings.sigma, 0, 'g', 4);
     else if (large)
-        lines << QString("%1% of the frame at K at once, median rise %2 ADU · K %3")
+        lines << QString("%1% of the frame at K at once, median difference %2 ADU · K %3")
             .arg(100 * first.share, 0, 'f', 1).arg(first.medianDifferenceAdu, 0, 'f', 1).arg(first.settings.sigma, 0, 'g', 4);
+    else if (first.change == ChangeKind::Fall)
+        lines << QString("Deepest fall %1 σ (%2 ADU) · %3 px in a %4 × %5 box at (%6, %7) · K %8, dark patch %9 to %10 px")
+            .arg(first.peakSigma, 0, 'f', 1).arg(-first.peakAdu, 0, 'f', 1).arg(first.brightPixelCount)
+            .arg(first.boxWidth).arg(first.boxHeight).arg(first.peakX).arg(first.peakY)
+            .arg(first.settings.sigma, 0, 'g', 4).arg(first.settings.minPixels).arg(first.settings.maxDarkPixels);
     else
         lines << QString("Peak %1 σ · %2 px in a %3 × %4 box at (%5, %6) · K %7, patch %8 to %9 px")
             .arg(first.peakSigma, 0, 'f', 1).arg(first.brightPixelCount).arg(first.boxWidth).arg(first.boxHeight)
@@ -908,10 +930,10 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder)
     if (clip.peak.ready) request.peakFrameIndex = clip.peak.frameIndex;
     request.referenceTime = first.triggerTime;
     bool duringCorrection = false;
-    // A large brightening covers much of the frame; it is not marked.
+    // A large brightening or darkening covers much of the frame; it is not marked.
     for (const ClipTrigger& trigger : clip.triggers)
     {
-        if (trigger.kind == TriggerKind::Automatic && trigger.change == ChangeKind::Rise
+        if (trigger.kind == TriggerKind::Automatic && (trigger.change == ChangeKind::Rise || trigger.change == ChangeKind::Fall)
             && trigger.boxWidth > 0 && trigger.boxHeight > 0)
             request.marks.push_back(QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight));
         duringCorrection = duringCorrection || duringMountCorrection(trigger.triggerTime);

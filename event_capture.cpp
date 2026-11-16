@@ -178,6 +178,7 @@ ClipTrigger EventCapture::currentTrigger(const DetectionSummary& measured, bool 
     trigger.activePatches=measured.activePatches; trigger.protectedPixels=measured.protectedPixels;
     trigger.learningFrames=measured.learningFrames; trigger.longestActiveSeconds=measured.longestActiveSeconds;
     trigger.change=measured.change; trigger.share=measured.share; trigger.medianDifferenceAdu=measured.medianDifferenceAdu;
+    trigger.peakAdu=measured.peakAdu;
     return trigger;
 }
 

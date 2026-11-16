@@ -45,9 +45,12 @@ QString patchText(int pixels, int high, double boxRatio, const DetectionSettings
 
 QString decisionText(const DetectionSummary& summary, bool monitoring)
 {
-    if (summary.change == ChangeKind::LargeRise)
-        return QString("Large brightening, %1% of the frame at K — %2")
+    if (summary.change == ChangeKind::LargeRise || summary.change == ChangeKind::LargeFall)
+        return QString("Large %1, %2% of the frame at K — %3")
+            .arg(summary.change == ChangeKind::LargeRise ? "brightening" : "darkening")
             .arg(100 * summary.share, 0, 'f', 1).arg(monitoring ? "capture ON" : "capture OFF");
+    if (summary.firing && summary.change == ChangeKind::Fall)
+        return monitoring ? "Darkening candidate — capture ON" : "Would trigger on darkening — capture OFF";
     if (summary.firing) return monitoring ? "Candidate — capture ON" : "Would trigger — capture OFF";
     if (summary.passed) return "Passing patch (1 / 2 frames)";
     if (summary.patchSearchLimited) return "Too many pixels at K to measure individual patches";
@@ -339,7 +342,38 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     model->addRow("Minimum noise", minimumNoise_);
     model->addRow(noiseSlider_);
     layout->addWidget(background, 16, 0, 1, 2);
-    layout->setRowStretch(17, 1);
+
+    // Feature-13: darkening, for a plane, the ISS or a bird in front of the
+    // sunlit Moon. Off until it is measured on recordings.
+    darkening_ = new QCheckBox("Also trigger on darkening", content);
+    darkening_->setObjectName("darkeningTrigger");
+    darkening_->setToolTip("A plane, the ISS or a bird in front of the sunlit Moon darkens the pixels it covers. "
+        "Dark patches have their own size limits; minimum patch, K and persistence are shared.");
+    layout->addWidget(darkening_, 17, 0, 1, 2);
+    auto* dark = new QWidget(content);
+    auto* darkForm = new QFormLayout(dark);
+    darkForm->setContentsMargins(0, 0, 0, 0);
+    maxDark_ = new QSpinBox(dark);
+    maxDark_->setObjectName("detectionMaxDarkPixels");
+    maxDark_->setRange(1, 1'000'000); maxDark_->setSuffix(" px");
+    darkBox_ = new QDoubleSpinBox(dark);
+    darkBox_->setObjectName("detectionMaxDarkBoxRatio");
+    darkBox_->setRange(1.0, 1000.0); darkBox_->setDecimals(2); darkBox_->setSingleStep(0.5); darkBox_->setSuffix(" ×");
+    darkShare_ = new QDoubleSpinBox(dark);
+    darkShare_->setObjectName("darkeningShare");
+    darkShare_->setRange(0, 100); darkShare_->setDecimals(1); darkShare_->setSingleStep(0.5);
+    darkShare_->setSuffix(" % of frame"); darkShare_->setSpecialValueText("Off");
+    darkShare_->setToolTip("A frame fires when this share of the unmasked pixels falls by K at once: a plane or bird "
+        "filling the field. A cloud edge does the same.");
+    darkForm->addRow("Maximum dark patch", maxDark_);
+    darkForm->addRow("Maximum dark box / patch", darkBox_);
+    darkForm->addRow("Large darkening", darkShare_);
+    darkReading_ = new ReadoutLabel({QString("Deepest fall 9999.9 sigma. Largest dark patch 999999 px (allowed 999–999999 px). "
+        "Too many dark pixels to measure patches.")}, dark);
+    darkReading_->setObjectName("darkReading");
+    darkForm->addRow(darkReading_);
+    layout->addWidget(dark, 18, 0, 1, 2);
+    layout->setRowStretch(19, 1);
     background->hide();
     connect(showBackground, &QToolButton::toggled, this, [showBackground, background](bool shown) {
         showBackground->setArrowType(shown ? Qt::DownArrow : Qt::RightArrow);
@@ -362,8 +396,10 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(target_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (!updating_) emit targetRequested(index == 1 ? Target::Sky : Target::Moon);
     });
-    for (auto* spin : {brightening_, release_})
+    for (auto* spin : {brightening_, release_, darkBox_, darkShare_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
+    connect(maxDark_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
+    connect(darkening_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
     connect(clearMask_, &QToolButton::clicked, this, [this] {
         mask_ = {};
@@ -377,6 +413,10 @@ DetectionSettings DetectionPanel::settings() const
 {
     DetectionSettings values{sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
         compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
+    values.darkening = darkening_->isChecked();
+    values.maxDarkPixels = maxDark_->value();
+    values.maxDarkBoxRatio = darkBox_->value();
+    values.darkeningShare = darkShare_->value() / 100;
     if (target() == Target::Sky)
     {
         values.brighteningShare = brightening_->value() / 100;
@@ -436,6 +476,12 @@ void DetectionPanel::setSettings(const DetectionSettings& settings)
     release_->setValue(settings.releaseSeconds);
     mask_ = settings.mask;
     showMask();
+    darkening_->setChecked(settings.darkening);
+    maxDark_->setValue(settings.maxDarkPixels);
+    darkBox_->setValue(settings.maxDarkBoxRatio);
+    darkShare_->setValue(100 * settings.darkeningShare);
+    maxDark_->setEnabled(settings.darkening);
+    darkBox_->setEnabled(settings.darkening);
     sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.maxPixels);
     oneFrame_->setChecked(settings.oneFrame);
     compactness_->setValue(settings.maxPatchBoxRatio);
@@ -498,6 +544,15 @@ void DetectionPanel::setView(const DetectionView& view)
         sigmaReading_->setText(view.settling ? kSettlingReading : "Learning the reference — waiting for measurements.");
         sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
     }
+    const auto& active = summary.settings;
+    if (!active.darkening && active.darkeningShare <= 0)
+        darkReading_->setText("Darkening is off.");
+    else if (!measuring)
+        darkReading_->setText("Waiting for measurements.");
+    else
+        darkReading_->setText(QString("Deepest fall %1 sigma. Largest dark patch %2 px (allowed %3–%4 px).%5")
+            .arg(summary.deepestSigma, 0, 'f', 1).arg(summary.largestDarkPatch).arg(active.minPixels).arg(active.maxDarkPixels)
+            .arg(summary.darkSearchLimited ? " Too many dark pixels to measure patches." : ""));
     updateDecision();
     history_->setView(view);
     overlayImage_ = {};
