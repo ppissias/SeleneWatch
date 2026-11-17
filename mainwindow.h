@@ -84,6 +84,7 @@ private:
     // recording), the Record button, and the saved site and clock check.
     void setupSessionMenu();
     void setupHelpMenu();
+    void showAcknowledgements();
     void onSiteAndInstrument();
     void onCameraSupport();
     void onScheduleRecording();
@@ -103,6 +104,8 @@ public:
     bool applyRecordingFolder(const QString& folder, QString& error);
     // Help → About: the release, the source revision and the licenses.
     [[nodiscard]] static QString aboutText();
+    // Help → Acknowledgements: ACKNOWLEDGEMENTS.md, built into the program.
+    [[nodiscard]] static QString acknowledgementsMarkdown();
     // View → Testing tools: the synthetic source and the test flash. Off by
     // default and remembered; changes only while stopped. The menu, and the
     // window tests.

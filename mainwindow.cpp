@@ -25,6 +25,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
 #include <QtCore/QSettings>
@@ -47,6 +48,7 @@
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStatusBar>
+#include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QVBoxLayout>
 
 #include <filesystem>
@@ -781,8 +783,34 @@ void MainWindow::setupHelpMenu()
     connect(about, &QAction::triggered, this, [this] {
         QMessageBox::about(this, "About SeleneWatch", aboutText());
     });
+    auto* acknowledgements = menu->addAction("Acknowledgements");
+    acknowledgements->setObjectName("acknowledgementsAction");
+    connect(acknowledgements, &QAction::triggered, this, &MainWindow::showAcknowledgements);
     auto* aboutQt = menu->addAction("About Qt");
     connect(aboutQt, &QAction::triggered, this, [this] { QMessageBox::aboutQt(this); });
+}
+
+QString MainWindow::acknowledgementsMarkdown()
+{
+    QFile file(":/ACKNOWLEDGEMENTS.md");
+    return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+}
+
+void MainWindow::showAcknowledgements()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Acknowledgements");
+    dialog.resize(760, 640);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* text = new QTextBrowser(&dialog);
+    text->setObjectName("acknowledgementsText");
+    text->setOpenExternalLinks(true);
+    text->setMarkdown(acknowledgementsMarkdown());
+    layout->addWidget(text);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
 }
 
 QString MainWindow::aboutText()
@@ -794,7 +822,7 @@ QString MainWindow::aboutText()
         "<a href=\"https://github.com/ppissias/SeleneWatch\">github.com/ppissias/SeleneWatch</a></p>"
         "<p>Built with Qt %3 under the GNU LGPL version 3 (Help &rarr; About Qt). The license texts of Qt and of "
         "the other components are in the <i>licenses</i> folder beside SeleneWatch.exe, and THIRD_PARTY_LICENSES.md "
-        "says where their source code is.</p>")
+        "says where their source code is. Help &rarr; Acknowledgements credits the methods, formats and tools it builds on.</p>")
         .arg(SELENEWATCH_RELEASE, SELENEWATCH_REVISION, qVersion());
 }
 

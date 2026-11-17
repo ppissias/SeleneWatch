@@ -137,6 +137,8 @@ add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     playerone_camera_panel.h playerone_camera_panel.cpp touptek_camera_panel.h touptek_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+# Help → Acknowledgements shows the same file that the repository holds.
+qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES ACKNOWLEDGEMENTS.md)
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
 add_dependencies(selenewatch_ui selenewatch_version)
 selenewatch_compile_options(selenewatch_ui)
@@ -189,6 +191,7 @@ target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_UI_QA_DIR="${C
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_DISPLAY_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-feature5")
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_MANUAL_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-manual")
 target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_CAMERA_QA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/out/qa-zwo")
+target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

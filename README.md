@@ -217,6 +217,10 @@ The architecture is a **working proposal, not a fixed specification**. Modules, 
 
 For goals, evidence rules, the time model, component responsibilities, and open decisions, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md).
 
+## Acknowledgements
+
+The established methods, file formats, protocols and tools SeleneWatch builds on, each with what it contributes, and the AI coding assistants that have supported its development, are credited in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). The program shows the same page under **Help → Acknowledgements**.
+
 ---
 
 *SeleneWatch is an early-stage project. Feedback, experiments, and design revisions are part of the development process.*

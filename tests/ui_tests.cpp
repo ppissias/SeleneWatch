@@ -961,6 +961,18 @@ void UiTest::theReleaseIsShown()
     QVERIFY(about.contains("BSD 2-Clause") && about.contains("LGPL"));
     QVERIFY(window.findChild<QAction*>("aboutAction"));
     QVERIFY(window.findChild<QAction*>("openEventsAction"));
+    // Help → Acknowledgements shows ACKNOWLEDGEMENTS.md, built in.
+    QVERIFY(window.findChild<QAction*>("acknowledgementsAction"));
+    QVERIFY(about.contains("Acknowledgements"));
+    const QString acknowledgements = MainWindow::acknowledgementsMarkdown();
+    QVERIFY(acknowledgements.startsWith("# Acknowledgements"));
+    QVERIFY(acknowledgements.contains("## Scientific References & Algorithms"));
+    QVERIFY(acknowledgements.contains("**Welford (1962)**"));
+    QVERIFY(acknowledgements.contains("### AI Coding Assistants"));
+    QVERIFY(acknowledgements.contains("**Claude** by Anthropic") && acknowledgements.contains("**Codex** by OpenAI"));
+    QFile source(QString(SELENEWATCH_SOURCE_DIR) + "/ACKNOWLEDGEMENTS.md");
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(acknowledgements, QString::fromUtf8(source.readAll()));
 }
 
 // Feature-15, Done-when 1 and 2 in the window. The site is put where it is
