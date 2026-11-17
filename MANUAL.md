@@ -29,7 +29,7 @@ For building SeleneWatch from source, see [Getting started](README.md#getting-st
 
 **Computer.** Windows 10 or 11, 64-bit. SeleneWatch is a native Qt application. It never waits on the disk, the display or the mount, but a fast disk and enough RAM help it keep long histories.
 
-**Installing.** Each release comes in two forms, named by its version (for example `2026.11-01`: year, month, and the release's number in that month). **Help → About SeleneWatch** shows the version you run, and **Help → Acknowledgements** credits the methods, formats and tools SeleneWatch builds on.
+**Installing.** Each release comes in two forms, named by its version (for example `2026.11-01`: year, month, and the release's number in that month). **Help → About SeleneWatch** shows the version you run, and **Help → Acknowledgements** credits the methods and tools SeleneWatch builds on.
 - `SeleneWatch-<version>-win64.msi` installs for your Windows account, without administrator rights, into `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older version. Uninstalling removes the program but keeps your `events` folder.
 - `SeleneWatch-<version>-win64.zip` needs no installation: unpack it into a folder you can write in, and run `SeleneWatch.exe`. To update, unpack the new version and copy your `events` folder across if you want it in the same place.
 

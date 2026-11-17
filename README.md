@@ -219,7 +219,7 @@ For goals, evidence rules, the time model, component responsibilities, and open 
 
 ## Acknowledgements
 
-The established methods, file formats, protocols and tools SeleneWatch builds on, each with what it contributes, and the AI coding assistants that have supported its development, are credited in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). The program shows the same page under **Help → Acknowledgements**.
+The established methods, interfaces and tools SeleneWatch builds on, each with what it contributes, and the AI coding assistants that have supported its development, are credited in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). The program shows the same page under **Help → Acknowledgements**.
 
 ---
 

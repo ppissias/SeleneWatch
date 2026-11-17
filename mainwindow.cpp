@@ -822,7 +822,7 @@ QString MainWindow::aboutText()
         "<a href=\"https://github.com/ppissias/SeleneWatch\">github.com/ppissias/SeleneWatch</a></p>"
         "<p>Built with Qt %3 under the GNU LGPL version 3 (Help &rarr; About Qt). The license texts of Qt and of "
         "the other components are in the <i>licenses</i> folder beside SeleneWatch.exe, and THIRD_PARTY_LICENSES.md "
-        "says where their source code is. Help &rarr; Acknowledgements credits the methods, formats and tools it builds on.</p>")
+        "says where their source code is. Help &rarr; Acknowledgements credits the methods and tools it builds on.</p>")
         .arg(SELENEWATCH_RELEASE, SELENEWATCH_REVISION, qVersion());
 }
 
