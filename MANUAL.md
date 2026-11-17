@@ -1,6 +1,6 @@
 # SeleneWatch User Manual
 
-This manual is for observers who use SeleneWatch at the telescope or with their own recordings. It describes the application as it is now. SeleneWatch is still evolving, so names, defaults and layouts may change; this manual changes with them. It has no screenshots yet for the same reason.
+This manual is for observers who use SeleneWatch at the telescope or with their own recordings. It describes the application as it is now. SeleneWatch is still evolving, so names, defaults and layouts may change; this manual and its screenshots are updated alongside it.
 
 For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md) (in the source repository). For the design and the evidence rules, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) (in the source repository).
 
@@ -96,6 +96,10 @@ From top to bottom:
 
     A readout that does not fit is shortened the same way.
 
+![SeleneWatch main window monitoring a lunar recording](docs/images/readme-main-window.png)
+
+*The main window in **Monitoring** (`Moon_181337.avi`), showing the top control row, green **MONITORING** banner, live lunar preview, **Detection** dock on the right, **Histogram** dock below, and the two-line status bar.*
+
 ---
 
 ## 3. Choosing a source
@@ -184,6 +188,10 @@ The Camera dock lists the controls the camera itself reports. For each, it shows
 
 QHY cameras run at bin 1 in this version, and QHY's SDK does not report dropped frames, so they are shown as unknown.
 
+![Camera dock beside the Detection dock in Preview mode](docs/images/manual-camera-settings.png)
+
+*The **Camera** dock on the left alongside **Detection** on the right in **Preview** mode (shown with a simulated ZWO ASI120MM Mini device): requested vs. read-back geometry and live controls appear below the inputs.*
+
 ---
 
 ## 6. Display, levels and histogram
@@ -199,6 +207,10 @@ The **Display and capture** tab offers three display modes:
 **Invert brightness** and **Show Bayer colour** (for colour sensors) are further display options. Level controls work while the stream is stopped too.
 
 **View → Histogram** shows the distribution of the original samples, before any stretch or colour conversion, in native ADU. It reports the observed range and the share of samples at zero and at the highest possible value, which shows clipping at a glance. **Fit range** zooms to the values present. **Log counts** makes sparse values visible.
+
+![Display and capture levels stretched with the native-ADU histogram](docs/images/manual-display-histogram.png)
+
+*Adjusting **Black / white levels** (`18` to `115 ADU`) in **Display and capture** to brighten dark lunar shadows while **Histogram** displays the unmodified `0–141 ADU` distribution.*
 
 ---
 
@@ -223,6 +235,10 @@ For every pixel, SeleneWatch learns the usual brightness and how much that pixel
 | **Follow the sky's brightness** | With a camera: keeps the sky's median, outside the mask, between 8% and 30% of full scale. After a minute outside, Monitoring stops (the clip in hand is saved), the exposure changes within **Exposure** *from … to …* (then the gain, by its step, up to **Gain up to**), and Monitoring starts again; at most one change every two minutes. Each change is logged in `candidates.txt` as `exposure_change`. | Off |
 
 Guiding is for the Moon and is off while the sky is watched.
+
+![Sky watch mode with polygon horizon mask and dusk-to-dawn settings](docs/images/manual-sky-mask.png)
+
+***The sky** target showing a hatched polygon **Mask** drawn over a treeline/roofline horizon, **Watch from dusk to dawn** with the calculated Sun altitude, and **Follow the sky's brightness**.*
 
 ### Controls (View → Detection)
 
@@ -268,6 +284,10 @@ A test flash adds a small, known Gaussian spot to real frames, so you can see wh
 The readout gives the requested peak in noise units at that pixel. In Preview the Detection panel shows whether it **would trigger**. In Monitoring a triggered test flash is saved like any candidate, and **every injected frame is marked as test data** in the clip and the log.
 
 A good routine: play a recording with no injection to see its normal noise, then inject flashes of decreasing peak until they are no longer caught. Saturation and bright moving edges near the limb limit what can be recovered there.
+
+![Test flash injected on the dark lunar limb showing Would trigger](docs/images/manual-test-flash.png)
+
+*Injecting a calibrated **Test flash** (`FWHM 4.0 px`, `Peak 140.0 ADU`, `8 frames`) at `(155, 432)` on the dark limb: the spot triggers **Would trigger — capture OFF** and spikes above `K 12.0` in the 10-second sigma history.*
 
 ---
 
@@ -323,6 +343,10 @@ Each clip folder is named by its UTC trigger time, for example `20261115-143156-
 The caption's last line suggests what the clip shows: **flash**, **meteor**, **satellite**, **aircraft**, **dark transit**, **lightning**, **seeing** or **unclear**, with the reason (for example "a straight, fast rise at 12°/s for 0.4 s"). It is a suggestion to help sort a night's clips, not a decision; nothing is moved or deleted by it. It is also in `event.txt` (`suggested_kind:`) and on the clip's line in `candidates.txt`. Speeds are in degrees per second when the site and instrument give the image scale.
 
 Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
+
+![Example 00_overview.png clip summary](docs/images/manual-clip-overview.png)
+
+*An actual `00_overview.png` saved by Monitoring: yellow trigger ticks on the dark limb (`Moon_165506.ser` with an injected test flash), enlarged crop strip (`before` through `after` plus `change`), and diagnostic caption.*
 `event.txt` contains:
 - whether the Moon or the sky was watched;
 - the observer, site and instrument, the last clock check, and the frame intervals (how evenly the frames came);
@@ -384,6 +408,10 @@ Once locked:
 If the feature is not found for 2 s (cloud, a bump), the state becomes **lock lost, searching**, and SeleneWatch looks in a wider area. It resumes when it finds the feature twice in the same place. After 60 s it stops searching; lock again.
 
 The lock survives Stop and Start of the stream. A change of frame size or format releases it. **Unlock** releases it by hand.
+
+![Feature lock locked onto a lunar crater in the Guiding dock](docs/images/manual-guiding.png)
+
+***Feature lock** locked onto a lunar crater (`State: Locked`): the green box tracks the crater across frames while **Guiding** reports pixel drift (`dx`, `dy`) in the dock and status bar.*
 
 ### Connecting a mount
 

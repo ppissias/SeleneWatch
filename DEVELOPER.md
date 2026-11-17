@@ -193,6 +193,7 @@ Both packages contain:
 - Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`; Universal CRT comes from Windows 10/11)
 - `ASICamera2.dll` (when configured with `SELENEWATCH_ZWO_SDK_DIR`)
 - `LICENSE.txt`, `README.md`, `MANUAL.md`, `THIRD_PARTY_LICENSES.md`, `ACKNOWLEDGEMENTS.md`
+- `icons/selenewatch-256.png` and `docs/images/` (logo and documentation screenshots referenced by `README.md` and `MANUAL.md`)
 - `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), and `ZWO-ASI-SDK.txt` (when built with ZWO)
 
 Tests, probes, and QHY / Player One / ToupTek vendor files are never shipped. Debug builds have no `package` target.

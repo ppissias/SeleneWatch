@@ -7,7 +7,8 @@
 # The installed tree, flat beside SeleneWatch.exe:
 #   SeleneWatch.exe, the Qt DLLs and plugins (windeployqt), the Visual C++
 #   runtime DLLs, ASICamera2.dll when built with the ZWO SDK, LICENSE.txt,
-#   README.md, MANUAL.md, THIRD_PARTY_LICENSES.md and licenses/.
+#   README.md, MANUAL.md, THIRD_PARTY_LICENSES.md, ACKNOWLEDGEMENTS.md,
+#   icons/selenewatch-256.png, docs/images/, and licenses/.
 # Tests, probes and QHY files are not installed: the observer installs QHY's
 # own runtime (THIRD_PARTY_LICENSES.md).
 
@@ -18,6 +19,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${CMAKE_CURRENT_SOURCE_DIR}/MANUAL.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" "${CMAKE_CURRENT_SOURCE_DIR}/ACKNOWLEDGEMENTS.md"
     DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/icons/selenewatch-256.png" DESTINATION icons)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/images" DESTINATION docs)
 
 # Qt is used under the LGPLv3: its license texts, and the notices of the
 # third-party code inside the Qt DLLs we ship (packaging/make_qt_notices.ps1).

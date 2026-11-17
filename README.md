@@ -1,3 +1,5 @@
+<img src="icons/selenewatch-256.png" alt="SeleneWatch logo" width="112" align="right">
+
 # SeleneWatch
 
 **Continuous lunar monitoring and automatic capture of transient phenomena.**
@@ -9,6 +11,10 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 > **Candidates, not discoveries.** Automatic detections are candidates for human review, not confirmed lunar events. Scientific confirmation of an impact flash normally requires an independent observation from another telescope or site. SeleneWatch preserves the frames, UTC timing, camera settings, and session records needed for that comparison.
 
 **Using SeleneWatch:** See the [User Manual](MANUAL.md) for installation, camera driver setup, window controls, detection settings, test flashes, saved output files, feature lock and guiding, and a step-by-step observing session.
+
+![SeleneWatch monitoring a lunar terminator recording with live detection and native-ADU histogram](docs/images/readme-main-window.png)
+
+*Monitoring a lunar terminator recording (`Moon_181337.avi`): live preview, detection thresholds and 10-second sigma trace on the right, and native-ADU histogram below.*
 
 ---
 
