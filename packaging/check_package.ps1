@@ -51,21 +51,28 @@ try {
     if ($missing) { throw "Missing DLLs:`n$($missing -join "`n")" }
 
     Copy-Item (Join-Path $QtPrefix 'plugins\platforms\qoffscreen.dll') (Join-Path $app 'platforms')
-    $saved = @{ PATH = $env:PATH; QT_QPA_PLATFORM = $env:QT_QPA_PLATFORM; QT_PLUGIN_PATH = $env:QT_PLUGIN_PATH }
+    # Settings of its own, so the observer's (a camera to connect at startup,
+    # say) do not apply; removed afterwards.
+    $settingsName = 'SeleneWatch package check'
+    $saved = @{ PATH = $env:PATH; QT_QPA_PLATFORM = $env:QT_QPA_PLATFORM; QT_PLUGIN_PATH = $env:QT_PLUGIN_PATH
+        SELENEWATCH_SETTINGS_NAME = $env:SELENEWATCH_SETTINGS_NAME }
     try {
         $env:PATH = "$system;$env:SystemRoot"
         $env:QT_QPA_PLATFORM = 'offscreen'
         $env:QT_PLUGIN_PATH = $null
+        $env:SELENEWATCH_SETTINGS_NAME = $settingsName
         $started = Start-Process (Join-Path $app 'SeleneWatch.exe') -PassThru -WorkingDirectory $app
     } finally {
         $env:PATH = $saved.PATH
         $env:QT_QPA_PLATFORM = $saved.QT_QPA_PLATFORM
         $env:QT_PLUGIN_PATH = $saved.QT_PLUGIN_PATH
+        $env:SELENEWATCH_SETTINGS_NAME = $saved.SELENEWATCH_SETTINGS_NAME
     }
     Start-Sleep -Seconds 5
     if ($started.HasExited) { throw "The packaged SeleneWatch.exe exited at start (exit code $($started.ExitCode))" }
     Stop-Process -Id $started.Id
     $started.WaitForExit()
+    Remove-Item "HKCU:\Software\SeleneWatch\$settingsName" -Recurse -ErrorAction SilentlyContinue
     "Package checked: files, DLL dependencies, and a start with its own files: $(Split-Path $Zip -Leaf)"
 } finally {
     Remove-Item -Recurse -Force $check -ErrorAction SilentlyContinue

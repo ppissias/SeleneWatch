@@ -110,7 +110,8 @@ public:
     // Any thread. Queues the session_start line for a stream that starts now,
     // with the site and the last clock check (Feature-14). Only a failure to
     // write it is reported.
-    void logSessionStart(const StreamInfo& stream, const ObservingSite& site = {}, const std::string& clockRecord = {});
+    void logSessionStart(const StreamInfo& stream, const ObservingSite& site = {}, const std::string& clockRecord = {},
+        bool testingTools = false);
 
     // Any thread. Queues finished lines for candidates.txt that are not
     // about a clip: a recording's start and stop, a clock check, an exposure
@@ -139,6 +140,7 @@ private:
         StreamInfo stream;
         ObservingSite site;
         std::string clockRecord;
+        bool testingTools{false};
     };
 
     // Work waiting for the writer: a session_start line, guiding lines, a

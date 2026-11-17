@@ -32,6 +32,7 @@
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QGroupBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
@@ -47,6 +48,20 @@ QString text(const QString& path)
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
     return QString::fromUtf8(file.readAll());
+}
+// Chooses a Source entry by its key ("synthetic", "recording", "zwo", ...).
+void chooseSource(MainWindow& window, const QString& key)
+{
+    auto* source = window.findChild<QComboBox*>("sourceComboBox");
+    const int index = source->findData(key);
+    QVERIFY2(index > 0, qPrintable(key));
+    source->setCurrentIndex(index);
+}
+// Most window tests run on the synthetic source, which the testing tools offer.
+void useSynthetic(MainWindow& window)
+{
+    window.setTestingTools(true);
+    chooseSource(window, "synthetic");
 }
 }
 
@@ -85,7 +100,82 @@ private slots:
     void qhyReadbacksBayerEvidenceAndUnknownDrops();
     void playerOneAndToupTekInTheWindow();
     void cameraSupportShowsEachFamily();
+    void testingToolsAndConnectAtStartup();
 };
+
+// No source at start; View → Testing tools offers the synthetic source and the
+// test flash, recorded on session_start; Connect at startup chooses a camera
+// family when the window opens.
+void UiTest::testingToolsAndConnectAtStartup()
+{
+    QTemporaryDir dir;
+    auto zwo = std::make_shared<FakeZwoApi>();
+    {
+        MainWindow window(nullptr, dir.path(), zwo);
+        window.show();
+        auto* source = window.findChild<QComboBox*>("sourceComboBox");
+        auto* start = window.findChild<QPushButton*>("startButton");
+        auto* stop = window.findChild<QPushButton*>("stopButton");
+        auto* connect = window.findChild<QCheckBox*>("connectAtStartup");
+        auto* tools = window.findChild<QAction*>("testingToolsAction");
+        // Nothing chosen, no testing tools, no camera opened.
+        QVERIFY(source->currentData().toString().isEmpty());
+        QCOMPARE(source->findData("synthetic"), -1);
+        QVERIFY(source->findData("recording") > 0);
+        QVERIFY(!start->isEnabled());
+        QVERIFY(!tools->isChecked());
+        QVERIFY(window.findChild<QGroupBox*>("blipGroupBox")->isHidden());
+        QVERIFY(window.findChild<QPushButton*>("injectFlashButton")->isHidden());
+        QVERIFY(window.findChild<QLabel*>("testingToolsBadge")->isHidden());
+        QVERIFY(!connect->isEnabled());
+        QCOMPARE(zwo->opened.load(), 0);
+
+        // Testing tools on: the synthetic source and the test flash, remembered and recorded.
+        tools->trigger();
+        QVERIFY(QSettings().value("testing/tools").toBool());
+        QVERIFY(!window.findChild<QGroupBox*>("blipGroupBox")->isHidden());
+        QVERIFY(!window.findChild<QLabel*>("testingToolsBadge")->isHidden());
+        chooseSource(window, "synthetic");
+        QVERIFY(start->isEnabled());
+        QVERIFY(!connect->isEnabled()); // only camera families connect at startup
+        start->click();
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
+        QVERIFY(!tools->isEnabled());
+        window.setTestingTools(false); // refused while running
+        QVERIFY(tools->isChecked());
+        window.findChild<QPushButton*>("monitoringButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(text(dir.path() + "/candidates.txt").contains(" testing_tools=\"on\" "), 3000);
+        stop->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
+        // Off again: the synthetic source goes, and nothing is chosen.
+        tools->trigger();
+        QVERIFY(source->currentData().toString().isEmpty());
+        QCOMPARE(source->findData("synthetic"), -1);
+        QVERIFY(!start->isEnabled());
+
+        // Connect at startup, for the chosen camera family.
+        chooseSource(window, "zwo");
+        QVERIFY(connect->isEnabled() && !connect->isChecked());
+        connect->setChecked(true);
+        QCOMPARE(QSettings().value("startup/camera").toString(), QString("zwo"));
+    }
+    {
+        // The next start chooses the camera family and finds its camera, ready for Start.
+        MainWindow window(nullptr, dir.path(), zwo);
+        auto* source = window.findChild<QComboBox*>("sourceComboBox");
+        QCOMPARE(source->currentData().toString(), QString("zwo"));
+        QVERIFY(window.findChild<CameraPanel*>()->hasCamera());
+        QVERIFY(window.findChild<QPushButton*>("startButton")->isEnabled());
+        auto* connect = window.findChild<QCheckBox*>("connectAtStartup");
+        QVERIFY(connect->isChecked());
+        connect->setChecked(false);
+        QVERIFY(!QSettings().contains("startup/camera"));
+        chooseSource(window, "recording");
+        QVERIFY(!connect->isEnabled());
+    }
+    MainWindow window(nullptr, dir.path(), zwo);
+    QVERIFY(window.findChild<QComboBox*>("sourceComboBox")->currentData().toString().isEmpty());
+}
 
 // Session → Camera support: each family's state, SDK library, version and
 // cameras, without opening a camera; a family missing from the build; the
@@ -221,7 +311,7 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
 {
     QTemporaryDir dir;
     {
-        MainWindow window(nullptr,dir.path()); window.show();
+        MainWindow window(nullptr,dir.path()); window.show(); useSynthetic(window);
         window.findChild<QDockWidget*>("detectionDock")->raise();
         auto* histogram = window.findChild<QDockWidget*>("histogramDock");
         auto* samples = histogram->findChild<QLabel*>("histogramSampleRange");
@@ -292,7 +382,7 @@ void UiTest::dragLocksOnAFeatureAndClickStillSelects()
 {
     QTemporaryDir dir;
     {
-        MainWindow window(nullptr, dir.path()); window.show();
+        MainWindow window(nullptr, dir.path()); window.show(); useSynthetic(window);
         window.findChild<QDockWidget*>("guidingDock")->raise();
         window.findChild<QPushButton*>("startButton")->click();
         auto* preview = window.findChild<PreviewWidget*>();
@@ -525,10 +615,9 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QTemporaryDir dir;
     auto api=std::make_shared<FakeZwoApi>(); api->dropCounts={0,0,3,3};
     MainWindow window(nullptr,dir.path(),api); window.show();
-    auto* source=window.findChild<QComboBox*>("sourceComboBox");
     auto* panel=window.findChild<CameraPanel*>(); QVERIFY(panel);
     QCOMPARE(api->opened.load(),0); // Other source types never inspect hardware.
-    source->setCurrentIndex(2); QVERIFY(panel->hasCamera());
+    chooseSource(window,"zwo"); QVERIFY(panel->hasCamera());
     auto* fps=window.findChild<QSpinBox*>("targetFpsSpinBox"); QVERIFY(!fps->isEnabled());
     QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl0"));
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->decimals(),3);
@@ -809,6 +898,7 @@ void UiTest::siteAndRecordingControls()
 
     QTemporaryDir directory;
     MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
     window.applySite(site, false, "pool.ntp.org");
     QCOMPARE(QSettings().value("site/telescope").toString(), QString("C9.25"));
     QCOMPARE(QSettings().value("site/latitude").toDouble(), 37.98);
@@ -880,6 +970,7 @@ void UiTest::nightScheduleAndExposureFollower()
     {
         QTemporaryDir directory;
         MainWindow window(nullptr, directory.path());
+        useSynthetic(window);
         auto* panel = window.findChild<DetectionPanel*>();
         auto* stop = window.findChild<QPushButton*>("stopButton");
         auto* reading = panel->findChild<QLabel*>("nightReading");
@@ -951,7 +1042,7 @@ void UiTest::nightScheduleAndExposureFollower()
         auto* camera = window.findChild<CameraPanel*>();
         auto* mode = window.findChild<QLabel*>("captureModeLabel");
         panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
-        window.findChild<QComboBox*>("sourceComboBox")->setCurrentIndex(2);
+        chooseSource(window, "zwo");
         SkyExtras extras;
         extras.follow = true;
         extras.minExposureMs = 0.1;
@@ -1104,6 +1195,7 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
     {
         MainWindow window(nullptr, output.path());
         window.show();
+        useSynthetic(window);
         auto* panel = window.findChild<DetectionPanel*>();
         auto* dock = window.findChild<QDockWidget*>("detectionDock");
         dock->raise();
@@ -1215,6 +1307,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
     {
         MainWindow window(nullptr, QDir(output.path()).filePath("events"));
         window.selectRecording(input); window.show();
+        window.setTestingTools(true); // the test flash on a recording
         auto* panel = window.findChild<DisplayPanel*>();
         window.findChild<QDockWidget*>("displayDock")->raise();
         panel->setCaptureSettings(chosen);

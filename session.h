@@ -112,6 +112,9 @@ public:
 
     // Feature-14. Context thread. Copied into each clip and recording from now on.
     void setSite(const ObservingSite& site);
+    // Context thread. Whether the window's testing tools (synthetic source,
+    // test flash) are on; recorded on each session_start line.
+    void setTestingTools(bool on);
     // Context thread. Where the next recording goes, each in a folder of its
     // own; empty means the default, <outputRoot>/recordings. Clips stay in
     // outputRoot.
@@ -221,6 +224,7 @@ private:
     // requestMutex_; the recording's state is the source thread's.
     QString outputRoot_;
     QString recordingFolder_;
+    bool testingTools_{false};
     ObservingSite site_;
     std::string clockRecord_;
     bool clockCheck_{false};

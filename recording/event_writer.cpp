@@ -353,7 +353,8 @@ void EventWriter::submit(EventClip clip)
     ready_.notify_one();
 }
 
-void EventWriter::logSessionStart(const StreamInfo& stream, const ObservingSite& site, const std::string& clockRecord)
+void EventWriter::logSessionStart(const StreamInfo& stream, const ObservingSite& site, const std::string& clockRecord,
+    bool testingTools)
 {
     bool ended = false;
     {
@@ -365,7 +366,7 @@ void EventWriter::logSessionStart(const StreamInfo& stream, const ObservingSite&
         else
         {
             Job job;
-            job.sessionStart = SessionStart{std::chrono::system_clock::now(), stream, site, clockRecord};
+            job.sessionStart = SessionStart{std::chrono::system_clock::now(), stream, site, clockRecord, testingTools};
             queue_.push_back(std::move(job));
         }
     }
@@ -966,8 +967,10 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
     {
         line += QString(" playback=\"%1\"").arg(QString::fromStdString(start.stream.playback));
     }
-    // Feature-14: where and with what, and the last clock check.
+    // Feature-14: where and with what, and the last clock check. Whether the
+    // window's testing tools were on: injected frames carry their own marks.
     line += siteFields(start.site);
+    line += QString(" testing_tools=\"%1\"").arg(start.testingTools ? "on" : "off");
     line += QString(" clock_check=\"%1\"").arg(start.clockRecord.empty() ? QString("not made")
         : QString::fromStdString(start.clockRecord).replace('"', '\''));
     line += QString(" source=\"%1\"\n").arg(orUnknown(start.stream.source));

@@ -17,6 +17,9 @@
 #include <memory>
 #include <optional>
 
+class QAction;
+class QCheckBox;
+class QMenu;
 class QPushButton;
 class QTimer;
 class RecordingReader;
@@ -100,6 +103,10 @@ public:
     bool applyRecordingFolder(const QString& folder, QString& error);
     // Help → About: the release, the source revision and the licenses.
     [[nodiscard]] static QString aboutText();
+    // View → Testing tools: the synthetic source and the test flash. Off by
+    // default and remembered; changes only while stopped. The menu, and the
+    // window tests.
+    void setTestingTools(bool on);
 private:
     void setupDetectionPanel();
     void updateDetectionDisplay();
@@ -169,6 +176,13 @@ private:
     [[nodiscard]] bool recordingReady() const;
 
     [[nodiscard]] bool recordingSelected() const;
+    // The Source list: "Choose a source…" (nothing chosen, as at start), the
+    // synthetic source with the testing tools on, the recording file, and the
+    // camera families. Rebuilt when the testing tools change; keeps the
+    // choice when it is still listed.
+    void setupSourceChoice();
+    void applyTestingTools(bool on);
+    void rebuildSourceList();
     // Feature-16: a camera family's Source entry, dock and connections.
     void addCameraFamily(CameraFamilyPanel* panel, const QString& dockTitle, const QString& dockName);
     // The camera family chosen under Source, or null.
@@ -220,6 +234,14 @@ private:
         QDockWidget* dock;
     };
     std::vector<CameraFamily> cameraFamilies_;
+    // The camera family chosen at startup ("Connect at startup"), or none.
+    QString startupCamera_;
+    QCheckBox* connectAtStartup_{nullptr};
+    // The testing tools, the View menu's switch and the badge beside Source.
+    bool testingTools_{false};
+    QMenu* viewMenu_{nullptr};
+    QAction* testingAction_{nullptr};
+    QLabel* testingBadge_{nullptr};
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};

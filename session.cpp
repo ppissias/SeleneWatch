@@ -67,6 +67,12 @@ void Session::setSite(const ObservingSite& site)
     site_ = site;
 }
 
+void Session::setTestingTools(bool on)
+{
+    std::lock_guard lock(requestMutex_);
+    testingTools_ = on;
+}
+
 void Session::setRecordingFolder(const QString& folder)
 {
     std::lock_guard lock(requestMutex_);
@@ -302,7 +308,7 @@ bool Session::start(QString& error, Mode mode)
     if (mode == Mode::Monitoring)
     {
         std::lock_guard lock(requestMutex_);
-        writer_.logSessionStart(streamInfo_, site_, clockRecord_);
+        writer_.logSessionStart(streamInfo_, site_, clockRecord_, testingTools_);
     }
     // A held lock carries over; its estimate starts again with this run.
     // Guiding is off at every start (safety rule 1).
@@ -370,7 +376,7 @@ void Session::applyModeRequest()
     if (*request && mode_.load() != Mode::Monitoring)
     {
         std::lock_guard lock(requestMutex_);
-        writer_.logSessionStart(streamInfo_, site_, clockRecord_);
+        writer_.logSessionStart(streamInfo_, site_, clockRecord_, testingTools_);
     }
     mode_.store(*request ? Mode::Monitoring : Mode::Preview);
     { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }

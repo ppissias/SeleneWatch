@@ -51,7 +51,7 @@ Where SeleneWatch looks for these libraries, in order:
 
 A copy too old for SeleneWatch is skipped, and **Session → Camera support…** shows which library was used. 32-bit programs' copies, under `Program Files (x86)`, cannot be used by 64-bit SeleneWatch.
 
-SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. SeleneWatch looks for a family's library only when you choose that camera under **Source**, or check it as below; starting SeleneWatch loads no camera maker's code apart from ZWO's.
+SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. SeleneWatch looks for a family's library only when you choose that camera under **Source** (or SeleneWatch chooses it for you with **Connect at startup**, section 3), or check it as below; otherwise starting SeleneWatch loads no camera maker's code apart from ZWO's.
 
 **Session → Camera support…** shows every camera family in one window: whether this version supports it, the SDK library it found (or why it found none), the SDK's version, and the cameras connected now. Nothing there opens a camera. Select a family to see what to install and where to get it; **Choose DLL…** and **Use automatic discovery** set its library, and the new choice is checked at once. **Check again** after plugging in a camera or installing a driver. While a stream runs the window only shows what it knows; stop the stream to check.
 
@@ -76,13 +76,13 @@ All of it goes into every clip, every recording and the `session_start` lines, s
 
 From top to bottom:
 
-- **Top row:** the **Source** selector and **Open…** (for recordings), then **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, and **Fixed flash** (synthetic source only). Then the **Target FPS**, playback **Speed**, and **Loop first … s** controls.
+- **Top row:** the **Source** selector, **Connect at startup** (for a camera), and **Open…** (for recordings). With the testing tools on, an amber **TESTING TOOLS ON** mark. Then **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, and, with the testing tools on, **Fixed flash** (synthetic source only). Then the **Target FPS**, playback **Speed**, and **Loop first … s** controls.
 - **Banner:** a coloured line that always says whether capture is **OFF** (Preview) or **ON** (Monitoring).
-- **Test flash:** controls for injecting a known, marked test signal (see [section 8](#8-testing-sensitivity-with-a-test-flash)).
+- **Test flash** (testing tools only): controls for injecting a known, marked test signal (see [section 8](#8-testing-sensitivity-with-a-test-flash)).
 - **Preview:** the live or recorded image, fitted to the window. Click to select a pixel; drag to lock on a feature.
 - **Docks:** panels you can show, hide, move or float from the **View** menu.
   - **Detection**, **Display and capture**, and **Guiding** share the right-hand side as tabs.
-  - **Camera** (ZWO) and **QHY camera** appear on the left when that camera is the source.
+  - Each camera family's panel (**Camera** for ZWO, **QHY camera**, **Player One camera**, **ToupTek camera**) appears on the left when that camera is the source.
   - **Histogram** opens below the preview.
 - **Status bar** (bottom), in two lines:
   - the latest message, on a line of its own so that a folder path or an error reason has the whole width. A text that still does not fit is shortened with "…"; hover over it to read all of it.
@@ -100,9 +100,13 @@ From top to bottom:
 
 ## 3. Choosing a source
 
-Choose the source while the stream is stopped.
+Choose the source while the stream is stopped. SeleneWatch starts with no source chosen (**Choose a source…**), so it opens no camera until you choose one.
 
-### Synthetic
+**Connect at startup**, next to **Source**, is for a camera you always use: tick it with that camera family chosen, and from the next start SeleneWatch chooses it and finds the camera, ready for **Start preview**. It does not start a stream. Untick it to start with no source again.
+
+**Testing tools** (**View → Testing tools**, off until you turn it on, and remembered) add the **Synthetic** source and the **Test flash** with **Fixed flash**. While they are on, an amber **TESTING TOOLS ON** mark shows next to **Source**, and every `session_start` line in `candidates.txt` says `testing_tools="on"` (otherwise `"off"`). They change only while the stream is stopped; turning them off with the synthetic source chosen leaves no source chosen. Recordings are not a testing tool: **Recording file** is always offered.
+
+### Synthetic (testing tools)
 
 A painted test Moon with craters, a small moving pacing marker, and sensor-like noise in the background. It needs no hardware and is the quickest way to learn the controls. **Target FPS** sets its frame rate. **Fixed flash** paints a bright spot for a few frames, as a quick check that capture works. Under **Display and capture → Synthetic pixels** you can make it produce 12-bit, 16-bit or Bayer colour frames, to try the display controls.
 
@@ -249,7 +253,7 @@ The starting values are not a calibrated recommendation. Tune them on your own r
 
 ## 8. Testing sensitivity with a test flash
 
-A test flash adds a small, known Gaussian spot to real frames, so you can see what the detector would catch.
+A test flash adds a small, known Gaussian spot to real frames, so you can see what the detector would catch. It is a testing tool: turn on **View → Testing tools** first.
 
 1. Start Preview, or play a recording.
 2. Click the preview where the flash should appear. The earthshine side is the interesting case.
@@ -387,7 +391,7 @@ Under **Mount**, choose **ASCOM telescope** and:
 2. Press **Connect**. The dock shows the mount's state: tracking, slewing, parked, pier side, and guide rates.
 3. Make sure **tracking is on** in the mount's driver. SeleneWatch never turns tracking on or off.
 
-Choose **Simulated mount** to try everything with the **Synthetic** source. The simulated mount drifts the painted Moon slowly and responds to guide pulses.
+Choose **Simulated mount** to try everything with the **Synthetic** source (testing tools on). The simulated mount drifts the painted Moon slowly and responds to guide pulses.
 
 Drivers that run as their own program (EQMOD, GS Sky, Device Hub, the ASCOM simulators) work. A 32-bit driver that loads into the program cannot be used by 64-bit SeleneWatch; connecting to one fails with that explanation.
 

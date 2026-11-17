@@ -92,8 +92,6 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
 {
     ui_->setupUi(this);
     setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
-    ui_->sourceComboBox->setItemData(0,"synthetic");
-    ui_->sourceComboBox->setItemData(1,"recording");
 
     // Clips are written next to the executable.
     if (outputRoot.isEmpty()) outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
@@ -139,6 +137,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         addCameraFamily(new PlayerOneCameraPanel(std::move(api),this),"Player One camera","playerOneCameraDock");
     if (auto api=toupTekApi?std::move(toupTekApi):makeToupTekApi())
         addCameraFamily(new ToupTekCameraPanel(std::move(api),this),"ToupTek camera","toupTekCameraDock");
+    setupSourceChoice();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
@@ -189,9 +188,93 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     prepareTimer_->setInterval(50);
     connect(prepareTimer_, &QTimer::timeout, this, [this] { takePreparedRecording(std::chrono::milliseconds{0}); });
 
+    // No source is chosen at start, unless a camera family is to connect at
+    // startup: choosing it finds its camera, ready for Start.
+    if (const int index = ui_->sourceComboBox->findData(startupCamera_); !startupCamera_.isEmpty() && index > 0)
+        ui_->sourceComboBox->setCurrentIndex(index);
+
     updateControls();
     updateStatusLabel();
     updateBlipReadout();
+}
+
+void MainWindow::setupSourceChoice()
+{
+    startupCamera_ = QSettings().value("startup/camera").toString();
+    connectAtStartup_ = new QCheckBox("Connect at startup", this);
+    connectAtStartup_->setObjectName("connectAtStartup");
+    connectAtStartup_->setToolTip("Choose this camera family when SeleneWatch starts and find its camera, ready for Start. "
+        "Without it, SeleneWatch starts with no source chosen.");
+    ui_->sourceLayout->insertWidget(ui_->sourceLayout->indexOf(ui_->sourceComboBox) + 1, connectAtStartup_);
+    connect(connectAtStartup_, &QCheckBox::toggled, this, [this](bool on) {
+        const CameraFamilyPanel* camera = selectedCamera();
+        if (!camera) return;
+        if (on) startupCamera_ = camera->sourceKey();
+        else if (startupCamera_ == camera->sourceKey()) startupCamera_.clear();
+        QSettings saved;
+        if (startupCamera_.isEmpty()) saved.remove("startup/camera");
+        else saved.setValue("startup/camera", startupCamera_);
+    });
+
+    testingBadge_ = new QLabel("TESTING TOOLS ON", this);
+    testingBadge_->setObjectName("testingToolsBadge");
+    testingBadge_->setStyleSheet("background:#8a5a00; color:white; font-weight:bold; padding:1px 6px;");
+    testingBadge_->setToolTip("The synthetic source and the test flash are available (View → Testing tools). "
+        "Injected frames are marked as test data, and session_start lines record testing_tools=\"on\".");
+    ui_->sourceLayout->addWidget(testingBadge_);
+    testingAction_ = viewMenu_->addAction("Testing tools");
+    testingAction_->setObjectName("testingToolsAction");
+    testingAction_->setCheckable(true);
+    testingAction_->setToolTip("Show the synthetic source and the test flash");
+    connect(testingAction_, &QAction::toggled, this, &MainWindow::setTestingTools);
+    applyTestingTools(QSettings().value("testing/tools", false).toBool());
+}
+
+void MainWindow::setTestingTools(bool on)
+{
+    if (session_->isRunning())
+    {
+        const QSignalBlocker blocked(testingAction_);
+        testingAction_->setChecked(testingTools_);
+        showMessage("Stop the stream to change the testing tools.", 4000);
+        return;
+    }
+    QSettings().setValue("testing/tools", on);
+    applyTestingTools(on);
+    showMessage(on ? "Testing tools on: the synthetic source and the test flash are available."
+                   : "Testing tools off.", 4000);
+}
+
+void MainWindow::applyTestingTools(bool on)
+{
+    testingTools_ = on;
+    {
+        const QSignalBlocker blocked(testingAction_);
+        testingAction_->setChecked(on);
+    }
+    ui_->blipGroupBox->setVisible(on);
+    ui_->injectFlashButton->setVisible(on);
+    testingBadge_->setVisible(on);
+    session_->setTestingTools(on);
+    rebuildSourceList();
+    updateControls();
+}
+
+void MainWindow::rebuildSourceList()
+{
+    const QString current = ui_->sourceComboBox->currentData().toString();
+    {
+        const QSignalBlocker blocked(ui_->sourceComboBox);
+        ui_->sourceComboBox->clear();
+        ui_->sourceComboBox->addItem("Choose a source…", QString());
+        if (testingTools_) ui_->sourceComboBox->addItem("Synthetic (testing)", "synthetic");
+        ui_->sourceComboBox->addItem("Recording file", "recording");
+        for (const auto& family : cameraFamilies_)
+            ui_->sourceComboBox->addItem(family.panel->sourceName(), family.panel->sourceKey());
+        ui_->sourceComboBox->setCurrentIndex(std::max(0, ui_->sourceComboBox->findData(current)));
+    }
+    // The synthetic source went away with the testing tools: nothing is chosen.
+    if (ui_->sourceComboBox->currentData().toString() != current) onSourceKindChanged();
 }
 
 MainWindow::~MainWindow()
@@ -228,8 +311,8 @@ void MainWindow::setupDetectionPanel()
     detectionDock_->setObjectName("detectionDock");
     detectionDock_->setWidget(detectionPanel_);
     addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
-    auto* view = menuBar()->addMenu("View");
-    view->addAction(detectionDock_->toggleViewAction());
+    viewMenu_ = menuBar()->addMenu("View");
+    viewMenu_->addAction(detectionDock_->toggleViewAction());
     target_ = QSettings().value("target", 0).toInt() == 1 ? Target::Sky : Target::Moon;
     detectionPanel_->setTarget(target_);
     detectionPanel_->setSettings(savedDetectionSettings(target_));
@@ -418,6 +501,12 @@ void MainWindow::checkNightSchedule()
     {
     case NightAction::Start:
         if (session_->modeChangePending()) break;
+        if (!session_->isRunning() && ui_->sourceComboBox->currentData().toString().isEmpty())
+        {
+            // Nothing to watch with yet; tried again at the next check.
+            showMessage("Dusk, but no source is chosen: choose the camera to watch with.", 6000);
+            break;
+        }
         nightStartedTonight_ = true;
         showMessage(QString("Dusk: the Sun is at %1°. Watching the sky.").arg(altitude, 0, 'f', 1), 6000);
         if (!session_->isRunning())
@@ -537,7 +626,7 @@ void MainWindow::setupDisplayPanel()
     displayDock_->setObjectName("displayDock"); displayDock_->setWidget(displayPanel_);
     addDockWidget(Qt::RightDockWidgetArea, displayDock_);
     tabifyDockWidget(detectionDock_, displayDock_);
-    menuBar()->actions().front()->menu()->addAction(displayDock_->toggleViewAction());
+    viewMenu_->addAction(displayDock_->toggleViewAction());
     QSettings saved;
     DisplaySettings display;
     const int mode = saved.value("display/mode", 0).toInt();
@@ -575,7 +664,7 @@ void MainWindow::setupHistogramPanel()
     addDockWidget(Qt::BottomDockWidgetArea, histogramDock_);
     setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
     setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
-    menuBar()->actions().front()->menu()->addAction(histogramDock_->toggleViewAction());
+    viewMenu_->addAction(histogramDock_->toggleViewAction());
 
     const QSettings saved;
     histogramPanel_->setOptions(saved.value("histogram/fitRange", false).toBool(),
@@ -606,7 +695,7 @@ void MainWindow::setupGuidingPanel()
     addDockWidget(Qt::RightDockWidgetArea, guidingDock_);
     tabifyDockWidget(displayDock_, guidingDock_);
     displayDock_->raise();
-    menuBar()->actions().front()->menu()->addAction(guidingDock_->toggleViewAction());
+    viewMenu_->addAction(guidingDock_->toggleViewAction());
 
     simulatedPointing_ = std::make_shared<SimulatedPointing>(SimulatedPointing::Settings{});
     const QSettings saved;
@@ -1095,7 +1184,6 @@ bool MainWindow::recordingSelected() const
 }
 void MainWindow::addCameraFamily(CameraFamilyPanel* panel,const QString& dockTitle,const QString& dockName)
 {
-    ui_->sourceComboBox->addItem(panel->sourceName(),panel->sourceKey());
     auto* dock=new QDockWidget(dockTitle,this);
     dock->setObjectName(dockName);
     dock->setWidget(panel);
@@ -1129,7 +1217,15 @@ void MainWindow::updateControls()
     const bool pending = session_->modeChangePending();
 
     CameraFamilyPanel* selected = selectedCamera();
-    ui_->startButton->setEnabled(!running && (!selected || selected->hasCamera()));
+    const bool chosen = !ui_->sourceComboBox->currentData().toString().isEmpty();
+    ui_->startButton->setEnabled(!running && chosen && (!selected || selected->hasCamera()));
+    if (connectAtStartup_)
+    {
+        connectAtStartup_->setEnabled(!running && selected);
+        const QSignalBlocker blocked(connectAtStartup_);
+        connectAtStartup_->setChecked(selected && startupCamera_ == selected->sourceKey());
+    }
+    if (testingAction_) testingAction_->setEnabled(!running);
     ui_->stopButton->setEnabled(running);
     ui_->monitoringButton->setEnabled(running && !session_->sourceFinished() && !pending);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
@@ -1154,9 +1250,9 @@ void MainWindow::updateControls()
     if (displayPanel_) displayPanel_->setRunning(running, recording || selected);
     for (const auto& family : cameraFamilies_)
     {
-        const bool chosen = family.panel == selected;
-        family.dock->setEnabled(chosen);
-        family.panel->setRunning(running && chosen, running && (monitoring || pending));
+        const bool thisFamily = family.panel == selected;
+        family.dock->setEnabled(thisFamily);
+        family.panel->setRunning(running && thisFamily, running && (monitoring || pending));
     }
     if (guidingPanel_) guidingPanel_->setAvailable(running, ui_->previewWidget->selectedPosition().has_value());
 }
@@ -1317,7 +1413,13 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
         }
         return camera->makeSource();
     }
-    if (!recordingSelected())
+    const QString kind = ui_->sourceComboBox->currentData().toString();
+    if (kind.isEmpty())
+    {
+        showMessage("Choose a source first.");
+        return {};
+    }
+    if (kind == "synthetic")
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
         // The simulated mount moves the painted Moon; it stays put while that mount is not connected.
@@ -1325,10 +1427,10 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
             const auto offset = pointing->imageOffset(SimulatedPointing::Clock::now());
             return std::pair{offset.x, offset.y};
         });
-        const int kind = displayPanel_->syntheticFormat();
-        if (kind) source->setPixelLayout(PixelFormat::Mono16, kind == 3 ? 16 : 12,
-            kind == 2 || kind == 4 ? BitAlignment::High : BitAlignment::Low,
-            kind == 4 ? BayerPattern::RGGB : BayerPattern::None);
+        const int layout = displayPanel_->syntheticFormat();
+        if (layout) source->setPixelLayout(PixelFormat::Mono16, layout == 3 ? 16 : 12,
+            layout == 2 || layout == 4 ? BitAlignment::High : BitAlignment::Low,
+            layout == 4 ? BayerPattern::RGGB : BayerPattern::None);
         synthetic_ = source.get();
         return source;
     }
@@ -1485,7 +1587,7 @@ void MainWindow::selectRecording(QString path)
 {
     if (session_->isRunning()) return;
     recordingPath_ = std::move(path);
-    ui_->sourceComboBox->setCurrentIndex(1);
+    ui_->sourceComboBox->setCurrentIndex(ui_->sourceComboBox->findData("recording"));
     ui_->fileLabel->setToolTip(QDir::toNativeSeparators(recordingPath_));
     prepareRecording();
     updateControls();
@@ -1633,6 +1735,7 @@ void MainWindow::onInjectFlashClicked()
 
 void MainWindow::onInjectBlipClicked()
 {
+    if (!testingTools_) return; // the test flash is a testing tool
     const auto centre = ui_->previewWidget->selectedPosition();
     if (!centre)
     {
