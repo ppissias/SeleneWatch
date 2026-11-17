@@ -2,225 +2,119 @@
 
 **Continuous lunar monitoring and automatic capture of transient phenomena.**
 
-SeleneWatch is a native C++/Qt desktop application being developed to monitor the Moon through a telescope-mounted camera, identify potentially interesting short-lived events, and preserve the surrounding frames for later review.
+SeleneWatch is a native Windows desktop application written in C++ and Qt 6 that monitors a live telescope camera stream—or recorded video—to detect brief, unexpected events and preserve lossless frames around them for later review.
 
-The main motivation is to help observers detect and document **lunar transient phenomena**, particularly brief flashes that may be caused by meteoroid impacts. The design also covers transits, occultations, moving objects, and other unexpected events.
+Its primary purpose is helping observers capture **lunar transient phenomena**, especially brief meteoroid impact flashes on the Moon's night side (earthshine). It also handles lunar **transits** (satellites, the ISS, aircraft), **occultations**, and an optional **Sky** mode for wide-field meteors, fireballs, lightning, satellites, and aircraft.
 
-> **ZWO and QHY acquisition and manual save are implemented. QHY camera and lunar observing checks are pending.** Synthetic streams, SER/uncompressed AVI recordings and optional ZWO and QHY cameras use the same detector, time-based history, shared memory budget and asynchronous SER writer. Clips retain native pixels, timestamps, test marks, settings and review previews. The ASI120MM Mini passed RAW8/RAW16 bench checks. [ZWO validation](docs/zwo-validation.md)
+> **Candidates, not discoveries.** Automatic detections are candidates for human review, not confirmed lunar events. Scientific confirmation of an impact flash normally requires an independent observation from another telescope or site. SeleneWatch preserves the frames, UTC timing, camera settings, and session records needed for that comparison.
 
-The detector keeps learning outside active patches and records separate candidates during ongoing activity. **Save now** preserves the current history and following interval as a manual clip. Observing calibration and the earthshine display check remain partial. Registration remains experimental. [Reference and rearming](docs/reference-and-manual-validation.md), [observing calibration](docs/feature-9-validation.md), [earthshine display](docs/feature-5-validation.md), [registration experiment](docs/registration-experiment.md)
+**Using SeleneWatch:** See the [User Manual](MANUAL.md) for installation, camera driver setup, window controls, detection settings, test flashes, saved output files, feature lock and guiding, and a step-by-step observing session.
 
-**Using SeleneWatch:** the [User Manual](MANUAL.md) explains the window, sources, Preview and Monitoring, camera and detector settings, test flashes, the saved files, the feature lock and mount guiding, and a step-by-step observing session.
+---
 
-## What SeleneWatch aims to do
+## What SeleneWatch does
 
-- **Monitor continuously** using cameras from many vendors, at the highest resolution and frame rate the hardware allows.
-- **Analyse every frame** to find candidate events while observation continues, without going blind while saving.
-- **Keep a RAM ring buffer** sized in seconds, so frames from *before* a detection are still available.
-- **Capture events automatically**, saving frames before and after a trigger. Predicted events (occultations, transits) are captured with continuous recording.
-- **Preserve lossless evidence**: pixel values exactly as the camera delivered them, at 8, 12, or 16 bits, in SER files with per-frame UTC timestamps.
-- **Measure sensitivity** by injecting known test signals into real data.
-- **Hold the field** by locking on a lunar feature, showing its drift, and on request correcting the mount with small, logged guide pulses.
-- **Support event review**, so observers inspect a short list of candidates instead of hours of recordings.
-- **Develop and test without hardware** using synthetic streams, recorded SER or AVI files, and a simulated mount.
+- **Monitor continuously across multiple sources** — acquire from **ZWO ASI**, **QHYCCD**, **Player One**, and **ToupTek** (and ToupTek-OEM) cameras, replay **SER** or uncompressed **AVI** recordings (in real time, fast, or looped), or use a built-in **synthetic** test Moon without hardware.
+- **Tune before capturing** — run in **Preview** to focus, frame, inspect the live native-ADU histogram, stretch the display for faint earthshine, and watch detector feedback (`Would trigger`) with live camera edits before arming **Monitoring**.
+- **Keep pre-event history in RAM** — maintain a time-sized ring buffer of shared, immutable frames under a configurable RAM ceiling so frames from *before* a trigger are saved alongside the event.
+- **Detect flashes, transits, and sky events** — analyse every frame per pixel against its own learned background and noise, with separate profiles for **The Moon** (flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon masks, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
+- **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), and annotated visual summaries (`00_overview.png`) with suggested classifications.
+- **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, or record predicted events (occultations, transits) continuously to SER manually or by UTC schedule without silently dropping frames.
+- **Measure sensitivity directly** — inject calibrated **Test flash** signals onto real data to check recovery limits; every affected frame and clip is explicitly marked as test data.
+- **Hold the field gently** — lock onto a lunar feature to track drift, and optionally guide an **ASCOM** mount with small, bounded, logged guide pulses so monitoring stays on target without slewing or syncing the telescope.
 
-Automatic detections are **candidates for review**, not scientific confirmation of a lunar event. Confirming an impact flash normally needs an independent observation from another telescope or site. SeleneWatch records each candidate's timing and metadata so that comparison is possible.
+---
 
 ## How it works
 
 ```text
-Synthetic source / Recording (SER, AVI) / Cameras (ZWO, QHY, Player One, ...)
-                              |
-                       Frame acquisition
-                 (a published frame is read-only
-                  and shared, never copied)
-                              |
-              +---------------+---------------+
-              |                               |
-       RAM ring buffer                 Event detection
-       (recent raw frames)        (on every frame, always)
-              |                               |
-              +---------------+---------------+
-                              |
-                       Event capture
-                              |
-                 Pre- and post-event frames
-                     + metadata + log
-                              |
-                 Writer (separate thread)
-                              |
-             events/<UTC>/  and  candidates.txt
+Synthetic source / Recording (SER, AVI) / Cameras (ZWO, QHY, Player One, ToupTek)
+                                  |
+                           Frame acquisition
+                     (a published frame is read-only
+                      and shared, never copied)
+                                  |
+                  +---------------+---------------+
+                  |                               |
+           RAM ring buffer                 Event detection
+           (recent raw frames)        (on every frame, always)
+                  |                               |
+                  +---------------+---------------+
+                                  |
+                           Event capture
+                                  |
+                  Pre- and post-event frames
+                      + metadata + overview
+                                  |
+                     Writer (separate thread)
+                                  |
+          events/<UTC>/, recordings/, candidates.txt
 
-        Qt GUI: live preview with stretch, controls,
-                status, and later an event browser
+            Qt GUI: live preview with stretch, histogram,
+                    controls, and status readouts
 
-        Guide thread: feature lock, drift readout,
-                and guide pulses to the mount
+            Guide thread: feature lock, drift readout,
+                    and bounded ASCOM guide pulses
 ```
 
 Acquisition never waits on the disk, the GUI, or the mount. The preview and the guider may skip frames; detection and recording may not.
 
-## Evidence rules in brief
+---
 
-The full list is in [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md#4-evidence-rules). In short:
+## Evidence principles
 
-- Raw pixels are never altered between the camera and the evidence file. Stretching is for the screen only.
-- Samples are stored as delivered, with their bit depth recorded. Evidence is always lossless.
-- Every frame keeps its index and UTC time, and dropped frames are recorded.
-- The detector never stops looking. Every candidate is logged, even one that could not be saved.
-- Injected test signals are marked. Written clips are never rewritten.
-- The telescope is moved only by guide pulses, and every pulse is recorded.
+SeleneWatch follows strict evidence rules so saved clips remain reliable observational records:
 
-## Technology stack
-
-| Area | Direction |
-| --- | --- |
-| Language | C++20 |
-| User interface | Qt 6 Widgets (LGPLv3, dynamically linked) |
-| Platform | Windows first |
-| IDE / compiler | Visual Studio 2026 / MSVC |
-| Build system | CMake + Ninja |
-| Testing | Qt Test + CTest |
-| Evidence format | SER, read and written by SeleneWatch; PNG for preview images |
-| Recorded input | SER and uncompressed AVI, both read by SeleneWatch |
-| Cameras | Native vendor SDKs, one adapter per camera family, each optional at build time. ZWO ASI first, then QHYCCD; Player One, ToupTek-based, and industrial cameras to follow. |
-| Mount | ASCOM through late-bound COM, guide pulses only, optional at build time; a simulated mount for tests |
-| Image processing | Plain C++ for the trigger; OpenCV only if registration or tracking needs it |
-
-The processing core does not depend on Qt UI classes, so it can be tested and measured without a window.
-
-## Getting started (development)
-
-1. Install **Visual Studio** with the **Desktop development with C++** workload and CMake support.
-2. Install a **Qt 6** build for your MSVC toolchain, including **Qt Widgets**.
-3. Point `QTDIR` in `CMakeUserPresets.json` at that Qt kit. Machine-specific paths and commands are in [local environment.txt](local%20environment.txt).
-4. Open the project in Visual Studio, select **Debug-x64**, configure, and build.
-5. Run **SeleneWatch** from the IDE. The [User Manual](MANUAL.md) explains how to use it.
-
-With the same Qt `PATH` and `QT_PLUGIN_PATH` used to launch the app, `ctest --test-dir out/build/debug --output-on-failure` runs the core, SER, detection, preview, display/capture, and window tests. The window tests use Qt's offscreen platform and an isolated settings namespace.
-
-Camera SDKs stay outside the repository. Each adapter is optional in CMake: without an SDK path the application builds and runs on synthetic and recorded sources. On the development machine the **Debug-x64** and **Release-x64** presets set both SDK paths (the hidden `Camera-SDKs` preset in `CMakeUserPresets.json`), so a normal build from Visual Studio includes the ZWO and QHY adapters. On another machine, change those two paths, or remove `Camera-SDKs` from the presets' `inherits` to build without cameras.
-
-The manual [camera soak tool](docs/camera-soak.md) saves periodic clips, flushes progress/memory/drop diagnostics, and stops at configured storage thresholds. The Mini completed [30 minutes in each raw format](docs/zwo-soak-validation.md), with zero SDK drops/refusals and all 420 sampled pixel hashes matched. These are bench checks; lunar observing acceptance remains open.
-
-For a ZWO-only build outside the presets on Windows x64, configure a separate build after loading the MSVC/Qt environment:
-
-```powershell
-cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
-cmake --build out/build/zwo-release
-ctest --test-dir out/build/zwo-release --output-on-failure
-.\out\build\zwo-release\SeleneWatch.exe
-```
-
-Start with **Start preview**: frames reach the history, display and detector, while automatic capture, Save now and the candidate record are off. The Detection panel shows peak sigma relative to K, patch size/compactness limits, noise, persistence and **Would trigger** feedback. **Start monitoring** enables automatic event clips and Save now; **Stop monitoring** finishes the available clip and returns to Preview while acquisition continues. Queued evidence writes finish in the background. The banner always shows whether capture is ON or OFF. See [Preview and Monitoring](docs/preview-monitoring.md) for boundaries and validation.
-
-Select **ZWO ASI camera** under Source. The Camera panel discovers devices and shows their reported controls beside the Detection panel. In Preview, exposure (ms), gain, offset, USB bandwidth and high-speed mode apply live when supported and writable; actual readbacks remain visible separately from requested values. Format, binning and ROI use **Apply format / ROI and restart Preview**. Camera settings are fixed during Monitoring; display and detection controls remain editable. Starting Monitoring reopens the camera and learns a new reference, excluding buffered tuning frames and history with uncertain settings. **Stop stream** closes the camera. The status bar shows SDK-reported drops; UTC is host arrival time, and drop locations are approximate because the SDK buffers frames. RAW16 keeps all delivered bits; the sensor's advertised ADC depth is separate metadata. The SDK DLL and its notice are copied into the build directory; release packaging must also satisfy [dependency notices](THIRD_PARTY_LICENSES.md).
-
-Player One and ToupTek (Feature-16) work the same way as QHY. `SELENEWATCH_PLAYERONE_SDK_DIR` (the folder holding `include/PlayerOneCamera.h`) and `SELENEWATCH_TOUPTEK_SDK_DIR` (holding `inc/toupcam.h`) build them against the vendors' headers. At run time SeleneWatch loads the observer's `PlayerOneCamera.dll` or `toupcam.dll`: the one chosen in the panel; otherwise the one beside the program; otherwise the newest of the copies that 64-bit N.I.N.A., SharpCap or (for ToupTek) the ASCOM driver installed (`cameras/vendor_runtime`). **Session → Camera support…** shows each family's state, SDK library, version and connected cameras, checked on request while no stream runs, and lets the observer choose a family's DLL. For developers, `SeleneWatchRuntimeProbe qhy|playerone|touptek [DLL]` reports the same from the command line. The window sees every camera family through `CameraFamilyPanel`, so a family is added in one place.
-
-For QHY on Windows x64, set `SELENEWATCH_QHY_SDK_DIR` to the vendor SDK root when configuring the build. Install QHY's Windows All-In-One driver and SDK, then select **QHY camera** under Source. SeleneWatch discovers the installed x64 DLL on demand. **Choose QHY DLL…** saves a path for a custom installation. **Use automatic discovery** clears that override. QHY supports live tuning in Preview and fixes acquisition settings during Monitoring. The adapter uses bin 1 and reports SDK losses as unknown. [Build and validation instructions](docs/qhy-development.md), [QHY downloads](https://www.qhyccd.com/download/)
-
-SeleneWatch starts with no source chosen; **Connect at startup** next to Source makes it choose a camera family at start and find its camera. The synthetic source and the test flash are testing tools, shown only with **View → Testing tools** on (remembered, changed only while stopped). While they are on, an amber mark shows beside Source and each `session_start` line records `testing_tools="on"`. Recordings are always offered.
-
-To try a test flash, turn on the testing tools, start Preview, click the image to select a pixel, set **FWHM**, **Peak**, and **Duration** under **Test flash**, then press **Inject blip**. Preview shows whether it would trigger; start Monitoring to save test events. Peak is an addition in native sample units (ADU), including for 12-bit data stored in a 16-bit word. The readout also gives the requested peak in local noise units. A saved clip marks each injected frame and records its settings. The synthetic source's **Fixed flash** remains available as a capture check.
-
-Use **View → Detection** to adjust K (sigma), patch size limits, maximum box-to-patch area ratio, and one- or two-frame confirmation. Expand **Background and noise** for the reference learning time and minimum noise in native ADU. Sliders make broad changes and the number fields allow precise values. The panel reports the selected patch's measured values and the reason it failed a check. Changes reach the next frame, and the app remembers the values on Stop or close. Green marks show current measurements and amber marks show recent highs. The sigma history covers ten seconds of source time. **Sigma map** highlights pixels at or above K in red. **Noise map** shows the local noise in ADU.
-
-**Watching** at the top of the panel chooses the Moon or the sky; each keeps its own detection and capture settings. The sky is for a wide-lens camera watching for meteors, fireballs, aircraft, satellites and lightning: it allows long streaks, fires on a large share of the frame brightening at once, learns a patch that keeps firing for 20 s (a star drifting past a fixed camera), and leaves out masked rectangles drawn on the preview. **Also trigger on darkening**, off by default, fires on patches that get darker, such as a plane or the ISS in front of the sunlit Moon. A **Disk reserve** (default 10 GiB) stops saving clips before the output drive fills; their candidates are still logged.
-
-Start by measuring a recording with no injection, then lower the injected amplitude until recovery stops. A peak above K alone is insufficient: enough neighbouring pixels must also pass. Saturation and motion at bright edges can limit recovery. The defaults (6 sigma, 8–400 pixels) are starting values, not a calibrated observing prescription. Each event folder contains `event.ser`, `event.txt`, `00_overview.png`, `01_baseline.png`, `02_event_peak.png`, and `03_diff_annotated.png`; the PNGs are display previews. The overview shows the clip at a glance: the peak frame with everything that rose (orange) or fell (blue) during the clip, each trigger marked, a strip of crops that follows the activity, and a caption with the UTC time and the clip's flags. A final `complete: yes` line identifies a finished clip. The candidate log records a pending entry before the writer starts the clip and its outcome afterwards; open clips and queued work still in RAM can be lost in a process crash.
-
-**View → Guiding** shows the feature lock (Feature-8 Part A). While a stream runs, drag a rectangle on the image around a crater or other detail to lock on it, or click a pixel and press **Lock at selection** for a 64 × 64 box. A region that is flat, mostly saturated, or a straight edge (limb, terminator) is refused with the reason. The dashed box marks where the feature was locked and the solid box where it is now: green while the lock holds, amber when the latest search failed. The dock and the status bar show the drift as a median over the last few seconds, in frame pixels. After 2 s without a match the lock is lost and the search widens; after 60 s it stops. While Monitoring, `guiding.txt` beside `candidates.txt` records the lock and one offset line per second.
-
-To keep the field with the mount (Feature-8 Parts B and C), choose **ASCOM telescope** under Mount, press **Choose…** to pick the driver in ASCOM's own chooser, and **Connect**. Turn tracking on in the mount's driver. With a lock held, press **Calibrate**: SeleneWatch pulses west, east, north (after taking up backlash) and south, and measures how the image moves, so it needs no focal length, pixel size, or camera angle. Then **Start guiding**. Nothing is sent while the drift stays inside the tolerance (a share of the field's shorter side, default 3 %). Outside it, one pulse per axis removes 70 % of the error, followed by a settle and a fresh estimate. Only guide pulses are ever sent: never a slew, sync, park, tracking change, or rate offset. Guiding stops with the reason when the mount is not tracking, slewing, parked, or changes pier side; when the lock is lost; when three corrections in a row do not reduce the error; or when pulses would exceed 20 s per minute. It is off at every start. A pulse that moves the image more than 0.25 px per frame is refused, because the detector would see the motion; lower the guide rate in the driver. Every pulse goes into `guiding.txt` while Monitoring. A candidate whose trigger falls inside a pulse or its settle time is marked `during_mount_correction=yes`, and its `event.txt` lists the pulses inside the clip. **Simulated mount** moves the synthetic Moon, so the whole loop can be tried without a telescope. ASCOM is reached through late-bound COM against the installed Platform; a 32-bit in-process driver cannot be used by 64-bit SeleneWatch, while drivers that run as their own process (EQMOD, GS Sky, Device Hub, OmniSim) can.
-
-**View → Histogram** opens a plot of the original samples below the live or recorded preview. It shows the observed ADU range and the percentages at zero and at the highest code in the stream's declared range. **Fit range** zooms to the observed values. **Log counts** shows bins with few samples. The graph uses native samples before stretch, inversion or colour conversion. For colour frames it combines the raw Bayer samples or the three stored RGB channels.
-
-The **Display and capture** tab offers Linear, Black/white levels, and Auto-stretch, plus inversion and Bayer colour. Level controls use native ADU and work while stopped. Choose pre-event history, quiet tail, maximum duration after a trigger, and the image/analysis RAM ceiling before Start. Defaults are 5 s, 3 s, 10 s, and 2 GiB. Playback speed does not change these source-time windows. The effective history may be shorter under the byte allowance, and clip metadata records why collection ended. The readout includes shared pixels, detector buffers, maps, and previews; Qt caches, container metadata, and codec workspaces are additional to that ceiling. A full writer logs refused work, and a required allocation failure stops acquisition visibly while preserving the available clip.
-
-## Building a release
-
-**Version.** A release is named `YYYY.MM-NN`: the year, the month, and the release's number in that month, so `2026.11-01` is the first release of November 2026 and `2026.11-02` the second. It is set in one place, `SELENEWATCH_RELEASE` at the top of [CMakeLists.txt](CMakeLists.txt). From there it reaches the window title, **Help → About** (with the Git revision the build came from), the `software:` line of every `event.txt` and `recording.txt`, the executable's file properties, and the package names. Tag the release commit `v2026.11-01`.
-
-**What a release is.** Two packages of the same files, made by CPack from the install rules in [packaging/package.cmake](packaging/package.cmake) when the Release build's `package` target is built:
-
-| Package | What it does |
-| --- | --- |
-| `SeleneWatch-<version>-win64.zip` | Unpacks into a `SeleneWatch-<version>-win64` folder and runs from there. |
-| `SeleneWatch-<version>-win64.msi` | Installs for the current Windows account without administrator rights, in `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older one; the `events` folder beside the program is kept on upgrade and uninstall. |
-
-Both hold `SeleneWatch.exe`, the Qt DLLs and plugins it needs (gathered by `windeployqt`), the Visual C++ runtime DLLs, `ASICamera2.dll` when the build has the ZWO SDK, `LICENSE.txt`, `README.md`, `MANUAL.md`, `THIRD_PARTY_LICENSES.md`, and a `licenses` folder: Qt's LGPLv3/GPLv3 texts, the notices of the third-party code inside the Qt DLLs, and the ZWO SDK notice. No test, probe or QHY file is shipped. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the terms of each.
-
-**Tools.** The development setup above, and the [WiX Toolset 3](https://github.com/wixtoolset/wix3/releases) binaries for the installer, unpacked anywhere. Their folder (the one holding `bin\candle.exe`) is `SELENEWATCH_WIX_ROOT`, set by the hidden `Release-Tools` preset in `CMakeUserPresets.json`, or the `WIX` environment variable. Without it, packaging makes the `.zip` only and says so when configuring. CPack and `windeployqt` come with CMake and Qt.
-
-**Making the packages.** The build preset **Release: .zip and installer** (`Release-packages`) builds Release and then its `package` target. That makes both packages in `out\build\release\package`. Then a check runs inside the packaging step, so it fails the build if any part fails:
-- the expected files are in the `.zip`, and Qt Network and Qt Svg are not;
-- every DLL a shipped binary imports is in the package or part of Windows;
-- the packaged `SeleneWatch.exe` starts with only its own folder and Windows on the path. It runs on Qt's offscreen platform, so no window opens.
-
-The build output ends with each package's size and SHA-256.
-- **From Visual Studio:** choose **Release (x64)** as the configure preset and **Release: .zip and installer** as the build preset in the toolbar, then **Build → Build All**. Switch the build preset back to **Release (x64)** or **Debug (x64)** for everyday work.
-- **From the command line**, in the developer PowerShell at the repository root:
-  ```powershell
-  cmake --preset Release-x64
-  cmake --build --preset Release-packages
-  ```
-- **For a release**, `packaging\make_release.ps1` does the same after two more steps. It refuses a tree with uncommitted changes, and runs every test first. `-AllowDirty` makes a trial package whose revision ends in `-dirty`.
-
-The Debug build has no `package` target: packages hold the Release program only.
-
-**Steps for a release.**
-1. Set `SELENEWATCH_RELEASE` in `CMakeLists.txt`, update the stage table in this README if a feature is complete, and commit.
-2. Run `packaging\make_release.ps1`.
-3. Install the `.msi` once, start SeleneWatch from the Start menu, and check **Help → About**.
-4. Tag the commit (`git tag v2026.11-01`) and publish the two packages with the release.
-
-When Qt is upgraded, regenerate the Qt notices from the new Qt documentation and commit the result:
-```powershell
-powershell -File packaging\make_qt_notices.ps1 -QtDocs C:\dev\tools\Qt\Docs\Qt-<version> -QtVersion <version>
-```
-
-## Roadmap
-
-| Stage | Content | Feature | State |
-| --- | --- | --- | --- |
-| 1 | Bootstrap: Qt Widgets / CMake application, Git, conventions | — | Done |
-| 2 | Preview and synthetic source | Feature-2 | Done |
-| 3 | RAM ring buffer | Feature-3 | Done |
-| 4 | First detector and event capture | Feature-4 | Done |
-| 5 | An evidence-safe core: shared frames, detection on every frame, candidate log, lossless file path | Feature-7 | Done |
-| 6 | Recordings in, SER out: SER and AVI playback (whole or looped), 16-bit frames, test injection, SER clips | Feature-6 | Done |
-| 7 | A measured trigger: per-pixel noise, controls, overlays, and recording calibration | Feature-9 | Implemented; field calibration partial |
-| 8 | Seeing the faint side: display stretch, time windows, shared image/analysis RAM limit | Feature-5 | Implemented; real-earthshine display check pending |
-| 9 | First light: ZWO and QHY camera adapters, manual save | Feature-10 | Software implemented. QHY hardware and observing checks pending. |
-| 10 | A stable field: feature lock, drift readout, mount guiding (simulated mount, then ASCOM) | Feature-8 | Built; checked on the simulated mount and the ASCOM simulator. A real mount under the Moon is pending |
-| — | An overview picture of every clip | Feature-12 | Built; the observer's review of real clips is pending |
-| — | Watching the sky: Moon and Sky modes, large brightenings, release of slow drifters, a detection mask, a disk reserve | Feature-11 | Built; a night outside is pending |
-| — | A trigger for darkening, for transits in front of the sunlit Moon | Feature-13 | Built and measured on recordings; off by default. A real transit is pending |
-| — | Sky extras: dusk-to-dawn watching, exposure that follows the sky, a suggested kind for each clip, polygon masks | Feature-15 | Built; a night outside is pending |
-| — | Player One and ToupTek cameras (ToupTek also for the cameras it makes for other brands), with the observer's own vendor DLL | Feature-16 | Built and tested with test cameras; the vendors' DLLs and cameras are pending |
-| 11 | The full session record: continuous recording (also scheduled), the time record, site and instrument | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
-| 12 | More camera families; registration, transit tracking, event browser, export | — | Planned |
-
-Feature details are in [features.md](features.md) (open) and [implemented features.md](implemented%20features.md) (history). The order may change with prototype results and available hardware.
-
-## Scope
-
-**In scope:** lunar image acquisition from multiple camera families, software registration where needed, candidate detection, buffering, lossless recording, diagnostics, review, and holding the field on a locked lunar feature with small guide pulses.
-
-**Not in scope:** pointing the telescope. SeleneWatch does not slew, sync, park, or change the mount's tracking; the observer puts the Moon in the field, and guiding only keeps it there.
-
-## Architecture is expected to evolve
-
-The architecture is a **working proposal, not a fixed specification**. Modules, threading, buffering, GUI structure, algorithms, dependencies, and storage formats may change as development progresses. The evidence rules change only by an explicit, recorded decision. Everything else is driven by **reliable evidence capture, simplicity, maintainability, testability, and measured performance**.
-
-For goals, evidence rules, the time model, component responsibilities, and open decisions, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md).
-
-## Acknowledgements
-
-The established methods, interfaces and tools SeleneWatch builds on, each with what it contributes, and the AI coding assistants that have supported its development, are credited in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). The program shows the same page under **Help → Acknowledgements**.
+- **Raw pixels stay untouched** between the source and the evidence file; display stretch, inversion, and debayering happen only on screen.
+- **Native bit depths are preserved** lossless in SER files (8-bit or 16-bit words, with delivered sample layout recorded separately from advertised sensor ADC depth).
+- **Every frame keeps its index and UTC time**, with dropped-frame gaps recorded.
+- **Detection never goes blind** while clips collect or write; every candidate during Monitoring is logged even if disk reserve or writer backlog prevents saving its clip.
+- **Test injections are explicitly marked** per frame and per clip, and finished clips are never rewritten.
+- **Telescope motion is strictly bounded** to logged guide pulses; SeleneWatch never slews, syncs, parks, or alters mount tracking.
 
 ---
 
-*SeleneWatch is an early-stage project. Feedback, experiments, and design revisions are part of the development process.*
+## Installing and running
+
+Windows 64-bit releases are distributed in two forms:
+
+- **`SeleneWatch-<version>-win64.msi`** — installs per user (no administrator rights needed) under `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry, keeping your `events` folder on upgrades and uninstall.
+- **`SeleneWatch-<version>-win64.zip`** — portable archive; unpack into a writable folder and run `SeleneWatch.exe`.
+
+Install your camera vendor's Windows driver before connecting a camera. ZWO's SDK library ships with SeleneWatch; for QHYCCD, Player One, and ToupTek, SeleneWatch automatically discovers the vendor's x64 SDK DLL installed on your system (or lets you pick it in **Session → Camera support…**). See [User Manual §1](MANUAL.md#1-before-you-start) for exact driver, DLL, and optional ASCOM Platform setup.
+
+---
+
+## Scope and current status
+
+**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and scheduled continuous recording, visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
+
+**Not in scope:** pointing the telescope. SeleneWatch does not slew, sync, park, or turn mount tracking on or off; the observer centres the target, and guiding only holds it there.
+
+**Current maturity:**
+
+- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), `00_overview.png` summaries, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
+- **Verified on bench hardware:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, and two 30-minute unattended soak runs) and ASCOM simulator guiding checks.
+- **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; real earthshine/transit calibration; and unattended overnight Sky runs.
+- **Planned next:** additional camera families, frame registration, transit tracking, and an in-app event browser/exporter.
+
+Detailed test coverage and validation status are tracked in [User Manual §14](MANUAL.md#14-what-has-been-tested).
+
+---
+
+## Documentation map
+
+SeleneWatch is written in **C++20** with **Qt 6 Widgets** (dynamically linked under LGPLv3), keeping its processing core independent of Qt UI classes. The architecture is a working design expected to evolve as field testing progresses; only the evidence rules require an explicit recorded decision to change.
+
+| Document | Audience | Contents |
+| --- | --- | --- |
+| [MANUAL.md](MANUAL.md) | Observers | Installation, cameras, controls, detection, guiding, outputs, troubleshooting *(included in releases)* |
+| [DEVELOPER.md](DEVELOPER.md) | Contributors & maintainers | Building with Visual Studio/CMake/Qt 6, camera SDK options, CTest, probes, release packaging *(source repository)* |
+| [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) | Architects & reviewers | Project vision, evidence rules, time model, threading/ownership, SER contract, development stages *(source repository)* |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Users & packagers | Dependency versions, licenses, and binary redistribution obligations *(included in releases)* |
+| [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) | Everyone | Scientific references, libraries, and tools *(also shown under **Help → Acknowledgements**)* |
+| [features.md](features.md) & [implemented features.md](implemented%20features.md) | Contributors | Feature specifications, design rationales, validation records, and history *(source repository)* |
+
+---
+
+*SeleneWatch is an early-stage project. Feedback, observing tests, and design revisions are part of the development process.*

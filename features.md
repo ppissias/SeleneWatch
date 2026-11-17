@@ -2,6 +2,21 @@
 
 Open proposals. What is already in the program is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
+## Contents
+
+| Feature | Focus | Status |
+| --- | --- | --- |
+| [Feature-9 — A measured trigger](#feature-9--a-measured-trigger) | Per-pixel noise model, controls, overlays, recording calibration | Implemented; field calibration partial |
+| [Feature-5 — Display stretch and a ring sized in seconds](#feature-5--display-stretch-and-a-ring-sized-in-seconds) | Display stretch, Bayer colour, source-time windows, shared RAM ceiling | Implemented; real-earthshine display check pending |
+| [Feature-10 — First light: camera adapters (ZWO, then QHY) and manual save](#feature-10--first-light-camera-adapters-zwo-then-qhy-and-manual-save) | ZWO & QHY adapters, readbacks, Preview/Monitoring, Save now | Software implemented; QHY hardware & lunar checks pending |
+| [Feature-8 — Feature lock and mount guiding](#feature-8--feature-lock-and-mount-guiding) | Crater feature lock, drift readout, simulated & ASCOM pulse guiding | Built & simulator-checked; real mount on Moon pending |
+| [Feature-11 — Sky watch](#feature-11--sky-watch) | Moon vs. Sky mode, large brightenings, drifter release, mask, disk reserve | Built; overnight sky run pending |
+| [Feature-12 — An overview of every clip](#feature-12--an-overview-of-every-clip) | Annotated `00_overview.png` summary & crop strip per clip | Built; observer review of real clips pending |
+| [Feature-13 — A trigger for darkening](#feature-13--a-trigger-for-darkening) | Dark patches & large darkenings for sunlit lunar transits | Built & archive-measured; real transit pending |
+| [Feature-14 — The full session record](#feature-14--the-full-session-record) | Continuous & scheduled SER recording, clock checks, site & instrument | Built; scheduled transit recording pending |
+| [Feature-15 — Sky extras](#feature-15--sky-extras) | Dusk-to-dawn schedule, sky-following exposure, suggested kind, polygon masks | Built; overnight sky run pending |
+| [Feature-16 — A third camera family](#feature-16--a-third-camera-family) | Player One and ToupTek adapters & vendor DLL discovery | Built & tested with deterministic fakes and DLL probes; physical cameras pending |
+
 ## Feature-9 — A measured trigger
 
 > **14 November 2026: implementation complete; acceptance item 7 partly open.** The controls, detector, overlays, evidence, and automated/window checks are built. Recording measurements below cover mare, terminator, bright limb, crater rim, and RGB terrain. Earthshine was not identified in the survey, and the bright-limb comparison is saturation-limited. The full feature remains here until that observing calibration is completed; its proposal and review history are preserved below.

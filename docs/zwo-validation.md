@@ -48,7 +48,7 @@ Nine CTest targets pass in **Debug and Release, each with and without the ZWO SD
 
 **Siril 1.4.4** independently computed statistics for every frame of new RAW8 (31 frames), RAW16 (30), and induced-overload TEST (43) files. Independent header/trailer checks confirmed 1280×960, 8/16-bit storage, exact lengths, strictly increasing UTC trailer times, header start time and exact trailer/sidecar tick agreement. Those files include the new Observer declaration. The loss experiment's source indices remain in the sidecar; SER itself has no per-frame index field.
 
-Build commands and observer controls are in [README.md](../README.md#getting-started-development). `SELENEWATCH_ZWO_SDK_DIR` is empty by default. With it set, CMake requires the SDK header, x64 library/DLL and license, and copies the DLL and complete notice to the build directory. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) records the installed SDK's MIT-worded notice and redistribution obligations. No SDK binaries, captured frames or new image-processing dependency are added to the repository.
+Build commands are in [DEVELOPER.md](../DEVELOPER.md) and observer controls are in [MANUAL.md](../MANUAL.md). `SELENEWATCH_ZWO_SDK_DIR` is empty by default. With it set, CMake requires the SDK header, x64 library/DLL and license, and copies the DLL and complete notice to the build directory. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) records the installed SDK's MIT-worded notice and redistribution obligations. No SDK binaries, captured frames or new image-processing dependency are added to the repository.
 
 The manual probe is built as `SeleneWatchCameraProbe`:
 

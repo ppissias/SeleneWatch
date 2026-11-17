@@ -2,7 +2,7 @@
 
 Read [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) before changing the application. It is the project vision and the working architecture. It is a starting point, not a frozen specification.
 
-Machine paths, tool versions, and the commands to configure, build, and run this project are in [local environment.txt](local%20environment.txt).
+Portable build, test, SDK, and release instructions are in [DEVELOPER.md](DEVELOPER.md). Machine-specific paths, tool versions, and local test data on the maintainer's workstation are in [local environment.txt](local%20environment.txt). When changing user-visible controls, build options, or packaging, keep [README.md](README.md), [MANUAL.md](MANUAL.md), and [DEVELOPER.md](DEVELOPER.md) in sync.
 
 ## Principles
 

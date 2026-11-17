@@ -2,7 +2,7 @@
 # it, a .zip to unpack and run and a per-user Windows installer (.msi).
 # Included from CMakeLists.txt for the Release build only. Both packages come
 # from the "package" target, which the "Release-packages" build preset builds
-# from the command line or from Visual Studio (README, "Building a release").
+# from the command line or from Visual Studio (DEVELOPER.md, "Building a release").
 #
 # The installed tree, flat beside SeleneWatch.exe:
 #   SeleneWatch.exe, the Qt DLLs and plugins (windeployqt), the Visual C++

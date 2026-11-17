@@ -1,12 +1,13 @@
 SeleneWatch local environment
-Checked 2026-11-10 on this machine.
+Checked 2026-11-17 on this machine.
 
 Project
   Root: C:\dev\projects\SeleneWatch
   Description: PROJECT_DESCRIPTION.md
+  Developer guide: DEVELOPER.md
   Language: C++20, set by CMAKE_CXX_STANDARD in CMakeLists.txt
   Build presets & Qt kit definition: CMakeUserPresets.json
-    - Presets: Debug-x64, Release-x64
+    - Presets: Debug-x64, Release-x64, Release-packages
     - Generator: Ninja
     - Build outputs: out\build\debug, out\build\release
     - Active Qt kit: configured under 'QTDIR' in CMakeUserPresets.json (currently C:\dev\tools\Qt\6.12.0\msvc2022_64)
@@ -67,7 +68,7 @@ Camera SDKs (not part of the repository)
   All these paths contain a space; quote them in CMake and on the command line.
   Since 2026-11-15 the Debug-x64 and Release-x64 presets build the camera adapters: they inherit the hidden
   Camera-SDKs preset in CMakeUserPresets.json, which sets SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR
-  (and since 2026-11-17 SELENEWATCH_PLAYERONE_SDK_DIR and SELENEWATCH_TOUPTEK_SDK_DIR) to the paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera and QHY camera
+  (and since 2026-11-17 SELENEWATCH_PLAYERONE_SDK_DIR and SELENEWATCH_TOUPTEK_SDK_DIR) to the paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera, QHY camera, Player One camera, and ToupTek camera
   under Source, and ASICamera2.dll plus licenses\ZWO-ASI-SDK.txt are copied into out\build\debug (or release).
   Separate single-adapter builds (below) are still possible but no longer needed for daily work.
   Older separate SDK builds: out\build\zwo-debug and out\build\zwo-release.
@@ -127,7 +128,7 @@ Release packaging (checked 2026-11-17)
     cmake --build --preset Release-packages
   or, for a release (clean tree, all tests, then the same packaging):
     packaging\make_release.ps1
-  Makes out\build\release\package\SeleneWatch-<release>-win64.zip and .msi; see README.md, "Building a release".
+  Makes out\build\release\package\SeleneWatch-<release>-win64.zip and .msi; see DEVELOPER.md, "Building a release".
   Qt notices are generated from C:\dev\tools\Qt\Docs\Qt-6.12.0 (packaging\make_qt_notices.ps1);
   Qt's LGPLv3/GPLv3 texts come from C:\dev\tools\Qt\Licenses\LICENSE.
 
@@ -145,14 +146,14 @@ Quick Start (PowerShell Shortcut)
     cmake --build out/build/debug
     .\out\build\debug\SeleneWatch.exe
 
-  The preset builds include both camera adapters, so live cameras work from either one:
+  The preset builds include all configured camera adapters, so live cameras work from either one:
     .\out\build\debug\SeleneWatch.exe   or   .\out\build\release\SeleneWatch.exe
-  With the stream stopped, choose ZWO ASI camera or QHY camera from Source at the top left.
+  With the stream stopped, choose the camera family from Source at the top left.
   The device list opens on the left. Use Refresh cameras if the device is missing.
 
-Command Line Build (Manual)
-  Open a command prompt or PowerShell, then:
+General build, test, and release workflows live in DEVELOPER.md. Machine-specific CLI paths follow:
 
+Command Line Build (Manual paths on this machine)
   call "C:\dev\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
   cd /d C:\dev\projects\SeleneWatch
   "C:\dev\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --preset Debug-x64
@@ -160,15 +161,11 @@ Command Line Build (Manual)
 
   (Release uses --preset Release-x64 and out\build\release.)
 
-Running the Tests
-  ctest --test-dir out\build\debug --output-on-failure
-  CTest runs SeleneWatchTests with "-o -,tap". On Windows, Qt Test's plain text goes to the
-  debugger instead of stdout when the process has no console of its own (as under CTest or an
-  automation tool). TAP always reaches stdout. From a console window,
-  out\build\debug\SeleneWatchTests.exe prints plain text as usual; elsewhere add "-o -,tap".
-
-Running the Executable from the Command Line
-  Ensure Qt runtime DLLs and plugins are accessible:
+Running the Tests & Executable outside the IDE (paths on this machine)
   set PATH=C:\dev\tools\Qt\6.12.0\msvc2022_64\bin;%PATH%
   set QT_PLUGIN_PATH=C:\dev\tools\Qt\6.12.0\msvc2022_64\plugins
+  ctest --test-dir out\build\debug --output-on-failure
   out\build\debug\SeleneWatch.exe
+
+  Note: CTest runs Qt Test targets with "-o -,tap". On Windows, Qt Test plain text goes to the
+  debugger instead of stdout when the process has no console of its own; TAP always reaches stdout.

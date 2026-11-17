@@ -2,6 +2,15 @@
 
 Historical record of completed features in the program. Open proposals stay in [features.md](features.md). When moving completed features from `features.md`, append them here in full detail without removing or condensing specifications, review notes, or design decisions. This file is an append-only history.
 
+## Contents
+
+- [Feature-2 — Preview and synthetic source (Stage 2)](#feature-2--preview-and-synthetic-source-stage-2)
+- [Feature-3 — RAM ring buffer (Stage 3)](#feature-3--ram-ring-buffer-stage-3)
+- [Feature-4 — First detector and event capture (Stage 4)](#feature-4--first-detector-and-event-capture-stage-4)
+- [Code review — November 2026](#code-review--november-2026)
+- [Feature-7 — Evidence safety: shared frames, no blind detector, and a lossless file path](#feature-7--evidence-safety-shared-frames-no-blind-detector-and-a-lossless-file-path)
+- [Feature-6 — Recordings in, SER out](#feature-6--recordings-in-ser-out)
+
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
 A `Frame` and a threaded `SyntheticFrameSource` draw a lunar disk with a slow moving marker. The window starts and stops the stream, shows the latest frame, and can drop preview frames when it falls behind.

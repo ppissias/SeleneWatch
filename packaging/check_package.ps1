@@ -25,7 +25,7 @@ try {
 
     $expected = 'SeleneWatch.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms\qwindows.dll',
         'msvcp140.dll', 'vcruntime140.dll', 'LICENSE.txt', 'README.md', 'MANUAL.md', 'THIRD_PARTY_LICENSES.md',
-        'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt'
+        'ACKNOWLEDGEMENTS.md', 'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt'
     foreach ($file in $expected) {
         if (-not (Test-Path (Join-Path $app $file))) { throw "The package lacks $file" }
     }

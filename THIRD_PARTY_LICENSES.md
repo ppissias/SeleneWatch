@@ -41,7 +41,7 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ---
 
-## QHYCCD Windows SDK (user-installed runtime)
+### 3. QHYCCD Windows SDK (user-installed runtime)
 
 - **Installed version:** Windows x64 25.6.16.15, confirmed from the file/header and a runtime version-only query.
 - **Vendor sources reviewed:** [SDK documentation and demos](https://www.qhyccd.com/sdk-demo-and-sample-project/), [downloads](https://www.qhyccd.com/download/). A [historical SDK repository](https://github.com/qhyccd-lzr/QHYCCD_Linux) was also checked for context, without establishing this Windows package's terms.
@@ -50,7 +50,27 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 - **Distribution:** QHY headers, import libraries, DLLs, drivers, firmware and demos stay out of the repository and SeleneWatch packages. The tested `qhyccd.dll` imports Windows components. Bundling any QHY component would require verifying its terms and notices first. SeleneWatch's original adapter code remains BSD-2-Clause.
 - **Validation:** Physical camera qualification is pending. [QHY integration and validation](docs/qhy-development.md)
 
-## ASCOM Platform (user-installed runtime, mount guiding)
+---
+
+### 4. Player One camera SDK (user-installed runtime, Feature-16)
+
+- **Version used to build:** Windows camera SDK 3.10.1, from [Player One's software page](https://player-one-astronomy.com/service/software/) (`PlayerOne_Camera_SDK_Windows_V3.10.1.zip`, sha256 `428cdf88f14f5a7170c41cc9be5353030dba1cd8c97fdd72ec06d64940e2f7e5`), unpacked outside the repository.
+- **Terms:** the SDK's `license.txt` (copyright Player One Astronomy Co., Ltd.) grants use "for the secondary development of our company's cameras or other equipment" and says "You can use our company's products and this SDK to develop any products without any restrictions". It grants nothing explicit about redistribution, and keeps an MIT-style warranty disclaimer.
+- **Integration:** only `cameras/playerone_sdk.cpp` includes `PlayerOneCamera.h`, for the function declarations. Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `PlayerOneCamera.dll` by absolute path, through `cameras/vendor_runtime`.
+- **Distribution:** no Player One file is in the repository or the packages. The observer installs Player One's driver and DLL.
+
+---
+
+### 5. ToupTek camera SDK (user-installed runtime, Feature-16)
+
+- **Version used to build:** `toupcamsdk.20261024.zip` (library version 60.33015.20261024), from [ToupTek's SDK downloads](https://www.touptekphotonics.com/download/?category=SDK) (sha256 `8845f9d770e07e301126a8142a4609d8ed5129264f4d7cbdefe62c7913cfc444`), unpacked outside the repository.
+- **Terms:** the package holds no license text, and `toupcam.h` names none. Redistribution rights are unknown.
+- **Integration:** only `cameras/touptek_sdk.cpp` includes `toupcam.h`, for the declarations, with its import markers off (`TOUPCAM_NOIMPORTS`). Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `toupcam.dll` by absolute path.
+- **Distribution:** no ToupTek file is in the repository or the packages. The observer installs the camera's driver and ToupTek's DLL.
+
+---
+
+### 6. ASCOM Platform (user-installed runtime, mount guiding)
 
 - **Installed version on the development machine:** ASCOM Platform 7.1 Update 3 (7.1.3.4851), with the OmniSim simulator.
 - **License:** The ASCOM Platform repository is licensed under Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0, SPDX `CC-BY-SA-3.0`), except `DriverAccess.XML`, which is MIT. Sources: the [ASCOMPlatform repository page](https://github.com/ASCOMInitiative/ASCOMPlatform) ("The entire ASCOM Platform (as opposed to drivers and programs that use it) is open source...") and its [LicenseExceptions.txt](https://github.com/ASCOMInitiative/ASCOMPlatform/blob/main/LicenseExceptions.txt), read 15 November 2026. No license file ships with the installed Platform 7 in Program Files. The OmniSim simulator ships its own MIT notice (`C:\Program Files\ASCOM\OmniSimulator\license.md`).
@@ -58,19 +78,25 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 - **Members used:** the ASCOM Telescope interface's `Connected` (read and write), `CanPulseGuide`, `Tracking`, `Slewing`, `AtPark`, `SideOfPier`, `AlignmentMode`, `GuideRateRightAscension`, `GuideRateDeclination`, `IsPulseGuiding`, and `PulseGuide`; and `ASCOM.Utilities.Chooser`'s `DeviceType` and `Choose` for the driver dialog.
 - **Distribution:** SeleneWatch packages contain no ASCOM component. The observer installs the ASCOM Platform and their mount's driver. Read as written, CC BY-SA obligations attach to distributing the Platform or adaptations of it, and the Platform page separates the Platform from "drivers and programs that use it". This is a reading of the license text, not legal advice. Bundling any ASCOM file, or the OmniSim simulator, would need its terms and notices checked first. SeleneWatch's adapter code remains BSD-2-Clause.
 
-## Microsoft Visual C++ runtime (shipped in release packages)
+---
+
+### 7. Microsoft Visual C++ runtime (shipped in release packages)
 
 - **Files:** `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140*.dll`, `concrt140.dll`, copied unmodified from Visual Studio's redistributable folder (`VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT`, file version 14.51.36247.0) by CMake's `InstallRequiredSystemLibraries`. The Universal CRT is part of Windows 10 and 11 and is not shipped.
 - **Terms:** Visual Studio's license lets these files, listed in its `REDIST` list as distributable code, be shipped with an application, unmodified. Qt's DLLs need the same runtime.
 
-## WiX Toolset 3 (build tool for the installer, not shipped)
+---
+
+### 8. WiX Toolset 3 (build tool for the installer, not shipped)
 
 - **Version:** 3.14.1, binaries from the [WiX Toolset v3 releases](https://github.com/wixtoolset/wix3/releases), used by CPack to make the `.msi`.
 - **License:** Microsoft Reciprocal License (MS-RL), for the toolset itself (`bin\LICENSE.TXT`). The project's [About page](https://wixtoolset.org/docs/about), read 17 November 2026, states that the packages WiX generates are generally outside the MS-RL, and that the code and binaries placed in them keep their own licenses. No WiX source is copied into SeleneWatch.
 
+---
+
 ## Release packages: what is shipped and the obligations met
 
-Made by the Release build's `package` target, from the command line or Visual Studio (see the README, *Building a release*):
+Made by the Release build's `package` target, from the command line or Visual Studio (see [DEVELOPER.md](DEVELOPER.md) in the source repository, *Building a release*):
 
 - **SeleneWatch:** `SeleneWatch.exe`, under BSD-2-Clause (`LICENSE.txt`).
 - **Qt 6.12.0, LGPLv3:** `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, and the plugins `platforms/qwindows.dll`, `styles/qmodernwindowsstyle.dll`, `imageformats/qgif.dll`, `qico.dll`, `qjpeg.dll`, unmodified from the Qt installation and dynamically linked, so a user can replace them with compatible builds.
@@ -83,19 +109,7 @@ Made by the Release build's `package` target, from the command line or Visual St
 - **Microsoft Visual C++ runtime:** as above.
 - **Not shipped:** QHY, Player One and ToupTek files, ASCOM, camera drivers, test and probe programs.
 
-## Player One camera SDK (user-installed runtime, Feature-16)
-
-- **Version used to build:** Windows camera SDK 3.10.1, from [Player One's software page](https://player-one-astronomy.com/service/software/) (`PlayerOne_Camera_SDK_Windows_V3.10.1.zip`, sha256 `428cdf88f14f5a7170c41cc9be5353030dba1cd8c97fdd72ec06d64940e2f7e5`), unpacked outside the repository.
-- **Terms:** the SDK's `license.txt` (copyright Player One Astronomy Co., Ltd.) grants use "for the secondary development of our company's cameras or other equipment" and says "You can use our company's products and this SDK to develop any products without any restrictions". It grants nothing explicit about redistribution, and keeps an MIT-style warranty disclaimer.
-- **Integration:** only `cameras/playerone_sdk.cpp` includes `PlayerOneCamera.h`, for the function declarations. Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `PlayerOneCamera.dll` by absolute path, through `cameras/vendor_runtime`.
-- **Distribution:** no Player One file is in the repository or the packages. The observer installs Player One's driver and DLL.
-
-## ToupTek camera SDK (user-installed runtime, Feature-16)
-
-- **Version used to build:** `toupcamsdk.20261024.zip` (library version 60.33015.20261024), from [ToupTek's SDK downloads](https://www.touptekphotonics.com/download/?category=SDK) (sha256 `8845f9d770e07e301126a8142a4609d8ed5129264f4d7cbdefe62c7913cfc444`), unpacked outside the repository.
-- **Terms:** the package holds no license text, and `toupcam.h` names none. Redistribution rights are unknown.
-- **Integration:** only `cameras/touptek_sdk.cpp` includes `toupcam.h`, for the declarations, with its import markers off (`TOUPCAM_NOIMPORTS`). Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `toupcam.dll` by absolute path.
-- **Distribution:** no ToupTek file is in the repository or the packages. The observer installs the camera's driver and ToupTek's DLL.
+---
 
 ## Camera families evaluated (17 November 2026)
 
@@ -107,6 +121,8 @@ Player One Astronomy, ToupTek (with Altair Astro and other brands that ship the 
 
 None of them grants redistribution clearly. Any of them therefore follows the QHY pattern: SDK files stay out of the repository and the packages, and the observer installs the vendor's runtime.
 
+---
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:
@@ -115,4 +131,4 @@ When proposing or introducing any new third-party dependency into SeleneWatch:
 2. **LGPL Libraries:** LGPLv3 or LGPLv2.1 libraries may be used under the condition that they are **dynamically linked** and allow user replacement.
 3. **No Strongly Copyleft Dependencies (GPL):** Do not introduce GPL-licensed libraries, GPL-only Qt modules, or AGPL code into SeleneWatch without prior architectural and licensing review and explicit approval.
 4. **Proprietary Camera SDKs:** If a camera vendor SDK is proprietary/closed-source with redistribution restrictions, isolate it behind the modular Frame Source abstraction so SeleneWatch's core remains buildable and distributable without proprietary locks.
-5. **Update This Document:** Add any accepted dependency to the table above before merging into the main branch.
+5. **Update This Document:** Add any accepted dependency to the inventory above before merging into the main branch.

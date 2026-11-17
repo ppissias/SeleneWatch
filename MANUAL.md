@@ -2,7 +2,7 @@
 
 This manual is for observers who use SeleneWatch at the telescope or with their own recordings. It describes the application as it is now. SeleneWatch is still evolving, so names, defaults and layouts may change; this manual changes with them. It has no screenshots yet for the same reason.
 
-For building SeleneWatch from source, see [Getting started](README.md#getting-started-development) in the README. For the design and the evidence rules, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md).
+For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md) (in the source repository). For the design and the evidence rules, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) (in the source repository).
 
 > **Candidates, not discoveries.** SeleneWatch flags *candidate* events. A candidate is not a confirmed lunar impact. Confirming a flash normally needs an independent observation from another telescope or site. SeleneWatch keeps each candidate's frames, timing and settings so that comparison is possible.
 
@@ -135,14 +135,16 @@ Choose **Recording file**, press **Open…**, and pick a file.
 
 When a recording ends, the stream stops by itself and any clip still being collected is saved.
 
-### ZWO ASI camera / QHY camera
+### Cameras (ZWO ASI, QHY, Player One, ToupTek)
 
-These appear in the Source list when SeleneWatch was built with that camera family.
+These appear in the **Source** list when SeleneWatch was built with that camera family.
 
-- **ZWO:** select **ZWO ASI camera**; the **Camera** dock opens on the left. Press **Refresh cameras** if your camera is not listed, then choose it.
-- **QHY:** select **QHY camera**; the **QHY camera** dock opens. If the SDK library is installed somewhere unusual, **Choose QHY DLL…** points SeleneWatch at it, and **Use automatic discovery** returns to the default search.
+- **ZWO ASI camera:** opens the **Camera** dock on the left. Press **Refresh cameras** if your camera is not listed, then choose it.
+- **QHY camera:** opens the **QHY camera** dock. If the SDK library is installed somewhere unusual, **Choose QHY DLL…** points SeleneWatch at it, and **Use automatic discovery** returns to the default search.
+- **Player One camera:** opens the **Player One camera** dock. Uses `PlayerOneCamera.dll` (x64) via **Choose Player One DLL…** or automatic discovery.
+- **ToupTek camera:** opens the **ToupTek camera** dock (also for cameras ToupTek makes for other brands). Uses `toupcam.dll` (x64) via **Choose ToupTek DLL…** or automatic discovery.
 
-See [section 5](#5-camera-settings) for the camera controls.
+See [section 1](#1-before-you-start) for driver/DLL discovery and [section 5](#5-camera-settings) for camera controls.
 
 ---
 
@@ -435,6 +437,8 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 
 ## 12. An observing session, step by step
 
+### Lunar monitoring
+
 1. Connect the camera and, if guiding, the mount. Start SeleneWatch.
 2. Choose the camera under **Source** and press **Start preview**.
 3. Focus and frame the Moon. Set exposure and gain in the Camera dock. Use **Display and capture** levels and the **Histogram** to check that the bright limb is not badly clipped and that the earthshine side is visible.
@@ -448,13 +452,27 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 8. **Stop monitoring**, then **Stop stream**, at the end.
 9. Review the clip folders and `candidates.txt`. Compare candidates with other observers' records by UTC time.
 
+### Sky watch (dusk to dawn)
+
+1. Enter your site position once under **Session → Site and instrument…** with **Position known** ticked.
+2. Choose your camera under **Source** (optionally tick **Connect at startup**), and under **View → Detection** switch **Watching** to **The sky**.
+3. Start Preview briefly to frame the sky, tune initial exposure/gain, and exclude trees, roofs, or streetlights with **Draw mask**.
+4. Tick **Watch from dusk to dawn** and set **Sun below** (default −10°); optionally enable **Follow the sky's brightness** with your allowed exposure and gain limits.
+5. Leave SeleneWatch ready in **Preview** (or stopped with the camera selected); it starts and stops Monitoring automatically at dusk and dawn, and you can inspect saved clips and overviews in `events` the next morning.
+
+### Predicted occultation or transit (continuous recording)
+
+1. Check **Session → Recordings folder…** if you want the continuous SER file written to a larger or faster SSD, and verify your PC clock check under **Session → Site and instrument…**.
+2. Start Preview, tune exposure, gain, and ROI, then press **Start monitoring** a couple of minutes before the predicted time.
+3. Either press **Record** manually before the event and **Stop recording** afterwards, or set the UTC start time and duration in **Session → Schedule a recording…** before it arrives. Detection keeps running meanwhile.
+
 ---
 
 ## 13. Troubleshooting
 
 | Problem | What to try |
 | --- | --- |
-| The camera does not appear under **Source** | That camera family was not built into this copy of SeleneWatch. See the README's build section. |
+| The camera does not appear under **Source** | That camera family was not built into this copy of SeleneWatch. See [DEVELOPER.md](DEVELOPER.md) (in the source repository). |
 | The camera is not in the device list | Check the cable and the vendor driver, then press **Refresh cameras**. **Session → Camera support…** shows whether the camera maker's SDK library was found, its version, and the cameras it sees. For QHY, Player One and ToupTek, choose the maker's x64 DLL there or with **Choose … DLL** in the camera panel. |
 | **Start monitoring** is greyed out | The source has ended or failed, or a mode change is still in progress. |
 | A recording is refused | Compressed AVI files are not supported. Convert to SER or uncompressed AVI. |

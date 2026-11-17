@@ -1,6 +1,6 @@
 # SeleneWatch — Project Description and Architecture
 
-> **Status:** Working architecture, revised November 2026 after Feature-6, Feature-9/Feature-5 and the Feature-10 ZWO and QHY software integration. QHY hardware and lunar observing checks remain open. This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down. [ZWO bench checks](docs/zwo-validation.md), [open features](features.md), [implemented feature history](implemented%20features.md)
+> **Status:** Working architecture, revised November 2026 through Feature-16 (ZWO, QHY, Player One and ToupTek camera adapters, continuous/scheduled recording, guiding, Sky mode and clip overviews implemented; live camera, mount and lunar/sky observing checks remain open). This document holds the goals, the rules every feature must respect, and the overall structure. Where a feature conflicts with a rule here, either the feature changes or the rule is revised on purpose and the reason is written down. [ZWO bench checks](docs/zwo-validation.md), [open features](features.md), [implemented feature history](implemented%20features.md)
 
 ## 1. Project Overview
 
@@ -111,7 +111,7 @@ The application is a **processing core** with a **Qt Widgets interface**. The co
 
 `Session` owns the frame path. It applies a requested test blip before publication, then gives the same read-only frame to the preview and the capture. The window selects the source, sends requests, and reads notifications and counters.
 
-`Session` also owns Stopped / Preview / Monitoring state. Preview is the default and keeps acquisition, bounded history and analysis active with capture disabled. Monitoring enables both automatic clips and explicit Save now. Mode requests cross on the source thread before a frame or after a camera read returns without one. Leaving Monitoring hands off the current available clip before Preview camera edits are allowed. The writer drains immutable jobs independently. ZWO and QHY queue live controls for their workers and publish readback snapshots under a mutex. The camera SDKs lack settings identifiers for individual frames, so Monitoring starts with a fresh open/readback and an empty history and reference. Synthetic and recorded sources retain valid same-configuration history and reference and reconfirm ongoing patches on entry. [Preview and Monitoring](docs/preview-monitoring.md)
+`Session` also owns Stopped / Preview / Monitoring state. Preview is the default and keeps acquisition, bounded history and analysis active with capture disabled. Monitoring enables both automatic clips and explicit Save now. Mode requests cross on the source thread before a frame or after a camera read returns without one. Leaving Monitoring hands off the current available clip before Preview camera edits are allowed. The writer drains immutable jobs independently. Camera adapters queue live controls for their workers and publish readback snapshots under a mutex. The camera SDKs lack settings identifiers for individual frames, so Monitoring starts with a fresh open/readback and an empty history and reference. Synthetic and recorded sources retain valid same-configuration history and reference and reconfirm ongoing patches on entry. [Preview and Monitoring](docs/preview-monitoring.md)
 
 ### Frame ownership
 
@@ -129,7 +129,7 @@ This was chosen in Feature-7 over copying the ring at each trigger, and over pro
 
 SeleneWatch is meant to work with many cameras, not one vendor. Each camera family is an **adapter** behind the same frame source type. Nothing outside an adapter depends on a vendor's types or behaviour.
 
-- **Native SDKs.** Planetary and lunar cameras are driven through their vendors' SDKs, because those are the paths that deliver high frame rates. Generic still-image interfaces such as ASCOM are built around single exposures and are not suited to high-rate video. Likely families include ZWO ASI, QHYCCD, Player One, ToupTek-based cameras (sold under several brands), and industrial cameras (for example Basler or FLIR through their SDKs or GenICam). ZWO is the first and QHYCCD the second (Feature-10), because those are the cameras in hand; the order of the rest follows the hardware observers actually use.
+- **Native SDKs.** Planetary and lunar cameras are driven through their vendors' SDKs, because those are the paths that deliver high frame rates. Generic still-image interfaces such as ASCOM are built around single exposures and are not suited to high-rate video. Implemented families cover ZWO ASI, QHYCCD (Feature-10), Player One, and ToupTek-based cameras (Feature-16); industrial cameras (for example Basler or FLIR through their SDKs or GenICam) remain a future direction as observers need them.
 - **Optional at build time.** Each adapter builds against its SDK declarations when enabled in CMake. Builds without camera SDKs support synthetic and recorded sources. SDKs stay outside the repository. License and packaging details are recorded in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 - **Adapters report what the camera can do.** Supported formats and bit depths, where the significant bits sit in a 16-bit word, whether there is a hardware frame counter, and what the frame time means (host arrival, exposure start, or a GPS-stamped exposure). Evidence rules 2 and 4 depend on those answers, so an adapter that cannot give one says so rather than guessing.
 - **Mono and colour sensors are both supported.** A colour camera's raw Bayer mosaic is stored as it arrives, with its pattern (Evidence rule 2). It is debayered only for the screen. The trigger compares each pixel with its own history and runs on the mosaic unchanged. The feature lock bins a mosaic 2×2 before matching. Nothing else knows whether the sensor is mono or colour.
@@ -140,6 +140,8 @@ The ZWO adapter is implemented in `cameras/`. Only `zwo_sdk.cpp` includes the SD
 The ASI SDK provides cumulative losses but no per-exposure frame ID. Published indices are delivery ordinal plus the last observed SDK drop count; gap placement is approximate because of SDK buffering. Each frame records that cumulative count, UTC immediately after `ASIGetVideoData`, and the accompanying host steady time. A telemetry error or counter reset preserves the received frame with unknown loss telemetry, then ends acquisition visibly. Actual unplug and hour-long lunar acceptance remain open. [ZWO validation](docs/zwo-validation.md) records the Mini's bench rates, injection recovery and deliberately induced SDK losses.
 
 `QhySource` uses a private SDK binding that loads the user's installed x64 DLL on demand. The shared pool charges the full SDK-sized buffer and the source publishes checked native image bytes. The camera ID is recorded separately from the unknown serial. The SDK provides neither a loss count nor exposure timestamps through this binding, so the source reports delivery ordinals and host arrival time. The adapter commands bin 1 and checks the delivered geometry. QHY and ZWO share the settings editor, Bayer-phase helper and diagnostic runner. Each source owns its own camera lifecycle and telemetry. [QHY integration and validation](docs/qhy-development.md)
+
+`PlayerOneSource` and `ToupTekSource` (Feature-16) follow the same header-only build and on-demand DLL pattern through `cameras/vendor_runtime`, discovering the user's installed x64 DLL (or checking N.I.N.A., 64-bit SharpCap, and for ToupTek the ASCOM driver folder) without shipping vendor binaries. Player One reports frame losses and supports mono binning (averaged); ToupTek uses bin 1, even ROI, and the camera's own frame counter for dropped-frame tracking.
 
 ### Threads and ownership
 
@@ -200,15 +202,15 @@ The same table bounds continuous recording. The upper rows need an SSD. The writ
 
 Detection keeps running during a continuous recording. A candidate found during it is still written as a clip and also refers to the recording's frame index.
 
-Manual save is implemented for synthetic, recorded, ZWO and QHY sources. Save now marks the latest source frame and extends the current clip or starts one from the ring while detection continues. Host request UTC and the applied source UTC/index are distinct, and manual marks remain identifiable through partial endings, continuation, and refusal.
+Manual save is implemented across synthetic, recorded, and camera sources. Save now marks the latest source frame and extends the current clip or starts one from the ring while detection continues. Host request UTC and the applied source UTC/index are distinct, and manual marks remain identifiable through partial endings, continuation, and refusal.
 
-Continuous recording is implemented (Feature-14), by the Record button or a schedule by UTC frame time. It writes to `events/recordings/<UTC stamp>/` with its own writer thread and queue, and stops with its reason rather than drop a frame.
+Continuous recording is implemented (Feature-14), by the Record button or a schedule by UTC frame time. It writes to `events/recordings/<UTC stamp>/` by default (or a folder chosen with **Session → Recordings folder…**) with its own writer thread and queue, and stops with its reason rather than drop a frame.
 
 Alongside the clips, `events/candidates.txt` keeps each candidate's time, frames, and measured values (Evidence rule 5). When the writer consumes a finished clip job, it flushes a pending line before writing pixels and appends the saved/not-saved outcome afterwards, associated by a record ID. An interrupted write can leave a pending line without an outcome. An open clip and jobs still waiting in RAM can be lost in a crash; the journal is not an immediate durable record of the trigger. Clips can overlap in time; that is accepted, because losing frames is worse than storing some twice. In memory the overlapping frames are shared; on disk they are written twice.
 
 While a feature lock is held, `events/guiding.txt` keeps the measured field offset once a second and every guide pulse sent to the mount (Evidence rule 9).
 
-Output goes next to the executable for now (a Feature-4 decision). A configurable location comes when there is a settings page for other reasons.
+Clips and session logs go to `events/` next to the executable for now (a Feature-4 decision); continuous recordings can already point to another drive or folder, and a broader configurable storage location belongs in a general settings page later.
 
 ## 8. Intended Runtime Workflow
 
@@ -233,7 +235,7 @@ Output goes next to the executable for now (a Feature-4 decision). A configurabl
 | Image processing | **Plain C++ loops** | The flash trigger is a few passes over the pixels. OpenCV (Apache-2.0) is taken only when registration or tracking needs it, as argued in Feature-9. |
 | Evidence files | **SER, written and read by SeleneWatch** | A small, documented format; no dependency needed. PNG through Qt for preview images. |
 | Recorded input | **SER and uncompressed AVI, both with SeleneWatch's own readers** | Uncompressed AVI is lossless and is what planetary capture programs write. A compressed AVI is refused with its codec shown; a decoder through Windows Media Foundation is added only if the observer's files need one (Feature-6). |
-| Cameras | **Native vendor SDKs, one adapter per family** | ZWO ASI first (ASICamera2 SDK), then QHYCCD, then other families. SDKs are closed or vendor-licensed, are not stored in the repository, and are optional at build time (Section 6, Camera support). |
+| Cameras | **Native vendor SDKs, one adapter per family** | ZWO ASI first (ASICamera2 SDK), then QHYCCD, Player One, and ToupTek-based families. SDKs are closed or vendor-licensed, are not stored in the repository, and are optional at build time (Section 6, Camera support). |
 | Mount | **ASCOM through late-bound COM, guide pulses only** | The driver is found at run time; no ASCOM code is copied or linked. Optional at build time. A simulated mount serves the tests. ASCOM Alpaca is the fallback if 32-bit in-process drivers prove common (Feature-8). |
 | Feature lock | **Plain C++ loops** | Normalised cross-correlation of a small template in a small window, a few times a second. No library is needed for it. |
 | Version control | **Git** | |
@@ -264,11 +266,11 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 ## 11. Code Organization
 
-Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. Release packaging lives in `packaging/`: the install rules and package settings, the check run on every package, the release script, and the Qt notices shipped with a release (README, *Building a release*). The remaining core and UI files sit at the root, with tests in `tests/`.
+Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. Release packaging lives in `packaging/`: the install rules and package settings, the check run on every package, the release script, and the Qt notices shipped with a release ([DEVELOPER.md](DEVELOPER.md), *Building a release*). The remaining core and UI files sit at the root, with tests in `tests/`.
 
 The release number (`YYYY.MM-NN`, set once in `CMakeLists.txt`) and the Git revision are generated into `selenewatch_version.h` at build time and recorded on every `event.txt` and `recording.txt`, so each piece of evidence names the program that wrote it.
 
-A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. Feature-16 added Player One and ToupTek there, and `cameras/vendor_runtime` for loading a vendor DLL the observer installs (QHY, Player One, ToupTek). The window sees each camera family through `CameraFamilyPanel` (`camera_family_panel.h`): its Source entry, discovery, requested settings, the source it makes, readbacks and live controls. Each family is one implementation, and the window names none of them. A plausible later layout follows.
+A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. Feature-16 added Player One and ToupTek there, and `cameras/vendor_runtime` for loading a vendor DLL the observer installs (QHY, Player One, ToupTek). The window sees each camera family through `CameraFamilyPanel` (`camera_family_panel.h`): its Source entry, discovery, requested settings, the source it makes, readbacks and live controls. Each family is one implementation, and the window names none of them. Currently `sources/`, `cameras/`, `guiding/`, and `recording/` sit at the repository root alongside the remaining core and UI files; a plausible target future layout follows.
 
 ```text
 SeleneWatch/
@@ -311,6 +313,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside pending |
 | — | **A trigger for darkening.** Dark patches and large darkenings, for transits in front of the sunlit Moon; off by default after measurement on recordings | Feature-13 | Built; a real transit pending |
 | — | **Sky extras.** Watching from dusk to dawn by the Sun's altitude, an exposure that follows the sky, a suggested kind for each clip, polygon masks | Feature-15 | Built; a night outside pending |
+| — | **Player One and ToupTek cameras** (ToupTek also for cameras it makes for other brands), with the observer's own vendor DLL | Feature-16 | Built and checked with deterministic camera tests and runtime DLL loading; physical cameras pending |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
 | 12 | **Later.** More camera families as observers bring the hardware; registration, transit tracking, event browser, export | To be written | Planned |
 
