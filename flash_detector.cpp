@@ -142,14 +142,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         if (settings_.mask != maskBuiltFor_ || maskWidth_ != width_ || maskHeight_ != height_)
         {
             masked_.assign(settings_.mask.empty() ? 0 : pixels, 0);
-            for (int r = 0; r < settings_.mask.count; ++r)
-            {
-                const MaskRect& rect = settings_.mask.rects[static_cast<size_t>(r)];
-                const int x0 = std::clamp(rect.x, 0, width_), x1 = std::clamp(rect.x + rect.width, 0, width_);
-                for (int y = std::max(0, rect.y); y < std::min(height_, rect.y + rect.height); ++y)
-                    std::fill(masked_.begin() + static_cast<ptrdiff_t>(y) * width_ + x0,
-                        masked_.begin() + static_cast<ptrdiff_t>(y) * width_ + x1, uint8_t{1});
-            }
+            if (!settings_.mask.empty()) settings_.mask.fill(width_, height_, masked_.data());
             unmaskedPixels_ = pixels - static_cast<size_t>(std::count(masked_.begin(), masked_.end(), uint8_t{1}));
             maskBuiltFor_ = settings_.mask; maskWidth_ = width_; maskHeight_ = height_;
         }

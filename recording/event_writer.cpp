@@ -91,18 +91,6 @@ void writeTestSignalLines(QTextStream& out, const EventClip& clip)
     }
 }
 
-// The mask's rectangles as x,y,width,height, separated by semicolons.
-QString maskText(const DetectionMask& mask)
-{
-    QStringList rects;
-    for (int i = 0; i < mask.count; ++i)
-    {
-        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
-        rects << QString("%1,%2,%3,%4").arg(rect.x).arg(rect.y).arg(rect.width).arg(rect.height);
-    }
-    return rects.join(';');
-}
-
 // The model settings, and the Sky settings (Feature-11) when they are on.
 QString detectorModelFields(const DetectionSettings& settings)
 {
@@ -111,7 +99,8 @@ QString detectorModelFields(const DetectionSettings& settings)
         .arg(settings.minNoiseAdu, 0, 'g', 17);
     if (settings.brighteningShare > 0) text += QString(" brightening_share=%1").arg(settings.brighteningShare, 0, 'g', 17);
     if (settings.releaseSeconds > 0) text += QString(" release_seconds=%1").arg(settings.releaseSeconds, 0, 'g', 17);
-    if (!settings.mask.empty()) text += " mask=" + maskText(settings.mask);
+    // The mask's shapes, separated by ';', their corners x,y by '_'.
+    if (!settings.mask.empty()) text += " mask=" + QString::fromStdString(settings.mask.text()).replace(' ', '_');
     // Feature-13, when on.
     if (settings.darkening)
         text += QString(" darkening=yes max_dark_pixels=%1 max_dark_box_ratio=%2")
@@ -589,7 +578,7 @@ ClipWriteResult EventWriter::process(Job& job)
         try
         {
             QString error;
-            const QString folder = writeClip(job.clip, error);
+            const QString folder = writeClip(job.clip, error, result.suggestedKind);
             if (error.isEmpty())
             {
                 result.folder = folder;
@@ -620,7 +609,7 @@ ClipWriteResult EventWriter::process(Job& job)
     return result;
 }
 
-QString EventWriter::writeClip(EventClip& clip, QString& error)
+QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggestedKind)
 {
     if (clip.triggers.empty())
     {
@@ -757,7 +746,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
     // Feature-12: the overview needs every frame, so it is made before the
     // frames are released. A review aid must not cost the evidence: when it
     // cannot be made, the clip is still complete and says why.
-    const QString overviewNote = writeOverview(clip, folder);
+    QString kindReason;
+    const QString overviewNote = writeOverview(clip, folder, suggestedKind, kindReason);
 
     const uint64_t onset = clip.triggers.front().onsetFrameIndex;
     FramePtr baseline;
@@ -853,6 +843,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
             out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
         out << "overview: " << overviewNote << "\n";
+        if (!suggestedKind.isEmpty())
+            out << "suggested_kind: " << suggestedKind << " (" << kindReason << "); a suggestion for review, not a decision\n";
         out.flush();
         if (out.status() != QTextStream::Ok || !note.flush())
         {
@@ -879,7 +871,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
     return folder;
 }
 
-QString EventWriter::writeOverview(const EventClip& clip, const QString& folder) const
+QString EventWriter::writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason) const
 {
     const ClipTrigger& first = clip.triggers.front();
     OverviewRequest request;
@@ -899,17 +891,17 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder)
             && trigger.boxWidth > 0 && trigger.boxHeight > 0)
             request.marks.push_back(QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight));
         duringCorrection = duringCorrection || duringMountCorrection(trigger.triggerTime);
+        request.largeBrightening = request.largeBrightening
+            || (trigger.kind == TriggerKind::Automatic && trigger.change == ChangeKind::LargeRise);
     }
-    const DetectionMask& mask = first.settings.mask;
-    for (int i = 0; i < mask.count; ++i)
-    {
-        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
-        request.mask.push_back(QRect(rect.x, rect.y, rect.width, rect.height));
-    }
+    request.mask = first.settings.mask;
     request.caption = overviewCaption(clip, duringCorrection);
     try
     {
         const ClipOverview overview = makeClipOverview(clip.frames, request, clip.frames.front()->data.get_allocator().budget);
+        // Feature-15: the suggested kind is kept even if the picture cannot be saved.
+        suggestedKind = overview.suggestedKind;
+        kindReason = overview.kindReason;
         if (!overview.image.save(QDir(folder).filePath("00_overview.png"), "PNG"))
             return "not written: could not save 00_overview.png";
         return QString("00_overview.png main_frame_index=%1 sigma=%2 active_frames=%3 changed_pixels=%4; display only, not evidence")
@@ -945,6 +937,8 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
             << (duringMountCorrection(trigger.triggerTime) ? " during_mount_correction=yes" : "")
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;
+        if (!pending && !result.suggestedKind.isEmpty())
+            out << " suggested_kind=" << QString(result.suggestedKind).replace(' ', '_');
         if (!pending) out << " " << outcome;
         out << "\n";
     }

@@ -268,8 +268,7 @@ void SkyTest::aMaskedFlashDoesNotFireAndItsPixelsAreSaved()
 {
     std::mt19937 random(26);
     DetectionSettings detection = defaultDetectionSettings(Target::Sky);
-    detection.mask.rects[0] = {0, 40, 100, 20};
-    detection.mask.count = 1;
+    detection.mask = DetectionMask({DetectionMask::rectangle(0, 40, 100, 20)});
     Watch watch(defaultCaptureSettings(Target::Sky), detection);
     std::vector<FramePtr> sent;
     for (uint64_t i = 0; i < 260; ++i)
@@ -292,7 +291,7 @@ void SkyTest::aMaskedFlashDoesNotFireAndItsPixelsAreSaved()
     const auto results = write(directory.path(), std::move(watch.clips));
     QCOMPARE(results.size(), size_t{1});
     const QDir folder(results[0].folder);
-    QVERIFY(contents(folder.filePath("event.txt")).contains(" mask=0,40,100,20"));
+    QVERIFY(contents(folder.filePath("event.txt")).contains(" mask=0,40_100,40_100,60_0,60"));
     SerReader reader;
     std::string error;
     QVERIFY2(reader.open(std::filesystem::path(folder.filePath("event.ser").toStdWString()), 30, error), error.c_str());

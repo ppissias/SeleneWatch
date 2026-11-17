@@ -2,6 +2,7 @@
 
 #include "recording/event_writer.h"
 #include "frame.h"
+#include "sky_exposure.h"
 #include "sources/frame_source.h"
 #include "session.h"
 
@@ -102,6 +103,19 @@ private:
     void onTargetRequested(Target target);
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
+public:
+    // Feature-15: closes the mask shape whose corners were clicked; the
+    // preview's double-click, and the window test.
+    void closeMaskShape();
+    // Feature-15, every 30 s and on a change: starts or stops watching by
+    // the Sun's altitude. Public for the window test.
+    void checkNightSchedule();
+    // Feature-15, every 5 s: measures the sky and changes the camera's
+    // exposure or gain when the rule says so. Public so the window test can
+    // give the time.
+    void checkSkyExposure(std::chrono::steady_clock::time_point now);
+private:
+    void saveSkyExtras();
     void setupDisplayPanel();
     void setupHistogramPanel();
     void setupGuidingPanel();
@@ -156,6 +170,19 @@ private:
     QDockWidget* detectionDock_{nullptr};
     // What is watched. The detection and display panels hold its settings.
     Target target_{Target::Moon};
+    // The corners of a mask shape being drawn (Feature-15).
+    std::vector<MaskPoint> pendingShape_;
+    // Feature-15: the timer of the night schedule and the exposure follower,
+    // and the follower's memory. The schedule's own record: whether it has
+    // started tonight, and what it started that still runs (the stream, or
+    // only Monitoring on the observer's stream). The observer's Stop ends
+    // what it owns.
+    QTimer* skyTimer_{nullptr};
+    int skyTicks_{0};
+    enum class NightOwns { Nothing, Monitoring, Stream };
+    NightOwns nightOwns_{NightOwns::Nothing};
+    bool nightStartedTonight_{false};
+    SkyExposureState skyExposureState_;
     DetectionSummary latestDetection_;
     DisplayPanel* displayPanel_{nullptr};
     QDockWidget* displayDock_{nullptr};

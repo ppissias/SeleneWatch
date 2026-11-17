@@ -12,7 +12,9 @@
 #include "guiding/simulated_mount.h"
 #include "preview_image.h"
 #include "recording/metadata_text.h"
+#include "camera_settings_editor.h"
 #include "site_dialog.h"
+#include "sky_schedule.h"
 #include "target_defaults.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
@@ -59,40 +61,17 @@ QString settingsPrefix(Target target)
     return target == Target::Sky ? "sky/" : "";
 }
 
-// The mask as saved: x,y,width,height for each rectangle, separated by semicolons.
-QString maskToText(const DetectionMask& mask)
+// The mask's shapes for the preview.
+std::vector<QPolygon> maskRects(const DetectionMask& mask)
 {
-    QStringList rects;
-    for (int i = 0; i < mask.count; ++i)
+    std::vector<QPolygon> shapes;
+    for (const MaskShape& shape : mask.shapes())
     {
-        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
-        rects << QString("%1,%2,%3,%4").arg(rect.x).arg(rect.y).arg(rect.width).arg(rect.height);
+        QPolygon polygon;
+        for (const MaskPoint& point : shape) polygon << QPoint(point.x, point.y);
+        shapes.push_back(polygon);
     }
-    return rects.join(';');
-}
-
-DetectionMask maskFromText(const QString& text)
-{
-    DetectionMask mask;
-    for (const QString& item : text.split(';', Qt::SkipEmptyParts))
-    {
-        const QStringList numbers = item.split(',');
-        if (numbers.size() != 4 || mask.count >= DetectionMask::kMaxRects) continue;
-        const MaskRect rect{numbers[0].toInt(), numbers[1].toInt(), numbers[2].toInt(), numbers[3].toInt()};
-        if (rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0) mask.rects[static_cast<size_t>(mask.count++)] = rect;
-    }
-    return mask;
-}
-
-std::vector<QRect> maskRects(const DetectionMask& mask)
-{
-    std::vector<QRect> rects;
-    for (int i = 0; i < mask.count; ++i)
-    {
-        const MaskRect& rect = mask.rects[static_cast<size_t>(i)];
-        rects.emplace_back(rect.x, rect.y, rect.width, rect.height);
-    }
-    return rects;
+    return shapes;
 }
 
 } // namespace
@@ -170,17 +149,29 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     connect(ui_->openFileButton, &QPushButton::clicked, this, &MainWindow::onOpenFileClicked);
     connect(ui_->injectFlashButton, &QPushButton::clicked, this, &MainWindow::onInjectFlashClicked);
     connect(ui_->injectBlipButton, &QPushButton::clicked, this, &MainWindow::onInjectBlipClicked);
-    connect(ui_->previewWidget, &PreviewWidget::positionSelected, this, [this] {
+    connect(ui_->previewWidget, &PreviewWidget::positionSelected, this, [this](QPoint position) {
+        // Feature-15: with Draw mask on, a click places a corner of a shape.
+        if (detectionPanel_->drawingMask() && static_cast<int>(pendingShape_.size()) < DetectionMask::kMaxCorners
+            && (pendingShape_.empty() || pendingShape_.back() != MaskPoint{position.x(), position.y()}))
+        {
+            pendingShape_.push_back({position.x(), position.y()});
+            std::vector<QPoint> corners;
+            for (const MaskPoint& point : pendingShape_) corners.emplace_back(point.x, point.y);
+            ui_->previewWidget->setPendingShape(std::move(corners));
+        }
         updateDetectionDisplay();
         updateBlipReadout();
         updateControls();
     });
+    connect(ui_->previewWidget, &PreviewWidget::shapeClosed, this, [this] { closeMaskShape(); });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
         // Feature-11: in Sky mode a drag draws the mask, and guiding is off.
         if (detectionPanel_->drawingMask())
         {
+            pendingShape_.clear();
+            ui_->previewWidget->setPendingShape({});
             if (!detectionPanel_->addMaskRect(region))
-                showMessage(QString("The mask is full: %1 rectangles. Clear it to start again.").arg(DetectionMask::kMaxRects), 5000);
+                showMessage(QString("The mask is full: %1 shapes. Clear it to start again.").arg(DetectionMask::kMaxShapes), 5000);
             return;
         }
         if (target_ == Target::Sky || !session_->isRunning()) return;
@@ -250,8 +241,36 @@ void MainWindow::setupDetectionPanel()
         ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
     });
     connect(detectionPanel_, &DetectionPanel::targetRequested, this, &MainWindow::onTargetRequested);
+
+    // Feature-15: the night schedule and the exposure follower.
+    {
+        const QSettings saved;
+        SkyExtras extras;
+        extras.night = saved.value("sky/night/enabled", extras.night).toBool();
+        extras.sunLimitDeg = saved.value("sky/night/sunLimit", extras.sunLimitDeg).toDouble();
+        extras.follow = saved.value("sky/follow/enabled", extras.follow).toBool();
+        extras.minExposureMs = saved.value("sky/follow/minExposureMs", extras.minExposureMs).toDouble();
+        extras.maxExposureMs = saved.value("sky/follow/maxExposureMs", extras.maxExposureMs).toDouble();
+        extras.maxGain = saved.value("sky/follow/maxGain", extras.maxGain).toDouble();
+        extras.gainStep = saved.value("sky/follow/gainStep", extras.gainStep).toDouble();
+        detectionPanel_->setSkyExtras(extras);
+    }
+    connect(detectionPanel_, &DetectionPanel::skyExtrasChanged, this, [this] {
+        saveSkyExtras();
+        skyExposureState_ = {};
+        checkNightSchedule();
+    });
+    skyTimer_ = new QTimer(this);
+    skyTimer_->setInterval(5000);
+    connect(skyTimer_, &QTimer::timeout, this, [this] {
+        checkSkyExposure(std::chrono::steady_clock::now());
+        if (++skyTicks_ % 6 == 0) checkNightSchedule();
+    });
+    skyTimer_->start();
     connect(detectionPanel_, &DetectionPanel::maskDrawingChanged, this, [this](bool drawing) {
-        if (drawing) showMessage("Drag rectangles on the preview to leave them out of detection.", 5000);
+        pendingShape_.clear();
+        ui_->previewWidget->setPendingShape({});
+        if (drawing) showMessage("Drag a rectangle, or click the corners of a shape and double-click to close it.", 6000);
     });
     connect(detectionPanel_, &DetectionPanel::displayChanged, this, &MainWindow::updateDetectionDisplay);
     connect(detectionDock_, &QDockWidget::visibilityChanged, this, &MainWindow::updateDetectionDisplay);
@@ -279,7 +298,7 @@ DetectionSettings MainWindow::savedDetectionSettings(Target target)
     {
         settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
         settings.releaseSeconds = saved.value(key + "releaseSeconds", settings.releaseSeconds).toDouble();
-        settings.mask = maskFromText(saved.value(key + "mask").toString());
+        settings.mask = DetectionMask::fromText(saved.value(key + "mask").toString().toStdString());
     }
     return settings.valid() ? settings : defaultDetectionSettings(target);
 }
@@ -305,7 +324,7 @@ void MainWindow::saveDetectionSettings()
     {
         saved.setValue(key + "brighteningShare", values.brighteningShare);
         saved.setValue(key + "releaseSeconds", values.releaseSeconds);
-        saved.setValue(key + "mask", maskToText(values.mask));
+        saved.setValue(key + "mask", QString::fromStdString(values.mask.text()));
     }
     saved.sync();
 }
@@ -358,6 +377,147 @@ void MainWindow::onTargetRequested(Target target)
     applyTarget();
     showMessage(target_ == Target::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
         : "Watching the Moon: the Moon's settings are loaded.", 6000);
+}
+
+void MainWindow::saveSkyExtras()
+{
+    const SkyExtras extras = detectionPanel_->skyExtras();
+    QSettings saved;
+    saved.setValue("sky/night/enabled", extras.night);
+    saved.setValue("sky/night/sunLimit", extras.sunLimitDeg);
+    saved.setValue("sky/follow/enabled", extras.follow);
+    saved.setValue("sky/follow/minExposureMs", extras.minExposureMs);
+    saved.setValue("sky/follow/maxExposureMs", extras.maxExposureMs);
+    saved.setValue("sky/follow/maxGain", extras.maxGain);
+    saved.setValue("sky/follow/gainStep", extras.gainStep);
+}
+
+void MainWindow::checkNightSchedule()
+{
+    const SkyExtras extras = detectionPanel_->skyExtras();
+    if (target_ != Target::Sky || !extras.night)
+    {
+        detectionPanel_->showNight({});
+        nightOwns_ = NightOwns::Nothing;
+        nightStartedTonight_ = false;
+        return;
+    }
+    const ObservingSite site = savedSite();
+    if (!site.hasPosition())
+    {
+        detectionPanel_->showNight("Needs the site's position: Session → Site and instrument.");
+        return;
+    }
+    const auto now = std::chrono::system_clock::now();
+    const double altitude = sunAltitudeDegrees(*site.latitudeDeg, *site.longitudeDeg, now);
+    const bool watching = session_->isRunning() && session_->mode() == Session::Mode::Monitoring;
+    // What the schedule started may have ended without it: a source that
+    // stopped, or Monitoring turned off by the observer.
+    if (!session_->isRunning()
+        || (nightOwns_ == NightOwns::Monitoring && !watching && !session_->modeChangePending()))
+        nightOwns_ = NightOwns::Nothing;
+    switch (nightAction(altitude, extras.sunLimitDeg, watching, nightStartedTonight_, nightOwns_ != NightOwns::Nothing))
+    {
+    case NightAction::Start:
+        if (session_->modeChangePending()) break;
+        nightStartedTonight_ = true;
+        showMessage(QString("Dusk: the Sun is at %1°. Watching the sky.").arg(altitude, 0, 'f', 1), 6000);
+        if (!session_->isRunning())
+        {
+            nightOwns_ = NightOwns::Stream;
+            startStream(Session::Mode::Monitoring);
+        }
+        else
+        {
+            nightOwns_ = NightOwns::Monitoring;
+            onMonitoringClicked();
+        }
+        break;
+    case NightAction::Stop:
+        showMessage(QString("Dawn: the Sun is at %1°. Watching stopped.").arg(altitude, 0, 'f', 1), 6000);
+        if (nightOwns_ == NightOwns::Stream) finishStream();
+        else if (!session_->modeChangePending() && session_->requestMonitoring(false))
+        {
+            updateControls();
+            updateStatusLabel();
+        }
+        nightOwns_ = NightOwns::Nothing;
+        break;
+    case NightAction::None:
+        break;
+    }
+    if (altitude >= extras.sunLimitDeg) nightStartedTonight_ = false;
+    const auto next = nextSunCrossing(*site.latitudeDeg, *site.longitudeDeg, extras.sunLimitDeg, now);
+    QString text = QString("Sun at %1°.").arg(altitude, 0, 'f', 1);
+    if (next)
+        text += QString(" %1 at %2 UTC.").arg(altitude < extras.sunLimitDeg ? "Dawn stop" : "Dusk start",
+            utcDateTime(*next).toString("yyyy-MM-dd HH:mm"));
+    else text += " It does not cross the limit in the next two days.";
+    detectionPanel_->showNight(text);
+}
+
+void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
+{
+    const SkyExtras extras = detectionPanel_->skyExtras();
+    if (target_ != Target::Sky || !extras.follow)
+    {
+        detectionPanel_->showFollow({});
+        return;
+    }
+    CameraSettingsEditor* controls = camera_ ? cameraPanel_->controls() : qhyCamera_ ? qhyPanel_->controls() : nullptr;
+    if (!controls || !session_->isRunning() || !latestFrame_ || session_->modeChangePending())
+    {
+        detectionPanel_->showFollow("Follows the sky while a camera runs.");
+        return;
+    }
+    // Both camera families number Exposure 0 and Gain 1, in microseconds and their own units.
+    constexpr int kExposure = 0, kGain = 1;
+    const auto exposure = controls->controlValue(kExposure);
+    if (!exposure) return;
+    const auto gain = controls->controlValue(kGain);
+    const auto gainRange = controls->controlRange(kGain);
+    SkyExposureRule rule;
+    rule.minExposureUs = extras.minExposureMs * 1000;
+    rule.maxExposureUs = std::max(rule.minExposureUs, extras.maxExposureMs * 1000);
+    rule.minGain = gainRange ? gainRange->first : 0;
+    rule.maxGain = gainRange ? std::min(gainRange->second, std::max(rule.minGain, extras.maxGain)) : 0;
+    rule.gainStep = gain ? extras.gainStep : 0;
+    const double level = skyLevel(*latestFrame_, detectionPanel_->settings().mask);
+    detectionPanel_->showFollow(QString("Sky at %1% of full scale. Exposure %2 ms, gain %3.")
+        .arg(100 * level, 0, 'f', 1).arg(*exposure / 1000, 0, 'g', 4).arg(gain.value_or(0), 0, 'f', 0));
+    const auto change = decideSkyExposure(level, *exposure, gain.value_or(0), now, skyExposureState_, rule);
+    if (!change) return;
+    controls->setControlValue(kExposure, change->exposureUs);
+    if (gain) controls->setControlValue(kGain, change->gain);
+    session_->logRecord(QString("%1 exposure_change exposure_ms=%2 to %3 gain=%4 to %5 reason=\"%6\"\n")
+        .arg(utcText(std::chrono::system_clock::now())).arg(*exposure / 1000, 0, 'g', 6).arg(change->exposureUs / 1000, 0, 'g', 6)
+        .arg(gain.value_or(0), 0, 'g', 6).arg(change->gain, 0, 'g', 6).arg(QString::fromStdString(change->reason)));
+    showMessage(QString("The exposure follows the sky: %1 ms, gain %2 (%3).")
+        .arg(change->exposureUs / 1000, 0, 'g', 4).arg(change->gain, 0, 'f', 0).arg(QString::fromStdString(change->reason)), 8000);
+    if (session_->mode() == Session::Mode::Monitoring)
+    {
+        // A camera's settings are fixed while Monitoring: the clip in hand is
+        // written and Monitoring starts again, with the new settings read back.
+        bufferReadoutTimer_->stop();
+        session_->stop("the exposure follows the sky");
+        startStream(Session::Mode::Monitoring);
+    }
+    else onApplyLiveCamera();
+}
+
+void MainWindow::closeMaskShape()
+{
+    if (!detectionPanel_->drawingMask()) return;
+    MaskShape shape = pendingShape_;
+    pendingShape_.clear();
+    ui_->previewWidget->setPendingShape({});
+    if (shape.size() < 3)
+    {
+        showMessage("A mask shape needs at least three corners.", 4000);
+        return;
+    }
+    if (!detectionPanel_->addMaskShape(shape))
+        showMessage(QString("The mask is full: %1 shapes. Clear it to start again.").arg(DetectionMask::kMaxShapes), 5000);
 }
 
 void MainWindow::applyTarget()
@@ -1147,6 +1307,8 @@ void MainWindow::startStream(Session::Mode mode)
 
 void MainWindow::onStopClicked()
 {
+    // The observer's stop: the night schedule leaves it until the next dusk.
+    nightOwns_ = NightOwns::Nothing;
     finishStream();
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "detection_mask.h"
 #include "frame.h"
 
 #include <QtCore/QPoint>
@@ -47,10 +48,12 @@ struct OverviewRequest
     // Trigger boxes in frame pixels, marked and numbered in this order.
     std::vector<QRect> marks;
     // Areas the detector leaves out (Feature-11): not measured, and hatched.
-    std::vector<QRect> mask;
+    DetectionMask mask;
     // The image scale, when the site and instrument give it (Feature-14):
     // speeds are then also given in degrees per second.
     std::optional<double> arcsecPerPixel;
+    // A large brightening fired in the clip (Feature-11), for the suggested kind.
+    bool largeBrightening{false};
     // Lines about the clip, printed above the line the overview adds.
     QStringList caption;
 };
@@ -79,6 +82,12 @@ struct ClipOverview
 
     // The caption line describing the activity.
     QString activity;
+
+    // Feature-15 Part C: what the clip probably shows, and why. One of
+    // flash, meteor, satellite, aircraft, dark transit, lightning, seeing,
+    // unclear. A suggestion for review, not a decision.
+    QString suggestedKind;
+    QString kindReason;
 };
 
 // frames must not be empty and share one layout. Throws MemoryLimitError

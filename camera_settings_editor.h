@@ -2,6 +2,8 @@
 #include "frame.h"
 #include <QtWidgets/QWidget>
 #include <map>
+#include <optional>
+#include <utility>
 #include <vector>
 class QComboBox;
 class QSpinBox;
@@ -28,6 +30,12 @@ public:
     void addControl(int id,const QString& name,double minimum,double maximum,double step,double value,
         double nativeUnitsPerDisplayUnit,const QString& suffix,bool writable=true);
     std::map<int,double> controlValues() const;
+    // One control's requested value and range, in native units, and setting
+    // it (Feature-15, the exposure that follows the sky). None or false when
+    // the camera has no such control.
+    std::optional<double> controlValue(int id) const;
+    std::optional<std::pair<double,double>> controlRange(int id) const;
+    bool setControlValue(int id,double nativeValue);
     void setLiveEditing(bool enabled);
 signals:
     void liveControlsRequested();

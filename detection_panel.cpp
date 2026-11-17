@@ -237,7 +237,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     drawMask_->setObjectName("drawMask");
     drawMask_->setText("Draw mask");
     drawMask_->setCheckable(true);
-    drawMask_->setToolTip("While on, a rectangle dragged on the preview is left out of detection: the ground, trees, lights.");
+    drawMask_->setToolTip("While on, shapes drawn on the preview are left out of detection: the ground, trees, roofs, lights. "
+        "Drag for a rectangle, or click the corners of a shape and double-click to close it.");
     clearMask_ = new QToolButton(sky_);
     clearMask_->setObjectName("clearMask");
     clearMask_->setText("Clear");
@@ -245,6 +246,53 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     maskRow->addWidget(drawMask_);
     maskRow->addWidget(clearMask_);
     skyForm->addRow(maskRow);
+
+    // Feature-15: unattended nights.
+    night_ = new QCheckBox("Watch from dusk to dawn", sky_);
+    night_->setObjectName("nightSchedule");
+    night_->setToolTip("Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it "
+        "rises again. Needs the site's position (Session → Site and instrument).");
+    sunLimit_ = new QDoubleSpinBox(sky_);
+    sunLimit_->setObjectName("sunLimit");
+    sunLimit_->setRange(-18, 0); sunLimit_->setDecimals(1); sunLimit_->setSuffix("°");
+    nightReading_ = new QLabel(sky_);
+    nightReading_->setObjectName("nightReading");
+    nightReading_->setWordWrap(true);
+    nightReading_->hide();
+    skyForm->addRow(night_);
+    skyForm->addRow("Sun below", sunLimit_);
+    skyForm->addRow(nightReading_);
+    follow_ = new QCheckBox("Follow the sky's brightness", sky_);
+    follow_->setObjectName("followSky");
+    follow_->setToolTip("With a camera: keeps the sky's median outside the mask between 8% and 30% of full scale. After a "
+        "minute outside, Monitoring stops, the exposure (then the gain) changes, and Monitoring starts again.");
+    minExposure_ = new QDoubleSpinBox(sky_);
+    minExposure_->setObjectName("followMinExposure");
+    maxExposure_ = new QDoubleSpinBox(sky_);
+    maxExposure_->setObjectName("followMaxExposure");
+    for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); }
+    maxGain_ = new QDoubleSpinBox(sky_);
+    maxGain_->setObjectName("followMaxGain");
+    gainStep_ = new QDoubleSpinBox(sky_);
+    gainStep_->setObjectName("followGainStep");
+    for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); }
+    gainStep_->setSpecialValueText("Gain fixed");
+    followReading_ = new QLabel(sky_);
+    followReading_->setObjectName("followReading");
+    followReading_->setWordWrap(true);
+    followReading_->hide();
+    skyForm->addRow(follow_);
+    auto* exposureRow = new QHBoxLayout;
+    exposureRow->addWidget(minExposure_);
+    exposureRow->addWidget(new QLabel("to", sky_));
+    exposureRow->addWidget(maxExposure_);
+    skyForm->addRow("Exposure", exposureRow);
+    auto* gainRow = new QHBoxLayout;
+    gainRow->addWidget(maxGain_);
+    gainRow->addWidget(new QLabel("in steps of", sky_));
+    gainRow->addWidget(gainStep_);
+    skyForm->addRow("Gain up to", gainRow);
+    skyForm->addRow(followReading_);
     column->addWidget(sky_);
     sky_->hide();
 
@@ -401,6 +449,10 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(maxDark_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(darkening_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
+    for (auto* box : {night_, follow_})
+        connect(box, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
+    for (auto* spin : {sunLimit_, minExposure_, maxExposure_, maxGain_, gainStep_})
+        connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) emit skyExtrasChanged(); });
     connect(clearMask_, &QToolButton::clicked, this, [this] {
         mask_ = {};
         showMask();
@@ -447,13 +499,20 @@ void DetectionPanel::setTargetEditable(bool editable)
     target_->setEnabled(editable);
 }
 
-bool DetectionPanel::addMaskRect(QRect rect)
+bool DetectionPanel::addMaskShape(const MaskShape& shape)
 {
-    if (target() != Target::Sky || rect.isEmpty() || mask_.count >= DetectionMask::kMaxRects) return false;
-    mask_.rects[static_cast<size_t>(mask_.count++)] = {rect.x(), rect.y(), rect.width(), rect.height()};
+    if (target() != Target::Sky) return false;
+    const DetectionMask grown = mask_.with(shape);
+    if (grown.count() == mask_.count()) return false;
+    mask_ = grown;
     showMask();
     emit settingsChanged();
     return true;
+}
+
+bool DetectionPanel::addMaskRect(QRect rect)
+{
+    return !rect.isEmpty() && addMaskShape(DetectionMask::rectangle(rect.x(), rect.y(), rect.width(), rect.height()));
 }
 
 bool DetectionPanel::drawingMask() const
@@ -461,10 +520,42 @@ bool DetectionPanel::drawingMask() const
     return drawMask_->isChecked();
 }
 
+SkyExtras DetectionPanel::skyExtras() const
+{
+    return {night_->isChecked(), sunLimit_->value(), follow_->isChecked(), minExposure_->value(), maxExposure_->value(),
+        maxGain_->value(), gainStep_->value()};
+}
+
+void DetectionPanel::setSkyExtras(const SkyExtras& extras)
+{
+    const bool updating = updating_;
+    updating_ = true;
+    night_->setChecked(extras.night);
+    sunLimit_->setValue(extras.sunLimitDeg);
+    follow_->setChecked(extras.follow);
+    minExposure_->setValue(extras.minExposureMs);
+    maxExposure_->setValue(extras.maxExposureMs);
+    maxGain_->setValue(extras.maxGain);
+    gainStep_->setValue(extras.gainStep);
+    updating_ = updating;
+}
+
+void DetectionPanel::showNight(const QString& text)
+{
+    nightReading_->setText(text);
+    nightReading_->setVisible(!text.isEmpty());
+}
+
+void DetectionPanel::showFollow(const QString& text)
+{
+    followReading_->setText(text);
+    followReading_->setVisible(!text.isEmpty());
+}
+
 void DetectionPanel::showMask()
 {
     maskLabel_->setText(mask_.empty() ? QString("No mask")
-        : QString("Mask: %1 of %2 rectangles").arg(mask_.count).arg(DetectionMask::kMaxRects));
+        : QString("Mask: %1 of %2 shapes").arg(mask_.count()).arg(DetectionMask::kMaxShapes));
     clearMask_->setEnabled(!mask_.empty());
 }
 

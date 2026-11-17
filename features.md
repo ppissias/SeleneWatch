@@ -1213,3 +1213,34 @@ A sky camera is meant to run unattended for whole nights. Four things stand in t
 
 - Sorting by kind beyond the suggestion: no clip is moved, hidden or deleted by its kind.
 - Moonrise and moonset for the Moon target.
+
+### Implementation — 17 November 2026
+
+Built. Done-when items 1 to 4 pass; item 5, a night outside, is open.
+
+**Where it lives.**
+
+- **Part A.** `sky_schedule`: the Sun's geometric altitude by the NOAA formulas; the next crossing of a given altitude, found in five-minute steps and halved to the second; and the decision, start, stop or nothing, as a plain function. The Detection panel's Sky group has **Watch from dusk to dawn** and **Sun below**. The window checks every 30 s and on any change, using the site saved in **Site and instrument**. With no position it says so and does nothing. It shows the Sun's altitude and the next start or stop. It starts once a night, so an observer's **Stop** in the night holds until the next dusk. The same holds when a camera fails: restarting after a failure is left for a later step. The window keeps what the schedule started and still owns: the stream, or only Monitoring when the observer's stream was already running. The observer's **Stop**, or Monitoring turned off, ends that ownership. At dawn it ends only what it owns.
+- **Part B.** `sky_exposure`: the sky's level (the median of a bounded grid of samples outside the mask, as a share of full scale) and the rule as a plain function with its memory. The window measures every 5 s from the latest frame while a camera runs. It changes the requested exposure and gain in the camera's settings form, which gained `controlValue`, `controlRange` and `setControlValue`. While Monitoring it then starts Monitoring again, which reopens the camera with the new settings and reads them back. In Preview it applies them live. Each change goes into `candidates.txt` as an `exposure_change` line, through the session to the clip writer.
+- **Part C.** The overview computes the kind from the run of activity it already measures: its sign, whether it moved (three linked frames or more), its speed, its straightness (every centre within the larger of 3 px and 5% of the path from the line between the first and last), and blinking (at least two separate jumps to 2.5 times the run's median strength, over 1.5 s or more). A large brightening in the clip makes it lightning, and eight or more triggers spread over a quarter of the frame make it seeing. The writer records `suggested_kind:` in `event.txt` and `suggested_kind=` before the outcome on the clip's `candidates.txt` line (spaces become underscores there). The kind and the reason end the overview's caption.
+- **Part D.** `detection_mask`: a mask of up to 16 polygons of up to 32 corners, shared rather than copied, since every measurement carries a copy of its settings. A pixel is masked when its centre is inside (even-odd rule), so a rectangle masks exactly its pixels as before. It is filled by the detector, the overview and the sky level alike. It is saved as corners `x,y` separated by spaces and shapes separated by `;`, and a rectangle saved as `x,y,w,h` before this feature still reads. In `event.txt` the spaces become underscores, since a trigger line separates its fields by spaces. On the preview, clicks with **Draw mask** on place corners, joined by a dashed line, and a double-click closes the shape; a drag still makes a rectangle.
+
+**Part C on an archive recording.** `2018.07.27-28 moon eclipse iss/iss/raw/Moon_223619.avi` (1296 × 964, about 18 fps, filed with the observer's ISS recordings) was run through the probe in 300-frame windows at K 12. A bright blob about 100 px across appears in single frames, about six frames (0.33 s) apart, along a straight line, in every window up to frame 2100. Each appearance is a run of its own, so the suggestion is "flash", or "unclear" where two blobs touch. A light that shows in single frames along a line would need runs linked across gaps. That waits until the observer says what the recording shows.
+
+**A change to the overview found by the tests.** The overview's background model learned a changed pixel like any other. A slow light, crossing at half a pixel a frame, raised its own noise within two frames, and only its leading edge stayed at K, so it showed as a one-frame flash. The overview now holds a changed pixel from learning, as the detector holds a firing patch. Every earlier overview test passes unchanged.
+
+**Tests.** A new suite, `sky_extras` (6 tests):
+
+- **The Sun (item 1):** NREL's Golden, Colorado example within 0.1°, the June solstice noon in Athens within 0.1°, a winter midnight far below, the next dusk at −10° found to the second, and no crossing in polar night.
+- **The schedule's decision (item 1).**
+- **The exposure rule (item 2):** nothing within the bounds, before 60 s outside, or within 2 minutes of a change; exposure first and then gain when dark, gain first and then exposure when bright; nothing at every limit.
+- **The sky level** leaves the mask out.
+- **Kinds (item 3):** constructed clips give flash, meteor, satellite, aircraft, dark transit, lightning and seeing.
+- **The polygon mask (item 4):** filled exactly, saved and read back (old rectangles too), and a flash under a triangle does not fire while one above it does.
+
+Window tests:
+- **The schedule:** off does nothing; with no position the panel says why; local midnight starts the stream and Monitoring; the observer's Stop in the night holds; the next night starts again and local noon stops it; on a stream the observer started, the night adds Monitoring and the day ends only that. The site is placed where it is midnight or noon now, so the test runs at any hour.
+- **The exposure follower with the simulated camera:** its sky at 42% of full scale halves the exposure after a minute outside, Monitoring starts again, and the change is logged.
+- **A mask shape:** clicked corners closed by the double-click; two corners are refused; the shape is saved.
+
+All 17 suites pass.

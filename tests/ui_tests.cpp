@@ -54,6 +54,8 @@ private slots:
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
     void siteAndRecordingControls();
+    void nightScheduleAndExposureFollower();
+    void aMaskShapeIsDrawnOnThePreview();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
@@ -624,7 +626,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     // A mask drawn on the sky, and a Sky K.
     panel->findChild<QToolButton*>("drawMask")->setChecked(true);
     QVERIFY(panel->addMaskRect(QRect(0, 400, 640, 80)));
-    QCOMPARE(panel->settings().mask.count, 1);
+    QCOMPARE(panel->settings().mask.count(), 1);
     sigma->setValue(9);
 
     choice->setCurrentIndex(0);
@@ -639,12 +641,12 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(display->captureSettings().maxPostSeconds, 10.0);
     QVERIFY(guiding->isEnabled());
     QCOMPARE(QSettings().value("sky/detection/sigma").toDouble(), 9.0);
-    QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,400,640,80"));
+    QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,400 640,400 640,480 0,480"));
 
     choice->setCurrentIndex(1);
     QCOMPARE(panel->settings().sigma, 9.0);
-    QCOMPARE(panel->settings().mask.count, 1);
-    QCOMPARE(panel->settings().mask.rects[0], (MaskRect{0, 400, 640, 80}));
+    QCOMPARE(panel->settings().mask.count(), 1);
+    QVERIFY(panel->settings().mask.shapes()[0] == DetectionMask::rectangle(0, 400, 640, 80));
 }
 
 // Feature-14: the site dialog keeps what is entered, the window saves it,
@@ -686,6 +688,136 @@ void UiTest::siteAndRecordingControls()
     QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
     window.findChild<QPushButton*>("stopButton")->click();
     QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
+}
+
+// Feature-15, Done-when 1 and 2 in the window. The site is put where it is
+// local midnight now, then where it is noon, so the test runs at any hour.
+void UiTest::nightScheduleAndExposureFollower()
+{
+    {
+        QTemporaryDir directory;
+        MainWindow window(nullptr, directory.path());
+        auto* panel = window.findChild<DetectionPanel*>();
+        auto* stop = window.findChild<QPushButton*>("stopButton");
+        auto* reading = panel->findChild<QLabel*>("nightReading");
+        panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+        const double utcHour = std::fmod(std::chrono::duration<double>(
+            std::chrono::system_clock::now().time_since_epoch()).count() / 3600.0, 24.0);
+        const auto wrap = [](double longitude) { return std::fmod(longitude + 540.0, 360.0) - 180.0; };
+        ObservingSite night;
+        night.latitudeDeg = 0; night.heightM = 0;
+        night.longitudeDeg = wrap(-15 * utcHour);
+        ObservingSite day = night;
+        day.longitudeDeg = wrap(15 * (12 - utcHour));
+
+        // The schedule off: nothing starts.
+        window.applySite(night, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QVERIFY(!stop->isEnabled());
+        SkyExtras extras;
+        extras.night = true;
+        extras.sunLimitDeg = -10;
+        panel->setSkyExtras(extras);
+        // No position: nothing starts, and the panel says why.
+        window.applySite(ObservingSite{}, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QVERIFY(!stop->isEnabled());
+        QVERIFY(reading->text().contains("position"));
+        auto* mode = window.findChild<QLabel*>("captureModeLabel");
+        // Night: the stream and Monitoring start.
+        window.applySite(night, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+        QVERIFY2(reading->text().contains("Dawn stop at"), qPrintable(reading->text()));
+        // The observer stops in the night: the schedule leaves it stopped.
+        stop->click();
+        window.checkNightSchedule();
+        QVERIFY(!stop->isEnabled());
+        // Day, then the next night: it starts again, and stops at dawn.
+        window.applySite(day, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QVERIFY2(reading->text().contains("Dusk start at"), qPrintable(reading->text()));
+        window.applySite(night, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+        window.applySite(day, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QVERIFY(!stop->isEnabled());
+        // A stream the observer started: at night the schedule adds
+        // Monitoring, and at dawn it ends only that.
+        window.findChild<QPushButton*>("startButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && mode->text().contains("PREVIEW"), 5000);
+        window.applySite(night, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+        window.applySite(day, false, "pool.ntp.org");
+        window.checkNightSchedule();
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("PREVIEW"), 5000);
+        QVERIFY(stop->isEnabled());
+        window.checkNightSchedule();
+        QVERIFY(stop->isEnabled());
+        stop->click();
+    }
+    {
+        // The fake camera's sky is 42% of full scale: too bright.
+        QTemporaryDir directory;
+        auto api = std::make_shared<FakeZwoApi>();
+        MainWindow window(nullptr, directory.path(), api);
+        window.show();
+        auto* panel = window.findChild<DetectionPanel*>();
+        auto* camera = window.findChild<CameraPanel*>();
+        auto* mode = window.findChild<QLabel*>("captureModeLabel");
+        panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+        window.findChild<QComboBox*>("sourceComboBox")->setCurrentIndex(2);
+        SkyExtras extras;
+        extras.follow = true;
+        extras.minExposureMs = 0.1;
+        extras.maxExposureMs = 100;
+        panel->setSkyExtras(extras);
+        window.findChild<QPushButton*>("startButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(api->delivered >= 2, 3000);
+        window.findChild<QPushButton*>("monitoringButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+        QTest::qWait(300);
+        const auto t0 = std::chrono::steady_clock::now();
+        window.checkSkyExposure(t0);
+        QVERIFY2(panel->findChild<QLabel*>("followReading")->text().startsWith("Sky at 4"),
+            qPrintable(panel->findChild<QLabel*>("followReading")->text()));
+        QCOMPARE(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{1000});
+        window.checkSkyExposure(t0 + std::chrono::seconds{61});
+        // Half the exposure, applied by starting Monitoring again.
+        QTRY_COMPARE_WITH_TIMEOUT(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{500}, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+        window.findChild<QPushButton*>("stopButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(text(directory.path() + "/candidates.txt").contains(" exposure_change exposure_ms=1 to 0.5 "), 3000);
+    }
+}
+
+// Feature-15, Done-when 4 in the window: clicked corners, closed by a
+// double-click, make a mask shape that is saved.
+void UiTest::aMaskShapeIsDrawnOnThePreview()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    auto* panel = window.findChild<DetectionPanel*>();
+    auto* preview = window.findChild<PreviewWidget*>();
+    panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+    panel->findChild<QToolButton*>("drawMask")->setChecked(true);
+    emit preview->positionSelected(QPoint(0, 479));
+    emit preview->positionSelected(QPoint(639, 479));
+    emit preview->positionSelected(QPoint(320, 300));
+    emit preview->positionSelected(QPoint(320, 300)); // The release after a double-click.
+    window.closeMaskShape();
+    QCOMPARE(panel->settings().mask.count(), 1);
+    QVERIFY(panel->settings().mask.shapes()[0] == (MaskShape{{0, 479}, {639, 479}, {320, 300}}));
+    // Two corners are not a shape.
+    emit preview->positionSelected(QPoint(10, 10));
+    emit preview->positionSelected(QPoint(20, 10));
+    window.closeMaskShape();
+    QCOMPARE(panel->settings().mask.count(), 1);
+    // Switching away saves the sky's mask.
+    panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(0);
+    QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,479 639,479 320,300"));
 }
 
 // The readouts keep room for their longest texts, so the controls below them

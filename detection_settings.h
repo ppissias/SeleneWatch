@@ -1,34 +1,8 @@
 #pragma once
 
-#include <array>
+#include "detection_mask.h"
+
 #include <cmath>
-
-// A rectangle of the frame, in frame pixels, that the detector does not test.
-struct MaskRect
-{
-    int x{0}, y{0}, width{0}, height{0};
-    bool operator==(const MaskRect&) const = default;
-};
-
-// The areas the detector leaves out (Feature-11, Sky mode): the ground,
-// trees, street lights. A fixed array keeps the settings cheap to copy,
-// since every measurement carries the settings that made it.
-struct DetectionMask
-{
-    static constexpr int kMaxRects = 16;
-    std::array<MaskRect, kMaxRects> rects{};
-    int count{0};
-
-    [[nodiscard]] bool empty() const { return count == 0; }
-    [[nodiscard]] bool valid() const
-    {
-        if (count < 0 || count > kMaxRects) return false;
-        for (int i = 0; i < count; ++i)
-            if (rects[i].x < 0 || rects[i].y < 0 || rects[i].width < 1 || rects[i].height < 1) return false;
-        return true;
-    }
-    bool operator==(const DetectionMask&) const = default;
-};
 
 struct DetectionSettings
 {

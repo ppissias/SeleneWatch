@@ -2,6 +2,7 @@
 
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
 
 #include <algorithm>
 #include <utility>
@@ -48,10 +49,21 @@ void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRec
     update();
 }
 
-void PreviewWidget::setMask(std::vector<QRect> mask)
+void PreviewWidget::setMask(std::vector<QPolygon> mask)
 {
     mask_ = std::move(mask);
     update();
+}
+
+void PreviewWidget::setPendingShape(std::vector<QPoint> corners)
+{
+    pending_ = std::move(corners);
+    update();
+}
+
+void PreviewWidget::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton && framePosition(event->position())) emit shapeClosed();
 }
 
 QRectF PreviewWidget::toWidget(const QRectF& frameRect) const
@@ -141,17 +153,34 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
                 detectionBox_.height() * image.height() / static_cast<double>(image_.height())));
         }
     }
-    if (!mask_.empty())
+    // A frame corner (x, y) is the top-left of pixel (x, y) on the screen.
+    const auto toScreen = [&](QPoint corner) {
+        return QPointF(image.x() + corner.x() * image.width() / static_cast<double>(image_.width()),
+            image.y() + corner.y() * image.height() / static_cast<double>(image_.height()));
+    };
+    if (!mask_.empty() || !pending_.empty())
     {
         painter.save();
         painter.setClipRect(image);
-        for (const QRect& rect : mask_)
+        for (const QPolygon& shape : mask_)
         {
-            const QRectF area = toWidget(rect);
-            painter.fillRect(area, QColor(0, 0, 0, 90));
-            painter.fillRect(area, QBrush(QColor(220, 70, 70, 160), Qt::BDiagPattern));
+            QPolygonF area;
+            for (const QPoint& corner : shape) area << toScreen(corner);
+            QPainterPath path;
+            path.addPolygon(area);
+            path.closeSubpath();
+            painter.fillPath(path, QColor(0, 0, 0, 90));
+            painter.fillPath(path, QBrush(QColor(220, 70, 70, 160), Qt::BDiagPattern));
             painter.setPen(QPen(QColor(220, 70, 70), 1));
-            painter.drawRect(area);
+            painter.drawPath(path);
+        }
+        if (!pending_.empty())
+        {
+            QPolygonF line;
+            for (const QPoint& corner : pending_) line << toScreen(corner);
+            painter.setPen(QPen(QColor(255, 120, 120), 1, Qt::DashLine));
+            painter.drawPolyline(line);
+            for (const QPointF& corner : line) painter.drawEllipse(corner, 3, 3);
         }
         painter.restore();
     }

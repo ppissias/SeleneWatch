@@ -191,7 +191,9 @@ For every pixel, SeleneWatch learns the usual brightness and how much that pixel
 | --- | --- | --- |
 | **Large brightening** | A frame fires when this share of the unmasked frame rises by K at once, as with lightning or a fireball's flare. Repeated strokes within the quiet tail stay in one clip. Slow changes such as twilight are learned and do not fire. | 2 % of the frame |
 | **Learn a patch after** | A patch that keeps firing this long is learned into the background. A star or planet drifting past a fixed camera then stops firing; aircraft and satellites move on faster and keep firing. | 20 s |
-| **Mask** | Areas left out of detection: the ground, trees, street lights. Turn on **Draw mask** and drag rectangles on the preview; **Clear** removes them all. Up to 16 rectangles. Masked pixels are still recorded in the clips. | None |
+| **Mask** | Areas left out of detection: the ground, trees, roofs, street lights. Turn on **Draw mask**, then drag a rectangle on the preview, or click the corners of a shape and double-click to close it. **Clear** removes them all. Up to 16 shapes of up to 32 corners. Masked pixels are still recorded in the clips. | None |
+| **Watch from dusk to dawn**, **Sun below** | Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it rises again. Needs the site's position (Session → Site and instrument). The panel shows the Sun's altitude and the next start or stop. It starts once a night: if you press **Stop** during the night, or the camera stops, it waits for the next dusk. At dawn it stops only what it started (if your stream was already running at dusk, it ends only Monitoring). | Off, −10° |
+| **Follow the sky's brightness** | With a camera: keeps the sky's median, outside the mask, between 8% and 30% of full scale. After a minute outside, Monitoring stops (the clip in hand is saved), the exposure changes within **Exposure** *from … to …* (then the gain, by its step, up to **Gain up to**), and Monitoring starts again; at most one change every two minutes. Each change is logged in `candidates.txt` as `exposure_change`. | Off |
 
 Guiding is for the Moon and is off while the sky is watched.
 
@@ -289,6 +291,8 @@ Each clip folder is named by its UTC trigger time, for example `20261115-143156-
 - **Top:** the peak frame, stretched so the earthshine shows. Everything that changed during the clip is drawn over it: rises in orange, falls in blue. A flash is an orange dot, a meteor an orange line, and a plane or the ISS crossing the sunlit Moon a blue band. Each trigger has a yellow box with ticks pointing at it, numbered when there are several, so it can be found even in a thumbnail.
 - **Strip:** enlarged crops of the frame before the activity, its first frame, the peak, its last frame and the frame after, each with its time from the trigger. The crops follow a moving object. The last cell shows the change around the peak.
 - **Caption:** the UTC time and frame number, the trigger's measurement, the clip's length and why it ended, flags such as *during mount correction* or *dropped frames*, and a line describing the activity: how many frames it lasted, its strongest rise or fall, and whether it stayed in place or moved, with its speed.
+
+The caption's last line suggests what the clip shows: **flash**, **meteor**, **satellite**, **aircraft**, **dark transit**, **lightning**, **seeing** or **unclear**, with the reason (for example "a straight, fast rise at 12°/s for 0.4 s"). It is a suggestion to help sort a night's clips, not a decision; nothing is moved or deleted by it. It is also in `event.txt` (`suggested_kind:`) and on the clip's line in `candidates.txt`. Speeds are in degrees per second when the site and instrument give the image scale.
 
 Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
 `event.txt` contains:
@@ -455,7 +459,8 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Calibration and guiding | Automated tests and a full simulated run; ASCOM checked against the ASCOM telescope simulator |
 | A real mount under the Moon | **Pending** |
 | Detector settings for real observing | Partial; tuning on real earthshine data is pending |
-| Watching the sky | Automated tests with constructed meteors, lightning, drifting stars and masks; **a night outside is pending**, and its starting values are first guesses |
+| Watching the sky | Automated tests with constructed meteors, lightning, drifting stars and masks; the dusk-to-dawn schedule and the exposure follower with a simulated camera. **A night outside is pending**, and its starting values are first guesses |
+| Continuous and scheduled recording | Automated tests on played files and constructed slow disks; **a predicted transit recorded with a schedule is pending** |
 | The clip overview | Automated tests; checked on archive lunar recordings |
 | Darkening (transits) | Automated tests; measured on five archive recordings with injected silhouettes: at K 12 it adds nothing to an unchanged field and catches near-black crossings on four of the five. **A real transit is pending.** |
 

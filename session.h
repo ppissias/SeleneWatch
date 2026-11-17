@@ -132,6 +132,9 @@ public:
     void cancelSchedule();
     [[nodiscard]] std::optional<Schedule> schedule() const;
     [[nodiscard]] RecordingWriter::Status recordingStatus() const;
+    // Any thread. Lines for candidates.txt that are not about a clip, such as
+    // an exposure change (Feature-15).
+    void logRecord(const QString& lines) { writer_.logRecord(lines); }
     // Tests: the recording writer's drive query and pace.
     [[nodiscard]] RecordingWriter& recordingWriter() { return recorder_; }
 

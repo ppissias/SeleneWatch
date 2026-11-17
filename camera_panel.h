@@ -23,6 +23,8 @@ public:
     [[nodiscard]] ZwoSettings settings() const;
     void showActual(const ZwoProfile& profile);
     void showLiveActual(const ZwoProfile& profile);
+    // The requested controls' form (Feature-15: exposure that follows the sky).
+    [[nodiscard]] CameraSettingsEditor* controls() const { return editor_; }
 signals:
     void applyRequested();
     void liveControlsRequested();

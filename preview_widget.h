@@ -3,6 +3,7 @@
 #include <QtCore/QPoint>
 #include <QtCore/QRect>
 #include <QtGui/QImage>
+#include <QtGui/QPolygon>
 #include <QtWidgets/QWidget>
 
 #include <optional>
@@ -29,8 +30,10 @@ public:
     void setDetectionOverlay(QImage image, QRect frameBox);
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
-    // Frame coordinates. The detection mask (Feature-11), drawn hatched.
-    void setMask(std::vector<QRect> mask);
+    // Frame coordinates. The detection mask (Feature-11), drawn hatched, and
+    // the corners of a shape being drawn (Feature-15), joined by a line.
+    void setMask(std::vector<QPolygon> mask);
+    void setPendingShape(std::vector<QPoint> corners);
     [[nodiscard]] std::optional<QPoint> selectedPosition() const;
     [[nodiscard]] std::optional<QPoint> framePosition(QPointF widgetPosition) const;
     [[nodiscard]] QRect imageRect() const;
@@ -38,12 +41,15 @@ public:
 signals:
     void positionSelected(QPoint position);
     void regionSelected(QRect frameRegion);
+    // A double-click on the image, which closes a mask shape being drawn.
+    void shapeClosed();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private:
     [[nodiscard]] QRectF toWidget(const QRectF& frameRect) const;
@@ -57,7 +63,8 @@ private:
     std::optional<QRect> lockBox_;
     std::optional<QRectF> foundBox_;
     bool foundValid_{false};
-    std::vector<QRect> mask_;
+    std::vector<QPolygon> mask_;
+    std::vector<QPoint> pending_;
     // A left press on the image, and whether it has become a drag.
     std::optional<QPointF> pressPosition_;
     QPointF dragPosition_;

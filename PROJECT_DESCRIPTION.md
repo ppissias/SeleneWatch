@@ -308,6 +308,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | — | **An overview of every clip.** One picture per clip: what changed, where, when, and the clip's flags | Feature-12 | Built; review of real clips pending |
 | — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside pending |
 | — | **A trigger for darkening.** Dark patches and large darkenings, for transits in front of the sunlit Moon; off by default after measurement on recordings | Feature-13 | Built; a real transit pending |
+| — | **Sky extras.** Watching from dusk to dawn by the Sun's altitude, an exposure that follows the sky, a suggested kind for each clip, polygon masks | Feature-15 | Built; a night outside pending |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
 | 12 | **Later.** More camera families as observers bring the hardware; registration, transit tracking, event browser, export | To be written | Planned |
 

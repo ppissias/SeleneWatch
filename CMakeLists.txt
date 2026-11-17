@@ -31,6 +31,7 @@ add_library(selenewatch_core STATIC
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
     recording/metadata_text.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
+    detection_mask.cpp sky_schedule.cpp sky_exposure.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
@@ -166,6 +167,12 @@ target_link_libraries(SeleneWatchDarkeningTests PRIVATE selenewatch_core Qt6::Te
 selenewatch_compile_options(SeleneWatchDarkeningTests)
 add_test(NAME darkening COMMAND SeleneWatchDarkeningTests -o -,tap)
 set_tests_properties(darkening PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchSkyExtrasTests tests/sky_extras_tests.cpp)
+target_link_libraries(SeleneWatchSkyExtrasTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchSkyExtrasTests)
+add_test(NAME sky_extras COMMAND SeleneWatchSkyExtrasTests -o -,tap)
+set_tests_properties(sky_extras PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(SeleneWatchSessionRecordTests tests/session_record_tests.cpp)
 target_link_libraries(SeleneWatchSessionRecordTests PRIVATE selenewatch_core Qt6::Test)

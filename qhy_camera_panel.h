@@ -20,6 +20,8 @@ public:
     QhySettings settings() const;
     void showActual(const QhyProfile& profile);
     void showLiveActual(const QhyProfile& profile);
+    // The requested controls' form (Feature-15: exposure that follows the sky).
+    [[nodiscard]] CameraSettingsEditor* controls() const { return editor_; }
 signals:
     void applyRequested();
     void liveControlsRequested();

@@ -16,6 +16,20 @@ class QToolButton;
 class MeterSlider;
 class PeakHistory;
 
+// Feature-15: the Sky group's unattended-night controls. The window acts on
+// them; the panel only holds and shows them.
+struct SkyExtras
+{
+    // Watch from dusk to dawn: below this Sun altitude, in degrees.
+    bool night{false};
+    double sunLimitDeg{-10};
+    // Follow the sky's brightness within these limits.
+    bool follow{false};
+    double minExposureMs{1}, maxExposureMs{2000};
+    double maxGain{0}, gainStep{0};
+    bool operator==(const SkyExtras&) const = default;
+};
+
 // The observer's trigger controls and a read-only view of source-thread
 // measurements. It never calls the detector or accesses its live buffers.
 //
@@ -44,11 +58,21 @@ public:
     void setTarget(Target target);
     // The target changes only while the stream is stopped.
     void setTargetEditable(bool editable);
-    // Adds a rectangle, in frame pixels, to the mask. False when the mask is full.
+    // Adds a shape, in frame pixels, to the mask. False when the mask is
+    // full, the shape has fewer than three or too many corners, or the
+    // target is not the sky.
+    bool addMaskShape(const MaskShape& shape);
     bool addMaskRect(QRect rect);
     [[nodiscard]] bool drawingMask() const;
 
+    [[nodiscard]] SkyExtras skyExtras() const;
+    void setSkyExtras(const SkyExtras& extras);
+    // What the schedule and the exposure follower found; empty hides it.
+    void showNight(const QString& text);
+    void showFollow(const QString& text);
+
 signals:
+    void skyExtrasChanged();
     void settingsChanged();
     void displayChanged();
     // The observer chose another target in the choice box.
@@ -83,6 +107,16 @@ private:
     QToolButton* drawMask_;
     QToolButton* clearMask_;
     DetectionMask mask_;
+    // Feature-15: unattended nights.
+    QCheckBox* night_;
+    QDoubleSpinBox* sunLimit_;
+    QLabel* nightReading_;
+    QCheckBox* follow_;
+    QDoubleSpinBox* minExposure_;
+    QDoubleSpinBox* maxExposure_;
+    QDoubleSpinBox* maxGain_;
+    QDoubleSpinBox* gainStep_;
+    QLabel* followReading_;
     // Feature-13: darkening, in both modes.
     QCheckBox* darkening_;
     QSpinBox* maxDark_;

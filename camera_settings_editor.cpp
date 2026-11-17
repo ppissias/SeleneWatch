@@ -80,6 +80,25 @@ std::map<int,double> CameraSettingsEditor::controlValues() const
     for(const auto& [id,control]:controls_) result[id]=control.widget->value()*control.scale;
     return result;
 }
+std::optional<double> CameraSettingsEditor::controlValue(int id) const
+{
+    const auto found=controls_.find(id);
+    if(found==controls_.end()) return std::nullopt;
+    return found->second.widget->value()*found->second.scale;
+}
+std::optional<std::pair<double,double>> CameraSettingsEditor::controlRange(int id) const
+{
+    const auto found=controls_.find(id);
+    if(found==controls_.end()) return std::nullopt;
+    return std::pair{found->second.widget->minimum()*found->second.scale,found->second.widget->maximum()*found->second.scale};
+}
+bool CameraSettingsEditor::setControlValue(int id,double nativeValue)
+{
+    const auto found=controls_.find(id);
+    if(found==controls_.end()) return false;
+    found->second.widget->setValue(nativeValue/found->second.scale);
+    return true;
+}
 // Constrain the ROI origin and extent to the sensor dimensions at the selected bin.
 void CameraSettingsEditor::updateBounds()
 {

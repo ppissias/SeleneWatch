@@ -37,6 +37,9 @@ struct ClipWriteResult
     // than the clip's disk reserve (Feature-11). freeBytes is what was free.
     bool diskReserve{false};
     uint64_t freeBytes{0};
+
+    // The overview's suggested kind of the clip (Feature-15), when made.
+    QString suggestedKind;
 };
 
 // A guide pulse, kept by the writer to mark candidates that fall inside a
@@ -161,10 +164,11 @@ private:
     ClipWriteResult process(Job& job);
     void deliver(const ClipWriteResult& result);
 
-    QString writeClip(EventClip& clip, QString& error);
+    QString writeClip(EventClip& clip, QString& error, QString& suggestedKind);
     // Writer thread. Saves the clip's overview (Feature-12) in its folder and
-    // returns its metadata line, or why it was not written.
-    QString writeOverview(const EventClip& clip, const QString& folder) const;
+    // returns its metadata line, or why it was not written. Gives the
+    // suggested kind and its reason (Feature-15) when it could measure them.
+    QString writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason) const;
     // Writer thread. True, with the result filled in, when writing the clip
     // would go below its disk reserve.
     bool belowDiskReserve(const Job& job, ClipWriteResult& result) const;
