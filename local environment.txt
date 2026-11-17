@@ -59,7 +59,8 @@ Camera SDKs (not part of the repository)
     Downloaded 2026-11-17: toupcamsdk.20261024.zip (in C:\dev\tools\downloads), library 60.33015.20261024
     Header:  inc\toupcam.h; x64 DLL: win\x64\toupcam.dll; no license text in the package
   Neither DLL is shipped or copied into the build; the observer's own copy is loaded at run time, as for QHY.
-  Check a family's runtime without a camera being opened (not yet run on this machine):
+  Check a family's runtime without a camera being opened (all three passed on 2026-11-17: Player One 3.10.1,
+  ToupTek 60.33015.20261024, QHY 25.6.16.15 found in Program Files; no camera of those families connected):
     .\out\build\release\SeleneWatchRuntimeProbe.exe playerone "C:\dev\tools\SDKs\PlayerOne SDK\lib\x64\PlayerOneCamera.dll"
     .\out\build\release\SeleneWatchRuntimeProbe.exe touptek "C:\dev\tools\SDKs\ToupTek SDK\win\x64\toupcam.dll"
     .\out\build\release\SeleneWatchRuntimeProbe.exe qhy

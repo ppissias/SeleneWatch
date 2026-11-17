@@ -1291,7 +1291,7 @@ No SDK grants redistribution clearly, so Player One would follow the QHY pattern
 
 ### Implementation — 17 November 2026
 
-Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Item 3 is built: `SeleneWatchRuntimeProbe` loads the observer's DLL and reports its version and cameras, but it has not been run against the vendors' DLLs here. Item 4 needs cameras.
+Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Item 3 passes: the observer ran `SeleneWatchRuntimeProbe` against the vendors' DLLs on 17 November 2026 (results below). Item 4 needs cameras.
 
 **The SDKs used to build.**
 - Player One Windows camera SDK 3.10.1 (`PlayerOne_Camera_SDK_Windows_V3.10.1.zip`, sha256 `428cdf88…f2e7e5`), header `include/PlayerOneCamera.h`.
@@ -1316,10 +1316,14 @@ Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Ite
 - A window test drives both families through the window: the saved DLL choice reaching the SDK, discovery, Preview, a live gain change, Monitoring reopening the camera, the drop readout, and the docks following the Source choice.
 - The refactored ZWO and QHY panels pass all their earlier window tests unchanged.
 
-**Not verified here.** The bindings against the vendors' DLLs, and anything with a camera. Running a downloaded vendor DLL on this machine needs the observer's permission. The probe is the first step:
-```
-out\build\release\SeleneWatchRuntimeProbe.exe playerone "C:\dev\tools\SDKs\PlayerOne SDK\lib\x64\PlayerOneCamera.dll"
-out\build\release\SeleneWatchRuntimeProbe.exe touptek "C:\dev\tools\SDKs\ToupTek SDK\win\x64\toupcam.dll"
-out\build\release\SeleneWatchRuntimeProbe.exe qhy
-```
-The last one checks that the QHY adapter, which now loads its DLL through the shared loader, still finds the installed QHY runtime.
+**The vendors' DLLs (item 3).** Run by the observer on 17 November 2026, with no camera of these families connected. Every export each binding uses resolved, and each SDK reported its version:
+
+| Command | Runtime loaded | SDK version | Cameras |
+| --- | --- | --- | --- |
+| `SeleneWatchRuntimeProbe playerone "…\PlayerOne SDK\lib\x64\PlayerOneCamera.dll"` | the SDK's x64 DLL | 3.10.1 | 0 |
+| `SeleneWatchRuntimeProbe touptek "…\ToupTek SDK\win\x64\toupcam.dll"` | the SDK's x64 DLL | 60.33015.20261024 | 0 |
+| `SeleneWatchRuntimeProbe qhy` | `C:\Program Files\QHYCCD\AllInOne\sdk\x64\qhyccd.dll`, by automatic discovery | 25.6.16.15 | 0 |
+
+The last row shows that the QHY adapter, which now loads its DLL through the shared loader, still finds the installed QHY runtime.
+
+**Not verified.** Anything with a Player One or ToupTek camera (item 4).
