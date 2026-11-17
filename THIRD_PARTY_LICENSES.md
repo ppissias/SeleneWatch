@@ -81,17 +81,31 @@ Made by the Release build's `package` target, from the command line or Visual St
   - Qt Network and Qt Svg are deliberately not shipped (the package check refuses a package holding them), so their notices are not needed.
 - **ZWO ASI SDK:** `ASICamera2.dll` with `licenses/ZWO-ASI-SDK.txt` (section 2 above), only when the build has the SDK.
 - **Microsoft Visual C++ runtime:** as above.
-- **Not shipped:** QHY files, ASCOM, camera drivers, test and probe programs.
+- **Not shipped:** QHY, Player One and ToupTek files, ASCOM, camera drivers, test and probe programs.
 
-## Camera families evaluated, not integrated (17 November 2026)
+## Player One camera SDK (user-installed runtime, Feature-16)
 
-Player One Astronomy, ToupTek (with Altair Astro and other brands that ship the same SDK under their own names), SVBONY and Atik were considered for a third camera family; see Feature-16 in `features.md`. The license files found with their SDKs, as vendored in the INDI project's `indi-3rdparty` repository and read on 17 November 2026:
+- **Version used to build:** Windows camera SDK 3.10.1, from [Player One's software page](https://player-one-astronomy.com/service/software/) (`PlayerOne_Camera_SDK_Windows_V3.10.1.zip`, sha256 `428cdf88f14f5a7170c41cc9be5353030dba1cd8c97fdd72ec06d64940e2f7e5`), unpacked outside the repository.
+- **Terms:** the SDK's `license.txt` (copyright Player One Astronomy Co., Ltd.) grants use "for the secondary development of our company's cameras or other equipment" and says "You can use our company's products and this SDK to develop any products without any restrictions". It grants nothing explicit about redistribution, and keeps an MIT-style warranty disclaimer.
+- **Integration:** only `cameras/playerone_sdk.cpp` includes `PlayerOneCamera.h`, for the function declarations. Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `PlayerOneCamera.dll` by absolute path, through `cameras/vendor_runtime`.
+- **Distribution:** no Player One file is in the repository or the packages. The observer installs Player One's driver and DLL.
+
+## ToupTek camera SDK (user-installed runtime, Feature-16)
+
+- **Version used to build:** `toupcamsdk.20261024.zip` (library version 60.33015.20261024), from [ToupTek's SDK downloads](https://www.touptekphotonics.com/download/?category=SDK) (sha256 `8845f9d770e07e301126a8142a4609d8ed5129264f4d7cbdefe62c7913cfc444`), unpacked outside the repository.
+- **Terms:** the package holds no license text, and `toupcam.h` names none. Redistribution rights are unknown.
+- **Integration:** only `cameras/touptek_sdk.cpp` includes `toupcam.h`, for the declarations, with its import markers off (`TOUPCAM_NOIMPORTS`). Nothing links against the SDK. At run time SeleneWatch loads the observer's x64 `toupcam.dll` by absolute path.
+- **Distribution:** no ToupTek file is in the repository or the packages. The observer installs the camera's driver and ToupTek's DLL.
+
+## Camera families evaluated (17 November 2026)
+
+Player One Astronomy, ToupTek (with Altair Astro and other brands that ship the same SDK under their own names), SVBONY and Atik were considered for a third camera family. Player One and ToupTek were integrated as above; see Feature-16 in `features.md`. The license files found with their SDKs, as vendored in the INDI project's `indi-3rdparty` repository and read on 17 November 2026:
 
 - **Player One:** `license.txt` grants use of the SDK "for the secondary development of our company's cameras", says "You can use our company's products and this SDK to develop any products without any restrictions", and grants nothing explicit about redistribution.
 - **ToupTek and Altair:** a generic GNU LGPL 2.1 text only, with no vendor statement that it covers the binaries.
 - **SVBONY and Atik:** no license file. Atik's SDK changelog says a EULA was added in its 2025.11.24 release; its text was not read.
 
-None of them grants redistribution clearly. Any of them would therefore follow the QHY pattern: SDK files stay out of the repository and the packages, and the observer installs the vendor's runtime.
+None of them grants redistribution clearly. Any of them therefore follows the QHY pattern: SDK files stay out of the repository and the packages, and the observer installs the vendor's runtime.
 
 ## Dependency Evaluation Guidelines
 

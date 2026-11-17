@@ -4,9 +4,8 @@
 #include "cameras/qhy_api.h"
 
 #ifdef SELENEWATCH_WITH_QHY
-#include <QtCore/QCoreApplication>
+#include "cameras/vendor_runtime.h"
 #include <QtCore/QDir>
-#include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QStringList>
 #include <Windows.h>
@@ -52,19 +51,17 @@ int dimension(uint32_t value)
     return static_cast<int>(value);
 }
 
-template<class Function> Function resolve(HMODULE library, const char* name)
+template<class Function> Function resolve(void* library, const char* name)
 {
-    const auto pointer=GetProcAddress(library,name);
-    if (!pointer) throw std::runtime_error(std::string("missing SDK export ")+name);
-    return reinterpret_cast<Function>(pointer);
+    return reinterpret_cast<Function>(vendorExport(library,name));
 }
 
 // Resolve the complete API before choosing a runtime. An incompatible DLL
 // in an automatic location can then be skipped in favor of the next one.
 struct QhyFunctions
 {
-    explicit QhyFunctions(HMODULE module) : module(module) {}
-    HMODULE module;
+    explicit QhyFunctions(void* module) : module(module) {}
+    void* module;
 
 #define QHY_FUNCTION(name) decltype(&::name) name{resolve<decltype(&::name)>(module,#name)}
     QHY_FUNCTION(BeginQHYCCDLive);
@@ -99,8 +96,7 @@ struct QhyFunctions
 QStringList installedRuntimePaths()
 {
     QStringList paths;
-    const auto appDir=QCoreApplication::applicationDirPath();
-    if (!appDir.isEmpty()) paths << QDir(appDir).filePath("qhyccd.dll");
+    if (const auto beside=runtimeBesideProgram("qhyccd.dll"); !beside.isEmpty()) paths << beside;
 
     for (const auto* variable : {"ProgramFiles","ProgramW6432","ProgramFiles(x86)"})
     {
@@ -113,12 +109,8 @@ QStringList installedRuntimePaths()
     return paths;
 }
 
-QString libraryError(DWORD error)
-{
-    if (error==ERROR_BAD_EXE_FORMAT) return "expected an x64 Windows DLL";
-    if (error==ERROR_MOD_NOT_FOUND) return "Windows could not load the DLL or a required component";
-    return QString("Windows error %1").arg(error);
-}
+const VendorRuntime qhyRuntime{"QHY","qhyccd.dll",
+    "Install QHY's Windows All-In-One driver and SDK, or select its x64 qhyccd.dll."};
 
 // Construction neither loads the SDK nor touches USB. Only an absolute
 // installed path is loaded, with dependencies resolved beside it or in System32.
@@ -262,51 +254,17 @@ private:
     const QhyFunctions& functions()
     {
         if (functions_) return *functions_;
-
-        const auto paths=runtimeOverride_.isEmpty()?installedRuntimePaths():QStringList{runtimeOverride_};
-        QStringList failedLoads;
-        for (const auto& path : paths)
-        {
-            if (!QDir::isAbsolutePath(path) || !QFileInfo(path).isFile()) continue;
-            const auto nativePath=QDir::toNativeSeparators(path);
-            const auto module=LoadLibraryExW(nativePath.toStdWString().c_str(),nullptr,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-            if (!module)
-            {
-                const auto error=GetLastError();
-                failedLoads << QString("%1 (%2)").arg(nativePath,libraryError(error));
-                continue;
-            }
-            try
-            {
-                functions_.emplace(module);
-            }
-            catch (const std::exception& ex)
-            {
-                FreeLibrary(module);
-                failedLoads << QString("%1 (%2)").arg(nativePath,QString::fromUtf8(ex.what()));
-                continue;
-            }
-            loadedRuntimePath_=nativePath;
-            return *functions_;
-        }
-
-        QString error;
-        if (!failedLoads.isEmpty())
-            error="Cannot load a compatible 64-bit QHY runtime.\n"+failedLoads.join('\n');
-        else if (!runtimeOverride_.isEmpty())
-            error=QString("QHY runtime file unavailable at %1.").arg(QDir::toNativeSeparators(runtimeOverride_));
-        else
-            error="QHY runtime (64-bit qhyccd.dll) was not found.";
-        error+="\nInstall QHY's Windows All-In-One driver and SDK, or select its x64 qhyccd.dll.";
-        throw std::runtime_error(error.toStdString());
+        // The module is kept in functions_, which resolved every export from it.
+        (void)loadVendorRuntime(qhyRuntime,runtimeOverride_,installedRuntimePaths(),
+            [this](void* candidate) { functions_.emplace(candidate); },loadedRuntimePath_);
+        return *functions_;
     }
     void unloadRuntime() noexcept
     {
         if (!functions_) return;
         if (resources_) (void)functions_->ReleaseQHYCCDResource();
         resources_=false;
-        FreeLibrary(functions_->module);
+        freeVendorRuntime(functions_->module);
         functions_.reset();
         loadedRuntimePath_.clear();
     }

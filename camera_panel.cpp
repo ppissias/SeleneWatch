@@ -8,7 +8,7 @@
 #include <QtWidgets/QVBoxLayout>
 #include <cmath>
 
-CameraPanel::CameraPanel(std::shared_ptr<ZwoApi> api,QWidget* parent):QWidget(parent),api_(std::move(api))
+CameraPanel::CameraPanel(std::shared_ptr<ZwoApi> api,QWidget* parent):CameraFamilyPanel(parent),api_(std::move(api))
 {
     setObjectName("cameraPanel");
     auto* layout=new QVBoxLayout(this);
@@ -36,10 +36,12 @@ void CameraPanel::refresh()
     {
         { const QSignalBlocker blocked(cameras_); cameras_->clear();
           for (const auto& c:api_->cameras()) cameras_->addItem(QString::fromStdString(c.name)+QString(" (ID %1)").arg(c.id),c.id); }
-        if (cameras_->count()) inspectSelected();
-        else { readback_->setText("No ASI camera detected. Connect one and refresh."); setRunning(false); }
+        if (cameras_->count()) { inspectSelected(); return; }
+        readback_->setText("No ASI camera detected. Connect one and refresh.");
     }
-    catch (const std::exception& ex) { readback_->setText(QString::fromUtf8(ex.what())); setRunning(false); }
+    catch (const std::exception& ex) { readback_->setText(QString::fromUtf8(ex.what())); }
+    setRunning(false);
+    emit availabilityChanged();
 }
 void CameraPanel::inspectSelected()
 {
@@ -47,8 +49,33 @@ void CameraPanel::inspectSelected()
     try { profile_=ZwoSource::inspect(api_,cameras_->currentData().toInt()); showProfile(); }
     catch (const std::exception& ex) { profile_.reset(); readback_->setText(QString::fromUtf8(ex.what())); }
     setRunning(false);
+    emit availabilityChanged();
 }
 bool CameraPanel::hasCamera() const { return profile_.has_value(); }
+void CameraPanel::validateSettings() const { ZwoSource::validateSettings(profile().camera,settings()); }
+std::unique_ptr<FrameSource> CameraPanel::makeSource()
+{
+    auto source=std::make_unique<ZwoSource>(api_,profile(),settings());
+    source_=source.get();
+    return source;
+}
+void CameraPanel::showSourceReadback(bool live)
+{
+    if (!source_) return;
+    if (live) showLiveActual(source_->actualProfile());
+    else showActual(source_->actualProfile());
+}
+bool CameraPanel::readBack(std::string& error)
+{
+    ZwoSource source(api_,profile(),settings());
+    if (!source.open(error)) return false;
+    showActual(source.actualProfile());
+    return true;
+}
+void CameraPanel::requestLiveControls()
+{
+    if (source_) source_->requestLiveControls(settings().controls);
+}
 ZwoProfile CameraPanel::profile() const { return profile_.value(); }
 ZwoSettings CameraPanel::settings() const
 {

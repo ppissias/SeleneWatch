@@ -1253,7 +1253,7 @@ All 17 suites pass.
 
 ## Feature-16 — A third camera family
 
-*Proposed on 17 November 2026, from an investigation the observer asked for. Not started: the choice below needs the observer's agreement, and nobody here has a camera of the family to test with.*
+*Proposed on 17 November 2026, from an investigation the observer asked for. The observer chose both Player One and ToupTek the same day; see the implementation notes at the end of this section. Nobody here has a camera of either family to test with.*
 
 The observer asked about Player One Astronomy, ToupTek, Altair Astro, SVBONY and Atik. Each was checked for what it is used for, what its SDK looks like, and the terms its SDK comes with. The terms are the license files found with each SDK in the INDI project's `indi-3rdparty` repository, read on 17 November 2026; details in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
@@ -1286,5 +1286,40 @@ No SDK grants redistribution clearly, so Player One would follow the QHY pattern
 
 ### Open questions for the observer
 
-- Player One or ToupTek?
+- Player One or ToupTek? *Answered: both.*
 - Is there a Player One owner who could run item 4? Without it the adapter would ship marked "built; hardware test pending", as QHY is now.
+
+### Implementation — 17 November 2026
+
+Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Item 3 is built: `SeleneWatchRuntimeProbe` loads the observer's DLL and reports its version and cameras, but it has not been run against the vendors' DLLs here. Item 4 needs cameras.
+
+**The SDKs used to build.**
+- Player One Windows camera SDK 3.10.1 (`PlayerOne_Camera_SDK_Windows_V3.10.1.zip`, sha256 `428cdf88…f2e7e5`), header `include/PlayerOneCamera.h`.
+- ToupTek `toupcamsdk.20261024.zip` (sha256 `8845f9d7…cfc444`), header `inc/toupcam.h`, version 60.33015.20261024.
+- Both are unpacked in `C:\dev\tools\SDKs`, outside the repository. `SELENEWATCH_PLAYERONE_SDK_DIR` and `SELENEWATCH_TOUPTEK_SDK_DIR` point at them. Without them, those families are not built and do not appear.
+
+**Where it lives.**
+- `cameras/playerone_*`: the boundary (`PlayerOneApi`), the binding, and `PlayerOneSource`. They follow ZWO's: index, properties, open, initialize, config attributes for exposure, gain, offset and USB bandwidth, then bin, raw format, ROI size and origin, video mode, a wait on `POAImageReady` with a bounded read, and the SDK's dropped-frame total. Flip is turned off; binned pixels are averaged, not summed. Colour stays at bin 1, as for ZWO. ROI widths are multiples of 4 and heights of 2, as the SDK requires.
+- `cameras/touptek_*`: the boundary (`ToupTekApi`), the binding, and `ToupTekSource`, handle-based like QHY's.
+  - The SDK turns the image upside down on Windows by default, which would also change the Bayer cell. The adapter turns that off as soon as the camera opens.
+  - Raw mode is set at 8 or 16 bits, in video mode, with flips, automatic exposure and digital binning off. Bin is 1 only, and the ROI is even with sides of at least 8.
+  - Frames are read with `Toupcam_WaitImageV4` and a bounded wait.
+  - The controls are exposure, gain (ToupTek's percent, 100 for unity), black level, bandwidth and speed level. The black level's range grows with the raw depth (31 at 8 bits), so the source sets the raw depth before checking the requested controls.
+  - Frame indices come from the camera's own sequence numbers when the SDK reports them. Each frame advances the index by its step from the one before, so a lost frame is counted where it happened, and the 32-bit counter's wrap is carried. A repeat or a step back stops the stream, since losses could no longer be attributed. Without sequence numbers, losses are unknown, as for QHY.
+- `cameras/vendor_runtime`: loading a vendor DLL that the observer installs, by absolute path, with its dependencies from its own folder and System32. It was taken out of the QHY adapter, which now uses it too, and is shared by Player One and ToupTek. Their automatic location is beside `SeleneWatch.exe`. Otherwise the observer chooses the DLL with **Choose … DLL** (`RuntimeChooser`, which the QHY panel now uses as well).
+- `camera_family_panel.h`: what the window needs from a camera family: its Source entry, discovery, the requested settings, the source it makes, readbacks, and live controls. With four families, the window keeps a list of them instead of a branch per family at every place that touched a camera (about twenty). The ZWO and QHY panels implement it with their behaviour unchanged.
+- `tools/runtime_probe_main.cpp`, `SeleneWatchRuntimeProbe qhy|playerone|touptek [DLL]`: loads the runtime, prints its path, version and cameras, and opens nothing.
+
+**Tests.**
+- `playerone` (5 tests): settings read back at bin 2 and both depths; invalid ROI, binning and controls, and SDK failures, all leaving the camera closed; dropped frames counted and a disconnect reported; live controls on the same connection; a manual clip whose `event.txt` names the camera and whose SER holds the native words.
+- `touptek` (6 tests): raw at 16 bits with a black level only valid there; losses from sequence gaps, through the counter's wrap, and a stream stopped on a step back; invalid settings and SDK failures; not-ready and disconnect; live controls; a manual clip.
+- A window test drives both families through the window: the saved DLL choice reaching the SDK, discovery, Preview, a live gain change, Monitoring reopening the camera, the drop readout, and the docks following the Source choice.
+- The refactored ZWO and QHY panels pass all their earlier window tests unchanged.
+
+**Not verified here.** The bindings against the vendors' DLLs, and anything with a camera. Running a downloaded vendor DLL on this machine needs the observer's permission. The probe is the first step:
+```
+out\build\release\SeleneWatchRuntimeProbe.exe playerone "C:\dev\tools\SDKs\PlayerOne SDK\lib\x64\PlayerOneCamera.dll"
+out\build\release\SeleneWatchRuntimeProbe.exe touptek "C:\dev\tools\SDKs\ToupTek SDK\win\x64\toupcam.dll"
+out\build\release\SeleneWatchRuntimeProbe.exe qhy
+```
+The last one checks that the QHY adapter, which now loads its DLL through the shared loader, still finds the installed QHY runtime.

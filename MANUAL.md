@@ -41,6 +41,12 @@ Either way, the Qt and Visual C++ libraries the program needs come with it. The 
 | --- | --- | --- |
 | ZWO ASI | ZWO's camera driver. The SDK library ships next to SeleneWatch. | Tested on an ASI120MM Mini on the bench |
 | QHYCCD | QHY's Windows *All-In-One* driver and SDK package. SeleneWatch finds the installed SDK library when you select the camera. | Built; hardware test pending |
+| Player One | Player One's camera driver, and its `PlayerOneCamera.dll` (x64), from Player One's Windows camera SDK (`lib\x64`) or from your capture software's folder. Put the DLL next to `SeleneWatch.exe`, or press **Choose Player One DLL…** in the camera panel. | Built; hardware test pending |
+| ToupTek, and cameras ToupTek makes for other brands | The camera's driver, and ToupTek's `toupcam.dll` (x64), from ToupTek's camera SDK (`win\x64`) or from your capture software's folder. Put it next to `SeleneWatch.exe`, or press **Choose ToupTek DLL…**. | Built; hardware test pending |
+
+SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. To check an installation without opening a camera, run `SeleneWatchRuntimeProbe.exe playerone` (or `touptek`, `qhy`), from a build, with the DLL's path as a second argument when it is not next to the program. It prints the library it loaded, its version and the cameras it sees.
+
+Player One cameras work like ZWO ones: bin 1 or more for mono cameras (binned pixels are averaged), ROI width a multiple of 4. ToupTek cameras use bin 1 and an even ROI. Their frame numbers come from the camera's own counter, so a dropped frame is counted where it happened.
 
 **Mount (optional).** To let SeleneWatch keep the Moon in the field, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver, for example EQMOD. SeleneWatch only sends small guide pulses; it never slews or parks the mount.
 

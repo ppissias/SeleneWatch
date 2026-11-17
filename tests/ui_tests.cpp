@@ -5,7 +5,11 @@
 #include "guiding_panel.h"
 #include "tests/fake_zwo_api.h"
 #include "tests/fake_qhy_api.h"
+#include "tests/fake_playerone_api.h"
+#include "tests/fake_touptek_api.h"
 #include "qhy_camera_panel.h"
+#include "playerone_camera_panel.h"
+#include "touptek_camera_panel.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "site_dialog.h"
@@ -76,7 +80,73 @@ private slots:
     void cameraReadbacksRestartAndDisconnectKeepSeparateEvidence();
     void qhyRuntimeOverridePersistsAndRecovers();
     void qhyReadbacksBayerEvidenceAndUnknownDrops();
+    void playerOneAndToupTekInTheWindow();
 };
+
+// Feature-16: both new camera families through the window, with test cameras.
+void UiTest::playerOneAndToupTekInTheWindow()
+{
+    QTemporaryDir dir;
+    const QString savedRuntime = dir.filePath("Player One/PlayerOneCamera.dll");
+    QSettings().setValue("playerone/runtimePath", savedRuntime);
+    auto playerOne = std::make_shared<FakePlayerOneApi>();
+    auto toupTek = std::make_shared<FakeToupTekApi>();
+    MainWindow window(nullptr, dir.path(), {}, {}, playerOne, toupTek);
+    window.show();
+    QCOMPARE(playerOne->opened.load(), 0); // nothing is opened before its source is chosen
+    auto* source = window.findChild<QComboBox*>("sourceComboBox");
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    auto* frames = window.findChild<QLabel*>("framesReadout");
+    QVERIFY(source->findData("playerone") >= 2 && source->findData("touptek") > source->findData("playerone"));
+
+    // Player One: the saved DLL choice reaches the SDK boundary, discovery fills the panel.
+    source->setCurrentIndex(source->findData("playerone"));
+    auto* poa = window.findChild<PlayerOneCameraPanel*>();
+    QCOMPARE(playerOne->runtimeOverride, savedRuntime);
+    QVERIFY(poa->hasCamera());
+    QVERIFY(window.findChild<QDockWidget*>("playerOneCameraDock")->isVisible());
+    QVERIFY(window.findChild<QLabel*>("playerOneReadback")->text().contains("TEST-POA-0001"));
+    QVERIFY(start->isEnabled());
+    QVERIFY(!window.findChild<QSpinBox*>("targetFpsSpinBox")->isEnabled());
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(playerOne->delivered >= 2, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(frames->text().contains("SDK drops: 0"), 3000);
+    // A control changed in Preview applies live on the same connection and reads back.
+    poa->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(250);
+    QTRY_COMPARE_WITH_TIMEOUT(poa->profile().current.controls.at(PlayerOneControl::Gain), int64_t{250}, 3000);
+    QCOMPARE(playerOne->starts.load(), 1);
+    // Monitoring reopens the camera with the requested settings.
+    monitoring->click();
+    QTRY_COMPARE_WITH_TIMEOUT(playerOne->starts.load(), 2, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 3000);
+    QVERIFY(!poa->findChild<QPushButton*>("applyPlayerOneCamera")->isEnabled());
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
+    QCOMPARE(playerOne->opened.load(), playerOne->closed.load());
+    // Back to automatic discovery.
+    window.findChild<QPushButton*>("automaticPlayerOneRuntime")->click();
+    QVERIFY(playerOne->runtimeOverride.isEmpty());
+    QVERIFY(!QSettings().contains("playerone/runtimePath"));
+
+    // ToupTek: losses are counted from the camera's sequence numbers.
+    toupTek->sequences = {7, 8, 10};
+    source->setCurrentIndex(source->findData("touptek"));
+    auto* toupTekPanel = window.findChild<ToupTekCameraPanel*>();
+    QVERIFY(toupTekPanel->hasCamera());
+    QVERIFY(window.findChild<QDockWidget*>("toupTekCameraDock")->isVisible());
+    QVERIFY(window.findChild<QDockWidget*>("playerOneCameraDock")->isHidden());
+    QVERIFY(window.findChild<QLabel*>("toupTekReadback")->text().contains("TEST-TT-0001"));
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(toupTek->delivered >= 4, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(frames->text().contains("SDK drops: 1"), 3000);
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
+    QCOMPARE(toupTek->opened.load(), toupTek->closed.load());
+    source->setCurrentIndex(source->findData("synthetic"));
+    QVERIFY(window.findChild<QDockWidget*>("toupTekCameraDock")->isHidden());
+}
 
 void UiTest::previewShowsWouldTriggerWithoutSaving()
 {

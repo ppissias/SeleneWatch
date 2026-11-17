@@ -268,7 +268,7 @@ Synthetic acquisition and playback live in `sources/`; camera acquisition and th
 
 The release number (`YYYY.MM-NN`, set once in `CMakeLists.txt`) and the Git revision are generated into `selenewatch_version.h` at build time and recorded on every `event.txt` and `recording.txt`, so each piece of evidence names the program that wrote it.
 
-A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. A plausible later layout follows.
+A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. Feature-16 added Player One and ToupTek there, and `cameras/vendor_runtime` for loading a vendor DLL the observer installs (QHY, Player One, ToupTek). The window sees each camera family through `CameraFamilyPanel` (`camera_family_panel.h`): its Source entry, discovery, requested settings, the source it makes, readbacks and live controls. Each family is one implementation, and the window names none of them. A plausible later layout follows.
 
 ```text
 SeleneWatch/

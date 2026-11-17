@@ -1,0 +1,176 @@
+#include "touptek_camera_panel.h"
+#include "camera_settings_editor.h"
+#include "runtime_chooser.h"
+
+#include <QtCore/QSignalBlocker>
+#include <QtWidgets/QComboBox>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QVBoxLayout>
+
+#include <cmath>
+
+ToupTekCameraPanel::ToupTekCameraPanel(std::shared_ptr<ToupTekApi> api, QWidget* parent)
+    : CameraFamilyPanel(parent), api_(std::move(api))
+{
+    setObjectName("toupTekCameraPanel");
+    auto* layout = new QVBoxLayout(this);
+    runtime_ = new RuntimeChooser("ToupTek", "toupcam.dll", "touptek/runtimePath", "ToupTek", this);
+    layout->addWidget(runtime_);
+    cameras_ = new QComboBox(this);
+    cameras_->setObjectName("toupTekCameras");
+    refresh_ = new QPushButton("Refresh cameras", this);
+    refresh_->setObjectName("refreshToupTekCameras");
+    layout->addWidget(cameras_);
+    layout->addWidget(refresh_);
+    editor_ = new CameraSettingsEditor(2, 2, this);
+    layout->addWidget(editor_);
+    apply_ = new QPushButton("Apply settings", this);
+    apply_->setObjectName("applyToupTekCamera");
+    layout->addWidget(apply_);
+    readback_ = new QLabel("Refresh to discover ToupTek cameras.", this);
+    readback_->setWordWrap(true);
+    readback_->setTextFormat(Qt::PlainText);
+    readback_->setObjectName("toupTekReadback");
+    layout->addWidget(readback_);
+    auto* hint = new QLabel("For ToupTek cameras and cameras ToupTek makes for other brands. Needs the camera's driver and "
+        "ToupTek's toupcam.dll (x64), which SeleneWatch does not ship: put it beside SeleneWatch.exe or choose it. "
+        "Preview applies controls live; format and ROI changes restart Preview. Bin 1 only. Hardware validation is pending.", this);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    layout->addStretch();
+    connect(runtime_, &RuntimeChooser::changed, this, &ToupTekCameraPanel::refresh);
+    connect(refresh_, &QPushButton::clicked, this, &ToupTekCameraPanel::refresh);
+    connect(cameras_, &QComboBox::currentIndexChanged, this, &ToupTekCameraPanel::inspectSelected);
+    connect(apply_, &QPushButton::clicked, this, &ToupTekCameraPanel::applyRequested);
+    connect(editor_, &CameraSettingsEditor::liveControlsRequested, this, &ToupTekCameraPanel::liveControlsRequested);
+    setRunning(false);
+}
+
+void ToupTekCameraPanel::refresh()
+{
+    if (running_) return;
+    profile_.reset();
+    try
+    {
+        {
+            const QSignalBlocker blocked(cameras_);
+            cameras_->clear();
+            api_->setRuntimeOverride(runtime_->path());
+            for (const auto& d : api_->devices())
+                cameras_->addItem(QString::fromStdString(d.name), QString::fromStdString(d.id));
+        }
+        readback_->setToolTip(api_->loadedRuntimePath());
+        if (cameras_->count())
+        {
+            inspectSelected();
+            return;
+        }
+        readback_->setText(QString("ToupTek SDK %1 loaded. Connect a camera and refresh. If Windows cannot see it, check the "
+            "camera's driver.").arg(QString::fromStdString(api_->version())));
+    }
+    catch (const std::exception& ex)
+    {
+        readback_->setToolTip(api_->loadedRuntimePath());
+        readback_->setText(QString::fromUtf8(ex.what()));
+    }
+    setRunning(false);
+    emit availabilityChanged();
+}
+
+void ToupTekCameraPanel::inspectSelected()
+{
+    if (running_ || cameras_->currentIndex() < 0) return;
+    try { profile_ = ToupTekSource::inspect(api_, cameras_->currentData().toString().toStdString()); showProfile(); }
+    catch (const std::exception& ex) { profile_.reset(); readback_->setText(QString::fromUtf8(ex.what())); }
+    setRunning(false);
+    emit availabilityChanged();
+}
+
+void ToupTekCameraPanel::validateSettings() const { ToupTekSource::validateSettings(profile().camera, settings()); }
+
+std::unique_ptr<FrameSource> ToupTekCameraPanel::makeSource()
+{
+    auto source = std::make_unique<ToupTekSource>(api_, profile(), settings());
+    source_ = source.get();
+    return source;
+}
+
+void ToupTekCameraPanel::showSourceReadback(bool live)
+{
+    if (!source_) return;
+    profile_ = source_->actualProfile();
+    if (live) updateReadback();
+    else { showProfile(); setRunning(running_, monitoring_); }
+}
+
+bool ToupTekCameraPanel::readBack(std::string& error)
+{
+    ToupTekSource source(api_, profile(), settings());
+    if (!source.open(error)) return false;
+    profile_ = source.actualProfile();
+    showProfile();
+    setRunning(running_, monitoring_);
+    return true;
+}
+
+void ToupTekCameraPanel::requestLiveControls()
+{
+    if (source_) source_->requestLiveControls(settings().controls);
+}
+
+ToupTekSettings ToupTekCameraPanel::settings() const
+{
+    auto s = profile_.value().current;
+    const auto g = editor_->requestedGeometry();
+    s.width = g.width; s.height = g.height; s.x = g.x; s.y = g.y; s.format = g.format;
+    for (const auto& [id, value] : editor_->controlValues())
+        s.controls[static_cast<ToupTekControl>(id)] = static_cast<int64_t>(std::llround(value));
+    return s;
+}
+
+void ToupTekCameraPanel::showProfile()
+{
+    const auto& p = *profile_;
+    const auto& s = p.current;
+    editor_->showGeometry(p.camera.width, p.camera.height, p.camera.formats, {1}, {s.width, s.height, s.x, s.y, 1, s.format});
+    editor_->clearControls();
+    for (const auto& c : p.controls)
+    {
+        const bool exposure = c.kind == ToupTekControl::Exposure;
+        editor_->addControl(static_cast<int>(c.kind), QString::fromStdString(c.name), static_cast<double>(c.minimum),
+            static_cast<double>(c.maximum), exposure ? 100 : 1, static_cast<double>(c.value), exposure ? 1000 : 1, exposure ? " ms" : "");
+    }
+    updateReadback();
+}
+
+void ToupTekCameraPanel::updateReadback()
+{
+    const auto& p = *profile_;
+    const auto& s = p.current;
+    QStringList values;
+    for (const auto& c : p.controls)
+    {
+        const bool exposure = c.kind == ToupTekControl::Exposure;
+        values << QString("%1: %2%3").arg(QString::fromStdString(c.name))
+            .arg(exposure ? static_cast<double>(c.value) / 1000 : static_cast<double>(c.value), 0, 'g', 10).arg(exposure ? " ms" : "");
+    }
+    readback_->setText(QString("Read back: %1 × %2, RAW%3, origin (%4, %5).\nBin 1. Deepest raw mode: %6 bits. SDK %7. Serial: %8.\n"
+        "Actual controls: %9")
+        .arg(s.width).arg(s.height).arg(s.format == PixelFormat::Mono16 ? 16 : 8).arg(s.x).arg(s.y).arg(p.camera.sensorBits)
+        .arg(QString::fromStdString(p.sdkVersion), p.serial.empty() ? QString("unknown") : QString::fromStdString(p.serial),
+            values.join(", ")));
+}
+
+void ToupTekCameraPanel::setRunning(bool running, bool monitoring)
+{
+    running_ = running;
+    monitoring_ = monitoring;
+    refresh_->setEnabled(!running);
+    cameras_->setEnabled(!running);
+    runtime_->setRunning(running);
+    editor_->setEnabled(hasCamera() && !monitoring);
+    editor_->setLiveEditing(running && !monitoring);
+    apply_->setEnabled(hasCamera() && !monitoring);
+    apply_->setText(running ? "Apply format / ROI and restart Preview" : "Apply settings");
+}

@@ -40,7 +40,9 @@
       "displayName": "Camera SDKs on this machine (vendor SDKs stay outside the repository)",
       "cacheVariables": {
         "SELENEWATCH_ZWO_SDK_DIR": "C:/dev/tools/SDKs/ASI SDK",
-        "SELENEWATCH_QHY_SDK_DIR": "C:/dev/tools/SDKs/QHY sdk"
+        "SELENEWATCH_QHY_SDK_DIR": "C:/dev/tools/SDKs/QHY sdk",
+        "SELENEWATCH_PLAYERONE_SDK_DIR": "C:/dev/tools/SDKs/PlayerOne SDK",
+        "SELENEWATCH_TOUPTEK_SDK_DIR": "C:/dev/tools/SDKs/ToupTek SDK"
       }
     },
     {

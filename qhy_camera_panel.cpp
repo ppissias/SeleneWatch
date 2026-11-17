@@ -1,32 +1,17 @@
 #include "qhy_camera_panel.h"
 #include "camera_settings_editor.h"
-#include <QtCore/QDir>
-#include <QtCore/QFileInfo>
-#include <QtCore/QSettings>
+#include "runtime_chooser.h"
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QComboBox>
-#include <QtWidgets/QFileDialog>
-#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
 
-namespace {
-constexpr auto runtimeSetting="qhy/runtimePath";
-}
-
-QhyCameraPanel::QhyCameraPanel(std::shared_ptr<QhyApi> api,QWidget* parent):QWidget(parent),api_(std::move(api))
+QhyCameraPanel::QhyCameraPanel(std::shared_ptr<QhyApi> api,QWidget* parent):CameraFamilyPanel(parent),api_(std::move(api))
 {
-    runtimeOverride_=QSettings().value(runtimeSetting).toString();
     setObjectName("qhyCameraPanel");auto* layout=new QVBoxLayout(this);
-    auto* runtimeButtons=new QHBoxLayout;
-    chooseRuntime_=new QPushButton("Choose QHY DLL…",this);
-    chooseRuntime_->setObjectName("chooseQhyRuntime");
-    automaticRuntime_=new QPushButton("Use automatic discovery",this);
-    automaticRuntime_->setObjectName("automaticQhyRuntime");
-    runtimeButtons->addWidget(chooseRuntime_);
-    runtimeButtons->addWidget(automaticRuntime_);
-    layout->addLayout(runtimeButtons);
+    runtime_=new RuntimeChooser("QHY","qhyccd.dll","qhy/runtimePath","Qhy",this);
+    layout->addWidget(runtime_);
     cameras_=new QComboBox(this);cameras_->setObjectName("qhyCameras");
     refresh_=new QPushButton("Refresh cameras",this);refresh_->setObjectName("refreshQhyCameras");
     layout->addWidget(cameras_);layout->addWidget(refresh_);
@@ -38,32 +23,12 @@ QhyCameraPanel::QhyCameraPanel(std::shared_ptr<QhyApi> api,QWidget* parent):QWid
     readback_->setObjectName("qhyReadback");layout->addWidget(readback_);
     auto* hint=new QLabel("Preview applies supported controls live. Format and ROI changes restart Preview. Bin 1 only. QHY hardware validation is pending.",this);
     hint->setWordWrap(true);layout->addWidget(hint);layout->addStretch();
-    connect(chooseRuntime_,&QPushButton::clicked,this,&QhyCameraPanel::chooseRuntime);
-    connect(automaticRuntime_,&QPushButton::clicked,this,[this] { setRuntimeOverride({}); });
+    connect(runtime_,&RuntimeChooser::changed,this,&QhyCameraPanel::refresh);
     connect(refresh_,&QPushButton::clicked,this,&QhyCameraPanel::refresh);
     connect(cameras_,&QComboBox::currentIndexChanged,this,&QhyCameraPanel::inspectSelected);
     connect(apply_,&QPushButton::clicked,this,&QhyCameraPanel::applyRequested);
     connect(editor_,&CameraSettingsEditor::liveControlsRequested,this,&QhyCameraPanel::liveControlsRequested);
     setRunning(false);
-}
-void QhyCameraPanel::chooseRuntime()
-{
-    if (running_) return;
-    const auto directory=runtimeOverride_.isEmpty()?QString{}:QFileInfo(runtimeOverride_).absolutePath();
-    const auto path=QFileDialog::getOpenFileName(this,"Select the installed x64 QHY runtime",directory,
-        "QHY runtime (qhyccd.dll)");
-    if (!path.isEmpty()) setRuntimeOverride(path);
-}
-// Remember the observer's chosen DLL path for the next discovery.
-void QhyCameraPanel::setRuntimeOverride(QString path)
-{
-    if (running_) return;
-    runtimeOverride_=std::move(path);
-    QSettings saved;
-    if (runtimeOverride_.isEmpty()) saved.remove(runtimeSetting);
-    else saved.setValue(runtimeSetting,runtimeOverride_);
-    saved.sync();
-    refresh();
 }
 // Resolve the runtime and scan only while the panel can use the disconnected SDK.
 void QhyCameraPanel::refresh()
@@ -75,7 +40,7 @@ void QhyCameraPanel::refresh()
         {
             const QSignalBlocker blocked(cameras_);
             cameras_->clear();
-            api_->setRuntimeOverride(runtimeOverride_);
+            api_->setRuntimeOverride(runtime_->path());
             for (const auto& d:api_->devices())
                 cameras_->addItem(QString("%1 (%2)").arg(QString::fromStdString(d.name),QString::fromStdString(d.id)),
                     QString::fromStdString(d.id));
@@ -106,6 +71,30 @@ void QhyCameraPanel::inspectSelected()
     emit availabilityChanged();
 }
 bool QhyCameraPanel::hasCamera() const { return profile_.has_value(); }
+void QhyCameraPanel::validateSettings() const { QhySource::validateSettings(profile().camera,settings()); }
+std::unique_ptr<FrameSource> QhyCameraPanel::makeSource()
+{
+    auto source=std::make_unique<QhySource>(api_,profile(),settings());
+    source_=source.get();
+    return source;
+}
+void QhyCameraPanel::showSourceReadback(bool live)
+{
+    if (!source_) return;
+    if (live) showLiveActual(source_->actualProfile());
+    else showActual(source_->actualProfile());
+}
+bool QhyCameraPanel::readBack(std::string& error)
+{
+    QhySource source(api_,profile(),settings());
+    if (!source.open(error)) return false;
+    showActual(source.actualProfile());
+    return true;
+}
+void QhyCameraPanel::requestLiveControls()
+{
+    if (source_) source_->requestLiveControls(settings().controls);
+}
 QhyProfile QhyCameraPanel::profile() const { return profile_.value(); }
 QhySettings QhyCameraPanel::settings() const
 {
@@ -151,9 +140,7 @@ void QhyCameraPanel::setRunning(bool running,bool monitoring)
     monitoring_=monitoring;
     refresh_->setEnabled(!running);
     cameras_->setEnabled(!running);
-    chooseRuntime_->setEnabled(!running);
-    chooseRuntime_->setToolTip(runtimeOverride_.isEmpty()?"Using automatic QHY runtime discovery":QDir::toNativeSeparators(runtimeOverride_));
-    automaticRuntime_->setEnabled(!running && !runtimeOverride_.isEmpty());
+    runtime_->setRunning(running);
     editor_->setEnabled(hasCamera() && !monitoring);
     editor_->setLiveEditing(running && !monitoring);
     apply_->setEnabled(hasCamera() && !monitoring);

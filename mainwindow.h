@@ -27,12 +27,11 @@ class DisplayPanel;
 class HistogramPanel;
 class GuidingPanel;
 class SimulatedPointing;
-class CameraPanel;
+class CameraFamilyPanel;
 class ZwoApi;
-class ZwoSource;
 class QhyApi;
-class QhySource;
-class QhyCameraPanel;
+class PlayerOneApi;
+class ToupTekApi;
 class QDockWidget;
 namespace Ui { class MainWindowClass; }
 
@@ -47,9 +46,12 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    // Empty outputRoot writes beside the executable. Tests supply an isolated directory.
+    // Empty outputRoot writes beside the executable. Tests supply an isolated
+    // directory and test cameras; a camera family without one uses its SDK,
+    // when the build has it.
     explicit MainWindow(QWidget *parent = nullptr, QString outputRoot = {}, std::shared_ptr<ZwoApi> cameraApi = {},
-        std::shared_ptr<QhyApi> qhyApi = {});
+        std::shared_ptr<QhyApi> qhyApi = {}, std::shared_ptr<PlayerOneApi> playerOneApi = {},
+        std::shared_ptr<ToupTekApi> toupTekApi = {});
     ~MainWindow() override;
     // Selects a file while stopped; Start opens it. Shared by the file dialog
     // and the window test, which supplies an isolated recording.
@@ -166,9 +168,12 @@ private:
     [[nodiscard]] bool recordingReady() const;
 
     [[nodiscard]] bool recordingSelected() const;
-    [[nodiscard]] bool cameraSelected() const;
-    [[nodiscard]] bool qhySelected() const;
-    [[nodiscard]] bool anyCameraSelected() const;
+    // Feature-16: a camera family's Source entry, dock and connections.
+    void addCameraFamily(CameraFamilyPanel* panel, const QString& dockTitle, const QString& dockName);
+    // The camera family chosen under Source, or null.
+    [[nodiscard]] CameraFamilyPanel* selectedCamera() const;
+    // The camera family that made the session's source, or null.
+    [[nodiscard]] CameraFamilyPanel* activeCamera() const;
     [[nodiscard]] bool validateCameraSettings();
 
     std::unique_ptr<Ui::MainWindowClass> ui_;
@@ -206,14 +211,14 @@ private:
     int frameShortSide_{0};
     FramePtr latestFrame_;
     std::chrono::steady_clock::time_point lastHistogramTime_{};
-    std::shared_ptr<ZwoApi> cameraApi_;
-    CameraPanel* cameraPanel_{nullptr};
-    QDockWidget* cameraDock_{nullptr};
-    ZwoSource* camera_{nullptr};
-    std::shared_ptr<QhyApi> qhyApi_;
-    QhyCameraPanel* qhyPanel_{nullptr};
-    QDockWidget* qhyDock_{nullptr};
-    QhySource* qhyCamera_{nullptr};
+    // Feature-16: each camera family's panel and dock, in the Source list's
+    // order. The panels hold their SDK boundaries.
+    struct CameraFamily
+    {
+        CameraFamilyPanel* panel;
+        QDockWidget* dock;
+    };
+    std::vector<CameraFamily> cameraFamilies_;
 
     // The current source, where it has controls of its own. Owned by the session.
     SyntheticFrameSource* synthetic_{nullptr};

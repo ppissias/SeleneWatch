@@ -34,7 +34,8 @@ add_library(selenewatch_core STATIC
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
     sources/fine_sleep.cpp sources/synthetic_scene.cpp
     sources/synthetic_frame_source.cpp sources/recording_source.cpp
-    cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp
+    cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp cameras/vendor_runtime.cpp
+    cameras/playerone_source.cpp cameras/playerone_sdk.cpp cameras/touptek_source.cpp cameras/touptek_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
     recording/metadata_text.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
@@ -100,10 +101,40 @@ if(SELENEWATCH_QHY_SDK_DIR)
     message(STATUS "QHY runtime will be discovered on demand from the user's Windows installation")
 endif()
 
+# Feature-16: Player One and ToupTek, built against the vendors' headers and
+# using the DLL the observer installs, found at run time as for QHY. Neither
+# SDK's files are in the repository or the packages (THIRD_PARTY_LICENSES.md).
+set(SELENEWATCH_PLAYERONE_SDK_DIR "" CACHE PATH "Optional Player One camera SDK root containing include/PlayerOneCamera.h")
+if(SELENEWATCH_PLAYERONE_SDK_DIR)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "The Player One adapter requires Windows x64")
+    endif()
+    set(playerone_header "${SELENEWATCH_PLAYERONE_SDK_DIR}/include/PlayerOneCamera.h")
+    if(NOT EXISTS "${playerone_header}")
+        message(FATAL_ERROR "Player One SDK header missing: ${playerone_header}")
+    endif()
+    target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_WITH_PLAYERONE=1
+        SELENEWATCH_PLAYERONE_HEADER="${playerone_header}")
+endif()
+set(SELENEWATCH_TOUPTEK_SDK_DIR "" CACHE PATH "Optional ToupTek camera SDK root containing inc/toupcam.h")
+if(SELENEWATCH_TOUPTEK_SDK_DIR)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "The ToupTek adapter requires Windows x64")
+    endif()
+    set(touptek_header "${SELENEWATCH_TOUPTEK_SDK_DIR}/inc/toupcam.h")
+    if(NOT EXISTS "${touptek_header}")
+        message(FATAL_ERROR "ToupTek SDK header missing: ${touptek_header}")
+    endif()
+    target_compile_definitions(selenewatch_core PRIVATE SELENEWATCH_WITH_TOUPTEK=1
+        SELENEWATCH_TOUPTEK_HEADER="${touptek_header}")
+endif()
+
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
-    camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
+    camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
+    camera_family_panel.h runtime_chooser.h runtime_chooser.cpp
+    playerone_camera_panel.h playerone_camera_panel.cpp touptek_camera_panel.h touptek_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
@@ -226,6 +257,16 @@ target_link_libraries(SeleneWatchQhyTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchQhyTests)
 add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
 
+add_executable(SeleneWatchPlayerOneTests tests/playerone_tests.cpp)
+target_link_libraries(SeleneWatchPlayerOneTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchPlayerOneTests)
+add_test(NAME playerone COMMAND SeleneWatchPlayerOneTests -o -,tap)
+
+add_executable(SeleneWatchToupTekTests tests/touptek_tests.cpp)
+target_link_libraries(SeleneWatchToupTekTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchToupTekTests)
+add_test(NAME touptek COMMAND SeleneWatchToupTekTests -o -,tap)
+
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
     tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp tools/darkening_probe.cpp)
@@ -244,6 +285,9 @@ selenewatch_compile_options(SeleneWatchCameraProbe)
 add_executable(SeleneWatchQhyProbe tools/qhy_probe_main.cpp)
 target_link_libraries(SeleneWatchQhyProbe PRIVATE selenewatch_camera_probe)
 selenewatch_compile_options(SeleneWatchQhyProbe)
+add_executable(SeleneWatchRuntimeProbe tools/runtime_probe_main.cpp)
+target_link_libraries(SeleneWatchRuntimeProbe PRIVATE selenewatch_core)
+selenewatch_compile_options(SeleneWatchRuntimeProbe)
 
 add_executable(SeleneWatchCameraProbeTests tests/camera_probe_tests.cpp)
 target_link_libraries(SeleneWatchCameraProbeTests PRIVATE selenewatch_camera_probe Qt6::Test)

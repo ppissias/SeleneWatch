@@ -52,10 +52,21 @@ Camera SDKs (not part of the repository)
     Detected runtime: C:\Program Files\QHYCCD\AllInOne\sdk\x64\qhyccd.dll (25.6.16.15)
     The optional build uses the external header. The user installs the driver and DLL.
     See THIRD_PARTY_LICENSES.md for QHY redistribution status.
-  Both paths contain a space; quote them in CMake and on the command line.
-  Since 2026-11-15 the Debug-x64 and Release-x64 presets build both adapters: they inherit the hidden
+  Player One (Feature-16):  C:\dev\tools\SDKs\PlayerOne SDK
+    Downloaded 2026-11-17: PlayerOne_Camera_SDK_Windows_V3.10.1.zip (in C:\dev\tools\downloads)
+    Header:  include\PlayerOneCamera.h; x64 DLL: lib\x64\PlayerOneCamera.dll; license.txt (use for their cameras; no redistribution grant)
+  ToupTek (Feature-16):     C:\dev\tools\SDKs\ToupTek SDK
+    Downloaded 2026-11-17: toupcamsdk.20261024.zip (in C:\dev\tools\downloads), library 60.33015.20261024
+    Header:  inc\toupcam.h; x64 DLL: win\x64\toupcam.dll; no license text in the package
+  Neither DLL is shipped or copied into the build; the observer's own copy is loaded at run time, as for QHY.
+  Check a family's runtime without a camera being opened (not yet run on this machine):
+    .\out\build\release\SeleneWatchRuntimeProbe.exe playerone "C:\dev\tools\SDKs\PlayerOne SDK\lib\x64\PlayerOneCamera.dll"
+    .\out\build\release\SeleneWatchRuntimeProbe.exe touptek "C:\dev\tools\SDKs\ToupTek SDK\win\x64\toupcam.dll"
+    .\out\build\release\SeleneWatchRuntimeProbe.exe qhy
+  All these paths contain a space; quote them in CMake and on the command line.
+  Since 2026-11-15 the Debug-x64 and Release-x64 presets build the camera adapters: they inherit the hidden
   Camera-SDKs preset in CMakeUserPresets.json, which sets SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR
-  to the two paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera and QHY camera
+  (and since 2026-11-17 SELENEWATCH_PLAYERONE_SDK_DIR and SELENEWATCH_TOUPTEK_SDK_DIR) to the paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera and QHY camera
   under Source, and ASICamera2.dll plus licenses\ZWO-ASI-SDK.txt are copied into out\build\debug (or release).
   Separate single-adapter builds (below) are still possible but no longer needed for daily work.
   Older separate SDK builds: out\build\zwo-debug and out\build\zwo-release.
