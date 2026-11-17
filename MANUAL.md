@@ -27,7 +27,13 @@ For building SeleneWatch from source, see [Getting started](README.md#getting-st
 
 ## 1. Before you start
 
-**Computer.** Windows, 64-bit. SeleneWatch is a native Qt application. It never waits on the disk, the display or the mount, but a fast disk and enough RAM help it keep long histories.
+**Computer.** Windows 10 or 11, 64-bit. SeleneWatch is a native Qt application. It never waits on the disk, the display or the mount, but a fast disk and enough RAM help it keep long histories.
+
+**Installing.** Each release comes in two forms, named by its version (for example `2026.11-01`: year, month, and the release's number in that month). **Help → About SeleneWatch** shows the version you run.
+- `SeleneWatch-<version>-win64.msi` installs for your Windows account, without administrator rights, into `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older version. Uninstalling removes the program but keeps your `events` folder.
+- `SeleneWatch-<version>-win64.zip` needs no installation: unpack it into a folder you can write in, and run `SeleneWatch.exe`. To update, unpack the new version and copy your `events` folder across if you want it in the same place.
+
+Either way, the Qt and Visual C++ libraries the program needs come with it. The licenses of SeleneWatch and of everything shipped with it are in `LICENSE.txt` and the `licenses` folder.
 
 **Cameras.** Install the camera maker's Windows driver before you connect the camera.
 
@@ -38,7 +44,7 @@ For building SeleneWatch from source, see [Getting started](README.md#getting-st
 
 **Mount (optional).** To let SeleneWatch keep the Moon in the field, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver, for example EQMOD. SeleneWatch only sends small guide pulses; it never slews or parks the mount.
 
-**Where files go.** Clips and logs are written to a folder called `events` next to `SeleneWatch.exe`. Continuous recordings can go to another folder (section 9). SeleneWatch never writes into the folders it reads recordings from.
+**Where files go.** Clips and logs are written to a folder called `events` next to `SeleneWatch.exe`; **Session → Open the events folder** opens it. Continuous recordings can go to another folder (section 9). SeleneWatch never writes into the folders it reads recordings from.
 
 **Settings are remembered.** Detection, display, capture, histogram and guiding choices are saved when you stop a stream or close the window, and restored the next time you start SeleneWatch.
 

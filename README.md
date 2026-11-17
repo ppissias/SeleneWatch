@@ -135,6 +135,48 @@ To keep the field with the mount (Feature-8 Parts B and C), choose **ASCOM teles
 
 The **Display and capture** tab offers Linear, Black/white levels, and Auto-stretch, plus inversion and Bayer colour. Level controls use native ADU and work while stopped. Choose pre-event history, quiet tail, maximum duration after a trigger, and the image/analysis RAM ceiling before Start. Defaults are 5 s, 3 s, 10 s, and 2 GiB. Playback speed does not change these source-time windows. The effective history may be shorter under the byte allowance, and clip metadata records why collection ended. The readout includes shared pixels, detector buffers, maps, and previews; Qt caches, container metadata, and codec workspaces are additional to that ceiling. A full writer logs refused work, and a required allocation failure stops acquisition visibly while preserving the available clip.
 
+## Building a release
+
+**Version.** A release is named `YYYY.MM-NN`: the year, the month, and the release's number in that month, so `2026.11-01` is the first release of November 2026 and `2026.11-02` the second. It is set in one place, `SELENEWATCH_RELEASE` at the top of [CMakeLists.txt](CMakeLists.txt). From there it reaches the window title, **Help → About** (with the Git revision the build came from), the `software:` line of every `event.txt` and `recording.txt`, the executable's file properties, and the package names. Tag the release commit `v2026.11-01`.
+
+**What a release is.** Two packages of the same files, made by CPack from the install rules in [packaging/package.cmake](packaging/package.cmake) when the Release build's `package` target is built:
+
+| Package | What it does |
+| --- | --- |
+| `SeleneWatch-<version>-win64.zip` | Unpacks into a `SeleneWatch-<version>-win64` folder and runs from there. |
+| `SeleneWatch-<version>-win64.msi` | Installs for the current Windows account without administrator rights, in `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older one; the `events` folder beside the program is kept on upgrade and uninstall. |
+
+Both hold `SeleneWatch.exe`, the Qt DLLs and plugins it needs (gathered by `windeployqt`), the Visual C++ runtime DLLs, `ASICamera2.dll` when the build has the ZWO SDK, `LICENSE.txt`, `README.md`, `MANUAL.md`, `THIRD_PARTY_LICENSES.md`, and a `licenses` folder: Qt's LGPLv3/GPLv3 texts, the notices of the third-party code inside the Qt DLLs, and the ZWO SDK notice. No test, probe or QHY file is shipped. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the terms of each.
+
+**Tools.** The development setup above, and the [WiX Toolset 3](https://github.com/wixtoolset/wix3/releases) binaries for the installer, unpacked anywhere. Their folder (the one holding `bin\candle.exe`) is `SELENEWATCH_WIX_ROOT`, set by the hidden `Release-Tools` preset in `CMakeUserPresets.json`, or the `WIX` environment variable. Without it, packaging makes the `.zip` only and says so when configuring. CPack and `windeployqt` come with CMake and Qt.
+
+**Making the packages.** The build preset **Release: .zip and installer** (`Release-packages`) builds Release and then its `package` target. That makes both packages in `out\build\release\package`. Then a check runs inside the packaging step, so it fails the build if any part fails:
+- the expected files are in the `.zip`, and Qt Network and Qt Svg are not;
+- every DLL a shipped binary imports is in the package or part of Windows;
+- the packaged `SeleneWatch.exe` starts with only its own folder and Windows on the path. It runs on Qt's offscreen platform, so no window opens.
+
+The build output ends with each package's size and SHA-256.
+- **From Visual Studio:** choose **Release (x64)** as the configure preset and **Release: .zip and installer** as the build preset in the toolbar, then **Build → Build All**. Switch the build preset back to **Release (x64)** or **Debug (x64)** for everyday work.
+- **From the command line**, in the developer PowerShell at the repository root:
+  ```powershell
+  cmake --preset Release-x64
+  cmake --build --preset Release-packages
+  ```
+- **For a release**, `packaging\make_release.ps1` does the same after two more steps. It refuses a tree with uncommitted changes, and runs every test first. `-AllowDirty` makes a trial package whose revision ends in `-dirty`.
+
+The Debug build has no `package` target: packages hold the Release program only.
+
+**Steps for a release.**
+1. Set `SELENEWATCH_RELEASE` in `CMakeLists.txt`, update the stage table in this README if a feature is complete, and commit.
+2. Run `packaging\make_release.ps1`.
+3. Install the `.msi` once, start SeleneWatch from the Start menu, and check **Help → About**.
+4. Tag the commit (`git tag v2026.11-01`) and publish the two packages with the release.
+
+When Qt is upgraded, regenerate the Qt notices from the new Qt documentation and commit the result:
+```powershell
+powershell -File packaging\make_qt_notices.ps1 -QtDocs C:\dev\tools\Qt\Docs\Qt-<version> -QtVersion <version>
+```
+
 ## Roadmap
 
 | Stage | Content | Feature | State |

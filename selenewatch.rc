@@ -1,3 +1,36 @@
 // The executable's icon, shown by Windows in Explorer and on the taskbar.
 // icons/selenewatch.ico is rendered from icons/selenewatch.svg.
 IDI_ICON1 ICON "icons/selenewatch.ico"
+
+// The version in the file's properties, from the release in CMakeLists.txt.
+#include <winver.h>
+#include "selenewatch_version.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION SELENEWATCH_VERSION_NUMBERS
+PRODUCTVERSION SELENEWATCH_VERSION_NUMBERS
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "SeleneWatch"
+            VALUE "FileDescription", "SeleneWatch, a monitor for transient events on the Moon and in the sky"
+            VALUE "FileVersion", SELENEWATCH_RELEASE
+            VALUE "InternalName", "SeleneWatch"
+            VALUE "LegalCopyright", "Copyright (c) 2026, Petros Pissias. BSD 2-Clause License."
+            VALUE "OriginalFilename", "SeleneWatch.exe"
+            VALUE "ProductName", "SeleneWatch"
+            VALUE "ProductVersion", SELENEWATCH_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -264,7 +264,9 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 ## 11. Code Organization
 
-Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. The remaining core and UI files sit at the root, with tests in `tests/`.
+Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. Release packaging lives in `packaging/`: the install rules and package settings, the check run on every package, the release script, and the Qt notices shipped with a release (README, *Building a release*). The remaining core and UI files sit at the root, with tests in `tests/`.
+
+The release number (`YYYY.MM-NN`, set once in `CMakeLists.txt`) and the Git revision are generated into `selenewatch_version.h` at build time and recorded on every `event.txt` and `recording.txt`, so each piece of evidence names the program that wrote it.
 
 A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. A plausible later layout follows.
 

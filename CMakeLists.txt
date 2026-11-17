@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(SeleneWatch LANGUAGES CXX)
+
+# The release: year, month, and the release's number in that month
+# (2026.11-01 is the first release of November 2026). Change it here only;
+# the code, the executable's properties and the packages take it from here.
+set(SELENEWATCH_RELEASE "2026.11-01")
+string(REGEX REPLACE "^([0-9]+)\\.0?([0-9]+)-0?([0-9]+)$" "\\1.\\2.\\3" selenewatch_numeric_version "${SELENEWATCH_RELEASE}")
+project(SeleneWatch VERSION ${selenewatch_numeric_version} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +15,7 @@ qt_standard_project_setup()
 
 add_custom_target(selenewatch_version
     COMMAND ${CMAKE_COMMAND} "-DSELENEWATCH_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DSELENEWATCH_RELEASE=${SELENEWATCH_RELEASE}"
         "-DSELENEWATCH_VERSION_HEADER=${CMAKE_CURRENT_BINARY_DIR}/selenewatch_version.h"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/write_version.cmake"
     BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/selenewatch_version.h"
@@ -98,11 +105,16 @@ add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
+add_dependencies(selenewatch_ui selenewatch_version)
 selenewatch_compile_options(selenewatch_ui)
 qt_add_executable(SeleneWatch main.cpp)
 if(WIN32)
+    # The resource script includes selenewatch_version.h for the file's version.
     target_sources(SeleneWatch PRIVATE selenewatch.rc)
+    target_include_directories(SeleneWatch PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    add_dependencies(SeleneWatch selenewatch_version)
 endif()
 qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
     icons/selenewatch-16.png icons/selenewatch-32.png
@@ -110,6 +122,11 @@ qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
 set_target_properties(SeleneWatch PROPERTIES WIN32_EXECUTABLE TRUE)
 target_link_libraries(SeleneWatch PRIVATE selenewatch_ui)
 selenewatch_compile_options(SeleneWatch)
+# The .zip and the installer, from the Release build only (a Debug build
+# would need Qt's debug DLLs and the debug C++ runtime, which may not ship).
+if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    include(packaging/package.cmake)
+endif()
 
 enable_testing()
 add_executable(SeleneWatchTests tests/core_tests.cpp)

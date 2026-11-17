@@ -58,6 +58,41 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 - **Members used:** the ASCOM Telescope interface's `Connected` (read and write), `CanPulseGuide`, `Tracking`, `Slewing`, `AtPark`, `SideOfPier`, `AlignmentMode`, `GuideRateRightAscension`, `GuideRateDeclination`, `IsPulseGuiding`, and `PulseGuide`; and `ASCOM.Utilities.Chooser`'s `DeviceType` and `Choose` for the driver dialog.
 - **Distribution:** SeleneWatch packages contain no ASCOM component. The observer installs the ASCOM Platform and their mount's driver. Read as written, CC BY-SA obligations attach to distributing the Platform or adaptations of it, and the Platform page separates the Platform from "drivers and programs that use it". This is a reading of the license text, not legal advice. Bundling any ASCOM file, or the OmniSim simulator, would need its terms and notices checked first. SeleneWatch's adapter code remains BSD-2-Clause.
 
+## Microsoft Visual C++ runtime (shipped in release packages)
+
+- **Files:** `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140*.dll`, `concrt140.dll`, copied unmodified from Visual Studio's redistributable folder (`VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT`, file version 14.51.36247.0) by CMake's `InstallRequiredSystemLibraries`. The Universal CRT is part of Windows 10 and 11 and is not shipped.
+- **Terms:** Visual Studio's license lets these files, listed in its `REDIST` list as distributable code, be shipped with an application, unmodified. Qt's DLLs need the same runtime.
+
+## WiX Toolset 3 (build tool for the installer, not shipped)
+
+- **Version:** 3.14.1, binaries from the [WiX Toolset v3 releases](https://github.com/wixtoolset/wix3/releases), used by CPack to make the `.msi`.
+- **License:** Microsoft Reciprocal License (MS-RL), for the toolset itself (`bin\LICENSE.TXT`). The project's [About page](https://wixtoolset.org/docs/about), read 17 November 2026, states that the packages WiX generates are generally outside the MS-RL, and that the code and binaries placed in them keep their own licenses. No WiX source is copied into SeleneWatch.
+
+## Release packages: what is shipped and the obligations met
+
+Made by the Release build's `package` target, from the command line or Visual Studio (see the README, *Building a release*):
+
+- **SeleneWatch:** `SeleneWatch.exe`, under BSD-2-Clause (`LICENSE.txt`).
+- **Qt 6.12.0, LGPLv3:** `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, and the plugins `platforms/qwindows.dll`, `styles/qmodernwindowsstyle.dll`, `imageformats/qgif.dll`, `qico.dll`, `qjpeg.dll`, unmodified from the Qt installation and dynamically linked, so a user can replace them with compatible builds.
+  - License texts: `licenses/Qt-LICENSE.txt`, Qt's statement with the LGPLv3 and the GPLv3 it supplements.
+  - The third-party code inside those DLLs (zlib, PCRE2, HarfBuzz, FreeType, libpng, libjpeg-turbo, double-conversion and others): `licenses/Qt-third-party-notices.txt`, generated from the Qt documentation by `packaging/make_qt_notices.ps1`.
+  - Source: Qt 6.12.0's source code is published by The Qt Company at [download.qt.io](https://download.qt.io/official_releases/qt/6.12/6.12.0/) (moved to `download.qt.io/archive/qt/6.12/6.12.0/` once superseded) and in Git at [code.qt.io](https://code.qt.io/) (tag `v6.12.0`). SeleneWatch uses Qt unmodified; its own source is public at [github.com/ppissias/SeleneWatch](https://github.com/ppissias/SeleneWatch).
+  - The About box (Help → About SeleneWatch, Help → About Qt) states that Qt is used under the LGPLv3.
+  - Qt Network and Qt Svg are deliberately not shipped (the package check refuses a package holding them), so their notices are not needed.
+- **ZWO ASI SDK:** `ASICamera2.dll` with `licenses/ZWO-ASI-SDK.txt` (section 2 above), only when the build has the SDK.
+- **Microsoft Visual C++ runtime:** as above.
+- **Not shipped:** QHY files, ASCOM, camera drivers, test and probe programs.
+
+## Camera families evaluated, not integrated (17 November 2026)
+
+Player One Astronomy, ToupTek (with Altair Astro and other brands that ship the same SDK under their own names), SVBONY and Atik were considered for a third camera family; see Feature-16 in `features.md`. The license files found with their SDKs, as vendored in the INDI project's `indi-3rdparty` repository and read on 17 November 2026:
+
+- **Player One:** `license.txt` grants use of the SDK "for the secondary development of our company's cameras", says "You can use our company's products and this SDK to develop any products without any restrictions", and grants nothing explicit about redistribution.
+- **ToupTek and Altair:** a generic GNU LGPL 2.1 text only, with no vendor statement that it covers the binaries.
+- **SVBONY and Atik:** no license file. Atik's SDK changelog says a EULA was added in its 2025.11.24 release; its text was not read.
+
+None of them grants redistribution clearly. Any of them would therefore follow the QHY pattern: SDK files stay out of the repository and the packages, and the observer installs the vendor's runtime.
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

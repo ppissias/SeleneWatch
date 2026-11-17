@@ -118,6 +118,8 @@ public:
     void setRecordingFolder(const QString& folder);
     [[nodiscard]] QString recordingFolder() const;
     [[nodiscard]] QString defaultRecordingFolder() const;
+    // Where clips and candidates.txt go.
+    [[nodiscard]] QString outputRoot() const { return outputRoot_; }
     // Context thread. At each Start, on its own thread: the Windows time
     // service's status and, with a server given, an SNTP check. The result
     // goes into the clips and recordings that follow, and into session_start.

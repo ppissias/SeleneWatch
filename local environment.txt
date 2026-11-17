@@ -106,6 +106,19 @@ Mount (ASCOM)
   The full loop without hardware (synthetic source + simulated mount, real threads, a few minutes):
     .\out\build\debug\SeleneWatchProbe.exe guide-sim <new output directory> [seconds]
 
+Release packaging (checked 2026-11-17)
+  WiX Toolset 3.14.1 binaries: C:\dev\tools\wix (bin\candle.exe, bin\light.exe); no installation needed.
+  The Release-x64 preset sets SELENEWATCH_WIX_ROOT to it (hidden Release-Tools preset in CMakeUserPresets.json).
+  Visual Studio: configure preset "Release (x64)", build preset "Release: .zip and installer", Build All.
+  Command line, from the developer PowerShell at the repository root:
+    cmake --preset Release-x64
+    cmake --build --preset Release-packages
+  or, for a release (clean tree, all tests, then the same packaging):
+    packaging\make_release.ps1
+  Makes out\build\release\package\SeleneWatch-<release>-win64.zip and .msi; see README.md, "Building a release".
+  Qt notices are generated from C:\dev\tools\Qt\Docs\Qt-6.12.0 (packaging\make_qt_notices.ps1);
+  Qt's LGPLv3/GPLv3 texts come from C:\dev\tools\Qt\Licenses\LICENSE.
+
 Source Control
   Git initialized on branch 'main'.
   Remote repository: https://github.com/ppissias/SeleneWatch.git

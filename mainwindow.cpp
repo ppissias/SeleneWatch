@@ -13,6 +13,7 @@
 #include "preview_image.h"
 #include "recording/metadata_text.h"
 #include "camera_settings_editor.h"
+#include "selenewatch_version.h"
 #include "site_dialog.h"
 #include "sky_schedule.h"
 #include "target_defaults.h"
@@ -26,7 +27,9 @@
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryFile>
 #include <QtCore/QTimeZone>
+#include <QtCore/QUrl>
 #include <QtGui/QAction>
+#include <QtGui/QDesktopServices>
 #include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
@@ -84,6 +87,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     , ui_(std::make_unique<Ui::MainWindowClass>())
 {
     ui_->setupUi(this);
+    setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
     ui_->sourceComboBox->setItemData(0,"synthetic");
     ui_->sourceComboBox->setItemData(1,"recording");
 
@@ -119,6 +123,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupHistogramPanel();
     setupGuidingPanel();
     setupSessionMenu();
+    setupHelpMenu();
     applyTarget();
     // Only builds with the adapter and tests supplying a fake SDK get the camera entry and dock.
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
@@ -661,7 +666,14 @@ void MainWindow::setupSessionMenu()
     auto* folder = menu->addAction("Recordings folder…");
     folder->setObjectName("recordingFolderAction");
     connect(folder, &QAction::triggered, this, &MainWindow::onRecordingFolder);
-
+    menu->addSeparator();
+    auto* events = menu->addAction("Open the events folder");
+    events->setObjectName("openEventsAction");
+    events->setToolTip("Clips, candidates.txt and guiding.txt; beside SeleneWatch.exe");
+    connect(events, &QAction::triggered, this, [this] {
+        QDir().mkpath(session_->outputRoot());
+        QDesktopServices::openUrl(QUrl::fromLocalFile(session_->outputRoot()));
+    });
 
     // Record, beside Save now: every frame until pressed again (Feature-14).
     recordButton_ = new QPushButton("Record", this);
@@ -676,6 +688,31 @@ void MainWindow::setupSessionMenu()
     session_->setRecordingFolder(saved.value("recording/folder").toString());
     session_->setClockCheck(true, saved.value("time/ntp", false).toBool()
         ? saved.value("time/ntpServer", "pool.ntp.org").toString().toStdString() : std::string());
+}
+
+void MainWindow::setupHelpMenu()
+{
+    auto* menu = menuBar()->addMenu("Help");
+    auto* about = menu->addAction("About SeleneWatch");
+    about->setObjectName("aboutAction");
+    connect(about, &QAction::triggered, this, [this] {
+        QMessageBox::about(this, "About SeleneWatch", aboutText());
+    });
+    auto* aboutQt = menu->addAction("About Qt");
+    connect(aboutQt, &QAction::triggered, this, [this] { QMessageBox::aboutQt(this); });
+}
+
+QString MainWindow::aboutText()
+{
+    return QString("<p><b>SeleneWatch %1</b><br>Source revision %2</p>"
+        "<p>Watches the Moon for impact flashes and the sky for meteors, aircraft, satellites and lightning, "
+        "and keeps the evidence of each candidate.</p>"
+        "<p>Copyright &copy; 2026, Petros Pissias. BSD 2-Clause License.<br>"
+        "<a href=\"https://github.com/ppissias/SeleneWatch\">github.com/ppissias/SeleneWatch</a></p>"
+        "<p>Built with Qt %3 under the GNU LGPL version 3 (Help &rarr; About Qt). The license texts of Qt and of "
+        "the other components are in the <i>licenses</i> folder beside SeleneWatch.exe, and THIRD_PARTY_LICENSES.md "
+        "says where their source code is.</p>")
+        .arg(SELENEWATCH_RELEASE, SELENEWATCH_REVISION, qVersion());
 }
 
 ObservingSite MainWindow::savedSite()

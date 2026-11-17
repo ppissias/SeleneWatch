@@ -1248,3 +1248,43 @@ Window tests:
 - **A mask shape:** clicked corners closed by the double-click; two corners are refused; the shape is saved.
 
 All 17 suites pass.
+
+---
+
+## Feature-16 — A third camera family
+
+*Proposed on 17 November 2026, from an investigation the observer asked for. Not started: the choice below needs the observer's agreement, and nobody here has a camera of the family to test with.*
+
+The observer asked about Player One Astronomy, ToupTek, Altair Astro, SVBONY and Atik. Each was checked for what it is used for, what its SDK looks like, and the terms its SDK comes with. The terms are the license files found with each SDK in the INDI project's `indi-3rdparty` repository, read on 17 November 2026; details in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+| Family | Used for | SDK | Terms found | Fit with SeleneWatch |
+| --- | --- | --- | --- | --- |
+| **Player One Astronomy** | Planetary and lunar first: fast small-pixel cameras such as the Neptune and Mars series, alongside deep-sky models | C API (`POAGetCameraCount`, `POAOpenCamera`, `POAStartExposure`, `POAGetImageData`), close to ZWO's | Use for developing products with their cameras; nothing explicit on redistribution | Close to the ZWO adapter's boundary |
+| **ToupTek** (also sold under other names, among them **Altair Astro**) | Planetary, lunar and deep-sky, at lower prices | C API with callbacks and pulled frames (`Toupcam_EnumV2`, `Toupcam_Open`, `Toupcam_PullImage…`); Altair's `altaircam` is the same SDK renamed (same version, `Altaircam_` for `Toupcam_`) | A generic LGPL 2.1 text only; no vendor statement | One adapter could serve several brands, each through its renamed library; a different acquisition style from ZWO and QHY |
+| **SVBONY** | Entry-level planetary and guiding | C API almost identical to ZWO's (`SVBGetNumOfConnectedCameras`, `SVBStartVideoCapture`, `SVBGetVideoData`) | No license file | The simplest adapter, for cameras with a smaller share of serious lunar work |
+| **Atik** | Deep-sky and scientific imaging, with larger sensors and longer exposures | C API around single exposures (`ArtemisConnect`, `ArtemisStartExposure`, `ArtemisImageReady`) | No license file; a EULA was added in the 2025.11.24 SDK, not read | A poor fit: SeleneWatch needs a continuous stream of short frames |
+
+**Recommendation: Player One.** For lunar and planetary work it is, after ZWO, the family most often met among the cameras built for it, and QHY is already supported. Its SDK follows ZWO's model: enumerate, open, set controls, start, and pull frames with a timeout, so the adapter can follow `cameras/zwo_source` and its test boundary closely. ToupTek is the alternative if the aim is the number of brands covered rather than planetary use: one adapter for ToupTek, Altair and others, at the cost of a different acquisition model. SVBONY would be cheap to add later on the same pattern as Player One. Atik is not recommended.
+
+### Licensing
+
+No SDK grants redistribution clearly, so Player One would follow the QHY pattern (Feature-10): the SDK's header is used at build time from outside the repository (`SELENEWATCH_PLAYERONE_SDK_DIR`), its DLL is never committed or shipped, and SeleneWatch loads the observer's copy, with a **Choose DLL…** override as for QHY. Where Player One's Windows installation puts `PlayerOneCamera.dll`, and whether its driver package installs it at all, has to be checked with their current download before the design is fixed.
+
+### Proposed scope
+
+- `cameras/playerone_api.h` (the boundary, as `ZwoApi`), `playerone_sdk.cpp` (the only file that includes the vendor header), `playerone_source.cpp`, and a Camera panel through the shared `CameraSettingsEditor`.
+- RAW8 and RAW16 at bin 1 and 2, with ROI; exposure, gain, offset and USB bandwidth live in Preview, fixed in Monitoring; the camera's own frame drop count when the SDK gives one.
+- A fake API in the tests, like `FakeZwoApi`, so CTest needs no DLL or camera.
+- The exposure follower of Feature-15 works through the shared form as it does for ZWO and QHY.
+
+### Done when
+
+1. With no Player One SDK path the application builds, runs and passes its tests.
+2. Tests with the fake API cover discovery, the controls, Preview and Monitoring boundaries, a disconnect, and timeouts, as for ZWO.
+3. With the SDK path set, the adapter builds, and the version query finds the observer's DLL.
+4. By hand, with a Player One camera, by an observer who has one: RAW8 and RAW16 stream, where the significant bits sit is checked, a clip opens in SER Player or Siril with the right size, depth and times, and drops are reported.
+
+### Open questions for the observer
+
+- Player One or ToupTek?
+- Is there a Player One owner who could run item 4? Without it the adapter would ship marked "built; hardware test pending", as QHY is now.

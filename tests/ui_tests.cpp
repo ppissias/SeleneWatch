@@ -55,6 +55,7 @@ private slots:
     void eachTargetKeepsItsOwnSettings();
     void siteAndRecordingControls();
     void nightScheduleAndExposureFollower();
+    void theReleaseIsShown();
     void aMaskShapeIsDrawnOnThePreview();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
@@ -715,6 +716,22 @@ void UiTest::siteAndRecordingControls()
     // The default again: saved as empty.
     QVERIFY(window.applyRecordingFolder(QDir(directory.path()).filePath("recordings"), error));
     QVERIFY(QSettings().value("recording/folder").toString().isEmpty());
+}
+
+// The release (year.month-number) is in the title and the About text, with
+// the source revision and the licenses.
+void UiTest::theReleaseIsShown()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    const QRegularExpression release(R"(SeleneWatch \d{4}\.\d{2}-\d{2} )");
+    QVERIFY2(release.match(window.windowTitle()).hasMatch(), qPrintable(window.windowTitle()));
+    const QString about = MainWindow::aboutText();
+    QVERIFY2(about.contains(QRegularExpression(R"(<b>SeleneWatch \d{4}\.\d{2}-\d{2}</b>)")), qPrintable(about));
+    QVERIFY(about.contains("Source revision "));
+    QVERIFY(about.contains("BSD 2-Clause") && about.contains("LGPL"));
+    QVERIFY(window.findChild<QAction*>("aboutAction"));
+    QVERIFY(window.findChild<QAction*>("openEventsAction"));
 }
 
 // Feature-15, Done-when 1 and 2 in the window. The site is put where it is

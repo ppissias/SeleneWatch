@@ -78,6 +78,7 @@ private:
     // Feature-14: the Session menu (site and instrument, a scheduled
     // recording), the Record button, and the saved site and clock check.
     void setupSessionMenu();
+    void setupHelpMenu();
     void onSiteAndInstrument();
     void onScheduleRecording();
     void onRecordingFolder();
@@ -94,6 +95,8 @@ public:
     // Saves where recordings go (empty: the default) after checking that the
     // folder can be written; the dialog's OK, and the window test.
     bool applyRecordingFolder(const QString& folder, QString& error);
+    // Help → About: the release, the source revision and the licenses.
+    [[nodiscard]] static QString aboutText();
 private:
     void setupDetectionPanel();
     void updateDetectionDisplay();
