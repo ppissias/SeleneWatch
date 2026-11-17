@@ -16,14 +16,16 @@ public:
     // The chosen DLL, or empty for the automatic locations.
     [[nodiscard]] QString path() const { return path_; }
     void setRunning(bool running);
+    // Asks for the DLL with a file dialog; the panel's button and the Camera support window.
+    void choose();
+    // Saves a chosen DLL, or empty for the automatic locations. Ignored while running.
+    void setPath(QString path);
 
 signals:
     // The observer chose a DLL or went back to automatic; refresh discovery.
     void changed();
 
 private:
-    void choose();
-    void setPath(QString path);
     QString vendor_, fileName_, settingsKey_, path_;
     QPushButton *choose_, *automatic_;
     bool running_{false};

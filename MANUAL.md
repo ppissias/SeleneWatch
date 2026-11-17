@@ -44,7 +44,9 @@ Either way, the Qt and Visual C++ libraries the program needs come with it. The 
 | Player One | Player One's camera driver, and its `PlayerOneCamera.dll` (x64), from Player One's Windows camera SDK (`lib\x64`) or from your capture software's folder. Put the DLL next to `SeleneWatch.exe`, or press **Choose Player One DLL…** in the camera panel. | Built; hardware test pending |
 | ToupTek, and cameras ToupTek makes for other brands | The camera's driver, and ToupTek's `toupcam.dll` (x64), from ToupTek's camera SDK (`win\x64`) or from your capture software's folder. Put it next to `SeleneWatch.exe`, or press **Choose ToupTek DLL…**. | Built; hardware test pending |
 
-SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. To check an installation without opening a camera, run `SeleneWatchRuntimeProbe.exe playerone` (or `touptek`, `qhy`), from a build, with the DLL's path as a second argument when it is not next to the program. It prints the library it loaded, its version and the cameras it sees.
+SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. SeleneWatch looks for a family's library only when you choose that camera under **Source**, or check it as below; starting SeleneWatch loads no camera maker's code apart from ZWO's.
+
+**Session → Camera support…** shows every camera family in one window: whether this version supports it, the SDK library it found (or why it found none), the SDK's version, and the cameras connected now. Nothing there opens a camera. Select a family to see what to install and where to get it; **Choose DLL…** and **Use automatic discovery** set its library, and the new choice is checked at once. **Check again** after plugging in a camera or installing a driver. While a stream runs the window only shows what it knows; stop the stream to check.
 
 Player One cameras work like ZWO ones: bin 1 or more for mono cameras (binned pixels are averaged), ROI width a multiple of 4. ToupTek cameras use bin 1 and an even ROI. Their frame numbers come from the camera's own counter, so a dropped frame is counted where it happened.
 
@@ -442,7 +444,7 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Problem | What to try |
 | --- | --- |
 | The camera does not appear under **Source** | That camera family was not built into this copy of SeleneWatch. See the README's build section. |
-| The camera is not in the device list | Check the cable and the vendor driver, then press **Refresh cameras**. For QHY, check the All-In-One installation or use **Choose QHY DLL…**. |
+| The camera is not in the device list | Check the cable and the vendor driver, then press **Refresh cameras**. **Session → Camera support…** shows whether the camera maker's SDK library was found, its version, and the cameras it sees. For QHY, Player One and ToupTek, choose the maker's x64 DLL there or with **Choose … DLL** in the camera panel. |
 | **Start monitoring** is greyed out | The source has ended or failed, or a mode change is still in progress. |
 | A recording is refused | Compressed AVI files are not supported. Convert to SER or uncompressed AVI. |
 | "Reading the recording's index" | A large AVI file without an index is read chunk by chunk in the background; playback starts when that is done. The file's frame count and length appear next to its name. |
@@ -468,6 +470,7 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Synthetic source, recordings, detector, clip writing | Automated tests; checks on the author's SER and AVI archive |
 | ZWO ASI120MM Mini | Bench tests in RAW8 and RAW16, including two 30-minute unattended runs |
 | QHY cameras | Software complete; hardware test pending |
+| Player One and ToupTek cameras | Automated tests with simulated cameras; each maker's DLL loaded and its version read on Windows; hardware test pending |
 | Feature lock | Automated tests; followed features through two archive lunar recordings |
 | Calibration and guiding | Automated tests and a full simulated run; ASCOM checked against the ASCOM telescope simulator |
 | A real mount under the Moon | **Pending** |

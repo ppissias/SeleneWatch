@@ -6,6 +6,7 @@
 #include "histogram_panel.h"
 #include "guiding_panel.h"
 #include "camera_panel.h"
+#include "camera_support_dialog.h"
 #include "playerone_camera_panel.h"
 #include "qhy_camera_panel.h"
 #include "touptek_camera_panel.h"
@@ -649,6 +650,10 @@ void MainWindow::setupSessionMenu()
     auto* site = menu->addAction("Site and instrument…");
     site->setObjectName("siteAction");
     connect(site, &QAction::triggered, this, &MainWindow::onSiteAndInstrument);
+    auto* cameras = menu->addAction("Camera support…");
+    cameras->setObjectName("cameraSupportAction");
+    cameras->setToolTip("Which camera families this version supports, their SDK libraries and versions, and the connected cameras");
+    connect(cameras, &QAction::triggered, this, &MainWindow::onCameraSupport);
     auto* schedule = menu->addAction("Schedule a recording…");
     schedule->setObjectName("scheduleAction");
     connect(schedule, &QAction::triggered, this, &MainWindow::onScheduleRecording);
@@ -765,6 +770,17 @@ void MainWindow::applySite(const ObservingSite& site, bool ntp, const QString& s
     session_->setSite(site);
     session_->setClockCheck(true, ntp && !server.isEmpty() ? server.toStdString() : std::string());
     showMessage("Site and instrument saved; they are recorded from the next clip on.", 4000);
+}
+
+void MainWindow::onCameraSupport()
+{
+    std::vector<CameraFamilyPanel*> panels;
+    for (const auto& family : cameraFamilies_) panels.push_back(family.panel);
+    CameraSupportDialog dialog(panels, session_->isRunning(), this);
+    // Checked once the window shows, so it does not appear late.
+    QTimer::singleShot(0, &dialog, &CameraSupportDialog::checkAll);
+    dialog.exec();
+    updateControls();
 }
 
 void MainWindow::onScheduleRecording()

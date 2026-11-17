@@ -76,6 +76,22 @@ void CameraPanel::requestLiveControls()
 {
     if (source_) source_->requestLiveControls(settings().controls);
 }
+CameraSupport CameraPanel::checkSupport()
+{
+    CameraSupport support;
+    support.library="ASICamera2.dll, shipped with SeleneWatch";
+    try
+    {
+        support.sdkVersion=QString::fromStdString(api_->version());
+        for (const auto& c:api_->cameras()) support.cameras << QString::fromStdString(c.name);
+    }
+    catch (const std::exception& ex) { support.problem=QString::fromUtf8(ex.what()); }
+    return support;
+}
+QString CameraPanel::installHint() const
+{
+    return "Install ZWO's Windows camera driver from zwoastro.com. The ZWO SDK library ships with SeleneWatch.";
+}
 ZwoProfile CameraPanel::profile() const { return profile_.value(); }
 ZwoSettings CameraPanel::settings() const
 {

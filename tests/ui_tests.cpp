@@ -10,6 +10,8 @@
 #include "qhy_camera_panel.h"
 #include "playerone_camera_panel.h"
 #include "touptek_camera_panel.h"
+#include "camera_support_dialog.h"
+#include "runtime_chooser.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "site_dialog.h"
@@ -33,6 +35,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QTableWidget>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QToolTip>
 #include <QtTest/QSignalSpy>
@@ -81,7 +84,73 @@ private slots:
     void qhyRuntimeOverridePersistsAndRecovers();
     void qhyReadbacksBayerEvidenceAndUnknownDrops();
     void playerOneAndToupTekInTheWindow();
+    void cameraSupportShowsEachFamily();
 };
+
+// Session → Camera support: each family's state, SDK library, version and
+// cameras, without opening a camera; a family missing from the build; the
+// DLL choice; and nothing checked while a stream runs.
+void UiTest::cameraSupportShowsEachFamily()
+{
+    auto zwo = std::make_shared<FakeZwoApi>();
+    auto qhy = std::make_shared<FakeQhyApi>();
+    qhy->failOperation = "devices";
+    auto playerOne = std::make_shared<FakePlayerOneApi>();
+    playerOne->connected = false;
+    CameraPanel zwoPanel(zwo);
+    QhyCameraPanel qhyPanel(qhy, nullptr);
+    PlayerOneCameraPanel playerOnePanel(playerOne, nullptr);
+    {
+        CameraSupportDialog dialog({&zwoPanel, &qhyPanel, &playerOnePanel}, false);
+        auto* table = dialog.findChild<QTableWidget*>("cameraSupportTable");
+        auto* details = dialog.findChild<QLabel*>("cameraSupportDetails");
+        QCOMPARE(table->rowCount(), 4);
+        QCOMPARE(table->item(0, 1)->text(), QString("Not checked"));
+        dialog.checkAll();
+        // ZWO: ready, with its camera and SDK version; nothing opened.
+        QCOMPARE(table->item(0, 1)->text(), QString("Ready"));
+        QCOMPARE(table->item(0, 3)->text(), QString("TEST SDK 1"));
+        QCOMPARE(table->item(0, 4)->text(), QString("TEST ASI120 Mono"));
+        QCOMPARE(zwo->opened.load(), 0);
+        // QHY: the SDK's failure, with what to install.
+        QCOMPARE(table->item(1, 1)->text(), QString("SDK library not found"));
+        table->selectRow(1);
+        QVERIFY2(details->text().contains("TEST QHY devices failed"), qPrintable(details->text()));
+        QVERIFY(details->text().contains("All-In-One"));
+        // Player One: ready, no camera; a chosen DLL is used and shown at once, and can be forgotten.
+        QCOMPARE(table->item(2, 1)->text(), QString("Ready; no camera connected"));
+        QCOMPARE(table->item(2, 4)->text(), QString("none"));
+        table->selectRow(2);
+        auto* automatic = dialog.findChild<QPushButton*>("automaticCameraRuntime");
+        QVERIFY(dialog.findChild<QPushButton*>("chooseCameraRuntime")->isEnabled());
+        QVERIFY(!automatic->isEnabled());
+        playerOnePanel.runtimeChooser()->setPath("C:/Vendor/PlayerOneCamera.dll");
+        QCOMPARE(playerOne->runtimeOverride, QString("C:/Vendor/PlayerOneCamera.dll"));
+        QCOMPARE(table->item(2, 2)->text(), QDir::toNativeSeparators("C:/Vendor/PlayerOneCamera.dll"));
+        QVERIFY(details->text().contains("SDK library chosen"));
+        QVERIFY(automatic->isEnabled());
+        automatic->click();
+        QVERIFY(playerOne->runtimeOverride.isEmpty());
+        QVERIFY(!QSettings().contains("playerone/runtimePath"));
+        QCOMPARE(playerOne->opened.load(), 0);
+        // ToupTek: missing from this build, so listed but not offered.
+        QCOMPARE(table->item(3, 1)->text(), QString("Not in this version"));
+        table->selectRow(3);
+        QVERIFY(details->text().contains("built without"));
+        QVERIFY(!dialog.findChild<QPushButton*>("chooseCameraRuntime")->isEnabled());
+    }
+    // While a stream runs, nothing is checked or changed.
+    const size_t calls = zwo->calls.size();
+    CameraSupportDialog running({&zwoPanel}, true);
+    running.checkAll();
+    QCOMPARE(running.findChild<QTableWidget*>("cameraSupportTable")->item(0, 1)->text(), QString("Stop the stream to check"));
+    QVERIFY(!running.findChild<QPushButton*>("checkCameraSupport")->isEnabled());
+    QCOMPARE(zwo->calls.size(), calls);
+
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path(), zwo);
+    QVERIFY(window.findChild<QAction*>("cameraSupportAction"));
+}
 
 // Feature-16: both new camera families through the window, with test cameras.
 void UiTest::playerOneAndToupTekInTheWindow()

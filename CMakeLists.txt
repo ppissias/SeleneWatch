@@ -133,7 +133,7 @@ add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
-    camera_family_panel.h runtime_chooser.h runtime_chooser.cpp
+    camera_family_panel.h runtime_chooser.h runtime_chooser.cpp camera_support_dialog.h camera_support_dialog.cpp
     playerone_camera_panel.h playerone_camera_panel.cpp touptek_camera_panel.h touptek_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

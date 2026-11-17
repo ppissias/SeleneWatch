@@ -2,12 +2,23 @@
 
 #include "sources/frame_source.h"
 
+#include <QtCore/QStringList>
 #include <QtWidgets/QWidget>
 
 #include <memory>
 #include <string>
 
 class CameraSettingsEditor;
+class RuntimeChooser;
+
+// What a check of a camera family's SDK found, without opening a camera.
+struct CameraSupport
+{
+    QString library;      // the SDK library in use; empty when none could be loaded
+    QString sdkVersion;
+    QStringList cameras;  // the connected cameras, by name
+    QString problem;      // why the SDK cannot be used; empty when it can
+};
 
 // One camera family's panel as the window sees it: discovery, the requested
 // settings, and the source made from them. ZWO, QHY, Player One and ToupTek
@@ -45,6 +56,14 @@ public:
     virtual void requestLiveControls() = 0;
     // The requested controls' form (Feature-15: exposure that follows the sky).
     [[nodiscard]] virtual CameraSettingsEditor* controls() const = 0;
+
+    // While stopped: loads the family's SDK if needed and lists the connected
+    // cameras, opening none (Session → Camera support).
+    [[nodiscard]] virtual CameraSupport checkSupport() = 0;
+    // What the observer installs for this family, and where to get it.
+    [[nodiscard]] virtual QString installHint() const = 0;
+    // The observer's choice of SDK library, or null when it ships with SeleneWatch.
+    [[nodiscard]] virtual RuntimeChooser* runtimeChooser() const = 0;
 
 signals:
     void applyRequested();

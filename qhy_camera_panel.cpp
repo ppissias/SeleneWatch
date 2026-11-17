@@ -95,6 +95,24 @@ void QhyCameraPanel::requestLiveControls()
 {
     if (source_) source_->requestLiveControls(settings().controls);
 }
+CameraSupport QhyCameraPanel::checkSupport()
+{
+    CameraSupport support;
+    try
+    {
+        api_->setRuntimeOverride(runtime_->path());
+        support.sdkVersion=QString::fromStdString(api_->version());
+        for (const auto& d:api_->devices()) support.cameras << QString::fromStdString(d.name);
+    }
+    catch (const std::exception& ex) { support.problem=QString::fromUtf8(ex.what()); }
+    support.library=api_->loadedRuntimePath();
+    return support;
+}
+QString QhyCameraPanel::installHint() const
+{
+    return "Install QHY's Windows All-In-One package from qhyccd.com/download. It holds the camera driver and qhyccd.dll, "
+        "which SeleneWatch finds where the package installs it. Or choose another x64 qhyccd.dll.";
+}
 QhyProfile QhyCameraPanel::profile() const { return profile_.value(); }
 QhySettings QhyCameraPanel::settings() const
 {

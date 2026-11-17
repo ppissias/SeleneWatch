@@ -119,6 +119,27 @@ void PlayerOneCameraPanel::requestLiveControls()
     if (source_) source_->requestLiveControls(settings().controls);
 }
 
+CameraSupport PlayerOneCameraPanel::checkSupport()
+{
+    CameraSupport support;
+    try
+    {
+        api_->setRuntimeOverride(runtime_->path());
+        support.sdkVersion = QString::fromStdString(api_->version());
+        for (const auto& c : api_->cameras()) support.cameras << QString::fromStdString(c.name);
+    }
+    catch (const std::exception& ex) { support.problem = QString::fromUtf8(ex.what()); }
+    support.library = api_->loadedRuntimePath();
+    return support;
+}
+
+QString PlayerOneCameraPanel::installHint() const
+{
+    return "Install Player One's camera driver, and download Player One's Windows camera SDK, both from "
+        "player-one-astronomy.com/service/software. Put the SDK's lib\\x64\\PlayerOneCamera.dll next to SeleneWatch.exe, "
+        "or choose it.";
+}
+
 PlayerOneSettings PlayerOneCameraPanel::settings() const
 {
     auto s = profile_.value().current;

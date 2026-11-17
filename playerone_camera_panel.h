@@ -28,6 +28,9 @@ public:
     bool readBack(std::string& error) override;
     void requestLiveControls() override;
     [[nodiscard]] CameraSettingsEditor* controls() const override { return editor_; }
+    [[nodiscard]] CameraSupport checkSupport() override;
+    [[nodiscard]] QString installHint() const override;
+    [[nodiscard]] RuntimeChooser* runtimeChooser() const override { return runtime_; }
 
     [[nodiscard]] PlayerOneProfile profile() const { return profile_.value(); }
     [[nodiscard]] PlayerOneSettings settings() const;

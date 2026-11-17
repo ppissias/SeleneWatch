@@ -82,6 +82,7 @@ private:
     void setupSessionMenu();
     void setupHelpMenu();
     void onSiteAndInstrument();
+    void onCameraSupport();
     void onScheduleRecording();
     void onRecordingFolder();
     void onRecordClicked();

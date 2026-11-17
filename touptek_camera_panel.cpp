@@ -119,6 +119,27 @@ void ToupTekCameraPanel::requestLiveControls()
     if (source_) source_->requestLiveControls(settings().controls);
 }
 
+CameraSupport ToupTekCameraPanel::checkSupport()
+{
+    CameraSupport support;
+    try
+    {
+        api_->setRuntimeOverride(runtime_->path());
+        support.sdkVersion = QString::fromStdString(api_->version());
+        for (const auto& d : api_->devices()) support.cameras << QString::fromStdString(d.name);
+    }
+    catch (const std::exception& ex) { support.problem = QString::fromUtf8(ex.what()); }
+    support.library = api_->loadedRuntimePath();
+    return support;
+}
+
+QString ToupTekCameraPanel::installHint() const
+{
+    return "Install the camera's driver, from ToupTek or the brand that sold it, and download ToupTek's camera SDK "
+        "(ToupCamSDK) from touptekphotonics.com/download/?category=SDK. Put the SDK's win\\x64\\toupcam.dll next to "
+        "SeleneWatch.exe, or choose it.";
+}
+
 ToupTekSettings ToupTekCameraPanel::settings() const
 {
     auto s = profile_.value().current;
