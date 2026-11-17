@@ -1306,7 +1306,7 @@ Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Ite
   - Frames are read with `Toupcam_WaitImageV4` and a bounded wait.
   - The controls are exposure, gain (ToupTek's percent, 100 for unity), black level, bandwidth and speed level. The black level's range grows with the raw depth (31 at 8 bits), so the source sets the raw depth before checking the requested controls.
   - Frame indices come from the camera's own sequence numbers when the SDK reports them. Each frame advances the index by its step from the one before, so a lost frame is counted where it happened, and the 32-bit counter's wrap is carried. A repeat or a step back stops the stream, since losses could no longer be attributed. Without sequence numbers, losses are unknown, as for QHY.
-- `cameras/vendor_runtime`: loading a vendor DLL that the observer installs, by absolute path, with its dependencies from its own folder and System32. It was taken out of the QHY adapter, which now uses it too, and is shared by Player One and ToupTek. Their automatic location is beside `SeleneWatch.exe`. Otherwise the observer chooses the DLL with **Choose … DLL** (`RuntimeChooser`, which the QHY panel now uses as well).
+- `cameras/vendor_runtime`: loading a vendor DLL that the observer installs, by absolute path, with its dependencies from its own folder and System32. It was taken out of the QHY adapter, which now uses it too, and is shared by Player One and ToupTek. Their automatic location is beside `SeleneWatch.exe`. Otherwise the observer chooses the DLL with **Choose … DLL** (`RuntimeChooser`, which the QHY panel now uses as well). *See the later change below for the other programs' copies.*
 - `camera_family_panel.h`: what the window needs from a camera family: its Source entry, discovery, the requested settings, the source it makes, readbacks, and live controls. With four families, the window keeps a list of them instead of a branch per family at every place that touched a camera (about twenty). The ZWO and QHY panels implement it with their behaviour unchanged.
 - `tools/runtime_probe_main.cpp`, `SeleneWatchRuntimeProbe qhy|playerone|touptek [DLL]`: loads the runtime, prints its path, version and cameras, and opens nothing.
 
@@ -1327,3 +1327,31 @@ Built for both families. Items 1 and 2 pass, for Player One and for ToupTek. Ite
 The last row shows that the QHY adapter, which now loads its DLL through the shared loader, still finds the installed QHY runtime.
 
 **Not verified.** Anything with a Player One or ToupTek camera (item 4).
+
+### Later change — 17 November 2026: other programs' copies of the DLLs
+
+At the observer's request, the automatic search also looks where other 64-bit astronomy programs install these DLLs for themselves, as it already did for QHY's All-In-One folder. Neither vendor's own driver installs the DLL in a documented place: Player One's manual on replacing its SDK DLL tells users to copy it from the SDK into each program.
+
+**The order.**
+1. The DLL beside `SeleneWatch.exe`, always first.
+2. The copies found in the folders below, the newest file version first.
+
+The loader already skips a copy without the exports SeleneWatch needs, for example a `toupcam.dll` too old to have `Toupcam_WaitImageV4`, and says why.
+
+| Folder, under the 64-bit Program Files | DLL | Source |
+| --- | --- | --- |
+| `N.I.N.A. - Nighttime Imaging 'N' Astronomy\External\x64\PlayerOne` | `PlayerOneCamera.dll` | Player One's *Manually replace the SDK* manual (revision 3.9.0, screenshots of the installed folders) |
+| `N.I.N.A. - Nighttime Imaging 'N' Astronomy\External\x64\ToupTek` | `toupcam.dll` | N.I.N.A.'s `nina.external` repository (folders `x64/ToupTek` and `x64/PlayerOne`), installed as the folder above |
+| each `SharpCap … (64 bit)` folder, newest name first | both | the same manual (`SharpCap 4.1 (64 bit)`); SharpCap's forum: SharpCap installs its own `toupcam.dll` |
+| `Common Files\ASCOM\x64`, under `Program Files (x86)` | `toupcam.dll` | an observer's report of ToupTek's ASCOM driver (astronomie-va.com forum, November 2023); not a ToupTek statement |
+
+32-bit programs' copies, under `Program Files (x86)`, are not looked at, since 64-bit SeleneWatch cannot load them. On the development machine, APT and PHD2 hold 32-bit copies only, so the search finds nothing there yet.
+
+**Where it lives.** `copiesInCapturePrograms` and `newestFirst` in `cameras/vendor_runtime` (file versions read with the Windows version API), used by the Player One and ToupTek bindings. The panels, the error messages and the Camera support window say where SeleneWatch looks.
+
+**Windows' error boxes are off while candidates are tried.** The new test's first run under CTest hung for its five minutes. Loading a file that is not a DLL had made Windows raise a modal "Bad Image" box, waiting for a click, possibly on the observer's screen. The shell used for direct runs suppresses such boxes, which is why the direct run passed. The loader now sets the thread's error mode to `SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX` while it tries candidates, and restores it afterwards. So a damaged or wrong DLL among the automatic locations, or one the observer chose, is reported with its reason, as other failures are, and never waits on a click. The test checks that the mode is set during a load, and CTest stops it after 60 s should a box ever appear again.
+
+**Tests.** A new `vendor_runtime` suite, using a fake Program Files folder and Windows' own DLLs, so that no vendor code is loaded:
+- N.I.N.A.'s and 64-bit SharpCap's copies are found, and a 32-bit SharpCap folder is passed over;
+- a file with a version comes before those without, and missing files are left out;
+- the loader refuses a non-DLL and a DLL lacking an export, each with its reason, takes the first usable one, and names a chosen file that is missing.

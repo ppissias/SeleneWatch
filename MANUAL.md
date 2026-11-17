@@ -41,8 +41,15 @@ Either way, the Qt and Visual C++ libraries the program needs come with it. The 
 | --- | --- | --- |
 | ZWO ASI | ZWO's camera driver. The SDK library ships next to SeleneWatch. | Tested on an ASI120MM Mini on the bench |
 | QHYCCD | QHY's Windows *All-In-One* driver and SDK package. SeleneWatch finds the installed SDK library when you select the camera. | Built; hardware test pending |
-| Player One | Player One's camera driver, and its `PlayerOneCamera.dll` (x64), from Player One's Windows camera SDK (`lib\x64`) or from your capture software's folder. Put the DLL next to `SeleneWatch.exe`, or press **Choose Player One DLL…** in the camera panel. | Built; hardware test pending |
-| ToupTek, and cameras ToupTek makes for other brands | The camera's driver, and ToupTek's `toupcam.dll` (x64), from ToupTek's camera SDK (`win\x64`) or from your capture software's folder. Put it next to `SeleneWatch.exe`, or press **Choose ToupTek DLL…**. | Built; hardware test pending |
+| Player One | Player One's camera driver, and its `PlayerOneCamera.dll` (x64). SeleneWatch finds the copy that N.I.N.A. or 64-bit SharpCap installs. Otherwise take it from Player One's Windows camera SDK (`lib\x64`), and put it next to `SeleneWatch.exe` or press **Choose Player One DLL…** in the camera panel. | Built; hardware test pending |
+| ToupTek, and cameras ToupTek makes for other brands | The camera's driver, and ToupTek's `toupcam.dll` (x64). SeleneWatch finds the copy that N.I.N.A., 64-bit SharpCap or ToupTek's ASCOM driver installs. Otherwise take it from ToupTek's camera SDK (`win\x64`), and put it next to `SeleneWatch.exe` or press **Choose ToupTek DLL…**. | Built; hardware test pending |
+
+Where SeleneWatch looks for these libraries, in order:
+1. The DLL you chose, if you chose one; nothing else is then tried.
+2. The DLL next to `SeleneWatch.exe`.
+3. The copies other 64-bit programs installed for themselves, the newest version first: N.I.N.A. (`External\x64\PlayerOne` or `External\x64\ToupTek` in its folder under Program Files), each `SharpCap … (64 bit)` folder, and for ToupTek the ASCOM driver's `Common Files\ASCOM\x64`. For QHY, QHY's All-In-One install folder.
+
+A copy too old for SeleneWatch is skipped, and **Session → Camera support…** shows which library was used. 32-bit programs' copies, under `Program Files (x86)`, cannot be used by 64-bit SeleneWatch.
 
 SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. SeleneWatch looks for a family's library only when you choose that camera under **Source**, or check it as below; starting SeleneWatch loads no camera maker's code apart from ZWO's.
 

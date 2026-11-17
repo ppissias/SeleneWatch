@@ -34,7 +34,8 @@ ToupTekCameraPanel::ToupTekCameraPanel(std::shared_ptr<ToupTekApi> api, QWidget*
     readback_->setObjectName("toupTekReadback");
     layout->addWidget(readback_);
     auto* hint = new QLabel("For ToupTek cameras and cameras ToupTek makes for other brands. Needs the camera's driver and "
-        "ToupTek's toupcam.dll (x64), which SeleneWatch does not ship: put it beside SeleneWatch.exe or choose it. "
+        "ToupTek's toupcam.dll (x64), which SeleneWatch does not ship. It finds the copy N.I.N.A., 64-bit SharpCap or "
+        "ToupTek's ASCOM driver installs; otherwise put it beside SeleneWatch.exe or choose it (Session → Camera support). "
         "Preview applies controls live; format and ROI changes restart Preview. Bin 1 only. Hardware validation is pending.", this);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -135,9 +136,10 @@ CameraSupport ToupTekCameraPanel::checkSupport()
 
 QString ToupTekCameraPanel::installHint() const
 {
-    return "Install the camera's driver, from ToupTek or the brand that sold it, and download ToupTek's camera SDK "
-        "(ToupCamSDK) from touptekphotonics.com/download/?category=SDK. Put the SDK's win\\x64\\toupcam.dll next to "
-        "SeleneWatch.exe, or choose it.";
+    return "Install the camera's driver, from ToupTek or the brand that sold it. SeleneWatch finds the toupcam.dll that "
+        "N.I.N.A., 64-bit SharpCap or ToupTek's ASCOM driver installs, the newest first. Otherwise download ToupTek's camera "
+        "SDK (ToupCamSDK) from touptekphotonics.com/download/?category=SDK, and put its win\\x64\\toupcam.dll next to "
+        "SeleneWatch.exe or choose it. A DLL next to SeleneWatch.exe is always used first.";
 }
 
 ToupTekSettings ToupTekCameraPanel::settings() const

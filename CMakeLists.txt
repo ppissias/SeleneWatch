@@ -48,7 +48,7 @@ target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(selenewatch_core PUBLIC Qt6::Core Qt6::Gui)
 add_dependencies(selenewatch_core selenewatch_version)
 if(WIN32)
-    target_link_libraries(selenewatch_core PRIVATE winmm ws2_32)
+    target_link_libraries(selenewatch_core PRIVATE winmm ws2_32 version)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
@@ -256,6 +256,14 @@ add_executable(SeleneWatchQhyTests tests/qhy_tests.cpp)
 target_link_libraries(SeleneWatchQhyTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchQhyTests)
 add_test(NAME qhy COMMAND SeleneWatchQhyTests -o -,tap)
+
+add_executable(SeleneWatchVendorRuntimeTests tests/vendor_runtime_tests.cpp)
+target_link_libraries(SeleneWatchVendorRuntimeTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchVendorRuntimeTests)
+add_test(NAME vendor_runtime COMMAND SeleneWatchVendorRuntimeTests -o -,tap)
+# It loads files that are not DLLs. Should Windows ever show an error box for
+# one, the test fails within a minute instead of waiting for a click.
+set_tests_properties(vendor_runtime PROPERTIES TIMEOUT 60)
 
 add_executable(SeleneWatchPlayerOneTests tests/playerone_tests.cpp)
 target_link_libraries(SeleneWatchPlayerOneTests PRIVATE selenewatch_core Qt6::Test)

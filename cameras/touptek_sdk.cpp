@@ -5,6 +5,7 @@
 
 #ifdef SELENEWATCH_WITH_TOUPTEK
 #include "cameras/vendor_runtime.h"
+#include <QtCore/QDir>
 // Declarations only: every call goes through a pointer resolved from the
 // observer's DLL, so the header's import markers are switched off.
 #define TOUPCAM_NOIMPORTS
@@ -58,8 +59,21 @@ struct ToupTekFunctions
 };
 
 const VendorRuntime toupTekRuntime{"ToupTek", "toupcam.dll",
-    "Install the camera's Windows driver from ToupTek (or the brand that sold it), then select the x64 toupcam.dll "
-    "from ToupTek's camera SDK (win\\x64) or from your capture software's folder."};
+    "Install the camera's Windows driver from ToupTek (or the brand that sold it). Then put the x64 toupcam.dll from "
+    "ToupTek's camera SDK (win\\x64) next to SeleneWatch.exe, or select it. SeleneWatch also finds the copy that "
+    "N.I.N.A., 64-bit SharpCap or ToupTek's ASCOM driver installs."};
+
+// Beside SeleneWatch.exe first, the observer's own placement; then the
+// copies N.I.N.A., 64-bit SharpCap and ToupTek's ASCOM driver install, the
+// newest version first. The ASCOM driver's folder is an observer's report
+// (astronomie-va.com forum, November 2023), not a ToupTek statement.
+QStringList automaticPaths()
+{
+    QStringList copies = copiesInCapturePrograms("toupcam.dll", "ToupTek");
+    if (const auto common = qEnvironmentVariable("CommonProgramFiles(x86)"); !common.isEmpty())
+        copies << QDir(common).filePath("ASCOM/x64/toupcam.dll");
+    return QStringList{runtimeBesideProgram("toupcam.dll")} + newestFirst(copies);
+}
 
 constexpr HRESULT kTimeout = static_cast<HRESULT>(0x8001011FL); // E_TIMEOUT in toupcam.h
 constexpr HRESULT kNotImplemented = static_cast<HRESULT>(0x80004001L);
@@ -262,7 +276,7 @@ private:
     {
         if (functions_) return *functions_;
         // The module is kept in functions_, which resolved every export from it.
-        (void)loadVendorRuntime(toupTekRuntime, runtimeOverride_, {runtimeBesideProgram("toupcam.dll")},
+        (void)loadVendorRuntime(toupTekRuntime, runtimeOverride_, automaticPaths(),
             [this](void* candidate) { functions_.emplace(candidate); }, loadedRuntimePath_);
         return *functions_;
     }

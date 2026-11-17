@@ -57,8 +57,17 @@ struct PlayerOneFunctions
 };
 
 const VendorRuntime playerOneRuntime{"Player One", "PlayerOneCamera.dll",
-    "Install Player One's camera driver, then select the x64 PlayerOneCamera.dll from Player One's Windows camera SDK "
-    "(lib\\x64) or from your capture software's folder."};
+    "Install Player One's camera driver. Then put the x64 PlayerOneCamera.dll from Player One's Windows camera SDK "
+    "(lib\\x64) next to SeleneWatch.exe, or select it. SeleneWatch also finds the copy that N.I.N.A. or 64-bit "
+    "SharpCap installs."};
+
+// Beside SeleneWatch.exe first, the observer's own placement; then the
+// copies N.I.N.A. and 64-bit SharpCap install, the newest version first.
+QStringList automaticPaths()
+{
+    return QStringList{runtimeBesideProgram("PlayerOneCamera.dll")}
+        + newestFirst(copiesInCapturePrograms("PlayerOneCamera.dll", "PlayerOne"));
+}
 
 POAConfig native(PlayerOneControl kind)
 {
@@ -267,7 +276,7 @@ private:
     {
         if (functions_) return *functions_;
         // The module is kept in functions_, which resolved every export from it.
-        (void)loadVendorRuntime(playerOneRuntime, runtimeOverride_, {runtimeBesideProgram("PlayerOneCamera.dll")},
+        (void)loadVendorRuntime(playerOneRuntime, runtimeOverride_, automaticPaths(),
             [this](void* candidate) { functions_.emplace(candidate); }, loadedRuntimePath_);
         return *functions_;
     }

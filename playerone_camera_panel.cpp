@@ -33,8 +33,9 @@ PlayerOneCameraPanel::PlayerOneCameraPanel(std::shared_ptr<PlayerOneApi> api, QW
     readback_->setTextFormat(Qt::PlainText);
     readback_->setObjectName("playerOneReadback");
     layout->addWidget(readback_);
-    auto* hint = new QLabel("Needs Player One's camera driver and its PlayerOneCamera.dll (x64), which SeleneWatch does not ship: "
-        "put it beside SeleneWatch.exe or choose it. Preview applies controls live; format, bin and ROI changes restart Preview. "
+    auto* hint = new QLabel("Needs Player One's camera driver and its PlayerOneCamera.dll (x64), which SeleneWatch does not ship. "
+        "It finds the copy N.I.N.A. or 64-bit SharpCap installs; otherwise put it beside SeleneWatch.exe or choose it "
+        "(Session → Camera support). Preview applies controls live; format, bin and ROI changes restart Preview. "
         "Hardware validation is pending.", this);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -135,9 +136,10 @@ CameraSupport PlayerOneCameraPanel::checkSupport()
 
 QString PlayerOneCameraPanel::installHint() const
 {
-    return "Install Player One's camera driver, and download Player One's Windows camera SDK, both from "
-        "player-one-astronomy.com/service/software. Put the SDK's lib\\x64\\PlayerOneCamera.dll next to SeleneWatch.exe, "
-        "or choose it.";
+    return "Install Player One's camera driver, from player-one-astronomy.com/service/software. SeleneWatch finds the "
+        "PlayerOneCamera.dll that N.I.N.A. or 64-bit SharpCap installs, the newest first. Otherwise download Player One's "
+        "Windows camera SDK from the same page, and put its lib\\x64\\PlayerOneCamera.dll next to SeleneWatch.exe or choose it. "
+        "A DLL next to SeleneWatch.exe is always used first.";
 }
 
 PlayerOneSettings PlayerOneCameraPanel::settings() const
