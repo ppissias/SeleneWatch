@@ -48,6 +48,9 @@ struct OverviewRequest
     std::vector<QRect> marks;
     // Areas the detector leaves out (Feature-11): not measured, and hatched.
     std::vector<QRect> mask;
+    // The image scale, when the site and instrument give it (Feature-14):
+    // speeds are then also given in degrees per second.
+    std::optional<double> arcsecPerPixel;
     // Lines about the clip, printed above the line the overview adds.
     QStringList caption;
 };

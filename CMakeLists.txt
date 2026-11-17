@@ -30,6 +30,7 @@ add_library(selenewatch_core STATIC
     cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
+    recording/metadata_text.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
@@ -38,7 +39,7 @@ target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(selenewatch_core PUBLIC Qt6::Core Qt6::Gui)
 add_dependencies(selenewatch_core selenewatch_version)
 if(WIN32)
-    target_link_libraries(selenewatch_core PRIVATE winmm)
+    target_link_libraries(selenewatch_core PRIVATE winmm ws2_32)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
@@ -93,7 +94,7 @@ endif()
 
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
-    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp
+    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
@@ -165,6 +166,15 @@ target_link_libraries(SeleneWatchDarkeningTests PRIVATE selenewatch_core Qt6::Te
 selenewatch_compile_options(SeleneWatchDarkeningTests)
 add_test(NAME darkening COMMAND SeleneWatchDarkeningTests -o -,tap)
 set_tests_properties(darkening PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchSessionRecordTests tests/session_record_tests.cpp)
+target_link_libraries(SeleneWatchSessionRecordTests PRIVATE selenewatch_core Qt6::Test)
+if(WIN32)
+    target_link_libraries(SeleneWatchSessionRecordTests PRIVATE ws2_32)
+endif()
+selenewatch_compile_options(SeleneWatchSessionRecordTests)
+add_test(NAME session_record COMMAND SeleneWatchSessionRecordTests -o -,tap)
+set_tests_properties(session_record PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
 target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)

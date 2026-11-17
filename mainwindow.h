@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 
+class QPushButton;
 class QTimer;
 class RecordingReader;
 class RecordingSource;
@@ -73,6 +74,22 @@ private:
     // or for timeoutMs when that is above zero.
     void showMessage(const QString& text, int timeoutMs = 0);
     void startStream(Session::Mode mode);
+    // Feature-14: the Session menu (site and instrument, a scheduled
+    // recording), the Record button, and the saved site and clock check.
+    void setupSessionMenu();
+    void onSiteAndInstrument();
+    void onScheduleRecording();
+    void onRecordClicked();
+    void onRecordingChanged();
+    // The recording's line under the capture mode, or none.
+    [[nodiscard]] QString recordingReadout() const;
+    [[nodiscard]] static ObservingSite savedSite();
+    static void saveSite(const ObservingSite& site, bool ntp, const QString& server);
+public:
+    // Saves the site and the clock check and hands them to the session; the
+    // dialog's OK, and the window test.
+    void applySite(const ObservingSite& site, bool ntp, const QString& server);
+private:
     void setupDetectionPanel();
     void updateDetectionDisplay();
     // Feature-11: each target's detection and capture settings are saved
@@ -199,6 +216,7 @@ private:
     QLabel* frameLabel_{nullptr};
     QLabel* modeLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
+    QPushButton* recordButton_{nullptr};
 
     uint64_t lastAcquiredSample_{0};
     std::chrono::steady_clock::time_point lastFpsSampleTime_{};

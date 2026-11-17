@@ -3,7 +3,9 @@
 #include "blip_injector.h"
 #include "event_capture.h"
 #include "guiding/guider.h"
+#include "observing_site.h"
 #include "recording/event_writer.h"
+#include "recording/recording_writer.h"
 #include "frame.h"
 #include "sources/frame_source.h"
 #include "latest_frame_slot.h"
@@ -19,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 
 // The frame path from a source to the capture, the writer, the preview, and
 // the feature lock.
@@ -52,6 +55,8 @@ public:
         std::function<void(const ClipWriteResult&)> clipWritten;
         // The guider has a new status. Read it with guider().status().
         std::function<void()> lockChanged;
+        // A continuous recording started or ended. Read recordingStatus().
+        std::function<void()> recordingChanged;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -105,6 +110,31 @@ public:
     // guider() and reads guider().status() when lockChanged arrives.
     [[nodiscard]] Guider& guider() { return guider_; }
 
+    // Feature-14. Context thread. Copied into each clip and recording from now on.
+    void setSite(const ObservingSite& site);
+    // Context thread. At each Start, on its own thread: the Windows time
+    // service's status and, with a server given, an SNTP check. The result
+    // goes into the clips and recordings that follow, and into session_start.
+    void setClockCheck(bool enabled, std::string ntpServer);
+    [[nodiscard]] std::string clockRecord() const;
+
+    // Feature-14 continuous recording. Context thread. Starts or stops one
+    // while Monitoring; applied before the next frame. False when not Monitoring.
+    bool requestRecording(bool record);
+    // A scheduled recording: from start, for seconds, by frame time. It runs
+    // while Monitoring; a new schedule replaces the last.
+    struct Schedule
+    {
+        std::chrono::system_clock::time_point start{};
+        std::chrono::system_clock::time_point end{};
+    };
+    void scheduleRecording(Schedule schedule);
+    void cancelSchedule();
+    [[nodiscard]] std::optional<Schedule> schedule() const;
+    [[nodiscard]] RecordingWriter::Status recordingStatus() const;
+    // Tests: the recording writer's drive query and pace.
+    [[nodiscard]] RecordingWriter& recordingWriter() { return recorder_; }
+
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
     [[nodiscard]] bool isRunning() const;
@@ -137,6 +167,11 @@ private:
     void post(std::function<void()> call);
     void applyManualSave();
     void applyModeRequest();
+    // Source thread: starts, feeds and ends the continuous recording.
+    void updateRecording(const FramePtr& frame);
+    void beginRecording(const FramePtr& first, const std::string& startedBy);
+    void endRecording(const std::string& reason);
+    void startClockCheck();
 
     QObject* context_;
     Notifications notifications_;
@@ -170,6 +205,25 @@ private:
 
     // After the writer, which it feeds; stopped before the writer shuts down.
     Guider guider_;
+
+    // Feature-14. The site, the clock check and the requests are under
+    // requestMutex_; the recording's state is the source thread's.
+    QString outputRoot_;
+    ObservingSite site_;
+    std::string clockRecord_;
+    bool clockCheck_{false};
+    std::string ntpServer_;
+    std::atomic<bool> clockBusy_{false};
+    std::jthread clockThread_;
+    std::optional<bool> recordRequest_;
+    std::optional<Schedule> schedule_;
+    RecordingWriter recorder_;
+    bool recording_{false};
+    bool scheduledRecording_{false};
+    std::string recordingName_;
+    uint64_t recordingFirstIndex_{0}, recordingLastIndex_{0};
+    bool recordingKnown_{false};
+    size_t recordingQueueBytes_{0};
 
     // Declared last, so it is stopped and destroyed before what it feeds.
     std::unique_ptr<FrameSource> source_;

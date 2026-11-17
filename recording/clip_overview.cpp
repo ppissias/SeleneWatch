@@ -568,6 +568,8 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
             if (std::abs(dx) >= 1) parts << QString("%1 px %2").arg(std::abs(dx), 0, 'f', 0).arg(dx > 0 ? "right" : "left");
             if (std::abs(dy) >= 1) parts << QString("%1 px %2").arg(std::abs(dy), 0, 'f', 0).arg(dy > 0 ? "down" : "up");
             result.activity += QString("; moved %1, %2 px/s").arg(parts.join(" and ")).arg(result.speed, 0, 'f', 0);
+            if (request.arcsecPerPixel)
+                result.activity += QString(" (%1°/s)").arg(result.speed * *request.arcsecPerPixel / 3600, 0, 'f', 3);
         }
         else if (!apart) result.activity += "; in place";
     }

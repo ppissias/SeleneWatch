@@ -104,9 +104,15 @@ public:
     // Any thread. Takes the clip, or drops its frames and logs it as not saved.
     void submit(EventClip clip);
 
-    // Any thread. Queues the session_start line for a stream that starts now.
-    // Only a failure to write it is reported.
-    void logSessionStart(const StreamInfo& stream);
+    // Any thread. Queues the session_start line for a stream that starts now,
+    // with the site and the last clock check (Feature-14). Only a failure to
+    // write it is reported.
+    void logSessionStart(const StreamInfo& stream, const ObservingSite& site = {}, const std::string& clockRecord = {});
+
+    // Any thread. Queues finished lines for candidates.txt that are not
+    // about a clip: a recording's start and stop, a clock check, an exposure
+    // change (Features 14 and 15). Only a failure to write them is reported.
+    void logRecord(QString lines);
 
     // Any thread. Queues finished lines for <outputRoot>/guiding.txt (none
     // when empty) and the records that go with them. The records are kept in
@@ -128,6 +134,8 @@ private:
     {
         std::chrono::system_clock::time_point time;
         StreamInfo stream;
+        ObservingSite site;
+        std::string clockRecord;
     };
 
     // Work waiting for the writer: a session_start line, guiding lines, a
@@ -138,6 +146,7 @@ private:
         std::optional<SessionStart> sessionStart;
         bool guiding{false};
         QString guidingLines;
+        QString recordLines;
         std::optional<GuidePulseRecord> pulse;
         std::optional<GuideStateRecord> guideState;
         EventClip clip;

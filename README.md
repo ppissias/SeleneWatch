@@ -152,7 +152,7 @@ The **Display and capture** tab offers Linear, Black/white levels, and Auto-stre
 | — | An overview picture of every clip | Feature-12 | Built; the observer's review of real clips is pending |
 | — | Watching the sky: Moon and Sky modes, large brightenings, release of slow drifters, a detection mask, a disk reserve | Feature-11 | Built; a night outside is pending |
 | — | A trigger for darkening, for transits in front of the sunlit Moon | Feature-13 | Built and measured on recordings; off by default. A real transit is pending |
-| 11 | The full session record: continuous recording, time model, complete clip metadata | — | Planned |
+| 11 | The full session record: continuous recording (also scheduled), the time record, site and instrument | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
 | 12 | More camera families; registration, transit tracking, event browser, export | — | Planned |
 
 Feature details are in [features.md](features.md) (open) and [implemented features.md](implemented%20features.md) (history). The order may change with prototype results and available hardware.

@@ -1,14 +1,18 @@
 #include "session.h"
 
+#include "clock_check.h"
+#include "recording/metadata_text.h"
+
 #include <QtCore/QMetaObject>
 
+#include <format>
 #include <utility>
 #include <stdexcept>
 
 Session::Session(QObject* context, QString outputRoot, Notifications notifications)
     : context_(context)
     , notifications_(std::move(notifications))
-    , writer_(context, std::move(outputRoot), captureSettings_.memoryBytes * 2 / 5,
+    , writer_(context, outputRoot, captureSettings_.memoryBytes * 2 / 5,
           [done = notifications_.clipWritten](const ClipWriteResult& result) {
               if (done)
               {
@@ -22,9 +26,26 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
           // the source thread. The window is not in between.
           [this](EventClip clip) {
               clip.stream = streamInfo_;
+              {
+                  std::lock_guard lock(requestMutex_);
+                  clip.site = site_;
+                  clip.clockRecord = clockRecord_;
+              }
+              // Feature-14: the clip names the recording its frames fell in.
+              if (recordingKnown_ && !clip.frames.empty() && clip.frames.front()->frameIndex <= recordingLastIndex_
+                  && clip.frames.back()->frameIndex >= recordingFirstIndex_)
+                  clip.duringRecording = recordingName_;
               writer_.submit(std::move(clip));
           }, {}, memory_)
     , guider_(writer_, [this] { post(notifications_.lockChanged); })
+    , outputRoot_(std::move(outputRoot))
+    , recorder_([this](const RecordingWriter::Status& status) {
+          // Writer thread: the recording ended, by a stop or by itself.
+          writer_.logRecord(QString("%1 recording_stop name=%2 frames=%3 bytes=%4 seconds=%5 ended=\"%6\"\n")
+              .arg(utcText(std::chrono::system_clock::now()), status.name).arg(status.frames).arg(status.bytes)
+              .arg(status.streamSeconds, 0, 'f', 3).arg(QString::fromStdString(status.endReason)));
+          post(notifications_.recordingChanged);
+      })
 {
 }
 
@@ -32,7 +53,177 @@ Session::~Session()
 {
     stop();
     guider_.shutdown();
+    // A recording still being written is finished before the record closes.
+    recorder_.stop("the program closed");
+    recorder_.waitIdle();
+    if (clockThread_.joinable()) clockThread_.join();
     writer_.shutdown();
+}
+
+void Session::setSite(const ObservingSite& site)
+{
+    std::lock_guard lock(requestMutex_);
+    site_ = site;
+}
+
+void Session::setClockCheck(bool enabled, std::string ntpServer)
+{
+    std::lock_guard lock(requestMutex_);
+    clockCheck_ = enabled;
+    ntpServer_ = std::move(ntpServer);
+}
+
+std::string Session::clockRecord() const
+{
+    std::lock_guard lock(requestMutex_);
+    return clockRecord_;
+}
+
+// Context thread, at Start. One check at a time; a Start during one keeps it.
+void Session::startClockCheck()
+{
+    std::string server;
+    {
+        std::lock_guard lock(requestMutex_);
+        if (!clockCheck_) return;
+        server = ntpServer_;
+    }
+    if (clockBusy_.exchange(true)) return;
+    if (clockThread_.joinable()) clockThread_.join();
+    clockThread_ = std::jthread([this, server] {
+        const std::string windows = windowsTimeStatus();
+        std::optional<NtpResult> ntp;
+        if (!server.empty()) ntp = queryNtp(server, 123, 4, std::chrono::milliseconds{800});
+        const std::string text = clockCheckText(windows, ntp ? &*ntp : nullptr, std::chrono::system_clock::now());
+        {
+            std::lock_guard lock(requestMutex_);
+            clockRecord_ = text;
+        }
+        clockBusy_.store(false);
+    });
+}
+
+bool Session::requestRecording(bool record)
+{
+    std::lock_guard lock(requestMutex_);
+    if (!running_ || sourceFinished_.load() || mode_.load() != Mode::Monitoring) return false;
+    recordRequest_ = record;
+    return true;
+}
+
+void Session::scheduleRecording(Schedule schedule)
+{
+    std::lock_guard lock(requestMutex_);
+    schedule_ = schedule;
+}
+
+void Session::cancelSchedule()
+{
+    std::lock_guard lock(requestMutex_);
+    schedule_.reset();
+}
+
+std::optional<Session::Schedule> Session::schedule() const
+{
+    std::lock_guard lock(requestMutex_);
+    return schedule_;
+}
+
+RecordingWriter::Status Session::recordingStatus() const
+{
+    return recorder_.status();
+}
+
+// Source thread, for each published frame: a request, a schedule, or the
+// end of Monitoring starts or ends the recording; a running one takes the frame.
+void Session::updateRecording(const FramePtr& frame)
+{
+    std::optional<bool> request;
+    std::optional<Schedule> schedule;
+    {
+        std::lock_guard lock(requestMutex_);
+        request = recordRequest_;
+        recordRequest_.reset();
+        schedule = schedule_;
+    }
+    const bool monitoring = mode_.load() == Mode::Monitoring;
+    if (recording_)
+    {
+        if (!monitoring) endRecording("monitoring stopped");
+        else if (request && !*request) endRecording("stopped by the observer");
+        else if (scheduledRecording_ && schedule && frame->timestamp >= schedule->end)
+        {
+            endRecording("the scheduled end");
+            std::lock_guard lock(requestMutex_);
+            if (schedule_ && schedule_->end == schedule->end) schedule_.reset();
+        }
+    }
+    if (recording_)
+    {
+        if (recorder_.push(frame)) recordingLastIndex_ = frame->frameIndex;
+        else
+        {
+            // It ended by itself; its writer has the reason and reports it.
+            recording_ = false;
+            scheduledRecording_ = false;
+        }
+        return;
+    }
+    if (!monitoring) return;
+    if (request && *request)
+    {
+        beginRecording(frame, "the observer");
+        return;
+    }
+    if (schedule && frame->timestamp >= schedule->start)
+    {
+        if (frame->timestamp < schedule->end)
+        {
+            beginRecording(frame, std::format("a schedule from {} for {:.1f} s", utcText(schedule->start).toStdString(),
+                std::chrono::duration<double>(schedule->end - schedule->start).count()));
+            scheduledRecording_ = recording_;
+        }
+        else
+        {
+            // Its end passed while not Monitoring.
+            std::lock_guard lock(requestMutex_);
+            if (schedule_ && schedule_->end == schedule->end) schedule_.reset();
+            post(notifications_.recordingChanged);
+        }
+    }
+}
+
+void Session::beginRecording(const FramePtr& first, const std::string& startedBy)
+{
+    RecordingWriter::Start start;
+    start.outputRoot = outputRoot_;
+    start.stream = streamInfo_;
+    {
+        std::lock_guard lock(requestMutex_);
+        start.site = site_;
+        start.clockRecord = clockRecord_;
+    }
+    start.target = captureSettings_.target;
+    start.diskReserveBytes = captureSettings_.diskReserveBytes;
+    start.startedBy = startedBy;
+    start.queueBytes = recordingQueueBytes_ ? recordingQueueBytes_ : captureSettings_.memoryBytes / 8;
+    if (!recorder_.start(start, first)) return;
+    recording_ = true;
+    recordingKnown_ = true;
+    recordingName_ = utcStamp(first->timestamp).toStdString();
+    recordingFirstIndex_ = recordingLastIndex_ = first->frameIndex;
+    writer_.logRecord(QString("%1 recording_start name=%2 first_frame_index=%3 started_by=\"%4\"\n")
+        .arg(utcText(first->timestamp), QString::fromStdString(recordingName_)).arg(first->frameIndex)
+        .arg(QString::fromStdString(startedBy)));
+    post(notifications_.recordingChanged);
+}
+
+void Session::endRecording(const std::string& reason)
+{
+    if (!recording_) return;
+    recorder_.stop(reason);
+    recording_ = false;
+    scheduledRecording_ = false;
 }
 
 void Session::setSource(std::unique_ptr<FrameSource> source)
@@ -89,7 +280,12 @@ bool Session::start(QString& error, Mode mode)
     lastPreviewTime_ = {};
     (void)previewSlot_.take();
 
-    if (mode == Mode::Monitoring) writer_.logSessionStart(streamInfo_);
+    startClockCheck();
+    if (mode == Mode::Monitoring)
+    {
+        std::lock_guard lock(requestMutex_);
+        writer_.logSessionStart(streamInfo_, site_, clockRecord_);
+    }
     // A held lock carries over; its estimate starts again with this run.
     // Guiding is off at every start (safety rule 1).
     guider_.discontinuity();
@@ -106,6 +302,8 @@ void Session::stop(std::string reason)
         return;
     }
     source_->stop();
+    // The source thread is joined, so its recording state is this thread's now.
+    endRecording("the stream stopped");
     // Safety rule 8: no guiding without frames. Only pulses were sent, so nothing is undone.
     guider_.endGuiding("The stream stopped (" + reason + ").");
     applyManualSave();
@@ -151,7 +349,11 @@ void Session::applyModeRequest()
     if (!request) return;
     applyManualSave();
     capture_.setMonitoring(*request);
-    if (*request && mode_.load() != Mode::Monitoring) writer_.logSessionStart(streamInfo_);
+    if (*request && mode_.load() != Mode::Monitoring)
+    {
+        std::lock_guard lock(requestMutex_);
+        writer_.logSessionStart(streamInfo_, site_, clockRecord_);
+    }
     mode_.store(*request ? Mode::Monitoring : Mode::Preview);
     { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
     post(notifications_.modeChanged);
@@ -266,6 +468,9 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         if (previewAndNextFrame >= half) throw std::runtime_error("RAM ceiling leaves too little room for a frame and its difference; increase it");
         capture_.configure(captureSettings_, half - previewAndNextFrame, half / 2);
         writer_.setByteLimit(half);
+        // A recording's backlog mostly shares its frames with the ring; past
+        // the ring's allowance the disk is not keeping up (Feature-14).
+        recordingQueueBytes_ = half / 2;
         budgetPrepared_ = true;
     }
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
@@ -274,6 +479,7 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
 
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);
+    updateRecording(published);
 
     DetectionSettings settings;
     DetectionDisplayRequest display;
@@ -338,6 +544,7 @@ void Session::onEnded()
 {
     sourceFinished_.store(true);
     applyManualSave();
+    endRecording("the source ended");
     capture_.finishPartial("source ended");
     post(notifications_.ended);
 }
@@ -346,6 +553,7 @@ void Session::onFailed(const std::string& message)
 {
     sourceFinished_.store(true);
     applyManualSave();
+    endRecording("source failure: " + message);
     capture_.finishPartial("source failure: " + message);
     const QString text = QString::fromStdString(message);
     if (notifications_.failed)

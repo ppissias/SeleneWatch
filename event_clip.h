@@ -1,6 +1,7 @@
 #pragma once
 
 #include "frame.h"
+#include "observing_site.h"
 #include "stream_info.h"
 #include "detection_result.h"
 #include "capture_settings.h"
@@ -87,4 +88,10 @@ struct EventClip
     // What the source said about its stream. Added when the clip is handed
     // to the writer.
     StreamInfo stream;
+
+    // Feature-14, added at hand-off too: who observed from where with what,
+    // the last clock check, and the continuous recording the clip fell in.
+    ObservingSite site;
+    std::string clockRecord;
+    std::string duringRecording;
 };

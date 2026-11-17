@@ -99,7 +99,8 @@ bool SerWriter::write(const char* bytes, qint64 count, QString& error)
 }
 
 // Write a provisional header and establish the sample layout for all frames in this clip.
-bool SerWriter::start(const Frame& layout, const std::string& camera, QString& error, bool testSource)
+bool SerWriter::start(const Frame& layout, const std::string& camera, QString& error, bool testSource,
+    const std::string& telescope)
 {
     if (started_ || !output_.isWritable() || output_.isSequential() || output_.pos() != 0)
     {
@@ -129,6 +130,7 @@ bool SerWriter::start(const Frame& layout, const std::string& camera, QString& e
     const auto mark=observer(testSource_,bits_,alignment_);
     std::copy(mark.begin(),mark.end(),header.data()+42);
     std::copy_n(camera.data(), std::min(camera.size(), size_t{40}), header.data() + 82);
+    std::copy_n(telescope.data(), std::min(telescope.size(), size_t{40}), header.data() + 122);
     // Local time is unknown. Only DateTime_UTC is populated.
     put(header, 170, static_cast<uint64_t>(timeToSerTicks(layout.timestamp)), 8);
     started_ = true;
@@ -157,6 +159,25 @@ bool SerWriter::append(const Frame& frame, QString& error)
         return false;
     }
     times_.push_back(time);
+    return true;
+}
+
+bool SerWriter::updateCount(QString& error)
+{
+    if (!started_ || failed_ || finished_)
+    {
+        error = "SER writer is not accepting frames";
+        return false;
+    }
+    const qint64 end = output_.pos();
+    QByteArray count(4, '\0');
+    put(count, 0, times_.size(), 4);
+    if (!output_.seek(38) || !write(count.constData(), count.size(), error) || !output_.seek(end))
+    {
+        failed_ = true;
+        if (error.isEmpty()) error = "could not bring the SER frame count up to date";
+        return false;
+    }
     return true;
 }
 

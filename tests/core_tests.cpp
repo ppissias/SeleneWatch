@@ -2397,8 +2397,9 @@ void SessionTest::serFileThroughSessionWritesAClip()
 
     const QStringList lines = candidateLines(root);
     QCOMPARE(lines.size(), static_cast<qsizetype>(2));
-    QVERIFY2(lines[0].endsWith(" session_start camera=\"TestCam\" playback=\"whole file once, frames 0 to 59\" source=\""
-        + path + "\""), qPrintable(lines[0]));
+    QVERIFY2(lines[0].contains(" session_start camera=\"TestCam\" playback=\"whole file once, frames 0 to 59\" observer="),
+        qPrintable(lines[0]));
+    QVERIFY2(lines[0].endsWith(" source=\"" + path + "\""), qPrintable(lines[0]));
     QVERIFY(lines[1].startsWith(utcText(triggerTime) + " onset_frame_index=20 trigger_frame_index=21 "));
     QVERIFY(lines[1].endsWith("clip=" + utcStamp(triggerTime)));
 }
@@ -3270,11 +3271,14 @@ void EventWriterTest::sessionStartLineNamesTheSource()
 
     const QStringList lines = candidateLines(root.path());
     QCOMPARE(lines.size(), static_cast<qsizetype>(3));
-    QVERIFY2(lines[0].endsWith(
-        " session_start camera=\"Chameleon\" playback=\"loop over frames 0 to 3 of 10\" source=\"C:/data/Moon 2015.ser\""),
+    // Feature-14: the site and the clock check come before the source.
+    QVERIFY2(lines[0].contains(
+        " session_start camera=\"Chameleon\" playback=\"loop over frames 0 to 3 of 10\" observer=\"not entered\" site=\"not entered\""),
         qPrintable(lines[0]));
+    QVERIFY2(lines[0].endsWith(" clock_check=\"not made\" source=\"C:/data/Moon 2015.ser\""), qPrintable(lines[0]));
     QVERIFY(lines[1].startsWith(utcText(testTime(900)) + " onset_frame_index=4 "));
-    QVERIFY2(lines[2].endsWith(" session_start camera=\"unknown\" source=\"synthetic\""), qPrintable(lines[2]));
+    QVERIFY2(lines[2].contains(" session_start camera=\"unknown\" observer=") && lines[2].endsWith(" source=\"synthetic\""),
+        qPrintable(lines[2]));
 }
 
 void EventWriterTest::blipMetadataSurvivesAPartialClipAndRefusal()

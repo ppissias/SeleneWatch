@@ -20,9 +20,18 @@ class SerWriter
 {
 public:
     explicit SerWriter(QIODevice& output);
-    bool start(const Frame& layout, const std::string& camera, QString& error, bool testSource = false);
+    // camera goes into the header's Instrument field and telescope, when
+    // given, into its Telescope field (Feature-14). The Observer field holds
+    // SeleneWatch's sample-layout and test mark.
+    bool start(const Frame& layout, const std::string& camera, QString& error, bool testSource = false,
+        const std::string& telescope = {});
     bool append(const Frame& frame, QString& error);
+    // A long recording (Feature-14): writes the count of frames appended so
+    // far into the header, so a file whose finish never runs can still be
+    // read up to here. It has no trailer of times then.
+    bool updateCount(QString& error);
     bool finish(QString& error);
+    [[nodiscard]] size_t frames() const { return times_.size(); }
 
 private:
     bool write(const char* bytes, qint64 count, QString& error);

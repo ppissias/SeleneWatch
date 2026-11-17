@@ -1087,3 +1087,129 @@ The window test also checks that darkening is saved per target. All 15 suites pa
 - **The defaults it sets.** Darkening stays off in both modes, because at the default K of 6 it adds candidates and Moon mode is to behave as before. An observer who wants transits turns it on, at K 12 or more on sunlit fields. The dark limits keep 20 000 px and 10×. Large darkening stays off, with nothing yet to measure it on.
 
 Done-when item 7 is met. The archive holds no earthshine and no real transit, so a real transit (item 8) remains the test.
+
+---
+
+## Feature-14 — The full session record
+
+*Proposed on 16 November 2026, from a discussion with the observer. This is Stage 11 of PROJECT_DESCRIPTION.md.*
+
+Three things the record still lacks. A predicted event, such as an ISS transit, a lunar occultation or a graze, can only be caught today with Save now and a few seconds of history; Section 7 plans a continuous recording for them. A clip's time is a number without the evidence of how far to trust it (Section 5). And a clip does not say where it was observed from or with what (Evidence rule 8).
+
+### What shapes the design
+
+1. **A recording never loses a frame silently.** It takes every frame from its start to its end. If the disk cannot keep up or fills, the recording stops at once, finishes its file, and says why (Section 6).
+2. **Nothing on the frame path waits.** The recording has its own writer thread and queue, like the clip writer. The clock check runs on its own thread.
+3. **Detection keeps running during a recording.** A clip written meanwhile names the recording (Section 7).
+4. **Contacting the internet is the observer's choice.** The clock check against an NTP server is off until turned on.
+
+### Part A — continuous recording
+
+- A **Record** button beside Save now, enabled while Monitoring. Every frame from the first press to the second goes into one SER file, unchanged, with its UTC time. Stopping monitoring or the stream, or the end of a recording being played, ends it too, with that reason.
+- **A scheduled recording** for predicted events: **Record from** a UTC time **for** a number of seconds. Armed while Monitoring, it starts on the first frame whose time reaches the start and ends on the first frame at the end. It goes by frame times, so it also works, and is tested, on a recording being played.
+- **Files:** `events/recordings/<UTC stamp>/` holds `recording.ser`; `frames.txt`, one line per frame with its index, UTC time and any test mark; and `recording.txt`, with what `event.txt` holds for a clip. That is the source, the camera settings, the layout, what the time means, the site and instrument, and the time record. It adds the start and end, the frames written, the dropped-frame gaps, the write rate, why it ended, and `complete: yes` last.
+- **Its own writer.** Frames are shared, not copied, into a queue with a byte allowance of a quarter of the RAM ceiling. When the queue is full the disk is not keeping up: the recording stops with `disk too slow`. The disk reserve (Feature-11) is checked every second; below it the recording stops with `disk reserve`.
+- **A crash leaves a readable file.** The SER header's frame count is brought up to date every second and `frames.txt` is flushed, so after a crash the file can be read up to the last update; without `complete: yes` it is known to be partial.
+- `candidates.txt` gets `recording_start` and `recording_stop` lines; a clip written during a recording records `during_recording:` with its name.
+
+### Part B — the time record
+
+- **Frame intervals.** Each clip and recording records the mean, standard deviation, smallest and largest interval between frames: from the host's monotonic clock for a camera, from the frame times for a file. It also records the largest step between the UTC and monotonic clocks over its span, which shows a clock adjusted mid-clip.
+- **The PC clock.** At each Start, the Windows time service's status is read when the service runs (its source, last synchronisation and phase offset). When the observer has turned it on, the PC clock is also compared with an NTP server (SNTP: four queries, the one with the shortest round trip kept): its offset and round trip. Both go on the `session_start` line and into every clip and recording. A failure is recorded as such; nothing waits for an answer.
+
+### Part C — site and instrument
+
+- **Session → Site and instrument…**: observer, site name, latitude, longitude and height; telescope, aperture, focal length and pixel size, from which the image scale is shown. Saved, and written on `session_start`, in every clip and recording, and in the SER header's Observer and Telescope fields (Instrument keeps the camera).
+- With the image scale known, the overview (Feature-12) gives speeds in degrees per second as well as pixels per second.
+
+### Evidence
+
+The recording's SER file holds the frames unchanged (rules 1 to 3); `frames.txt` holds every frame's index and time and the gaps (rule 4); `recording.txt` describes it (rule 8). Detection continues (rule 5). The time record and the site add to rule 8 what it asked for once configured.
+
+### Done when
+
+1. A test records while Monitoring on a constructed source: the SER file holds every frame from the press to the stop, in order, unchanged; `frames.txt` matches it; `recording.txt` ends with `complete: yes`; `candidates.txt` has the start and stop; a clip during it names it.
+2. A test schedules a recording on a played file: it starts and ends on the frames whose times reach the start and the end.
+3. A test slows the recording's writer until its queue fills: the recording stops with `disk too slow`, its file is complete and holds a contiguous run of frames, and the window says so.
+4. A test sets the free space below the reserve: the recording stops with `disk reserve`.
+5. A test stops a recording's writer without finishing: the SER file can still be read up to its last header update.
+6. A test gives frames known intervals with jitter: the recorded statistics match.
+7. A test runs an SNTP responder on this computer with a known offset: the measured offset is within 5 ms of it. An unanswered query is recorded as such.
+8. A test saves a site and instrument: they appear on `session_start`, in `event.txt`, in `recording.txt` and in the SER header, and the overview gives a speed in degrees per second.
+9. By hand: a predicted ISS transit recorded with a schedule.
+
+### Out of this step
+
+- A GPS time reference (Section 5).
+- Recording to a format other than SER.
+
+### Implementation — 17 November 2026
+
+Built. Done-when items 1 to 8 pass; item 9, a predicted ISS transit recorded with a schedule, is open.
+
+**Where it lives.**
+
+- `recording/recording_writer`: the continuous recording. It has its own thread and a queue of shared frames with a byte allowance. The source thread hands frames over and never waits. The writer thread makes the folder and files, so the source thread does not touch the disk either. A full queue stops the recording with `disk too slow`, and the disk reserve is checked once a second; in both cases what is queued is still written and the file finished. Once a second the SER header's frame count is brought up to date (`SerWriter::updateCount`) and `frames.txt` is flushed.
+- `Session`: the source thread starts, feeds and ends the recording before each frame goes to detection. The causes are a request, a schedule, the end of Monitoring, a Stop, the end of a played file or a source failure. A recording's queue allowance is the ring's (half the share left after the working reserve, halved again): a backlog longer than the ring's history is a disk that is not keeping up. The writer logs `recording_start` and `recording_stop` lines in `candidates.txt` through the clip writer, so one thread writes that file. A clip that overlaps a recording's frames records `during_recording:`.
+- `recording/frame_timing`: the frame intervals of each clip and recording, from the host's monotonic clock when the source is a camera and from the frame times otherwise, with the largest UTC-minus-monotonic step.
+- `clock_check`: the Windows time service's status (`w32tm /query /status`, kept as the system prints it, in its language) and the SNTP query, through Winsock, which is part of Windows; no dependency was added. The session runs the check on its own thread at each Start when the window turns it on (the window always does; the NTP part only when the observer ticks it). Each clip, recording and `session_start` line carries the last finished check.
+- `observing_site.h` and `SiteDialog` (**Session → Site and instrument…**); `recording/metadata_text` holds the stream, site and time text that clips and recordings share. **Session → Schedule a recording…** sets a UTC start and a length; **Record** sits beside Save now; the capture mode line shows a running or scheduled recording.
+
+**Changes from the proposal, and why.**
+
+- **The SER header's Observer field keeps SeleneWatch's mark.** It already holds the sample-layout and test mark that SeleneWatch's reader parses. So the observer's name is in the text records only; the telescope goes into the Telescope field as proposed.
+- **No separate `clock_check` line in `candidates.txt`.** The check finishes some seconds after Start, at a moment nothing else is written, and a line then would land between other lines at random. The `session_start` line, the clips and the recordings carry the last finished check instead. The first `session_start` after the program starts says `not made`.
+- **The window message on a stopped recording** comes from the session's notification; it is checked by the window test for a recording started and stopped by the observer, and by the writer tests for the reasons.
+
+**Tests.** A new suite, `session_record` (8 tests):
+
+- **Schedule (items 1 and 2):** from frame 40's time for 1.5 s, on a played file. The SER file holds frames 40 to 85 unchanged, with their times; `frames.txt` matches; `recording.txt` is complete; the log has the start and the stop; a clip of a flash inside names the recording.
+- **Started by the observer (item 1):** at real-time speed, started and stopped by request, complete and without gaps.
+- **Slow disk (item 3):** a writer slowed to 20 ms a frame with a ten-frame allowance stops with `disk too slow`. Its file is complete and holds exactly the frames it accepted.
+- **Disk reserve (item 4):** a free space of 1 GiB against a 10 GiB reserve stops the recording within a second.
+- **Unfinished file (item 5):** a recording still running is opened and read up to its header's count.
+- **Intervals (item 6):** known intervals, and a clock put forward by 500 ms, give the expected statistics and step.
+- **SNTP (item 7):** a server on this computer 2.5 s ahead is measured within 5 ms; a silent port is recorded as no answer.
+- **Site (item 8):** the site appears on `session_start`, in `event.txt`, in `recording.txt` and in the SER header, and the overview gives degrees per second.
+
+The window test checks the site dialog, the saved site, and Record offered only while Monitoring, with the readout while it runs. All 16 suites pass.
+
+---
+
+## Feature-15 — Sky extras
+
+*Proposed on 16 November 2026, from a discussion with the observer. Out-of-step items of Feature-11.*
+
+A sky camera is meant to run unattended for whole nights. Four things stand in the way: someone has to start it at dusk and stop it at dawn; the exposure set at dusk is wrong an hour later; a night leaves many clips to sort; and a horizon of trees and roofs is not a set of rectangles.
+
+### Part A — from dusk to dawn
+
+- In Sky mode, with a site set (Feature-14), **Watch from dusk to dawn** with a Sun altitude (starting value −10°). Every 30 s the window computes the Sun's altitude from the site and the UTC time, by the NOAA formulas (within a few hundredths of a degree). When it is below the limit it starts the stream if stopped and starts Monitoring; when it rises above, it stops Monitoring and the stream. It acts only on what it started itself, and the panel shows the next change.
+
+### Part B — exposure that follows the sky
+
+- In Sky mode with a camera, **Follow the sky's brightness** keeps the sky's median, outside the mask, between bounds (starting 8% to 30% of the full scale, aiming at 15%). It is measured every 5 s from the latest frame.
+- After 60 s outside the bounds: Monitoring stops (the clip in hand is written), the exposure changes by the ratio needed (at most a factor of two) within the observer's minimum and maximum; when the exposure is at a limit, the gain moves by a set step instead. Monitoring then starts again, with the fresh boundary a camera needs. At most one change every 2 minutes.
+- Each change is logged in `candidates.txt` as an `exposure_change` line with the old and new values and the measured level, and shown in the window.
+
+### Part C — a suggested kind for each clip
+
+- The overview names a kind from its measurements, with the reasons: **flash** (in place, at most 0.2 s), **meteor** (a straight, fast, short rise), **satellite** (steady, straight and slow, without blinking, for seconds), **aircraft** (moving with blinking or several lights), **dark transit** (a moving fall), **lightning** (a large brightening), **seeing** (many triggers scattered over the frame), or **unclear**. Speeds are in degrees per second when the image scale is known (Feature-14), otherwise in frame widths per second.
+- It appears in the caption, in `event.txt` as `suggested_kind:` and on the `candidates.txt` outcome line. It is a suggestion for review, not a decision (Evidence rule 7).
+
+### Part D — polygon masks
+
+- A mask shape is a polygon. With **Draw mask** on, clicks on the preview place corners and a double-click closes the shape; a drag still makes a rectangle. Up to 16 shapes of up to 32 corners. Saved, recorded and hatched as before. The detector and the overview fill them as pixels.
+
+### Done when
+
+1. A test computes the Sun's altitude for known places and times: within 0.1° of the NOAA calculator. A test steps the schedule through a night: the stream and Monitoring start once below the limit and stop once above, and nothing happens when the schedule is off or no site is set.
+2. A test of the exposure rule: a dark sky raises the exposure, then the gain at the maximum exposure; a bright one lowers them; nothing changes within the bounds, before 60 s, or within 2 minutes of a change. A window test with a constructed camera shows Monitoring stopping, the exposure applied, Monitoring restarting, and the `exposure_change` line.
+3. Tests of the kinds on constructed clips: a one-frame flash, a fast streak, a steady slow point, a blinking slow point, a dark disk, a lightning stroke, scattered seeing.
+4. A test draws a triangle mask: a flash inside it does not fire and one outside does; the mask is saved, recorded and restored.
+5. By hand: a night outside, started and stopped by the schedule, with the exposure following the sky.
+
+### Out of this step
+
+- Sorting by kind beyond the suggestion: no clip is moved, hidden or deleted by its kind.
+- Moonrise and moonset for the Moon target.

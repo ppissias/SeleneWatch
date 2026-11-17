@@ -1,6 +1,8 @@
 #include "recording/event_writer.h"
 #include "preview_image.h"
 #include "recording/clip_overview.h"
+#include "recording/frame_timing.h"
+#include "recording/metadata_text.h"
 #include "recording/ser_writer.h"
 #include "selenewatch_version.h"
 
@@ -22,23 +24,6 @@
 
 namespace {
 
-QDateTime utcDateTime(std::chrono::system_clock::time_point time)
-{
-    const qint64 epochMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        time.time_since_epoch()).count();
-    return QDateTime::fromMSecsSinceEpoch(epochMs, QTimeZone::UTC);
-}
-
-QString utcStamp(std::chrono::system_clock::time_point time)
-{
-    return utcDateTime(time).toString("yyyyMMdd-HHmmss-zzz");
-}
-
-QString utcText(std::chrono::system_clock::time_point time)
-{
-    return utcDateTime(time).toString(Qt::ISODateWithMs);
-}
-
 QString frameFileName(size_t index)
 {
     return QString("%1").arg(static_cast<int>(index), 4, 10, QChar('0'));
@@ -48,7 +33,8 @@ QString frameFileName(size_t index)
 // is taken, -2, -3, ... is added.
 QString createClipFolder(const QString& outputRoot, const QString& stamp, QString& error)
 {
-    if (!QDir().mkpath(outputRoot))
+    // The recording writer may be making the same folder at the same moment.
+    if (!QDir().mkpath(outputRoot) && !QDir(outputRoot).exists())
     {
         error = QString("could not create %1").arg(outputRoot);
         return {};
@@ -70,11 +56,6 @@ QString createClipFolder(const QString& outputRoot, const QString& stamp, QStrin
 
     error = QString("could not create a folder for %1 in %2").arg(stamp, outputRoot);
     return {};
-}
-
-QString orUnknown(const std::string& text)
-{
-    return text.empty() ? QString("unknown") : QString::fromStdString(text);
 }
 
 bool containsTestSignal(const EventClip& clip)
@@ -110,45 +91,6 @@ void writeTestSignalLines(QTextStream& out, const EventClip& clip)
     }
 }
 
-// The stream and the frame layout, at the top of event.txt.
-void writeStreamLines(QTextStream& out, const EventClip& clip)
-{
-    out << "source: " << orUnknown(clip.stream.source) << "\n";
-    out << "camera: " << orUnknown(clip.stream.camera) << "\n";
-    out << "exposure: " << orUnknown(clip.stream.exposure) << "\n";
-    out << "gain: " << orUnknown(clip.stream.gain) << "\n";
-    out << "camera_serial: " << orUnknown(clip.stream.serial) << "\n";
-    out << "camera_sdk_version: " << orUnknown(clip.stream.sdkVersion) << "\n";
-    out << "camera_device_id: " << orUnknown(clip.stream.deviceId) << "\n";
-    out << "transfer_speed: " << orUnknown(clip.stream.transferSpeed) << "\n";
-    out << "offset: " << orUnknown(clip.stream.offset) << "\n";
-    out << "binning: " << orUnknown(clip.stream.binning) << "\n";
-    out << "roi: " << orUnknown(clip.stream.roi) << "\n";
-    out << "sensor_adc_bits: " << orUnknown(clip.stream.sensorBits) << "\n";
-    out << "sample_layout_policy: " << orUnknown(clip.stream.sampleLayout) << "\n";
-    out << "usb_bandwidth: " << orUnknown(clip.stream.usbBandwidth) << "\n";
-    out << "high_speed: " << orUnknown(clip.stream.highSpeed) << "\n";
-    out << "frame_rate: " << orUnknown(clip.stream.frameRate) << "\n";
-    out << "frame_time: " << orUnknown(clip.stream.frameTime) << "\n";
-    out << "frame_index: " << orUnknown(clip.stream.frameIndex) << "\n";
-    out << "conversion: " << orUnknown(clip.stream.conversion) << "\n";
-    if (!clip.stream.playback.empty())
-    {
-        out << "playback: " << QString::fromStdString(clip.stream.playback) << "\n";
-    }
-
-    if (clip.frames.empty())
-    {
-        return;
-    }
-    const Frame& first = *clip.frames.front();
-    out << "frame_size: " << first.width << "x" << first.height << "\n";
-    out << "pixel_format: " << pixelFormatName(first.format) << "\n";
-    out << "significant_bits: " << first.significantBits << "\n";
-    out << "bit_alignment: " << (first.alignment == BitAlignment::High ? "high" : "low") << "\n";
-    out << "bayer_pattern: " << bayerPatternName(first.bayer) << "\n";
-}
-
 // The mask's rectangles as x,y,width,height, separated by semicolons.
 QString maskText(const DetectionMask& mask)
 {
@@ -176,22 +118,6 @@ QString detectorModelFields(const DetectionSettings& settings)
             .arg(settings.maxDarkPixels).arg(settings.maxDarkBoxRatio, 0, 'g', 17);
     if (settings.darkeningShare > 0) text += QString(" darkening_share=%1").arg(settings.darkeningShare, 0, 'g', 17);
     return text;
-}
-
-// The free bytes on the drive that holds a folder, or of its nearest
-// existing parent before the folder is made.
-std::optional<uint64_t> freeBytesAt(const QString& folder)
-{
-    QString at = QDir::cleanPath(QDir(folder).absolutePath());
-    while (!QFileInfo::exists(at))
-    {
-        const QString parent = QFileInfo(at).path();
-        if (parent == at) return std::nullopt;
-        at = parent;
-    }
-    QStorageInfo storage(at);
-    if (!storage.isValid() || !storage.isReady()) return std::nullopt;
-    return static_cast<uint64_t>(storage.bytesAvailable());
 }
 
 QString triggerFields(const ClipTrigger& trigger)
@@ -438,7 +364,7 @@ void EventWriter::submit(EventClip clip)
     ready_.notify_one();
 }
 
-void EventWriter::logSessionStart(const StreamInfo& stream)
+void EventWriter::logSessionStart(const StreamInfo& stream, const ObservingSite& site, const std::string& clockRecord)
 {
     bool ended = false;
     {
@@ -450,11 +376,32 @@ void EventWriter::logSessionStart(const StreamInfo& stream)
         else
         {
             Job job;
-            job.sessionStart = SessionStart{std::chrono::system_clock::now(), stream};
+            job.sessionStart = SessionStart{std::chrono::system_clock::now(), stream, site, clockRecord};
             queue_.push_back(std::move(job));
         }
     }
 
+    if (ended)
+    {
+        deliver(ClipWriteResult{{}, {}, true});
+        return;
+    }
+    ready_.notify_one();
+}
+
+void EventWriter::logRecord(QString lines)
+{
+    bool ended = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (ended_) ended = true;
+        else
+        {
+            Job job;
+            job.recordLines = std::move(lines);
+            queue_.push_back(std::move(job));
+        }
+    }
     if (ended)
     {
         deliver(ClipWriteResult{{}, {}, true});
@@ -592,6 +539,13 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             continue;
         }
 
+        // Record lines that are not about a clip; a failure breaks the record.
+        if (!job.recordLines.isEmpty())
+        {
+            if (!appendLog(job.recordLines)) deliver(ClipWriteResult{{}, {}, true});
+            continue;
+        }
+
         // A session_start line is reported only when it could not be written.
         const ClipWriteResult result = process(job);
         {
@@ -692,7 +646,14 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
         QTextStream out(&note);
         out << "software: SeleneWatch " << SELENEWATCH_VERSION << "\n";
         out << "mode: " << targetName(clip.captureSettings.target) << "\n";
-        writeStreamLines(out, clip);
+        writeStreamLines(out, clip.stream, clip.frames.empty() ? nullptr : clip.frames.front().get());
+        // Feature-14: where and with what, how far to trust the times, and
+        // the continuous recording this clip fell in.
+        writeSiteLines(out, clip.site);
+        out << "clock_check: " << (clip.clockRecord.empty() ? QString("not made") : QString::fromStdString(clip.clockRecord)) << "\n";
+        out << "frame_intervals: " << timingText(measureFrameTiming(clip.frames, !clip.stream.sdkVersion.empty())) << "\n";
+        if (!clip.duringRecording.empty())
+            out << "during_recording: " << QString::fromStdString(clip.duringRecording) << "\n";
         writeTestSignalLines(out, clip);
         out << "triggers: " << clip.triggers.size() << "\n";
         for (const ClipTrigger& trigger : clip.triggers)
@@ -775,7 +736,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error)
     }
     SerWriter ser(evidence);
     const auto writeStarted = std::chrono::steady_clock::now();
-    if (!ser.start(*clip.frames.front(), clip.stream.camera, error, containsTestSignal(clip))) return {};
+    if (!ser.start(*clip.frames.front(), clip.stream.camera, error, containsTestSignal(clip), clip.site.telescope)) return {};
     for (const FramePtr& frame : clip.frames)
     {
         if (!ser.append(*frame, error)) return {};
@@ -929,6 +890,7 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder)
     request.onsetFrameIndex = first.onsetFrameIndex;
     if (clip.peak.ready) request.peakFrameIndex = clip.peak.frameIndex;
     request.referenceTime = first.triggerTime;
+    request.arcsecPerPixel = clip.site.arcsecPerPixel();
     bool duringCorrection = false;
     // A large brightening or darkening covers much of the frame; it is not marked.
     for (const ClipTrigger& trigger : clip.triggers)
@@ -1010,6 +972,10 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
     {
         line += QString(" playback=\"%1\"").arg(QString::fromStdString(start.stream.playback));
     }
+    // Feature-14: where and with what, and the last clock check.
+    line += siteFields(start.site);
+    line += QString(" clock_check=\"%1\"").arg(start.clockRecord.empty() ? QString("not made")
+        : QString::fromStdString(start.clockRecord).replace('"', '\''));
     line += QString(" source=\"%1\"\n").arg(orUnknown(start.stream.source));
     return appendLog(line);
 }
@@ -1018,7 +984,7 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
 // when the log cannot be written.
 bool EventWriter::appendLog(const QString& lines, const QString& fileName) const
 {
-    if (!QDir().mkpath(outputRoot_))
+    if (!QDir().mkpath(outputRoot_) && !QDir(outputRoot_).exists())
     {
         return false;
     }

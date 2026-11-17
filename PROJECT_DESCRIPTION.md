@@ -200,7 +200,9 @@ The same table bounds continuous recording. The upper rows need an SSD. The writ
 
 Detection keeps running during a continuous recording. A candidate found during it is still written as a clip and also refers to the recording's frame index.
 
-Manual save is implemented for synthetic, recorded, ZWO and QHY sources. Save now marks the latest source frame and extends the current clip or starts one from the ring while detection continues. Host request UTC and the applied source UTC/index are distinct, and manual marks remain identifiable through partial endings, continuation, and refusal. Continuous recording remains planned.
+Manual save is implemented for synthetic, recorded, ZWO and QHY sources. Save now marks the latest source frame and extends the current clip or starts one from the ring while detection continues. Host request UTC and the applied source UTC/index are distinct, and manual marks remain identifiable through partial endings, continuation, and refusal.
+
+Continuous recording is implemented (Feature-14), by the Record button or a schedule by UTC frame time. It writes to `events/recordings/<UTC stamp>/` with its own writer thread and queue, and stops with its reason rather than drop a frame.
 
 Alongside the clips, `events/candidates.txt` keeps each candidate's time, frames, and measured values (Evidence rule 5). When the writer consumes a finished clip job, it flushes a pending line before writing pixels and appends the saved/not-saved outcome afterwards, associated by a record ID. An interrupted write can leave a pending line without an outcome. An open clip and jobs still waiting in RAM can be lost in a crash; the journal is not an immediate durable record of the trigger. Clips can overlap in time; that is accepted, because losing frames is worse than storing some twice. In memory the overlapping frames are shared; on disk they are written twice.
 
@@ -216,7 +218,7 @@ Output goes next to the executable for now (a Feature-4 decision). A configurabl
 4. The detector analyses every frame and shows its noise, peak, and pass/fail state live.
 5. Optionally, the observer injects a test signal to measure the session's faint limit.
 6. **Start monitoring** fixes the camera settings and enables event capture. For cameras this establishes a fresh acquisition/reference boundary, so tuning frames are excluded. A candidate starts a clip; the clip is collected and written without stopping acquisition or detection.
-7. **Stop monitoring** finishes the available clip and returns to Preview while acquisition continues. Save now is enabled during Monitoring; continuous recording for predicted events remains planned. **Stop stream** ends acquisition and closes the camera.
+7. **Stop monitoring** finishes the available clip and returns to Preview while acquisition continues. Save now and Record (continuous recording, also by a schedule for predicted events) are enabled during Monitoring. **Stop stream** ends acquisition and closes the camera.
 8. Afterwards, the observer reviews, classifies, keeps, discards, or exports candidates.
 
 ## 9. Technology Choices
@@ -306,7 +308,7 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | — | **An overview of every clip.** One picture per clip: what changed, where, when, and the clip's flags | Feature-12 | Built; review of real clips pending |
 | — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside pending |
 | — | **A trigger for darkening.** Dark patches and large darkenings, for transits in front of the sunlit Moon; off by default after measurement on recordings | Feature-13 | Built; a real transit pending |
-| 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | To be written | Planned |
+| 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
 | 12 | **Later.** More camera families as observers bring the hardware; registration, transit tracking, event browser, export | To be written | Planned |
 
 Each stage ends with something that can be used or measured, and one feature is one stage.

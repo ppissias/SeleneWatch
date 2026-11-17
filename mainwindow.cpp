@@ -11,6 +11,8 @@
 #include "guiding/ascom_mount.h"
 #include "guiding/simulated_mount.h"
 #include "preview_image.h"
+#include "recording/metadata_text.h"
+#include "site_dialog.h"
 #include "target_defaults.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
@@ -20,8 +22,15 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
 #include <QtCore/QSettings>
+#include <QtCore/QTimeZone>
+#include <QtGui/QAction>
+#include <QtWidgets/QDateTimeEdit>
+#include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
+#include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QFormLayout>
+#include <QtWidgets/QPushButton>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QMenuBar>
@@ -119,6 +128,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     notifications.ended = [this] { onPlaybackEnded(); };
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
     notifications.lockChanged = [this] { onLockChanged(); };
+    notifications.recordingChanged = [this] { onRecordingChanged(); };
     session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
@@ -126,6 +136,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupDisplayPanel();
     setupHistogramPanel();
     setupGuidingPanel();
+    setupSessionMenu();
     applyTarget();
     // Only builds with the adapter and tests supplying a fake SDK get the camera entry and dock.
     cameraApi_=cameraApi?std::move(cameraApi):makeZwoApi();
@@ -475,6 +486,172 @@ void MainWindow::saveGuidingSettings()
     saved.setValue("guiding/tolerancePercent", guidingPanel_->tolerancePercent());
 }
 
+void MainWindow::setupSessionMenu()
+{
+    auto* menu = menuBar()->addMenu("Session");
+    auto* site = menu->addAction("Site and instrument…");
+    site->setObjectName("siteAction");
+    connect(site, &QAction::triggered, this, &MainWindow::onSiteAndInstrument);
+    auto* schedule = menu->addAction("Schedule a recording…");
+    schedule->setObjectName("scheduleAction");
+    connect(schedule, &QAction::triggered, this, &MainWindow::onScheduleRecording);
+
+    // Record, beside Save now: every frame until pressed again (Feature-14).
+    recordButton_ = new QPushButton("Record", this);
+    recordButton_->setObjectName("recordButton");
+    recordButton_->setToolTip("While Monitoring, writes every frame to one SER file in events/recordings until pressed again.");
+    ui_->controlsLayout->insertWidget(ui_->controlsLayout->indexOf(ui_->saveNowButton) + 1, recordButton_);
+    connect(recordButton_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
+
+    session_->setSite(savedSite());
+    const QSettings saved;
+    session_->setClockCheck(true, saved.value("time/ntp", false).toBool()
+        ? saved.value("time/ntpServer", "pool.ntp.org").toString().toStdString() : std::string());
+}
+
+ObservingSite MainWindow::savedSite()
+{
+    const QSettings saved;
+    ObservingSite site;
+    site.observer = saved.value("site/observer").toString().toStdString();
+    site.site = saved.value("site/name").toString().toStdString();
+    if (saved.contains("site/latitude") && saved.contains("site/longitude"))
+    {
+        site.latitudeDeg = saved.value("site/latitude").toDouble();
+        site.longitudeDeg = saved.value("site/longitude").toDouble();
+        site.heightM = saved.value("site/height", 0).toDouble();
+    }
+    site.telescope = saved.value("site/telescope").toString().toStdString();
+    site.apertureMm = saved.value("site/aperture", 0).toDouble();
+    site.focalLengthMm = saved.value("site/focalLength", 0).toDouble();
+    site.pixelSizeUm = saved.value("site/pixelSize", 0).toDouble();
+    return site;
+}
+
+void MainWindow::saveSite(const ObservingSite& site, bool ntp, const QString& server)
+{
+    QSettings saved;
+    saved.setValue("site/observer", QString::fromStdString(site.observer));
+    saved.setValue("site/name", QString::fromStdString(site.site));
+    if (site.hasPosition())
+    {
+        saved.setValue("site/latitude", *site.latitudeDeg);
+        saved.setValue("site/longitude", *site.longitudeDeg);
+        saved.setValue("site/height", site.heightM.value_or(0));
+    }
+    else
+    {
+        saved.remove("site/latitude");
+        saved.remove("site/longitude");
+        saved.remove("site/height");
+    }
+    saved.setValue("site/telescope", QString::fromStdString(site.telescope));
+    saved.setValue("site/aperture", site.apertureMm);
+    saved.setValue("site/focalLength", site.focalLengthMm);
+    saved.setValue("site/pixelSize", site.pixelSizeUm);
+    saved.setValue("time/ntp", ntp);
+    saved.setValue("time/ntpServer", server);
+    saved.sync();
+}
+
+void MainWindow::onSiteAndInstrument()
+{
+    SiteDialog dialog(this);
+    dialog.setSite(savedSite());
+    const QSettings saved;
+    dialog.setClockCheck(saved.value("time/ntp", false).toBool(), saved.value("time/ntpServer", "pool.ntp.org").toString());
+    if (dialog.exec() != QDialog::Accepted) return;
+    applySite(dialog.site(), dialog.ntpCheck(), dialog.ntpServer());
+}
+
+void MainWindow::applySite(const ObservingSite& site, bool ntp, const QString& server)
+{
+    saveSite(site, ntp, server);
+    session_->setSite(site);
+    session_->setClockCheck(true, ntp && !server.isEmpty() ? server.toStdString() : std::string());
+    showMessage("Site and instrument saved; they are recorded from the next clip on.", 4000);
+}
+
+void MainWindow::onScheduleRecording()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Schedule a recording");
+    auto* form = new QFormLayout(&dialog);
+    auto* start = new QDateTimeEdit(&dialog);
+    start->setObjectName("scheduleStart");
+    start->setTimeZone(QTimeZone::UTC);
+    start->setDisplayFormat("yyyy-MM-dd HH:mm:ss 'UTC'");
+    auto* seconds = new QDoubleSpinBox(&dialog);
+    seconds->setObjectName("scheduleSeconds");
+    seconds->setRange(1, 36000);
+    seconds->setDecimals(1);
+    seconds->setSuffix(" s");
+    const auto current = session_->schedule();
+    const auto toQt = [](std::chrono::system_clock::time_point time) {
+        return QDateTime::fromMSecsSinceEpoch(std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count(),
+            QTimeZone::UTC);
+    };
+    start->setDateTime(toQt(current ? current->start : std::chrono::system_clock::now() + std::chrono::minutes{1}));
+    seconds->setValue(current ? std::chrono::duration<double>(current->end - current->start).count() : 30);
+    form->addRow("From", start);
+    form->addRow("For", seconds);
+    auto* note = new QLabel("It runs while Monitoring, by the frames' times. For a predicted transit or "
+        "occultation, start a little before the prediction.", &dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    auto* clear = buttons->addButton("Clear the schedule", QDialogButtonBox::ResetRole);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(clear, &QPushButton::clicked, &dialog, [this, &dialog] {
+        session_->cancelSchedule();
+        showMessage("The scheduled recording is cleared.", 4000);
+        dialog.reject();
+    });
+    if (dialog.exec() == QDialog::Accepted)
+    {
+        const auto from = std::chrono::system_clock::time_point{} + std::chrono::milliseconds{start->dateTime().toMSecsSinceEpoch()};
+        session_->scheduleRecording({from, from + std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::duration<double>(seconds->value()))});
+        showMessage("Recording scheduled. It runs while Monitoring.", 4000);
+    }
+    updateStatusLabel();
+}
+
+void MainWindow::onRecordClicked()
+{
+    const bool recording = session_->recordingStatus().active;
+    if (!session_->requestRecording(!recording)) showMessage("Recording needs Monitoring.", 4000);
+    updateControls();
+}
+
+void MainWindow::onRecordingChanged()
+{
+    const auto status = session_->recordingStatus();
+    if (!status.active && !status.endReason.empty())
+        showMessage(QString("Recording %1 ended: %2. %3 frames.")
+            .arg(status.name, QString::fromStdString(status.endReason)).arg(status.frames));
+    else if (status.active)
+        showMessage("Recording every frame to events/recordings.");
+    updateControls();
+    updateStatusLabel();
+}
+
+QString MainWindow::recordingReadout() const
+{
+    const auto status = session_->recordingStatus();
+    if (status.active)
+        return QString("● RECORDING %1 s, %2 frames, %3 GB written at %4 MB/s.")
+            .arg(status.streamSeconds, 0, 'f', 0).arg(status.frames)
+            .arg(static_cast<double>(status.bytes) / 1e9, 0, 'f', 2).arg(status.megabytesPerSecond, 0, 'f', 0);
+    if (const auto schedule = session_->schedule())
+        return QString("Recording scheduled from %1 UTC for %2 s; it runs while Monitoring.")
+            .arg(utcText(schedule->start).replace('T', ' ').chopped(1))
+            .arg(std::chrono::duration<double>(schedule->end - schedule->start).count(), 0, 'f', 1);
+    return {};
+}
+
 // The tolerance is chosen as a share of the field and sent in frame pixels.
 void MainWindow::sendTolerance()
 {
@@ -665,6 +842,12 @@ void MainWindow::updateControls()
     ui_->monitoringButton->setEnabled(running && !session_->sourceFinished() && !pending);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
+    if (recordButton_)
+    {
+        const bool writing = session_->recordingStatus().active;
+        recordButton_->setText(writing ? "Stop recording" : "Record");
+        recordButton_->setEnabled(writing || (running && monitoring && !pending && !session_->sourceFinished()));
+    }
     ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!running);
@@ -713,6 +896,7 @@ void MainWindow::updateStreamReadout()
 {
     updateBufferReadout();
     updateBlipReadout();
+    if (session_->recordingStatus().active || session_->schedule()) updateStatusLabel();
 
     const auto now = std::chrono::steady_clock::now();
     const uint64_t acquired = session_->acquiredFrames();
@@ -781,6 +965,8 @@ void MainWindow::updateStatusLabel()
         modeLabel_->setText(recordFailed_?"MONITORING — recording failed. Check the reported storage error.":"MONITORING — event capture ON. Stop monitoring to return to Preview and tune camera settings.");
     else
         modeLabel_->setText("PREVIEW — capture OFF. Tune the camera and detector, then start monitoring. Previously queued clips can finish writing.");
+    if (const QString recording = recordingReadout(); !recording.isEmpty())
+        modeLabel_->setText(modeLabel_->text() + "\n" + recording);
 }
 
 void MainWindow::updateFrameLabel(const Frame& frame)

@@ -42,6 +42,13 @@ For building SeleneWatch from source, see [Getting started](README.md#getting-st
 
 **Settings are remembered.** Detection, display, capture, histogram and guiding choices are saved when you stop a stream or close the window, and restored the next time you start SeleneWatch.
 
+**Site, instrument and clock.** Open **Session → Site and instrument…** once:
+- **Observer and site:** your name, the site's name, and, when **Position known** is ticked, its latitude (north positive), longitude (east positive) and height.
+- **Instrument:** the telescope, aperture, focal length and pixel size. With binning, enter the binned pixel. From the focal length and pixel size SeleneWatch shows the image scale; the clip overviews then give speeds in degrees per second.
+- **Time:** at each Start, SeleneWatch records the Windows time service's status when it runs. Tick **Compare the PC clock with an NTP server** to also measure the PC clock's offset from a time server over the internet (off unless you turn it on).
+
+All of it goes into every clip, every recording and the `session_start` lines, so others know where, with what and how well-timed you observed. The telescope also goes into each SER file's header.
+
 ---
 
 ## 2. The window
@@ -249,6 +256,16 @@ Set these under **Display and capture → Capture settings** before pressing Sta
 
 These are the Moon's defaults; the sky has its own (see section 7). The status bar shows how much history is actually held and how much RAM is in use. At high frame rates or large frames, the RAM ceiling may hold less than the requested history; the clip metadata then says why collection ended. If the writer falls behind and its share is full, a clip that does not fit is not saved, but its candidate is still logged as *not saved*.
 
+### Continuous recording
+
+For predicted events (an ISS transit, a lunar occultation, a graze), record every frame instead of waiting for a trigger.
+- **Record**, beside **Save now**, works while Monitoring. Every frame from the press until you press **Stop recording** goes into one SER file, unchanged. Stopping monitoring or the stream, or the end of a recording being played, also ends it.
+- **Session → Schedule a recording…** sets a UTC start time and a length. While Monitoring, the recording starts on the first frame at or after that time and ends at its end. Start it a little before the prediction.
+- The capture mode line shows `● RECORDING` with the seconds, frames, size and write rate.
+- Each recording goes in `events/recordings/<UTC time>/`: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (what it is, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
+- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
+- Detection keeps running: clips written meanwhile say `during_recording:` with the recording's name, and `candidates.txt` has `recording_start` and `recording_stop` lines.
+
 When an event lasts longer than **Maximum after trigger**, it continues in a new clip whose `event.txt` names the clip before (`continues_clip:`). On the Moon each such clip starts with its own history, so it stands on its own. On the sky it starts with the next frame, so a plane crossing for minutes is not saved twice.
 
 ---
@@ -276,6 +293,7 @@ Each clip folder is named by its UTC trigger time, for example `20261115-143156-
 Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
 `event.txt` contains:
 - whether the Moon or the sky was watched;
+- the observer, site and instrument, the last clock check, and the frame intervals (how evenly the frames came);
 - the camera and its settings, and the stream description;
 - each trigger, with its detector settings;
 - test-signal marks;
@@ -410,6 +428,8 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | The camera is not in the device list | Check the cable and the vendor driver, then press **Refresh cameras**. For QHY, check the All-In-One installation or use **Choose QHY DLL…**. |
 | **Start monitoring** is greyed out | The source has ended or failed, or a mode change is still in progress. |
 | A recording is refused | Compressed AVI files are not supported. Convert to SER or uncompressed AVI. |
+| "Reading the recording's index" | A large AVI file without an index is read chunk by chunk in the background; playback starts when that is done. The file's frame count and length appear next to its name. |
+| A recording stopped: "disk too slow" | The disk could not keep up with the camera. Record to a faster disk (an SSD), lower the frame rate or the region of interest, or raise **RAM ceiling**. |
 | "RAM ceiling …" messages | Lower the history or the frame size, or raise **RAM ceiling** before starting. |
 | "Saving stopped: … below the disk reserve" | The output drive is nearly full. Free some space or move older clips; candidates are logged meanwhile. Lower **Disk reserve** only if you are sure the drive can take it. |
 | On the sky, clips all night of one star | It drifts past a fixed camera. Check that **Learn a patch after** is not *Never*, or put the camera on a tracking mount. |

@@ -8,6 +8,7 @@
 #include "qhy_camera_panel.h"
 #include "mainwindow.h"
 #include "preview_widget.h"
+#include "site_dialog.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "sources/synthetic_scene.h"
@@ -52,6 +53,7 @@ private slots:
     void detectionPanelExplainsPatchRejections();
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
+    void siteAndRecordingControls();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
     {
@@ -643,6 +645,47 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().sigma, 9.0);
     QCOMPARE(panel->settings().mask.count, 1);
     QCOMPARE(panel->settings().mask.rects[0], (MaskRect{0, 400, 640, 80}));
+}
+
+// Feature-14: the site dialog keeps what is entered, the window saves it,
+// and Record is offered only while Monitoring.
+void UiTest::siteAndRecordingControls()
+{
+    SiteDialog dialog;
+    ObservingSite site;
+    site.observer = "A. Observer";
+    site.latitudeDeg = 37.98; site.longitudeDeg = 23.73; site.heightM = 100;
+    site.telescope = "C9.25"; site.focalLengthMm = 2350; site.pixelSizeUm = 3.75;
+    dialog.setSite(site);
+    dialog.setClockCheck(true, "time.example.org");
+    QCOMPARE(dialog.site(), site);
+    QVERIFY(dialog.ntpCheck());
+    QCOMPARE(dialog.ntpServer(), QString("time.example.org"));
+    QVERIFY(dialog.findChild<QLabel*>("siteScale")->text().startsWith("0.329"));
+    dialog.findChild<QCheckBox*>("sitePositionKnown")->setChecked(false);
+    QVERIFY(!dialog.site().hasPosition());
+
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    window.applySite(site, false, "pool.ntp.org");
+    QCOMPARE(QSettings().value("site/telescope").toString(), QString("C9.25"));
+    QCOMPARE(QSettings().value("site/latitude").toDouble(), 37.98);
+    QCOMPARE(QSettings().value("time/ntp").toBool(), false);
+    auto* record = window.findChild<QPushButton*>("recordButton");
+    QVERIFY(record);
+    QVERIFY(!record->isEnabled());
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
+    QVERIFY(!record->isEnabled());
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 3000);
+    record->click();
+    QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Stop recording"), 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("RECORDING"), 3000);
+    record->click();
+    QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
+    window.findChild<QPushButton*>("stopButton")->click();
+    QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
 }
 
 // The readouts keep room for their longest texts, so the controls below them
