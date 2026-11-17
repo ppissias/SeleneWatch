@@ -80,6 +80,7 @@ private:
     void setupSessionMenu();
     void onSiteAndInstrument();
     void onScheduleRecording();
+    void onRecordingFolder();
     void onRecordClicked();
     void onRecordingChanged();
     // The recording's line under the capture mode, or none.
@@ -90,6 +91,9 @@ public:
     // Saves the site and the clock check and hands them to the session; the
     // dialog's OK, and the window test.
     void applySite(const ObservingSite& site, bool ntp, const QString& server);
+    // Saves where recordings go (empty: the default) after checking that the
+    // folder can be written; the dialog's OK, and the window test.
+    bool applyRecordingFolder(const QString& folder, QString& error);
 private:
     void setupDetectionPanel();
     void updateDetectionDisplay();

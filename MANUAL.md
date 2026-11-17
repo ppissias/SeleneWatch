@@ -38,7 +38,7 @@ For building SeleneWatch from source, see [Getting started](README.md#getting-st
 
 **Mount (optional).** To let SeleneWatch keep the Moon in the field, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver, for example EQMOD. SeleneWatch only sends small guide pulses; it never slews or parks the mount.
 
-**Where files go.** Clips and logs are written to a folder called `events` next to `SeleneWatch.exe`. SeleneWatch never writes into the folders it reads recordings from.
+**Where files go.** Clips and logs are written to a folder called `events` next to `SeleneWatch.exe`. Continuous recordings can go to another folder (section 9). SeleneWatch never writes into the folders it reads recordings from.
 
 **Settings are remembered.** Detection, display, capture, histogram and guiding choices are saved when you stop a stream or close the window, and restored the next time you start SeleneWatch.
 
@@ -264,8 +264,9 @@ For predicted events (an ISS transit, a lunar occultation, a graze), record ever
 - **Record**, beside **Save now**, works while Monitoring. Every frame from the press until you press **Stop recording** goes into one SER file, unchanged. Stopping monitoring or the stream, or the end of a recording being played, also ends it.
 - **Session → Schedule a recording…** sets a UTC start time and a length. While Monitoring, the recording starts on the first frame at or after that time and ends at its end. Start it a little before the prediction.
 - The capture mode line shows `● RECORDING` with the seconds, frames, size and write rate.
-- Each recording goes in `events/recordings/<UTC time>/`: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (what it is, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
-- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
+- Each recording goes in a folder of its own, named by its UTC start, in the recordings folder: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (what it is, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
+- The recordings folder is `events/recordings` unless you choose another with **Session → Recordings folder…**, for example on a larger or faster drive. **Default** returns to `events/recordings`. A folder SeleneWatch cannot write in is refused when you choose it. Clips and `candidates.txt` stay in `events`; the `recording_start` line names the folder each recording went to.
+- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve (checked on the recordings folder's drive) it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
 - Detection keeps running: clips written meanwhile say `during_recording:` with the recording's name, and `candidates.txt` has `recording_start` and `recording_stop` lines.
 
 When an event lasts longer than **Maximum after trigger**, it continues in a new clip whose `event.txt` names the clip before (`continues_clip:`). On the Moon each such clip starts with its own history, so it stands on its own. On the sky it starts with the next frame, so a plane crossing for minutes is not saved twice.
@@ -274,7 +275,7 @@ When an event lasts longer than **Maximum after trigger**, it continues in a new
 
 ## 10. What SeleneWatch saves
 
-Everything goes under the `events` folder next to `SeleneWatch.exe`, and only while **Monitoring**.
+Everything goes under the `events` folder next to `SeleneWatch.exe`, and only while **Monitoring**. Continuous recordings can go elsewhere (section 9, *Continuous recording*).
 
 ### One folder per clip
 

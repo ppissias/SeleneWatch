@@ -24,6 +24,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
 #include <QtCore/QSettings>
+#include <QtCore/QTemporaryFile>
 #include <QtCore/QTimeZone>
 #include <QtGui/QAction>
 #include <QtWidgets/QDateTimeEdit>
@@ -35,8 +36,10 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QMenu>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStatusBar>
 #include <QtWidgets/QVBoxLayout>
 
@@ -655,16 +658,22 @@ void MainWindow::setupSessionMenu()
     auto* schedule = menu->addAction("Schedule a recording…");
     schedule->setObjectName("scheduleAction");
     connect(schedule, &QAction::triggered, this, &MainWindow::onScheduleRecording);
+    auto* folder = menu->addAction("Recordings folder…");
+    folder->setObjectName("recordingFolderAction");
+    connect(folder, &QAction::triggered, this, &MainWindow::onRecordingFolder);
+
 
     // Record, beside Save now: every frame until pressed again (Feature-14).
     recordButton_ = new QPushButton("Record", this);
     recordButton_->setObjectName("recordButton");
-    recordButton_->setToolTip("While Monitoring, writes every frame to one SER file in events/recordings until pressed again.");
+    recordButton_->setToolTip("While Monitoring, writes every frame to one SER file in the recordings folder "
+        "(Session → Recordings folder; events/recordings unless chosen) until pressed again.");
     ui_->controlsLayout->insertWidget(ui_->controlsLayout->indexOf(ui_->saveNowButton) + 1, recordButton_);
     connect(recordButton_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
     session_->setSite(savedSite());
     const QSettings saved;
+    session_->setRecordingFolder(saved.value("recording/folder").toString());
     session_->setClockCheck(true, saved.value("time/ntp", false).toBool()
         ? saved.value("time/ntpServer", "pool.ntp.org").toString().toStdString() : std::string());
 }
@@ -779,6 +788,63 @@ void MainWindow::onScheduleRecording()
     updateStatusLabel();
 }
 
+void MainWindow::onRecordingFolder()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Recordings folder");
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* note = new QLabel("Each continuous recording gets a folder of its own here, named by its UTC start. "
+        "Clips and candidates.txt stay in the events folder, and candidates.txt names where each recording went. "
+        "The disk reserve is checked on this folder's drive.", &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto* row = new QHBoxLayout;
+    auto* path = new QLineEdit(QDir::toNativeSeparators(session_->recordingFolder()), &dialog);
+    path->setObjectName("recordingFolderPath");
+    path->setMinimumWidth(360);
+    auto* choose = new QPushButton("Choose…", &dialog);
+    auto* standard = new QPushButton("Default", &dialog);
+    standard->setToolTip("events/recordings beside the clips");
+    row->addWidget(path, 1);
+    row->addWidget(choose);
+    row->addWidget(standard);
+    layout->addLayout(row);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(choose, &QPushButton::clicked, &dialog, [&dialog, path] {
+        const QString chosen = QFileDialog::getExistingDirectory(&dialog, "Recordings folder", path->text());
+        if (!chosen.isEmpty()) path->setText(QDir::toNativeSeparators(chosen));
+    });
+    connect(standard, &QPushButton::clicked, &dialog, [path] { path->clear(); });
+    if (dialog.exec() != QDialog::Accepted) return;
+    QString error;
+    if (!applyRecordingFolder(QDir::fromNativeSeparators(path->text().trimmed()), error))
+        QMessageBox::warning(this, "Recordings folder", error);
+}
+
+bool MainWindow::applyRecordingFolder(const QString& folder, QString& error)
+{
+    // Empty, or the default itself, is saved as empty: the default.
+    QString chosen = folder.isEmpty() ? QString() : QDir::cleanPath(QDir(folder).absolutePath());
+    if (chosen.compare(QDir::cleanPath(session_->defaultRecordingFolder()), Qt::CaseInsensitive) == 0) chosen.clear();
+    if (!chosen.isEmpty())
+    {
+        // A folder that cannot be written is refused now, not at the recording's start.
+        QTemporaryFile probe(QDir(chosen).filePath("selenewatch-write-check-XXXXXX"));
+        if (!QDir().mkpath(chosen) || !probe.open())
+        {
+            error = QString("SeleneWatch cannot write in %1. The recordings folder is unchanged.").arg(QDir::toNativeSeparators(chosen));
+            return false;
+        }
+    }
+    QSettings().setValue("recording/folder", chosen);
+    session_->setRecordingFolder(chosen);
+    showMessage(QString("Recordings go to %1 from the next recording on.").arg(QDir::toNativeSeparators(session_->recordingFolder())), 5000);
+    return true;
+}
+
 void MainWindow::onRecordClicked()
 {
     const bool recording = session_->recordingStatus().active;
@@ -793,7 +859,7 @@ void MainWindow::onRecordingChanged()
         showMessage(QString("Recording %1 ended: %2. %3 frames.")
             .arg(status.name, QString::fromStdString(status.endReason)).arg(status.frames));
     else if (status.active)
-        showMessage("Recording every frame to events/recordings.");
+        showMessage(QString("Recording every frame to %1.").arg(QDir::toNativeSeparators(session_->recordingFolder())));
     updateControls();
     updateStatusLabel();
 }

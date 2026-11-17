@@ -3,6 +3,7 @@
 #include "clock_check.h"
 #include "recording/metadata_text.h"
 
+#include <QtCore/QDir>
 #include <QtCore/QMetaObject>
 
 #include <format>
@@ -64,6 +65,23 @@ void Session::setSite(const ObservingSite& site)
 {
     std::lock_guard lock(requestMutex_);
     site_ = site;
+}
+
+void Session::setRecordingFolder(const QString& folder)
+{
+    std::lock_guard lock(requestMutex_);
+    recordingFolder_ = folder;
+}
+
+QString Session::recordingFolder() const
+{
+    std::lock_guard lock(requestMutex_);
+    return recordingFolder_.isEmpty() ? defaultRecordingFolder() : recordingFolder_;
+}
+
+QString Session::defaultRecordingFolder() const
+{
+    return QDir(outputRoot_).filePath("recordings");
 }
 
 void Session::setClockCheck(bool enabled, std::string ntpServer)
@@ -196,7 +214,7 @@ void Session::updateRecording(const FramePtr& frame)
 void Session::beginRecording(const FramePtr& first, const std::string& startedBy)
 {
     RecordingWriter::Start start;
-    start.outputRoot = outputRoot_;
+    start.folder = recordingFolder();
     start.stream = streamInfo_;
     {
         std::lock_guard lock(requestMutex_);
@@ -212,9 +230,9 @@ void Session::beginRecording(const FramePtr& first, const std::string& startedBy
     recordingKnown_ = true;
     recordingName_ = utcStamp(first->timestamp).toStdString();
     recordingFirstIndex_ = recordingLastIndex_ = first->frameIndex;
-    writer_.logRecord(QString("%1 recording_start name=%2 first_frame_index=%3 started_by=\"%4\"\n")
+    writer_.logRecord(QString("%1 recording_start name=%2 first_frame_index=%3 started_by=\"%4\" folder=\"%5\"\n")
         .arg(utcText(first->timestamp), QString::fromStdString(recordingName_)).arg(first->frameIndex)
-        .arg(QString::fromStdString(startedBy)));
+        .arg(QString::fromStdString(startedBy), QDir::toNativeSeparators(start.folder)));
     post(notifications_.recordingChanged);
 }
 

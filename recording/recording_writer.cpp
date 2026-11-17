@@ -254,7 +254,7 @@ void RecordingWriter::run(std::stop_token stopToken)
             open->start = *job.start;
             const Frame& first = *job.frame;
             QString error;
-            open->folder = createFolder(QDir(open->start.outputRoot).filePath("recordings"), utcStamp(first.timestamp), error);
+            open->folder = createFolder(open->start.folder, utcStamp(first.timestamp), error);
             const QDir dir(open->folder);
             open->serFile.setFileName(dir.filePath("recording.ser"));
             open->framesFile.setFileName(dir.filePath("frames.txt"));

@@ -676,18 +676,45 @@ void UiTest::siteAndRecordingControls()
     auto* record = window.findChild<QPushButton*>("recordButton");
     QVERIFY(record);
     QVERIFY(!record->isEnabled());
-    window.findChild<QPushButton*>("startButton")->click();
-    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
-    QVERIFY(!record->isEnabled());
-    window.findChild<QPushButton*>("monitoringButton")->click();
-    QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 3000);
-    record->click();
-    QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Stop recording"), 3000);
-    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("RECORDING"), 3000);
-    record->click();
-    QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
-    window.findChild<QPushButton*>("stopButton")->click();
+    // A recordings folder that cannot be written is refused; the default stays.
+    QFile blocker(QDir(directory.path()).filePath("blocker"));
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    QString error;
+    QVERIFY(!window.applyRecordingFolder(QDir(directory.path()).filePath("blocker/recordings"), error));
+    QVERIFY(error.contains("cannot write"));
+    QVERIFY(QSettings().value("recording/folder").toString().isEmpty());
+    const auto recordOnce = [&] {
+        window.findChild<QPushButton*>("startButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
+        QVERIFY(!record->isEnabled());
+        window.findChild<QPushButton*>("monitoringButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 3000);
+        record->click();
+        QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Stop recording"), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("RECORDING"), 3000);
+        record->click();
+        QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
+        window.findChild<QPushButton*>("stopButton")->click();
+    };
+    recordOnce();
     QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
+
+    // A chosen folder takes the next recording; the clips' log names it.
+    QTemporaryDir elsewhere;
+    const QString chosen = QDir(elsewhere.path()).filePath("long nights");
+    QVERIFY(window.applyRecordingFolder(chosen, error));
+    QCOMPARE(QSettings().value("recording/folder").toString(), QDir::cleanPath(chosen));
+    recordOnce();
+    const QStringList made = QDir(chosen).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QCOMPARE(made.size(), qsizetype{1});
+    QVERIFY(QFile::exists(QDir(QDir(chosen).filePath(made.front())).filePath("recording.ser")));
+    QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
+    QTRY_VERIFY_WITH_TIMEOUT(text(directory.path() + "/candidates.txt").contains(" recording_start name=" + made.front() + " "), 3000);
+    QVERIFY(text(directory.path() + "/candidates.txt").contains("folder=\"" + QDir::toNativeSeparators(QDir::cleanPath(chosen)) + "\""));
+    // The default again: saved as empty.
+    QVERIFY(window.applyRecordingFolder(QDir(directory.path()).filePath("recordings"), error));
+    QVERIFY(QSettings().value("recording/folder").toString().isEmpty());
 }
 
 // Feature-15, Done-when 1 and 2 in the window. The site is put where it is

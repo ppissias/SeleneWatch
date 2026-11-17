@@ -112,6 +112,12 @@ public:
 
     // Feature-14. Context thread. Copied into each clip and recording from now on.
     void setSite(const ObservingSite& site);
+    // Context thread. Where the next recording goes, each in a folder of its
+    // own; empty means the default, <outputRoot>/recordings. Clips stay in
+    // outputRoot.
+    void setRecordingFolder(const QString& folder);
+    [[nodiscard]] QString recordingFolder() const;
+    [[nodiscard]] QString defaultRecordingFolder() const;
     // Context thread. At each Start, on its own thread: the Windows time
     // service's status and, with a server given, an SNTP check. The result
     // goes into the clips and recordings that follow, and into session_start.
@@ -212,6 +218,7 @@ private:
     // Feature-14. The site, the clock check and the requests are under
     // requestMutex_; the recording's state is the source thread's.
     QString outputRoot_;
+    QString recordingFolder_;
     ObservingSite site_;
     std::string clockRecord_;
     bool clockCheck_{false};

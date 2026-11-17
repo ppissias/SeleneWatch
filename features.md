@@ -1174,6 +1174,10 @@ Built. Done-when items 1 to 8 pass; item 9, a predicted ISS transit recorded wit
 
 The window test checks the site dialog, the saved site, and Record offered only while Monitoring, with the readout while it runs. All 16 suites pass.
 
+### Later change — 17 November 2026: the recordings folder
+
+At the observer's request, recordings can go to a folder of their own, for example a larger or faster drive: **Session → Recordings folder…**, with **Default** for `events/recordings`. The session owns the setting (`setRecordingFolder`; empty means the default) and hands it to each recording's start, so `RecordingWriter::Start` now names the folder that holds the recordings instead of the events folder. The disk reserve was already checked on the recording's own folder, so it follows the recording to its drive. A folder that cannot be written is refused when it is chosen, not when a recording starts. Clips and `candidates.txt` stay in `events`, and the `recording_start` line gains `folder="…"`. The window test records once to the default and once to a chosen folder, and refuses a folder below a file.
+
 ---
 
 ## Feature-15 — Sky extras

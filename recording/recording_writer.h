@@ -38,8 +38,8 @@ class RecordingWriter
 public:
     struct Start
     {
-        // The recording goes in <outputRoot>/recordings/<UTC stamp>/.
-        QString outputRoot;
+        // The recording goes in <folder>/<UTC stamp>/.
+        QString folder;
         StreamInfo stream;
         ObservingSite site;
         Target target{Target::Moon};

@@ -272,7 +272,7 @@ void SessionRecordTest::aSlowDiskStopsTheRecordingWithoutLosingFrames()
     writer.setWriteDelay(milliseconds{20});
     std::mt19937 random(42);
     RecordingWriter::Start start;
-    start.outputRoot = directory.path();
+    start.folder = QDir(directory.path()).filePath("recordings");
     start.startedBy = "a test";
     start.queueBytes = 10 * 64 * 48;
     QVERIFY(writer.start(start, makeFrame(0, random)));
@@ -305,7 +305,7 @@ void SessionRecordTest::theDiskReserveStopsTheRecording()
     writer.setFreeSpace([](const QString&) { return std::optional<uint64_t>{kGiB}; });
     std::mt19937 random(43);
     RecordingWriter::Start start;
-    start.outputRoot = directory.path();
+    start.folder = QDir(directory.path()).filePath("recordings");
     start.diskReserveBytes = 10 * kGiB;
     start.queueBytes = 64 * 1024 * 1024;
     QVERIFY(writer.start(start, makeFrame(0, random)));
@@ -328,7 +328,7 @@ void SessionRecordTest::aRecordingCanBeReadBeforeItIsFinished()
     RecordingWriter writer;
     std::mt19937 random(44);
     RecordingWriter::Start start;
-    start.outputRoot = directory.path();
+    start.folder = QDir(directory.path()).filePath("recordings");
     start.queueBytes = 64 * 1024 * 1024;
     QVERIFY(writer.start(start, makeFrame(0, random)));
     for (uint64_t i = 1; i < 130; ++i)
