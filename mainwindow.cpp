@@ -185,6 +185,9 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     bufferReadoutTimer_ = new QTimer(this);
     bufferReadoutTimer_->setInterval(1000);
     connect(bufferReadoutTimer_, &QTimer::timeout, this, &MainWindow::updateStreamReadout);
+    prepareTimer_ = new QTimer(this);
+    prepareTimer_->setInterval(50);
+    connect(prepareTimer_, &QTimer::timeout, this, [this] { takePreparedRecording(std::chrono::milliseconds{0}); });
 
     updateControls();
     updateStatusLabel();
@@ -204,6 +207,9 @@ MainWindow::~MainWindow()
     if (guidingDock_) disconnect(guidingDock_, nullptr, this, nullptr);
     if (guidingPanel_) disconnect(guidingPanel_, nullptr, this, nullptr);
     if (guidingTimer_) guidingTimer_->stop();
+    if (prepareTimer_) prepareTimer_->stop();
+    // A recording being read is let finish; its result is dropped.
+    if (preparing_.valid()) preparing_.wait();
     saveGuidingSettings();
     saveDetectionSettings();
     saveDisplaySettings();
@@ -864,7 +870,9 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
         return nullptr;
     }
 
-    auto source = std::make_unique<RecordingSource>(std::filesystem::path(recordingPath_.toStdWString()));
+    // The reader read off this thread when the file was chosen (startStream
+    // makes sure it is this file's), shared from run to run.
+    auto source = std::make_unique<RecordingSource>(std::filesystem::path(recordingPath_.toStdWString()), preparedReader_);
     source->setLoopSeconds(ui_->loopCheckBox->isChecked() ? ui_->loopSecondsSpinBox->value() : 0.0);
     source->setNominalFps(fps);
     source->setSpeed(ui_->speedComboBox->currentIndex() == kFastEntry
@@ -880,6 +888,25 @@ void MainWindow::onStartClicked()
 
 void MainWindow::startStream(Session::Mode mode)
 {
+    // A recording starts from its reader. Its index is read off this thread;
+    // a short read is waited for, a long one starts the stream when done.
+    if (recordingSelected() && !recordingPath_.isEmpty())
+    {
+        if (!preparing_.valid() && !recordingReady()) prepareRecording();
+        if (preparing_.valid()) takePreparedRecording(std::chrono::milliseconds{200});
+        if (preparing_.valid())
+        {
+            startWhenRead_ = mode;
+            showMessage("Reading the recording's index; it starts when that is done.");
+            updateControls();
+            return;
+        }
+        if (!preparedReader_)
+        {
+            showMessage(QString("Cannot start: %1").arg(preparedError_));
+            return;
+        }
+    }
     std::unique_ptr<FrameSource> source = makeSource();
     if (!source)
     {
@@ -990,9 +1017,73 @@ void MainWindow::selectRecording(QString path)
     if (session_->isRunning()) return;
     recordingPath_ = std::move(path);
     ui_->sourceComboBox->setCurrentIndex(1);
-    ui_->fileLabel->setText(QFileInfo(recordingPath_).fileName());
     ui_->fileLabel->setToolTip(QDir::toNativeSeparators(recordingPath_));
+    prepareRecording();
     updateControls();
+}
+
+bool MainWindow::recordingReady() const
+{
+    return !preparing_.valid() && preparedPath_ == recordingPath_ && preparedFps_ == ui_->targetFpsSpinBox->value();
+}
+
+void MainWindow::prepareRecording()
+{
+    if (recordingPath_.isEmpty()) return;
+    // One read at a time; a newer choice is read when the current one ends.
+    if (preparing_.valid())
+    {
+        prepareAgain_ = true;
+        return;
+    }
+    preparedReader_.reset();
+    preparedPath_.clear();
+    preparedError_.clear();
+    ui_->fileLabel->setText(QString("%1 — reading its index…").arg(QFileInfo(recordingPath_).fileName()));
+    preparing_ = std::async(std::launch::async, [path = recordingPath_, fps = ui_->targetFpsSpinBox->value()] {
+        PreparedRecording prepared{path, fps, {}, {}, {}};
+        std::string error;
+        prepared.reader = openRecordingReader(std::filesystem::path(path.toStdWString()), fps, error);
+        prepared.error = QString::fromStdString(error);
+        if (prepared.reader)
+        {
+            const int count = prepared.reader->frameCount();
+            const double seconds = std::chrono::duration<double>(
+                prepared.reader->frameTime(count - 1) - prepared.reader->frameTime(0)).count();
+            prepared.summary = QString("%1 frames, %2 s").arg(count).arg(seconds, 0, 'f', 1);
+        }
+        return prepared;
+    });
+    prepareTimer_->start();
+}
+
+bool MainWindow::takePreparedRecording(std::chrono::milliseconds wait)
+{
+    if (!preparing_.valid() || preparing_.wait_for(wait) != std::future_status::ready) return false;
+    PreparedRecording prepared = preparing_.get();
+    prepareTimer_->stop();
+    // The choice or the frame rate changed while this one was read.
+    if (prepareAgain_ || prepared.path != recordingPath_ || prepared.fps != ui_->targetFpsSpinBox->value())
+    {
+        prepareAgain_ = false;
+        prepareRecording();
+        return false;
+    }
+    preparedReader_ = std::move(prepared.reader);
+    preparedPath_ = prepared.path;
+    preparedFps_ = prepared.fps;
+    preparedError_ = prepared.error;
+    const QString name = QFileInfo(prepared.path).fileName();
+    ui_->fileLabel->setText(preparedReader_ ? QString("%1 — %2").arg(name, prepared.summary) : QString("%1 — cannot be read").arg(name));
+    if (!preparedReader_) showMessage(QString("Cannot read %1: %2").arg(name, prepared.error));
+    if (startWhenRead_)
+    {
+        const Session::Mode mode = *startWhenRead_;
+        startWhenRead_.reset();
+        if (preparedReader_ && !session_->isRunning()) startStream(mode);
+    }
+    updateControls();
+    return true;
 }
 
 void MainWindow::onSourceKindChanged()
@@ -1108,6 +1199,9 @@ void MainWindow::onTargetFpsChanged(int fps)
     {
         synthetic_->setTargetFps(fps);
     }
+    // A file without frame times or a rate is timed at this rate, so its
+    // reader is read again.
+    if (recordingSelected() && !session_->isRunning() && !recordingPath_.isEmpty()) prepareRecording();
 }
 
 void MainWindow::onSpeedChanged()

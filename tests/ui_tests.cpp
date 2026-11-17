@@ -493,6 +493,8 @@ void UiTest::saveARecordingManuallyThroughTheWindow()
     QVERIFY(writer.finish(error)); file.seek(0); const auto inputBytes=file.readAll(); file.close();
     const QString output=directory.path()+"/events";
     MainWindow window(nullptr,output); window.selectRecording(input); window.show();
+    // The file is read off the window's thread, and its length shown when read.
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("fileLabel")->text().contains("48 frames, "),3000);
     auto* save=window.findChild<QPushButton*>("saveNowButton");
     QVERIFY(save); QVERIFY(!save->isEnabled());
     window.findChild<DisplayPanel*>()->findChild<QDoubleSpinBox*>("postSeconds")->setValue(.3);

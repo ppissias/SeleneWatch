@@ -33,7 +33,10 @@ public:
         Fast
     };
 
-    explicit RecordingSource(std::filesystem::path path);
+    // reader, when given, is one already opened from path off the window's
+    // thread: an AVI file's index can take seconds to read. The source reads
+    // it only while running, so one reader can serve run after run.
+    explicit RecordingSource(std::filesystem::path path, std::shared_ptr<RecordingReader> reader = {});
     ~RecordingSource() override;
 
     RecordingSource(const RecordingSource&) = delete;
@@ -69,8 +72,8 @@ private:
     double nominalFps_{30.0};
     std::atomic<Speed> speed_{Speed::RealTime};
 
-    // Set by open(), then read by the worker.
-    std::unique_ptr<RecordingReader> reader_;
+    // Given, or set by open(), then read by the worker.
+    std::shared_ptr<RecordingReader> reader_;
     int framesPerLap_{0};
 
     // Frame numbers a lap spans, gaps included.

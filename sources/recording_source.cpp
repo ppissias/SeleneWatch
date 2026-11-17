@@ -30,8 +30,8 @@ bool waitUntil(steady_clock::time_point deadline, const std::stop_token& stopTok
 
 } // namespace
 
-RecordingSource::RecordingSource(std::filesystem::path path)
-    : path_(std::move(path))
+RecordingSource::RecordingSource(std::filesystem::path path, std::shared_ptr<RecordingReader> reader)
+    : path_(std::move(path)), reader_(std::move(reader))
 {
 }
 
@@ -57,7 +57,7 @@ void RecordingSource::setSpeed(Speed speed)
 
 bool RecordingSource::open(std::string& error)
 {
-    reader_ = openRecordingReader(path_, nominalFps_, error);
+    if (!reader_) reader_ = openRecordingReader(path_, nominalFps_, error);
     if (!reader_)
     {
         return false;

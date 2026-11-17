@@ -12,9 +12,12 @@
 
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <memory>
+#include <optional>
 
 class QTimer;
+class RecordingReader;
 class RecordingSource;
 class SyntheticFrameSource;
 class DetectionPanel;
@@ -116,6 +119,14 @@ private:
     void onPlaybackEnded();
     void onSourceFailed(const QString& message);
 
+    // The chosen recording is opened off this thread, since an AVI file
+    // without an index is walked chunk by chunk. Its reader is kept for
+    // every run of that file at that frame rate.
+    void prepareRecording();
+    // Takes a finished read, waiting up to wait for it. False when none finished.
+    bool takePreparedRecording(std::chrono::milliseconds wait);
+    [[nodiscard]] bool recordingReady() const;
+
     [[nodiscard]] bool recordingSelected() const;
     [[nodiscard]] bool cameraSelected() const;
     [[nodiscard]] bool qhySelected() const;
@@ -158,6 +169,23 @@ private:
     RecordingSource* recording_{nullptr};
 
     QString recordingPath_;
+    // A read of the chosen recording, its result, and a start waiting for it.
+    struct PreparedRecording
+    {
+        QString path;
+        int fps{0};
+        std::shared_ptr<RecordingReader> reader;
+        QString error;
+        QString summary;
+    };
+    std::future<PreparedRecording> preparing_;
+    bool prepareAgain_{false};
+    QTimer* prepareTimer_{nullptr};
+    std::shared_ptr<RecordingReader> preparedReader_;
+    QString preparedPath_;
+    int preparedFps_{0};
+    QString preparedError_;
+    std::optional<Session::Mode> startWhenRead_;
 
     // The status bar: a line for messages, with the readouts below it, so
     // neither takes the other's width.
