@@ -13,8 +13,11 @@
 #include "camera_support_dialog.h"
 #include "runtime_chooser.h"
 #include "mainwindow.h"
+#include "manual_dialog.h"
 #include "preview_widget.h"
 #include "site_dialog.h"
+#include "startup_tips.h"
+#include "tips_dialog.h"
 #include "recording/output_paths.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
@@ -37,7 +40,9 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTableWidget>
+#include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QToolTip>
 #include <QtTest/QSignalSpy>
@@ -109,6 +114,7 @@ private slots:
     void testingToolsAndConnectAtStartup();
     void outputFolderSafetyAndMigration();
     void timelapsePanelAndResharpenWorkflow();
+    void userManualAndStartupTipsWorkflow();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -979,6 +985,8 @@ void UiTest::theReleaseIsShown()
     QVERIFY2(about.contains(QRegularExpression(R"(<b>SeleneWatch \d{4}\.\d{2}-\d{2}</b>)")), qPrintable(about));
     QVERIFY(about.contains("Source revision "));
     QVERIFY(about.contains("BSD 2-Clause") && about.contains("LGPL"));
+    QVERIFY(window.findChild<QAction*>("userManualAction"));
+    QVERIFY(window.findChild<QAction*>("tipsAction"));
     QVERIFY(window.findChild<QAction*>("aboutAction"));
     QVERIFY(window.findChild<QAction*>("openEventsAction"));
     // Help → Acknowledgements shows ACKNOWLEDGEMENTS.md, built in.
@@ -1683,6 +1691,86 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(QDir(QDir(reOut).filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size() >= 2);
 
     window.findChild<QPushButton*>("stopButton")->click();
+}
+
+void UiTest::userManualAndStartupTipsWorkflow()
+{
+    const auto& tips = allStartupTips();
+    QVERIFY(tips.size() >= 20);
+    QCOMPARE(wrapTipIndex(-1, static_cast<int>(tips.size())), static_cast<int>(tips.size()) - 1);
+    QCOMPARE(wrapTipIndex(static_cast<int>(tips.size()), static_cast<int>(tips.size())), 0);
+
+    // Every tip's manual link must resolve cleanly inside the packaged MANUAL.md.
+    ManualDialog checkManual(nullptr, QString(SELENEWATCH_SOURCE_DIR) + "/MANUAL.md");
+    QCOMPARE(checkManual.loadedManualPath(), QString(SELENEWATCH_SOURCE_DIR) + "/MANUAL.md");
+    auto* checkBrowser = checkManual.findChild<QTextBrowser*>("manualTextBrowser");
+    QVERIFY(checkBrowser && checkBrowser->document()->toPlainText().contains("SeleneWatch User Manual"));
+    for (size_t i = 0; i < tips.size(); ++i)
+    {
+        QVERIFY2(checkManual.hasAnchor(tips[i].manualSection),
+            qPrintable(QString("Tip %1 missing MANUAL.md anchor: %2").arg(i + 1).arg(tips[i].manualSection)));
+        QVERIFY(checkManual.scrollToSection(tips[i].manualSection));
+        QCOMPARE(checkManual.currentSection(), tips[i].manualSection);
+    }
+
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    QCoreApplication::processEvents();
+
+    // Help menu places User Manual and Tips at the same top level before Acknowledgements.
+    QAction* manualAction = window.findChild<QAction*>("userManualAction");
+    QAction* tipsAction = window.findChild<QAction*>("tipsAction");
+    QAction* ackAction = window.findChild<QAction*>("acknowledgementsAction");
+    QAction* aboutAction = window.findChild<QAction*>("aboutAction");
+    QVERIFY(manualAction && tipsAction && ackAction && aboutAction);
+    QVERIFY(!manualAction->shortcut().isEmpty());
+
+    // Startup tips appear automatically while wantedAtStartup() is true, and step cleanly.
+    QVERIFY(TipsDialog::wantedAtStartup());
+    window.maybeShowStartupTips();
+    auto* tipsDlg = window.findChild<TipsDialog*>("tipsDialog");
+    QVERIFY(tipsDlg && tipsDlg->isVisible());
+
+    auto* posLbl = tipsDlg->findChild<QLabel*>("tipsPositionLabel");
+    auto* bodyLbl = tipsDlg->findChild<QLabel*>("tipsBodyLabel");
+    auto* prevBtn = tipsDlg->findChild<QPushButton*>("tipsPreviousButton");
+    auto* nextBtn = tipsDlg->findChild<QPushButton*>("tipsNextButton");
+    auto* linkBtn = tipsDlg->findChild<QPushButton*>("tipsManualLink");
+    auto* startupChk = tipsDlg->findChild<QCheckBox*>("showTipsAtStartupCheckBox");
+    auto* closeBtn = tipsDlg->findChild<QPushButton*>("tipsCloseButton");
+    QVERIFY(posLbl && bodyLbl && prevBtn && nextBtn && linkBtn && startupChk && closeBtn);
+    QCOMPARE(posLbl->text(), QString("1 of %1").arg(tips.size()));
+    QCOMPARE(QSettings().value(TipsDialog::kNextTipKey).toInt(), 1);
+
+    nextBtn->click();
+    QCOMPARE(posLbl->text(), QString("2 of %1").arg(tips.size()));
+    QCOMPARE(QSettings().value(TipsDialog::kNextTipKey).toInt(), 2);
+    prevBtn->click();
+    QCOMPARE(posLbl->text(), QString("1 of %1").arg(tips.size()));
+    prevBtn->click();
+    QCOMPARE(posLbl->text(), QString("%1 of %1").arg(tips.size()));
+
+    // Clicking "Read more in the manual" opens the manual scrolled to that tip's section.
+    linkBtn->click();
+    QCoreApplication::processEvents();
+    auto* manualDlg = window.findChild<ManualDialog*>("manualDialog");
+    QVERIFY(manualDlg && manualDlg->isVisible());
+    QCOMPARE(manualDlg->currentSection(), tips.back().manualSection);
+    manualDlg->findChild<QPushButton*>("manualTopButton")->click();
+    QVERIFY(manualDlg->currentSection().isEmpty());
+
+    // Unchecking "Show tips at startup" suppresses startup display, while Help → Tips still opens it.
+    startupChk->setChecked(false);
+    QVERIFY(!TipsDialog::wantedAtStartup());
+    closeBtn->click();
+    QVERIFY(!tipsDlg->isVisible());
+    window.maybeShowStartupTips();
+    QVERIFY(!tipsDlg->isVisible());
+    tipsAction->trigger();
+    QVERIFY(tipsDlg->isVisible());
+    tipsDlg->hide();
+    manualDlg->hide();
 }
 
 int main(int argc, char** argv)

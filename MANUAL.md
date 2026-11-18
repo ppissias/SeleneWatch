@@ -39,7 +39,7 @@ From top to bottom, the main screen contains:
 - **Menu bar:**
   - **View** — show/hide **Detection**, **Display and capture**, **Time-lapse**, **Guiding**, **Histogram**, camera docks, and toggle **View → Testing tools**.
   - **Session** — configure **Output folder…**, **Site and instrument…**, **Camera support…**, **Schedule a recording…**, **Re-sharpen time-lapse…**, or **Open the output folder**.
-  - **Help** — **About SeleneWatch**, **Acknowledgements**, **About Qt**.
+  - **Help** — **User Manual** (`F1`), **Tips**, **Acknowledgements**, **About SeleneWatch**, **About Qt**.
 - **Top bar:**
   - **Source** selector (`Choose a source…`, **Recording file**, camera families, and **Synthetic** when Testing tools are on), **Connect at startup**, **Open…**, and the amber **TESTING TOOLS ON** indicator when enabled.
   - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count), and (testing tools only) **Fixed flash**.

@@ -7,6 +7,8 @@
 #include "guiding_panel.h"
 #include "timelapse_panel.h"
 #include "resharpen_dialog.h"
+#include "manual_dialog.h"
+#include "tips_dialog.h"
 #include "camera_panel.h"
 #include "camera_support_dialog.h"
 #include "playerone_camera_panel.h"
@@ -37,6 +39,7 @@
 #include <QtCore/QUrl>
 #include <QtGui/QAction>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QKeySequence>
 #include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
@@ -917,16 +920,52 @@ void MainWindow::setupSessionMenu()
 void MainWindow::setupHelpMenu()
 {
     auto* menu = menuBar()->addMenu("Help");
+    auto* manual = menu->addAction("User Manual");
+    manual->setObjectName("userManualAction");
+    manual->setShortcut(QKeySequence::HelpContents);
+    manual->setToolTip("Open the packaged SeleneWatch User Manual.");
+    connect(manual, &QAction::triggered, this, [this] { showManual(); });
+
+    auto* tips = menu->addAction("Tips");
+    tips->setObjectName("tipsAction");
+    tips->setToolTip("Short tips on features and workflows you may not have tried yet.");
+    connect(tips, &QAction::triggered, this, &MainWindow::showTips);
+
+    auto* acknowledgements = menu->addAction("Acknowledgements");
+    acknowledgements->setObjectName("acknowledgementsAction");
+    connect(acknowledgements, &QAction::triggered, this, &MainWindow::showAcknowledgements);
+
+    menu->addSeparator();
     auto* about = menu->addAction("About SeleneWatch");
     about->setObjectName("aboutAction");
     connect(about, &QAction::triggered, this, [this] {
         QMessageBox::about(this, "About SeleneWatch", aboutText());
     });
-    auto* acknowledgements = menu->addAction("Acknowledgements");
-    acknowledgements->setObjectName("acknowledgementsAction");
-    connect(acknowledgements, &QAction::triggered, this, &MainWindow::showAcknowledgements);
     auto* aboutQt = menu->addAction("About Qt");
+    aboutQt->setObjectName("aboutQtAction");
     connect(aboutQt, &QAction::triggered, this, [this] { QMessageBox::aboutQt(this); });
+}
+
+void MainWindow::showManual(const QString& section)
+{
+    if (!manualDialog_) manualDialog_ = new ManualDialog(this);
+    manualDialog_->openSection(section);
+}
+
+void MainWindow::showTips()
+{
+    if (!tipsDialog_)
+    {
+        tipsDialog_ = new TipsDialog(this, [this](const QString& section) {
+            showManual(section);
+        });
+    }
+    tipsDialog_->open();
+}
+
+void MainWindow::maybeShowStartupTips()
+{
+    if (TipsDialog::wantedAtStartup()) showTips();
 }
 
 QString MainWindow::acknowledgementsMarkdown()

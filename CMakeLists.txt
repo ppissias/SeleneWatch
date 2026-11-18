@@ -195,6 +195,7 @@ endif()
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
+    manual_dialog.h manual_dialog.cpp startup_tips.h startup_tips.cpp tips_dialog.h tips_dialog.cpp
     elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
     camera_family_panel.h runtime_chooser.h runtime_chooser.cpp camera_support_dialog.h camera_support_dialog.cpp

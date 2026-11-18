@@ -32,6 +32,8 @@ class HistogramPanel;
 class GuidingPanel;
 class TimelapsePanel;
 class ResharpenDialog;
+class ManualDialog;
+class TipsDialog;
 class SimulatedPointing;
 class CameraFamilyPanel;
 class ZwoApi;
@@ -111,6 +113,10 @@ public:
     [[nodiscard]] static QString aboutText();
     // Help → Acknowledgements: ACKNOWLEDGEMENTS.md, built into the program.
     [[nodiscard]] static QString acknowledgementsMarkdown();
+    // Help → User Manual & Help → Tips (and non-modal startup tips).
+    void showManual(const QString& section = {});
+    void showTips();
+    void maybeShowStartupTips();
     // View → Testing tools: the synthetic source and the test flash. Off by
     // default and remembered; changes only while stopped. The menu, and the
     // window tests.
@@ -313,4 +319,7 @@ private:
 
     // The session's record is broken. Shown until the stream is restarted.
     bool recordFailed_{false};
+
+    ManualDialog* manualDialog_{nullptr};
+    TipsDialog* tipsDialog_{nullptr};
 };

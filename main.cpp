@@ -4,6 +4,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSettings>
+#include <QtCore/QTimer>
 #include <QtGui/QIcon>
 #include <QtWidgets/QApplication>
 
@@ -41,5 +42,6 @@ int main(int argc, char *argv[])
 
     MainWindow window;
     window.show();
+    QTimer::singleShot(0, &window, &MainWindow::maybeShowStartupTips);
     return app.exec();
 }
