@@ -141,7 +141,7 @@ None of them grants redistribution clearly. Any of them therefore follows the QH
 - **Component:** `ffmpeg.exe` + `avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll` (`n9.0.2-57-gd838f9f9ae-20261118` `win64-lgpl-shared`)
 - **License:** GNU Lesser General Public License v3.0 (LGPLv3, `licenses/FFmpeg-LICENSE.txt`), built **without** `--enable-gpl` / `libx264`
 - **Upstream:** https://www.ffmpeg.org/ / BtbN `win64-lgpl-shared` (`ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`, SHA-256 `3616f1027c0f9c08cdfc92bfaea84282db4398234cdcd861347d438c8edeb088`)
-- **Usage:** Invoked out-of-process over `stdin` raw RGB24 pipe via `QProcess` to encode `timelapse.mp4` (`libopenh264`, `yuv420p`) and palette-optimized `timelapse.gif`.
+- **Usage:** Invoked out-of-process over `stdin` raw RGB24 pipe via `QProcess` to encode `timelapse.mp4` (`libopenh264`, `yuv420p`), palette-optimized `timelapse.gif`, and compact event clip preview animations (`04_event_preview.gif`).
 - **Obligations:** LGPLv3 dynamic/external binary. Ship `licenses/FFmpeg-LICENSE.txt`, keep shared DLLs replaceable, and make corresponding FFmpeg source version metadata available. No GPL components included.
 
 ---

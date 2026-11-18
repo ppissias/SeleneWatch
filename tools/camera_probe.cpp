@@ -163,7 +163,13 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
         QJsonObject report; QString failure; uint64_t acquired=0; MemoryUsage memory; WriterUsage usage;
         double elapsed=0; int candidates=0; bool injectionRequested=false;
         QString stopReason="duration";
-        double sampleUntil=0;
+        using SysTime=std::chrono::system_clock::time_point;
+        const double postSampleFraction=(manualInterval>0 && manualInterval<capture.postSeconds)?0.45:0.75;
+        const auto postSampleWindow=std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::duration<double>(std::min(1.0,capture.postSeconds*postSampleFraction)));
+        bool manualPending=false;
+        SysTime pendingFrom{}, pendingUntil{}, sampleFrom{}, sampleUntil{};
+        std::vector<Sample> pendingSamples;
         uint64_t peakWorkingSet=0, peakPrivate=0;
         const auto started=std::chrono::steady_clock::now();
         const auto seconds=[&] { return std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count(); };
@@ -173,8 +179,21 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
             notices.previewReady=[&] {
                 if (!active) return;
                 auto preview=active->takePreview();
-                const bool sample=soak?(seconds()<=sampleUntil && samples.size()<4096):samples.size()<20;
-                if (preview.frame && sample) samples.push_back({preview.frame->timestamp,hash(*preview.frame)});
+                if (preview.frame)
+                {
+                    if (!soak)
+                    {
+                        if (samples.size()<20) samples.push_back({preview.frame->timestamp,hash(*preview.frame)});
+                    }
+                    else
+                    {
+                        const auto t=preview.frame->timestamp;
+                        if (t>=sampleFrom && t<=sampleUntil && samples.size()<4096)
+                            samples.push_back({t,hash(*preview.frame)});
+                        else if (manualPending && t>=pendingFrom && t<=pendingUntil && pendingSamples.size()<64)
+                            pendingSamples.push_back({t,hash(*preview.frame)});
+                    }
+                }
                 if (preview.detection && preview.detection->summary.ready) detectorTimes.push_back(preview.detection->summary.processingMs);
             };
             notices.clipWritten=[&](const auto& result){
@@ -184,7 +203,14 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
             };
             notices.candidateStarted=[&]{++candidates;};
             notices.manualSaveHandled=[&](bool saved) {
-                if (soak && saved) sampleUntil=seconds()+std::min(1.0,capture.postSeconds/2);
+                if (!soak) return;
+                if (saved)
+                {
+                    sampleFrom=pendingFrom; sampleUntil=pendingUntil;
+                    for (const auto& s:pendingSamples)
+                        if (s.time>=sampleFrom && s.time<=sampleUntil && samples.size()<4096) samples.push_back(s);
+                }
+                manualPending=false; pendingSamples.clear();
             };
             notices.failed=[&](const QString& error){failure=error;stopReason="source-failed";app.quit();};
             Session session(&context,root.filePath("events"),std::move(notices)); active=&session;
@@ -220,9 +246,11 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
             QObject::connect(&tick,&QTimer::timeout,&context,[&] {
                 const auto n=session.acquiredFrames();
                 elapsed=seconds();
-                if (soak && elapsed-lastResource>=1)
+                const bool endDue=(n>=frameLimit || elapsed>=duration);
+                if (soak && (elapsed-lastResource>=1 || endDue))
                 {
-                    lastResource=elapsed; outputBytes=directoryBytes(root);
+                    lastResource=lastResource<0?0.0:std::floor(elapsed);
+                    outputBytes=directoryBytes(root);
                     if (QFileInfo::exists(root.filePath("stop.request")))
                     { stopReason="requested-stop"; app.quit(); return; }
                     QStorageInfo storage(root.absolutePath()); storage.refresh();
@@ -235,11 +263,17 @@ int runCameraProbeCommand(QCoreApplication& app,const QStringList& args,
                     && session.requestManualSave())
                 {
                     lastManual=n; lastManualTime=elapsed;
+                    if (soak)
+                    {
+                        const auto nowSys=std::chrono::system_clock::now();
+                        manualPending=true; pendingFrom=nowSys; pendingUntil=nowSys+postSampleWindow;
+                        pendingSamples.clear();
+                    }
                 }
                 if (config.value("inject").toBool() && !injectionRequested && n>=10)
                     injectionRequested=session.requestBlip({layout.width/2,layout.height/2,4,config.value("amplitude").toDouble(8192),1});
                 if (soak && elapsed-lastSample>=sampleInterval) { lastSample=elapsed; snapshot("streaming"); }
-                if (n>=frameLimit || elapsed>=duration)
+                if (endDue)
                 { stopReason=n>=frameLimit?"frame-limit":"duration"; app.quit(); }
             });
             if (soak) snapshot("starting");

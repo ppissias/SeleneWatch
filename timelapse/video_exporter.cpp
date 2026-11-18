@@ -7,10 +7,12 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
+#include <QtCore/QSize>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <iterator>
 
 namespace {
 
@@ -101,6 +103,30 @@ QStringList sortedFitsFiles(const QString& dirPath)
     return files;
 }
 
+bool moveTempFileIntoPlace(const QString& tmpPath, const QString& targetPath, QString& error)
+{
+    QFile::remove(targetPath);
+    if (QFile::rename(tmpPath, targetPath)) return true;
+    error = QString("Could not move %1 into place").arg(targetPath);
+    QFile::remove(tmpPath);
+    return false;
+}
+
+// Computes even dimensions (minimum 2x2) fitting within maxLongEdge without upscaling.
+QSize boundedEvenSize(int srcW, int srcH, int maxLongEdge)
+{
+    const int longSide = std::max(srcW, srcH);
+    int w = srcW;
+    int h = srcH;
+    if (maxLongEdge > 0 && longSide > maxLongEdge)
+    {
+        const double scale = static_cast<double>(maxLongEdge) / static_cast<double>(longSide);
+        w = static_cast<int>(std::lround(srcW * scale));
+        h = static_cast<int>(std::lround(srcH * scale));
+    }
+    return QSize(std::max(2, w & ~1), std::max(2, h & ~1));
+}
+
 } // namespace
 
 QString findFfmpegExecutable()
@@ -168,13 +194,8 @@ bool encodeImagesWithFfmpeg(const std::vector<QImage>& frames,
             QFile::remove(tmp);
             return false;
         }
-        QFile::remove(mp4Path);
-        if (!QFile::rename(tmp, mp4Path))
-        {
-            error = QString("Could not move %1 into place").arg(mp4Path);
-            QFile::remove(tmp);
+        if (!moveTempFileIntoPlace(tmp, mp4Path, error))
             return false;
-        }
     }
 
     if (!gifPath.isEmpty())
@@ -204,15 +225,112 @@ bool encodeImagesWithFfmpeg(const std::vector<QImage>& frames,
             QFile::remove(tmp);
             return false;
         }
-        QFile::remove(gifPath);
-        if (!QFile::rename(tmp, gifPath))
+        if (!moveTempFileIntoPlace(tmp, gifPath, error))
+            return false;
+    }
+
+    return true;
+}
+
+bool encodeEventPreviewGif(const std::vector<QImage>& frames,
+    const QString& gifPath,
+    const EventPreviewGifOptions& options,
+    QString& error,
+    int* outWidth,
+    int* outHeight,
+    qint64* outBytes,
+    std::atomic<bool>* cancel)
+{
+    if (frames.empty())
+    {
+        error = "no frames to encode";
+        return false;
+    }
+    if (gifPath.isEmpty())
+    {
+        error = "no GIF output path";
+        return false;
+    }
+
+    const QString ffmpegExe = findFfmpegExecutable();
+    const QFileInfo info(gifPath);
+    QDir().mkpath(info.absolutePath());
+    const QString tmp = info.absolutePath() + "/." + info.fileName() + ".tmp.gif";
+
+    const int srcW = std::max(2, frames.front().width());
+    const int srcH = std::max(2, frames.front().height());
+    const int startEdge = std::max(32, std::min(options.maxLongEdge > 0 ? options.maxLongEdge : 512,
+        std::max(srcW, srcH)));
+    const int safeFps = std::clamp(options.fps, 1, 30);
+
+    struct GifTier
+    {
+        double edgeFraction;
+        int maxColors;
+        const char* dither;
+    };
+    constexpr GifTier kTiers[] = {
+        {1.00, 128, "bayer:bayer_scale=3"},
+        {0.75, 96,  "bayer:bayer_scale=3"},
+        {0.56, 64,  "bayer:bayer_scale=4"},
+        {0.38, 48,  "none"},
+        {0.25, 32,  "none"},
+    };
+
+    QSize finalSize;
+    qint64 finalBytes = 0;
+    for (size_t t = 0; t < std::size(kTiers); ++t)
+    {
+        const auto& tier = kTiers[t];
+        const int targetEdge = std::max(32, static_cast<int>(std::lround(startEdge * tier.edgeFraction)));
+        const QSize sz = boundedEvenSize(srcW, srcH, targetEdge);
+
+        std::vector<QImage> scaled;
+        scaled.reserve(frames.size());
+        for (const QImage& img : frames)
         {
-            error = QString("Could not move %1 into place").arg(gifPath);
+            QImage rgb = (img.width() == sz.width() && img.height() == sz.height())
+                ? img
+                : img.scaled(sz, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            if (rgb.format() != QImage::Format_RGB888)
+                rgb = std::move(rgb).convertToFormat(QImage::Format_RGB888);
+            scaled.push_back(std::move(rgb));
+        }
+
+        const QString filter = QString(
+            "split[s0][s1];[s0]palettegen=max_colors=%1:stats_mode=full[p];"
+            "[s1][p]paletteuse=dither=%2").arg(tier.maxColors).arg(QLatin1String(tier.dither));
+        const QStringList args{
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo",
+            "-pixel_format", "rgb24",
+            "-video_size", QString("%1x%2").arg(sz.width()).arg(sz.height()),
+            "-framerate", QString::number(safeFps),
+            "-i", "pipe:0",
+            "-vf", filter,
+            "-loop", "0",
+            tmp
+        };
+
+        QFile::remove(tmp);
+        if (!runFfmpegPipe(ffmpegExe, args, scaled, sz.width(), sz.height(), error, cancel))
+        {
             QFile::remove(tmp);
             return false;
         }
+
+        finalSize = sz;
+        finalBytes = QFileInfo(tmp).size();
+        if (options.maxBytes <= 0 || finalBytes <= options.maxBytes)
+            break;
     }
 
+    if (!moveTempFileIntoPlace(tmp, gifPath, error))
+        return false;
+
+    if (outWidth) *outWidth = finalSize.width();
+    if (outHeight) *outHeight = finalSize.height();
+    if (outBytes) *outBytes = finalBytes;
     return true;
 }
 

@@ -557,6 +557,7 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
 
     const size_t main = mainPosition(activity, request);
     result.mainFrameIndex = activity.frames[main].index;
+    result.mainPosition = main;
     const Frame& mainFrame = *frames[main];
     const auto reference = request.referenceTime.value_or(mainFrame.timestamp);
 
@@ -569,6 +570,9 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
     if (!run.empty())
     {
         const size_t firstActive = run.front(), lastActive = run.back();
+        result.hasActiveRun = true;
+        result.firstActivePosition = firstActive;
+        result.lastActivePosition = lastActive;
         const bool mainInRun = std::find(run.begin(), run.end(), main) != run.end();
         if (firstActive > 0) cells.push_back({firstActive - 1, "before"});
         cells.push_back({firstActive, firstActive == main ? "peak" : "first"});
@@ -795,4 +799,56 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
     painter.end();
     result.image = canvas;
     return result;
+}
+
+std::vector<size_t> selectEventGifFramePositions(size_t frameCount,
+    size_t firstActive, size_t peak, size_t lastActive,
+    size_t paddingBefore, size_t paddingAfter, size_t maxFrames)
+{
+    if (frameCount == 0 || maxFrames == 0) return {};
+    const size_t maxIdx = frameCount - 1;
+    firstActive = std::min(firstActive, maxIdx);
+    peak = std::min(peak, maxIdx);
+    lastActive = std::clamp(lastActive, firstActive, maxIdx);
+
+    const size_t lo = std::min(peak, firstActive >= paddingBefore ? firstActive - paddingBefore : 0);
+    const size_t hi = std::max(peak, lastActive + std::min(maxIdx - lastActive, paddingAfter));
+    const size_t span = hi - lo + 1;
+
+    std::vector<size_t> out;
+    if (span <= maxFrames)
+    {
+        out.reserve(span);
+        for (size_t p = lo; p <= hi; ++p) out.push_back(p);
+        return out;
+    }
+    if (maxFrames == 1) return {peak};
+
+    out.reserve(maxFrames);
+    const size_t intervals = maxFrames - 1;
+    if (peak == lo || peak == hi)
+    {
+        for (size_t i = 0; i < maxFrames; ++i)
+            out.push_back(lo + (i * (hi - lo)) / intervals);
+        return out;
+    }
+
+    const size_t totalSpan = hi - lo;
+    size_t leftIntervals = static_cast<size_t>(std::clamp<long>(
+        std::lround(static_cast<double>(intervals) * static_cast<double>(peak - lo) / static_cast<double>(totalSpan)),
+        1L, static_cast<long>(intervals - 1)));
+    leftIntervals = std::min(leftIntervals, peak - lo);
+    size_t rightIntervals = intervals - leftIntervals;
+    if (rightIntervals > hi - peak)
+    {
+        rightIntervals = hi - peak;
+        leftIntervals = std::min(intervals - rightIntervals, peak - lo);
+    }
+
+    for (size_t i = 0; i < leftIntervals; ++i)
+        out.push_back(lo + (i * (peak - lo)) / leftIntervals);
+    out.push_back(peak);
+    for (size_t j = 1; j <= rightIntervals; ++j)
+        out.push_back(peak + (j * (hi - peak)) / rightIntervals);
+    return out;
 }

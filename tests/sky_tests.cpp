@@ -6,8 +6,10 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImageReader>
 #include <QtTest/QTest>
 
 #include <cmath>
@@ -183,10 +185,16 @@ void SkyTest::lightningIsOneClipOfLargeBrighteningsOnlyInSkyMode()
         QTemporaryDir directory;
         const auto results = write(directory.path(), std::move(watch.clips));
         QCOMPARE(results.size(), size_t{1});
-        const QString text = contents(QDir(results[0].folder).filePath("event.txt"));
+        const QDir folder(results[0].folder);
+        const QString text = contents(folder.filePath("event.txt"));
         QVERIFY(text.contains("mode: sky\n"));
         QCOMPARE(text.count(" kind=brightening share="), 3);
         QVERIFY(text.contains(" brightening_share=0.02 release_seconds=20"));
+        QVERIFY(text.contains("preview_gif: 04_event_preview.gif "));
+        QVERIFY(QFile::exists(folder.filePath("04_event_preview.gif")));
+        QImageReader gif(folder.filePath("04_event_preview.gif"));
+        QVERIFY(gif.imageCount() >= 1 && gif.imageCount() <= 10);
+        QVERIFY(QFileInfo(folder.filePath("04_event_preview.gif")).size() <= 512 * 1024);
         QVERIFY(contents(QDir(directory.path()).filePath("candidates.txt")).contains(" mode=sky "));
     }
 }

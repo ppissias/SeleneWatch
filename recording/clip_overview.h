@@ -83,6 +83,13 @@ struct ClipOverview
     // The caption line describing the activity.
     QString activity;
 
+    // Position indices into the input `frames` vector for the detected main event
+    // run, used to extract a compact animated preview around the peak event.
+    size_t mainPosition{0};
+    size_t firstActivePosition{0};
+    size_t lastActivePosition{0};
+    bool hasActiveRun{false};
+
     // Feature-15 Part C: what the clip probably shows, and why. One of
     // flash, meteor, satellite, aircraft, dark transit, lightning, seeing,
     // unclear. A suggestion for review, not a decision.
@@ -94,3 +101,10 @@ struct ClipOverview
 // when the budget refuses the per-pixel buffers or the picture.
 [[nodiscard]] ClipOverview makeClipOverview(const std::vector<FramePtr>& frames,
     const OverviewRequest& request, MemoryBudget budget = {});
+
+// Selects up to maxFrames (default 10) sorted unique indices into clip frames
+// spanning [firstActive - paddingBefore .. lastActive + paddingAfter] while
+// always keeping the outer context boundaries and the peak frame.
+[[nodiscard]] std::vector<size_t> selectEventGifFramePositions(size_t frameCount,
+    size_t firstActive, size_t peak, size_t lastActive,
+    size_t paddingBefore = 2, size_t paddingAfter = 2, size_t maxFrames = 10);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "event_clip.h"
+#include "recording/clip_overview.h"
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -174,7 +175,8 @@ private:
     // Writer thread. Saves the clip's overview (Feature-12) in its folder and
     // returns its metadata line, or why it was not written. Gives the
     // suggested kind and its reason (Feature-15) when it could measure them.
-    QString writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason) const;
+    QString writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason,
+        ClipOverview* outOverview = nullptr) const;
     // Writer thread. True, with the result filled in, when writing the clip
     // would go below its disk reserve.
     bool belowDiskReserve(const Job& job, ClipWriteResult& result) const;

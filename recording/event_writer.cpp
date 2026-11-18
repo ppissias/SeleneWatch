@@ -5,6 +5,7 @@
 #include "recording/metadata_text.h"
 #include "recording/ser_writer.h"
 #include "selenewatch_version.h"
+#include "timelapse/video_exporter.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -252,6 +253,112 @@ void writeGuidingLines(QTextStream& out, const EventClip& clip, const std::deque
             << " ms=" << pulse->milliseconds << " settle_seconds=" << pulse->settleSeconds
             << " purpose=" << (pulse->calibration ? "calibration" : "guiding") << "\n";
     }
+}
+
+bool samePreviewLayout(const Frame& a, const Frame& b)
+{
+    return a.width == b.width && a.height == b.height && a.format == b.format
+        && a.significantBits == b.significantBits && a.alignment == b.alignment && a.bayer == b.bayer;
+}
+
+std::vector<QImage> preparePreviewGifFrames(const EventClip& clip, const ClipOverview* overview,
+    int maxLongEdge, QString& failureNote)
+{
+    const auto& frames = clip.frames;
+    if (frames.empty())
+    {
+        failureNote = "not written: no frames";
+        return {};
+    }
+
+    size_t firstPos = 0, peakPos = frames.size() / 2, lastPos = 0;
+    if (overview && overview->hasActiveRun && overview->mainPosition < frames.size())
+    {
+        firstPos = overview->firstActivePosition;
+        peakPos = overview->mainPosition;
+        lastPos = overview->lastActivePosition;
+    }
+    else
+    {
+        const uint64_t targetIdx = clip.peak.ready
+            ? clip.peak.frameIndex
+            : (!clip.triggers.empty() ? clip.triggers.front().triggerFrameIndex : frames[peakPos]->frameIndex);
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            if (frames[i]->frameIndex == targetIdx)
+            {
+                peakPos = i;
+                break;
+            }
+        }
+        firstPos = lastPos = peakPos;
+    }
+
+    const std::vector<size_t> positions = selectEventGifFramePositions(
+        frames.size(), firstPos, peakPos, lastPos, 2, 2, 10);
+    if (positions.empty())
+    {
+        failureNote = "not written: no frames selected";
+        return {};
+    }
+
+    std::vector<QImage> out;
+    try
+    {
+        // Anchor auto-stretch levels on a quiet pre/post frame if available so a bright
+        // flash or meteor does not dim the surrounding context frames.
+        const size_t refPos = (positions.front() < firstPos) ? positions.front()
+            : (positions.back() > lastPos ? positions.back() : positions.front());
+        const Frame& refFrame = *frames[refPos];
+        const AutoStretchCurve curve = computeAutoStretchCurve(refFrame);
+
+        const int longSide = std::max(refFrame.width, refFrame.height);
+        int outW = refFrame.width;
+        int outH = refFrame.height;
+        if (maxLongEdge > 0 && longSide > maxLongEdge)
+        {
+            const double scale = static_cast<double>(maxLongEdge) / static_cast<double>(longSide);
+            outW = static_cast<int>(std::lround(refFrame.width * scale));
+            outH = static_cast<int>(std::lround(refFrame.height * scale));
+        }
+        outW = std::max(2, outW & ~1);
+        outH = std::max(2, outH & ~1);
+
+        out.reserve(positions.size());
+        for (size_t pos : positions)
+        {
+            const Frame& f = *frames[pos];
+            if (!samePreviewLayout(f, refFrame)) continue;
+            QImage rendered = renderAutoStretchedFrame(f, curve, false, true);
+            if (rendered.isNull())
+            {
+                failureNote = "not written: RAM limit";
+                return {};
+            }
+            if (rendered.width() != outW || rendered.height() != outH)
+                rendered = rendered.scaled(outW, outH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            if (rendered.format() != QImage::Format_RGB888)
+                rendered = std::move(rendered).convertToFormat(QImage::Format_RGB888);
+            if (rendered.isNull())
+            {
+                failureNote = "not written: image conversion failed";
+                return {};
+            }
+            out.push_back(std::move(rendered));
+        }
+    }
+    catch (const MemoryLimitError&)
+    {
+        failureNote = "not written: RAM limit";
+        return {};
+    }
+    catch (const std::exception& ex)
+    {
+        failureNote = QString("not written: %1").arg(QString::fromUtf8(ex.what()));
+        return {};
+    }
+    if (out.empty()) failureNote = "not written: no compatible frames";
+    return out;
 }
 
 } // namespace
@@ -771,7 +878,14 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
     // frames are released. A review aid must not cost the evidence: when it
     // cannot be made, the clip is still complete and says why.
     QString kindReason;
-    const QString overviewNote = writeOverview(clip, folder, suggestedKind, kindReason);
+    ClipOverview overviewData;
+    bool hasOverviewData = false;
+    const QString overviewNote = writeOverview(clip, folder, suggestedKind, kindReason, &overviewData);
+    hasOverviewData = overviewData.mainPosition < clip.frames.size();
+
+    QString previewGifNote;
+    std::vector<QImage> previewGifFrames = preparePreviewGifFrames(
+        clip, hasOverviewData ? &overviewData : nullptr, 512, previewGifNote);
 
     const uint64_t onset = clip.triggers.front().onsetFrameIndex;
     FramePtr baseline;
@@ -843,6 +957,28 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
         return {};
     }
 
+    if (previewGifNote.isEmpty())
+    {
+        EventPreviewGifOptions gifOptions;
+        gifOptions.fps = 4;
+        gifOptions.maxLongEdge = 512;
+        gifOptions.maxBytes = 512 * 1024;
+        int gifW = 0, gifH = 0;
+        qint64 gifBytes = 0;
+        QString gifErr;
+        if (encodeEventPreviewGif(previewGifFrames, dir.filePath("04_event_preview.gif"),
+                gifOptions, gifErr, &gifW, &gifH, &gifBytes))
+        {
+            previewGifNote = QString("04_event_preview.gif frames=%1 size=%2x%3 bytes=%4 fps=%5; display only, not evidence")
+                .arg(previewGifFrames.size()).arg(gifW).arg(gifH).arg(gifBytes).arg(gifOptions.fps);
+        }
+        else
+        {
+            previewGifNote = QString("not written: %1").arg(gifErr);
+        }
+    }
+    previewGifFrames.clear();
+
     // Record precisely which frames the display previews represent.
     if (!note.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
     {
@@ -867,6 +1003,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
             out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
         out << "overview: " << overviewNote << "\n";
+        out << "preview_gif: " << previewGifNote << "\n";
         if (!suggestedKind.isEmpty())
             out << "suggested_kind: " << suggestedKind << " (" << kindReason << "); a suggestion for review, not a decision\n";
         out.flush();
@@ -895,7 +1032,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
     return folder;
 }
 
-QString EventWriter::writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason) const
+QString EventWriter::writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason,
+    ClipOverview* outOverview) const
 {
     const ClipTrigger& first = clip.triggers.front();
     OverviewRequest request;
@@ -923,6 +1061,11 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder,
     try
     {
         const ClipOverview overview = makeClipOverview(clip.frames, request, clip.frames.front()->data.get_allocator().budget);
+        if (outOverview)
+        {
+            *outOverview = overview;
+            outOverview->image = {};
+        }
         // Feature-15: the suggested kind is kept even if the picture cannot be saved.
         suggestedKind = overview.suggestedKind;
         kindReason = overview.kindReason;

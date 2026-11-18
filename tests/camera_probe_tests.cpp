@@ -107,7 +107,7 @@ private slots:
             if (disconnect) api->disconnectAt=70;
             else
             {
-                config["maximumOutputBytes"]=5000; config["postSeconds"]=.5;
+                config["seconds"]=4; config["maximumOutputBytes"]=5000; config["postSeconds"]=.5;
                 config["maxPostSeconds"]=.8; config["manualIntervalSeconds"]=.4;
             }
             QCOMPARE(run(dir.path(),config,api),1);

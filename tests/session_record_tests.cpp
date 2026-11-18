@@ -194,7 +194,6 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
     QTRY_VERIFY_WITH_TIMEOUT(ended, 10000);
     session.stop();
     session.recordingWriter().waitIdle();
-    QTest::qWait(200);
     QVERIFY(!session.schedule());
 
     const QDir folder = recordingFolder(output);
@@ -224,9 +223,11 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
     QVERIFY(frames.front().startsWith("0 40 ") && frames.back().startsWith("45 85 "));
 
     const QString moonEvents = eventsFolder(output, Target::Moon);
-    const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
-    QVERIFY2(log.contains(" recording_start name=" + folder.dirName() + " first_frame_index=40")
-        && log.contains(" recording_stop name=" + folder.dirName() + " frames=46"), qPrintable(log));
+    QTRY_VERIFY2_WITH_TIMEOUT(([&] {
+        const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
+        return log.contains(" recording_start name=" + folder.dirName() + " first_frame_index=40")
+            && log.contains(" recording_stop name=" + folder.dirName() + " frames=46");
+    })(), qPrintable(contents(QDir(moonEvents).filePath("candidates.txt"))), 10000);
     // The flash on frame 60 made a clip that names the recording.
     const QStringList clips = QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     bool named = false;
@@ -442,22 +443,24 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     QTRY_VERIFY_WITH_TIMEOUT(ended, 10000);
     session.stop();
     session.recordingWriter().waitIdle();
-    QTest::qWait(200);
 
     const QString moonEvents = eventsFolder(output, Target::Moon);
-    const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
-    QVERIFY2(log.contains(" observer=\"A. Observer\" site=\"Test field\" latitude_deg=37.98000 longitude_deg=23.73000 "
-        "height_m=100 telescope=\"C9.25\""), qPrintable(log));
+    QTRY_VERIFY2_WITH_TIMEOUT(([&] {
+        return contents(QDir(moonEvents).filePath("candidates.txt"))
+            .contains(" observer=\"A. Observer\" site=\"Test field\" latitude_deg=37.98000 longitude_deg=23.73000 height_m=100 telescope=\"C9.25\"");
+    })(), qPrintable(contents(QDir(moonEvents).filePath("candidates.txt"))), 10000);
     const QDir folder = recordingFolder(output);
     const QString note = contents(folder.filePath("recording.txt"));
     QVERIFY(note.contains("observer: A. Observer\n") && note.contains("image_scale_arcsec_per_pixel: 0.329\n"));
     QFile ser(folder.filePath("recording.ser"));
     QVERIFY(ser.open(QIODevice::ReadOnly));
     QCOMPARE(QByteArray(ser.read(178).constData() + 122), QByteArray("C9.25"));
-    bool clipHasSite = false;
-    for (const QString& clip : QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
-        clipHasSite = clipHasSite || contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n");
-    QVERIFY(clipHasSite);
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        for (const QString& clip : QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            if (contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n"))
+                return true;
+        return false;
+    })(), 10000);
 
     // The overview gives the speed in degrees per second.
     std::mt19937 random(45);

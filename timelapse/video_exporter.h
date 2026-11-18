@@ -33,6 +33,26 @@ bool encodeImagesWithFfmpeg(const std::vector<QImage>& frames,
     QString& error,
     std::atomic<bool>* cancel = nullptr);
 
+struct EventPreviewGifOptions
+{
+    int fps{4};
+    int maxLongEdge{512};
+    qint64 maxBytes{512 * 1024};
+};
+
+// Encodes up to 10 preview frames into a compact looping animated GIF via FFmpeg,
+// downscaling large frames and stepping down resolution/palette tiers if needed so
+// the output file stays within options.maxBytes. Returns encoded image dimensions
+// and byte count via optional outputs when provided.
+bool encodeEventPreviewGif(const std::vector<QImage>& frames,
+    const QString& gifPath,
+    const EventPreviewGifOptions& options,
+    QString& error,
+    int* outWidth = nullptr,
+    int* outHeight = nullptr,
+    qint64* outBytes = nullptr,
+    std::atomic<bool>* cancel = nullptr);
+
 // Reads sorted *.fits stacks from fitsDir, applies quality filtering, overlap
 // cropping, target-masked multiplicative brightness levelling, and session-wide
 // stretch/gamma (for video export only), then writes timelapse.mp4 / .gif into outputDir.

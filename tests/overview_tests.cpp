@@ -3,8 +3,10 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImageReader>
 #include <QtTest/QTest>
 
 #include <cmath>
@@ -112,7 +114,9 @@ private slots:
     void aSaveWithNothingInItSaysSo();
     void aSlowDriftMarksAlmostNothing();
     void twoTriggersAreBothMarked();
+    void gifFrameSelectionRespectsPaddingAndCapsAtTen();
     void theWriterSavesTheOverviewBesideTheEvidence();
+    void largeEventClipProducesDownscaledBoundedAnimatedGif();
     void aRefusedOverviewLeavesACompleteClip();
 };
 
@@ -262,6 +266,29 @@ void OverviewTest::twoTriggersAreBothMarked()
     QVERIFY(markNear(overview.image, QPoint(101 * 5, 71 * 5), 30));
 }
 
+void OverviewTest::gifFrameSelectionRespectsPaddingAndCapsAtTen()
+{
+    // 1-frame flash at index 20: 2 before, peak, 2 after = 5 consecutive frames.
+    QCOMPARE(selectEventGifFramePositions(40, 20, 20, 20), (std::vector<size_t>{18, 19, 20, 21, 22}));
+    // 3-frame event [20..22]: 2 before + 3 + 2 after = 7 consecutive frames.
+    QCOMPARE(selectEventGifFramePositions(40, 20, 21, 22), (std::vector<size_t>{18, 19, 20, 21, 22, 23, 24}));
+    // 6-frame event [20..25]: exact 10 frames [18..27].
+    QCOMPARE(selectEventGifFramePositions(40, 20, 22, 25), (std::vector<size_t>{18, 19, 20, 21, 22, 23, 24, 25, 26, 27}));
+    // Boundary clamp near start/end.
+    QCOMPARE(selectEventGifFramePositions(10, 0, 1, 1), (std::vector<size_t>{0, 1, 2, 3}));
+    QCOMPARE(selectEventGifFramePositions(1, 0, 0, 0), (std::vector<size_t>{0}));
+
+    // Long 40-frame event [10..49] with peak 25: capped at 10 strictly sorted frames,
+    // retaining lo=8 (10-2), peak=25, hi=51 (49+2).
+    const std::vector<size_t> sampled = selectEventGifFramePositions(80, 10, 25, 49, 2, 2, 10);
+    QCOMPARE(sampled.size(), size_t{10});
+    QCOMPARE(sampled.front(), size_t{8});
+    QCOMPARE(sampled.back(), size_t{51});
+    QVERIFY(std::find(sampled.begin(), sampled.end(), size_t{25}) != sampled.end());
+    for (size_t i = 1; i < sampled.size(); ++i)
+        QVERIFY(sampled[i] > sampled[i - 1]);
+}
+
 void OverviewTest::theWriterSavesTheOverviewBesideTheEvidence()
 {
     QTemporaryDir directory;
@@ -275,13 +302,94 @@ void OverviewTest::theWriterSavesTheOverviewBesideTheEvidence()
     QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
     const QDir folder(results[0].folder);
     QVERIFY(QFile::exists(folder.filePath("00_overview.png")));
+    QVERIFY(QFile::exists(folder.filePath("04_event_preview.gif")));
     QVERIFY(QFile::exists(folder.filePath("event.ser")));
     const QString text = contents(folder.filePath("event.txt"));
     QVERIFY2(text.contains("overview: 00_overview.png main_frame_index=20 sigma=6 active_frames=1"), qPrintable(text));
+    QVERIFY2(text.contains("preview_gif: 04_event_preview.gif frames=5 "), qPrintable(text));
     QVERIFY(text.endsWith("complete: yes\n"));
     const QImage saved(folder.filePath("00_overview.png"));
     QCOMPARE(saved.width(), 640);
     QVERIFY(markNear(saved, QPoint(31 * 5 + 2, 21 * 5 + 2), 30));
+
+    const QString gifPath = folder.filePath("04_event_preview.gif");
+    QVERIFY(QFileInfo(gifPath).size() > 0 && QFileInfo(gifPath).size() <= 512 * 1024);
+    QImageReader reader(gifPath);
+    QCOMPARE(reader.format(), QByteArray("gif"));
+    QVERIFY(reader.supportsAnimation());
+    QCOMPARE(reader.imageCount(), 5);
+    QCOMPARE(reader.size(), QSize(128, 96));
+}
+
+void OverviewTest::largeEventClipProducesDownscaledBoundedAnimatedGif()
+{
+    // 1280x960 Mono8 clip with a 25-frame streak (frames 12..36): must downscale
+    // below 512 px long edge, cap frames at 10, and stay <= 512 KiB.
+    EventClip clip;
+    clip.stream.source = "TEST: large streak clip";
+    clip.captureSettings.target = Target::Moon;
+    std::mt19937 random(99);
+    std::normal_distribution<double> noise(0.0, 2.5);
+    constexpr int W = 1280, H = 960;
+    for (uint64_t i = 0; i < 42; ++i)
+    {
+        auto f = std::make_shared<Frame>();
+        f->width = W;
+        f->height = H;
+        f->format = PixelFormat::Mono8;
+        f->frameIndex = i;
+        f->timestamp = timeOf(i);
+        f->testSource = true;
+        f->data.resize(static_cast<size_t>(W) * H, 20);
+        for (int y = 0; y < H; ++y)
+        {
+            uint8_t* row = f->data.data() + static_cast<size_t>(y) * W;
+            for (int x = 0; x < W; ++x)
+            {
+                double v = 25.0 + noise(random);
+                if (i >= 12 && i <= 36)
+                {
+                    const int cx = 100 + static_cast<int>(i - 12) * 35;
+                    const int cy = 480;
+                    if (std::abs(x - cx) <= 6 && std::abs(y - cy) <= 6) v += 160.0;
+                }
+                row[x] = static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+            }
+        }
+        clip.frames.push_back(std::move(f));
+    }
+    ClipTrigger trigger{12, 12, timeOf(12), 169, false};
+    trigger.peakSigma = 30.0;
+    trigger.peakX = 100;
+    trigger.peakY = 480;
+    trigger.boxX = 94;
+    trigger.boxY = 474;
+    trigger.boxWidth = 13;
+    trigger.boxHeight = 13;
+    clip.triggers.push_back(trigger);
+    clip.endReason = "post-event interval complete";
+
+    QTemporaryDir directory;
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    {
+        EventWriter writer(&context, directory.path(), 512 * 1024 * 1024, [&](const auto& result) { results.push_back(result); });
+        writer.submit(std::move(clip));
+        QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 15000);
+    }
+    QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
+    const QDir folder(results[0].folder);
+    const QString gifPath = folder.filePath("04_event_preview.gif");
+    QVERIFY(QFile::exists(gifPath));
+    const qint64 gifBytes = QFileInfo(gifPath).size();
+    QVERIFY2(gifBytes > 0 && gifBytes <= 512 * 1024, qPrintable(QString("GIF bytes=%1").arg(gifBytes)));
+
+    QImageReader reader(gifPath);
+    QCOMPARE(reader.format(), QByteArray("gif"));
+    QCOMPARE(reader.imageCount(), 10);
+    QVERIFY2(reader.size().width() <= 512 && reader.size().height() <= 512,
+        qPrintable(QString("%1x%2").arg(reader.size().width()).arg(reader.size().height())));
+    QVERIFY(contents(folder.filePath("event.txt")).contains("preview_gif: 04_event_preview.gif frames=10 "));
 }
 
 void OverviewTest::aRefusedOverviewLeavesACompleteClip()

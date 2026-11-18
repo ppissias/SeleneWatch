@@ -34,3 +34,16 @@ struct PreviewHistogram
 // A writable QImage backed by charged pixels. Shared image copies keep one
 // allocation until the last copy is destroyed. For display and writer previews.
 [[nodiscard]] QImage makeBudgetImage(int width, int height, QImage::Format format, MemoryBudget budget);
+
+// Consistent auto-stretch curve computed from one representative frame and
+// reusable across an animated event preview sequence so frame brightness stays steady.
+struct AutoStretchCurve
+{
+    double black{0};
+    double white{1};
+    double midtones{0.5};
+};
+
+[[nodiscard]] AutoStretchCurve computeAutoStretchCurve(const Frame& frame);
+[[nodiscard]] QImage renderAutoStretchedFrame(const Frame& frame, const AutoStretchCurve& curve,
+    bool invert = false, bool debayer = true);

@@ -10,7 +10,7 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 
 > **Candidates, not discoveries.** Automatic detections are candidates for human review, not confirmed lunar events. Scientific confirmation of an impact flash normally requires an independent observation from another telescope or site. SeleneWatch preserves the frames, UTC timing, camera settings, and session records needed for that comparison.
 
-**Using SeleneWatch:** See the [User Manual](MANUAL.md) for installation, camera driver setup, window controls, detection settings, test flashes, saved output files, feature lock and guiding, and a step-by-step observing session.
+**Using SeleneWatch:** See the [User Manual](MANUAL.md) for main screen orientation, camera and output setup, shared guiding, and step-by-step guides for the four observing workflows (lunar flashes, lunar transits/occultations, lucky-imaging time-lapses, and fixed-camera sky watching).
 
 ![SeleneWatch monitoring a lunar terminator recording with live detection and native-ADU histogram](docs/images/readme-main-window.png)
 
@@ -24,7 +24,7 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 - **Tune before capturing** — run in **Preview** to focus, frame, inspect the live native-ADU histogram, stretch the display for faint earthshine, and watch detector feedback (`Would trigger`) with live camera edits before arming **Monitoring**.
 - **Keep pre-event history in RAM** — maintain a time-sized ring buffer of shared, immutable frames under a configurable RAM ceiling so frames from *before* a trigger are saved alongside the event.
 - **Detect flashes, transits, and sky events** — analyse every frame per pixel against its own learned background and noise, with separate profiles for **The Moon** (flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon masks, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
-- **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), and annotated visual summaries (`00_overview.png`) with suggested classifications.
+- **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), annotated visual summaries (`00_overview.png`) with suggested classifications, and compact animated GIF previews (`04_event_preview.gif`, `≤ 10` frames, `≤ 512 KiB`) for both lunar and sky clips.
 - **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, record continuously to SER in **Preview** or **Monitoring** with **Record** (unlimited or for a chosen frame count), or schedule predicted events by UTC start and duration without silently dropping frames.
 - **Build lunar & planetary time-lapses** — run **Time-lapse** lucky-imaging bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), write linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assemble `timelapse.mp4` / `timelapse.gif`, and non-destructively **Re-sharpen time-lapse…** with saved profiles.
 - **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks.
@@ -89,7 +89,7 @@ Windows 64-bit releases are distributed in two forms:
 - **`SeleneWatch-<version>-win64.msi`** — installs per user (no administrator rights needed) under `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry; saved data under your chosen output folder (`%USERPROFILE%\SeleneWatch` by default) is kept untouched on upgrades and uninstall.
 - **`SeleneWatch-<version>-win64.zip`** — portable archive; unpack into a writable folder and run `SeleneWatch.exe`.
 
-Install your camera vendor's Windows driver before connecting a camera. ZWO's SDK library ships with SeleneWatch; for QHYCCD, Player One, and ToupTek, SeleneWatch automatically discovers the vendor's x64 SDK DLL installed on your system (or lets you pick it in **Session → Camera support…**). See [User Manual §1](MANUAL.md#1-before-you-start) for exact driver, DLL, and optional ASCOM Platform setup.
+Install your camera vendor's Windows driver before connecting a camera. ZWO's SDK library ships with SeleneWatch; for QHYCCD, Player One, and ToupTek, SeleneWatch automatically discovers the vendor's x64 SDK DLL installed on your system (or lets you pick it in **Session → Camera support…**). See [User Manual §2](MANUAL.md#2-common-setup--connecting-a-source) for exact driver, DLL, and optional ASCOM Platform setup.
 
 ---
 
@@ -101,12 +101,12 @@ Install your camera vendor's Windows driver before connecting a camera. ZWO's SD
 
 **Current maturity:**
 
-- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), single output folder management, lucky-imaging Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
-- **Verified on bench hardware:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, and two 30-minute unattended soak runs) and ASCOM simulator guiding checks.
-- **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; real earthshine/transit calibration; and unattended overnight Sky runs.
+- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), single output folder management, lucky-imaging Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, `04_event_preview.gif` event previews, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
+- **Verified on bench & all-night fixed-camera field use:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, two 30-minute unattended soak runs, and all-night fixed-camera **Sky** patrols capturing meteors/streaks, aircraft, cosmic rays, and flashes), plus ASCOM simulator guiding checks.
+- **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; and real earthshine/transit calibration.
 - **Planned next:** additional camera families, frame registration, transit tracking, and an in-app event browser/exporter.
 
-Detailed test coverage and validation status are tracked in [User Manual §14](MANUAL.md#14-what-has-been-tested).
+Detailed test coverage and validation status are tracked in [User Manual §10](MANUAL.md#10-what-has-been-tested).
 
 ---
 

@@ -1,586 +1,487 @@
 # SeleneWatch User Manual
 
-This manual is for observers who use SeleneWatch at the telescope or with their own recordings. It describes the application as it is now. SeleneWatch is still evolving, so names, defaults and layouts may change; this manual and its screenshots are updated alongside it.
+SeleneWatch is a native Windows application for observing the Moon and the open sky with a telescope or wide-field camera (or replaying your own SER/AVI recordings). This manual walks from the main screen through common setup and into each of the four core observing workflows.
 
-For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md) (in the source repository). For the design and the evidence rules, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) (in the source repository).
+For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md). For architecture and evidence rules, see [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md).
 
-> **Candidates, not discoveries.** SeleneWatch flags *candidate* events. A candidate is not a confirmed lunar impact. Confirming a flash normally needs an independent observation from another telescope or site. SeleneWatch keeps each candidate's frames, timing and settings so that comparison is possible.
+> **Candidates, not discoveries.** Automatic detections are *candidates* for human review, not confirmed discoveries. Confirming a lunar impact flash normally requires an independent simultaneous observation from another telescope or site. SeleneWatch keeps every candidate's raw frames, UTC timestamps, settings, and quick-look previews so comparison is straightforward.
+
+---
 
 ## Contents
 
-1. [Before you start](#1-before-you-start)
-2. [The window](#2-the-window)
-3. [Choosing a source](#3-choosing-a-source)
-4. [Preview and Monitoring](#4-preview-and-monitoring)
-5. [Camera settings](#5-camera-settings)
-6. [Display, levels and histogram](#6-display-levels-and-histogram)
-7. [Detection](#7-detection)
-8. [Testing sensitivity with a test flash](#8-testing-sensitivity-with-a-test-flash)
-9. [History, clip length and memory](#9-history-clip-length-and-memory)
-10. [What SeleneWatch saves](#10-what-selenewatch-saves)
-11. [Feature lock and guiding](#11-feature-lock-and-guiding)
-12. [An observing session, step by step](#12-an-observing-session-step-by-step)
-13. [Troubleshooting](#13-troubleshooting)
-14. [What has been tested](#14-what-has-been-tested)
+1. [The Main Screen at a Glance](#1-the-main-screen-at-a-glance)
+2. [Common Setup & Connecting a Source](#2-common-setup--connecting-a-source)
+   - [2.1 Computer, installation & camera drivers](#21-computer-installation--camera-drivers)
+   - [2.2 Choosing your output folder](#22-choosing-your-output-folder)
+   - [2.3 Site, instrument & clock accuracy](#23-site-instrument--clock-accuracy)
+   - [2.4 Selecting a camera or recording & starting Preview](#24-selecting-a-camera-or-recording--starting-preview)
+   - [2.5 Display stretch & the native-ADU histogram](#25-display-stretch--the-native-adu-histogram)
+3. [Feature Lock & Mount Guiding (Shared for Lunar & Planetary Workflows)](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)
+4. [Workflow 1 — Lunar Flashes on the Earth-Illuminated Side](#4-workflow-1--lunar-flashes-on-the-earth-illuminated-side)
+5. [Workflow 2 — Objects Passing in Front of the Moon (Shadows & Transits)](#5-workflow-2--objects-passing-in-front-of-the-moon-shadows--transits)
+6. [Workflow 3 — Lunar and Planetary Time-Lapses](#6-workflow-3--lunar-and-planetary-time-lapses)
+7. [Workflow 4 — Watching the Sky with a Fixed Camera](#7-workflow-4--watching-the-sky-with-a-fixed-camera)
+8. [What SeleneWatch Saves (Folders, Clips & Logs)](#8-what-selenewatch-saves-folders-clips--logs)
+9. [Troubleshooting](#9-troubleshooting)
+10. [What Has Been Tested](#10-what-has-been-tested)
 
 ---
 
-## 1. Before you start
-
-**Computer.** Windows 10 or 11, 64-bit. SeleneWatch is a native Qt application. It never waits on the disk, the display or the mount, but a fast disk and enough RAM help it keep long histories.
-
-**Installing.** Each release comes in two forms, named by its version (for example `2026.11-01`: year, month, and the release's number in that month). **Help → About SeleneWatch** shows the version you run, and **Help → Acknowledgements** credits the methods and tools SeleneWatch builds on.
-- `SeleneWatch-<version>-win64.msi` installs for your Windows account, without administrator rights, into `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older version. Uninstalling removes the program while keeping your saved data in your output folder intact.
-- `SeleneWatch-<version>-win64.zip` needs no installation: unpack it into a folder you can write in, and run `SeleneWatch.exe`.
-
-Either way, Qt 6, OpenCV, CFITSIO, FFmpeg (`win64-lgpl-shared`), and the Visual C++ libraries the program needs come with it. The licenses of SeleneWatch and of everything shipped with it are in `LICENSE.txt` and the `licenses` folder.
-
-**Cameras.** Install the camera maker's Windows driver before you connect the camera.
-
-| Camera family | What to install | Status |
-| --- | --- | --- |
-| ZWO ASI | ZWO's camera driver. The SDK library ships next to SeleneWatch. | Tested on an ASI120MM Mini on the bench |
-| QHYCCD | QHY's Windows *All-In-One* driver and SDK package. SeleneWatch finds the installed SDK library when you select the camera. | Built; hardware test pending |
-| Player One | Player One's camera driver, and its `PlayerOneCamera.dll` (x64). SeleneWatch finds the copy that N.I.N.A. or 64-bit SharpCap installs. Otherwise take it from Player One's Windows camera SDK (`lib\x64`), and put it next to `SeleneWatch.exe` or press **Choose Player One DLL…** in the camera panel. | Built; hardware test pending |
-| ToupTek, and cameras ToupTek makes for other brands | The camera's driver, and ToupTek's `toupcam.dll` (x64). SeleneWatch finds the copy that N.I.N.A., 64-bit SharpCap or ToupTek's ASCOM driver installs. Otherwise take it from ToupTek's camera SDK (`win\x64`), and put it next to `SeleneWatch.exe` or press **Choose ToupTek DLL…**. | Built; hardware test pending |
-
-Where SeleneWatch looks for these libraries, in order:
-1. The DLL you chose, if you chose one; nothing else is then tried.
-2. The DLL next to `SeleneWatch.exe`.
-3. The copies other 64-bit programs installed for themselves, the newest version first: N.I.N.A. (`External\x64\PlayerOne` or `External\x64\ToupTek` in its folder under Program Files), each `SharpCap … (64 bit)` folder, and for ToupTek the ASCOM driver's `Common Files\ASCOM\x64`. For QHY, QHY's All-In-One install folder.
-
-A copy too old for SeleneWatch is skipped, and **Session → Camera support…** shows which library was used. 32-bit programs' copies, under `Program Files (x86)`, cannot be used by 64-bit SeleneWatch.
-
-SeleneWatch does not ship the QHY, Player One or ToupTek libraries; their makers do not clearly allow it. **Use automatic discovery** forgets a chosen DLL. SeleneWatch looks for a family's library only when you choose that camera under **Source** (or SeleneWatch chooses it for you with **Connect at startup**, section 3), or check it as below; otherwise starting SeleneWatch loads no camera maker's code apart from ZWO's.
-
-**Session → Camera support…** shows every camera family in one window: whether this version supports it, the SDK library it found (or why it found none), the SDK's version, and the cameras connected now. Nothing there opens a camera. Select a family to see what to install and where to get it; **Choose DLL…** and **Use automatic discovery** set its library, and the new choice is checked at once. **Check again** after plugging in a camera or installing a driver. While a stream runs the window only shows what it knows; stop the stream to check.
-
-Player One cameras work like ZWO ones: bin 1 or more for mono cameras (binned pixels are averaged), ROI width a multiple of 4. ToupTek cameras use bin 1 and an even ROI. Their frame numbers come from the camera's own counter, so a dropped frame is counted where it happened.
-
-**Mount (optional).** To let SeleneWatch keep the Moon in the field, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver, for example EQMOD. SeleneWatch only sends small guide pulses; it never slews or parks the mount.
-
-**Where files go.** Everything SeleneWatch writes lives under a single remembered output folder (**Session → Output folder…**, defaulting to `%USERPROFILE%\SeleneWatch`, stored with `settingsVersion = 1`):
-- `events/moon/` and `events/sky/` — triggered candidate clips, `00_overview.png`, `candidates.txt`, and `guiding.txt`
-- `recordings/` — manual and scheduled continuous SER recordings
-- `timelapses/` — lucky-imaging time-lapse sessions (`stacks/`, `sharpened/`, `timelapse.mp4`, `timelapse.gif`, `timelapse.txt`)
-
-**Session → Open the output folder** opens it. Prefer a fast local folder rather than a cloud-synced drive (OneDrive, Dropbox, Google Drive, iCloud Drive); if a cloud-synced path is chosen, SeleneWatch warns you. Before Monitoring, recording, or starting a time-lapse, SeleneWatch checks that the chosen folder exists, is writable, and has at least **Disk reserve** free space—if the drive is unplugged or the folder is deleted, it refuses with an explanation instead of silently writing elsewhere. If an older version saved a legacy `events/` folder next to `SeleneWatch.exe`, a one-time notice lets you move or inspect it yourself without moving files behind your back. SeleneWatch never writes into the folders it reads recordings from.
-
-![Session -> Output folder dialog showing single root layout and free disk space](docs/images/manual-output-folder.png)
-
-***Session → Output folder…**: configures the single output root (`events/moon/`, `events/sky/`, `recordings/`, and `timelapses/`) and checks free space and cloud-sync warnings live.*
-
-**Settings are remembered.** Detection, display, capture, histogram and guiding choices are saved when you stop a stream or close the window, and restored the next time you start SeleneWatch.
-
-**Site, instrument and clock.** Open **Session → Site and instrument…** once:
-- **Observer and site:** your name, the site's name, and, when **Position known** is ticked, its latitude (north positive), longitude (east positive) and height.
-- **Instrument:** the telescope, aperture, focal length and pixel size. With binning, enter the binned pixel. From the focal length and pixel size SeleneWatch shows the image scale; the clip overviews then give speeds in degrees per second.
-- **Time:** at each Start, SeleneWatch records the Windows time service's status when it runs. Tick **Compare the PC clock with an NTP server** to also measure the PC clock's offset from a time server over the internet (off unless you turn it on).
-
-All of it goes into every clip, every recording and the `session_start` lines, so others know where, with what and how well-timed you observed. The telescope also goes into each SER file's header.
-
----
-
-## 2. The window
-
-From top to bottom:
-
-- **Top row:** the **Source** selector, **Connect at startup** (for a camera), and **Open…** (for recordings). With the testing tools on, an amber **TESTING TOOLS ON** mark. Then **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** (with optional frame limit: **Unlimited** or **N frames**), and, with the testing tools on, **Fixed flash** (synthetic source only). Then the **Target FPS**, playback **Speed**, and **Loop first … s** controls.
-- **Banner:** a coloured line that always says whether capture is **OFF** (Preview), **ON** (Monitoring), or **TIME-LAPSE**.
-- **Test flash** (testing tools only): controls for injecting a known, marked test signal (see [section 8](#8-testing-sensitivity-with-a-test-flash)).
-- **Preview:** the live or recorded image, fitted to the window. Click to select a pixel; drag to lock on a feature (or drag a sunlit lunar anchor box when **Select anchor** is checked in **Time-lapse**).
-- **Docks:** panels you can show, hide, move or float from the **View** menu.
-  - **Detection**, **Display and capture**, **Time-lapse**, and **Guiding** share the right-hand side as tabs.
-  - Each camera family's panel (**Camera** for ZWO, **QHY camera**, **Player One camera**, **ToupTek camera**) appears on the left when that camera is the source.
-  - **Histogram** opens below the preview.
-- **Status bar** (bottom), in two lines:
-  - the latest message, on a line of its own so that a folder path or an error reason has the whole width. A text that still does not fit is shortened with "…"; hover over it to read all of it.
-  - the readouts, from left to right:
-    - **Status**;
-    - **FPS**, and **Frames** with the camera's reported dropped frames;
-    - **Candidates**;
-    - **History** and **RAM** use;
-    - the frame size and format;
-    - **Lock**: the drift readout, and whether guiding is active.
-
-    A readout that does not fit is shortened the same way.
+## 1. The Main Screen at a Glance
 
 ![SeleneWatch main window monitoring a lunar recording](docs/images/readme-main-window.png)
 
-*The main window in **Monitoring** (`Moon_181337.avi`), showing the top control row, green **MONITORING** banner, live lunar preview, **Detection** dock on the right, **Histogram** dock below, and the two-line status bar.*
+*The SeleneWatch main window running **Monitoring** on `Moon_181337.avi`, showing the top control bar, status banner, live preview, docked panels on the right, live histogram below, and the two-line status bar.*
 
----
+From top to bottom, the main screen contains:
 
-## 3. Choosing a source
+- **Menu bar:**
+  - **View** — show/hide **Detection**, **Display and capture**, **Time-lapse**, **Guiding**, **Histogram**, camera docks, and toggle **View → Testing tools**.
+  - **Session** — configure **Output folder…**, **Site and instrument…**, **Camera support…**, **Schedule a recording…**, **Re-sharpen time-lapse…**, or **Open the output folder**.
+  - **Help** — **About SeleneWatch**, **Acknowledgements**, **About Qt**.
+- **Top bar:**
+  - **Source** selector (`Choose a source…`, **Recording file**, camera families, and **Synthetic** when Testing tools are on), **Connect at startup**, **Open…**, and the amber **TESTING TOOLS ON** indicator when enabled.
+  - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count), and (testing tools only) **Fixed flash**.
+  - Timing/playback controls: **Target FPS**, **Speed** (`Real time` / `Fast` for files), and **Loop first … s**.
+- **Mode banner:** a full-width colour strip immediately above the image showing which operating state SeleneWatch is in:
 
-Choose the source while the stream is stopped. SeleneWatch starts with no source chosen (**Choose a source…**), so it opens no camera until you choose one.
-
-**Connect at startup**, next to **Source**, is for a camera you always use: tick it with that camera family chosen, and from the next start SeleneWatch chooses it and finds the camera, ready for **Start preview**. It does not start a stream. Untick it to start with no source again.
-
-**Testing tools** (**View → Testing tools**, off until you turn it on, and remembered) add the **Synthetic** source and the **Test flash** with **Fixed flash**. While they are on, an amber **TESTING TOOLS ON** mark shows next to **Source**, and every `session_start` line in `candidates.txt` says `testing_tools="on"` (otherwise `"off"`). They change only while the stream is stopped; turning them off with the synthetic source chosen leaves no source chosen. Recordings are not a testing tool: **Recording file** is always offered.
-
-### Synthetic (testing tools)
-
-A painted test Moon with craters, a small moving pacing marker, and sensor-like noise in the background. It needs no hardware and is the quickest way to learn the controls. **Target FPS** sets its frame rate. **Fixed flash** paints a bright spot for a few frames, as a quick check that capture works. Under **Display and capture → Synthetic pixels** you can make it produce 12-bit, 16-bit or Bayer colour frames, to try the display controls.
-
-### Recording file
-
-Choose **Recording file**, press **Open…**, and pick a file.
-
-- **SER** files (8-bit and 16-bit mono, as written by FireCapture and others) are read with their own frame times when present.
-- **AVI** files are read when they are uncompressed:
-  - 8-bit grey and Y800 frames;
-  - 24-bit and 32-bit colour frames, kept as colour;
-  - YUY2, which is reduced to its brightness channel and marked as converted.
-
-  Compressed AVI files are refused with a message.
-- A **FireCapture log** (`.txt`) next to the file supplies the UTC start time, exposure and gain when it names that file.
-- An AVI file stores no frame times, so its frames get nominal times: the start time (or zero without a log) plus the frame's number at the frame rate.
-  - FireCapture writes the rate at the start of a capture, rounded, into the AVI header, and the camera can run far slower. When FireCapture's log gives its **Duration** to the millisecond and counts the same number of frames as the file holds, the frames are spread evenly over that duration instead.
-  - Otherwise the header's rate is used, or the **Target FPS** when the header states none.
-  - The clip metadata (`frame_rate`, `frame_time`) says which.
-- An AVI file whose capture stopped before it wrote an index is read by walking through it. The walk stops where the file holds no more frames, and the clip metadata (`frame_index`) says how many bytes were left unread.
-- Frames that the capture program recorded as dropped stay as gaps in the frame numbers.
-
-**Speed:** **Real time** follows the recording's own frame times. **Fast** runs the detector through the file as quickly as the computer allows, which is useful for tuning. You can change the speed while the file plays. The history and clip windows are measured in the recording's own time, so they do not change with speed.
-
-**Loop first … s** plays the first seconds of the file again and again, which is useful for tuning the detector on one stretch of sky. Each lap restarts detection, and frame numbers and times keep counting up.
-
-When a recording ends, the stream stops by itself and any clip still being collected is saved.
-
-### Cameras (ZWO ASI, QHY, Player One, ToupTek)
-
-These appear in the **Source** list when SeleneWatch was built with that camera family.
-
-- **ZWO ASI camera:** opens the **Camera** dock on the left. Press **Refresh cameras** if your camera is not listed, then choose it.
-- **QHY camera:** opens the **QHY camera** dock. If the SDK library is installed somewhere unusual, **Choose QHY DLL…** points SeleneWatch at it, and **Use automatic discovery** returns to the default search.
-- **Player One camera:** opens the **Player One camera** dock. Uses `PlayerOneCamera.dll` (x64) via **Choose Player One DLL…** or automatic discovery.
-- **ToupTek camera:** opens the **ToupTek camera** dock (also for cameras ToupTek makes for other brands). Uses `toupcam.dll` (x64) via **Choose ToupTek DLL…** or automatic discovery.
-
-See [section 1](#1-before-you-start) for driver/DLL discovery and [section 5](#5-camera-settings) for camera controls.
-
----
-
-## 4. Preview, Monitoring, and Time-lapse
-
-SeleneWatch has three running states:
-
-| State | What happens | Camera controls | What is written |
+| Mode | Banner & what happens | Camera settings | Output written |
 | --- | --- | --- | --- |
-| **Preview** | Frames are shown, analysed and kept in the history | Live, where the camera allows | Nothing unless **Record** is pressed (which writes only `recordings/<UTC>/`, never `candidates.txt`) |
-| **Monitoring** | Same analysis; candidates are captured as clips | Fixed | Clips under `events/<target>/`, `candidates.txt`, `guiding.txt`, plus optional **Record** / scheduled SER |
-| **Time-lapse** | Periodic lucky-imaging bursts stacked & aligned into linear 32-bit FITS and MP4/GIF (flash detection OFF) | Fixed | Under `timelapses/<UTC>/`: `stacks/*.fits`, `sharpened/*.fits`, optional `raw/*.ser`, `timelapse.txt`, `timelapse.mp4`/`.gif` |
+| **Preview** *(blue)* | Live analysis & ring buffer run; capture is OFF | Editable live | None unless **Record** is pressed (writes `recordings/<UTC>/` only) |
+| **Monitoring** *(green)* | Automatic event detection & **Save now** active; optional **Record** / scheduled SER allowed | Locked for evidence integrity | `events/moon/` or `events/sky/`, `candidates.txt`, `guiding.txt`, plus optional `recordings/` |
+| **Time-lapse** *(purple)* | Fixed-cadence lucky-imaging bursts stacked into 32-bit float FITS and MP4/GIF *(flash detection OFF)* | Locked | `timelapses/<UTC>/` (`stacks/`, `sharpened/`, `timelapse.mp4`/`.gif`, `timelapse.txt`, optional `raw/*.ser`) |
 
-**Start preview** is the normal first step: focus, frame the Moon, set exposure and gain, and watch the detector's readout. The banner says **capture OFF**. The Detection panel shows **Would trigger — capture OFF** when the detector would have fired.
-
-**Start monitoring** turns capture on. With a camera, SeleneWatch closes and reopens the camera with the chosen settings and reads them back. This is so every saved frame carries verified settings. You will see a short gap and the frame counter restart. The detector then learns the sky afresh.
-
-**Stop monitoring** saves the clip being collected, if there is one, and returns to Preview without stopping the camera.
-
-**Stop stream** ends acquisition, saves any open clip, and closes the camera.
-
-**Save now** (Monitoring only) keeps the current history and the following few seconds as a *manual* clip, even if the detector did not fire. Use it when you see something by eye.
-
-After a live camera change in Preview, the panel shows **Settling** for a short time while the detector relearns the background.
+- **Preview canvas:** fitted live or recorded view. Depending on active tools, clicking selects a pixel (for local noise readout / **Test flash**), dragging locks on a crater (**Guiding**) or lunar anchor (**Time-lapse**), or clicking/dragging defines horizon masks (**The sky**).
+- **Dock panels (right & bottom):** **Detection**, **Display and capture**, **Guiding**, **Time-lapse** share right-hand tabs; the active **Camera** dock opens on the left; **Histogram** opens below the preview.
+- **Two-line status bar (bottom):**
+  - Top line: latest status or action message across the full window width (hover if shortened).
+  - Bottom line: **Status**, **FPS** & **Frames** (plus SDK dropped frames), **Candidates**, **History** & **RAM** usage (`used / ceiling MiB`), frame geometry/format (`1296 × 964 Mono8`), and **Lock** readout.
 
 ---
 
-## 5. Camera settings
+## 2. Common Setup & Connecting a Source
 
-The Camera dock lists the controls the camera itself reports. For each, it shows what you asked for and what the camera actually set; cameras often round values.
+Complete these five setup steps before starting any of the four observing workflows. Detection, display, capture, histogram, guiding, and time-lapse preferences are saved automatically and restored on launch.
 
-- **In Preview**, exposure (in ms), gain, offset, USB bandwidth and, where available, high-speed mode apply **live** shortly after you change them.
-- **Raw format** (RAW8 or RAW16), **Binning**, and the **ROI** (region of interest: width, height and origin) need the camera to stop. Use **Apply format / ROI and restart Preview**.
-- **In Monitoring**, camera settings are locked. Stop monitoring to change them. Display and detection settings stay adjustable.
-- **RAW16** keeps every bit the camera delivers. The sensor's ADC depth (for example 12 bits) is recorded separately in the clip metadata.
-- **Dropped frames** reported by the camera's SDK appear in the status bar and are recorded. Their position is approximate, because the SDK buffers frames.
-- **Frame times** are the computer's UTC clock when each frame arrived. These cameras have no GPS timing, so keep the computer's clock synchronised for the session.
+### 2.1 Computer, installation & camera drivers
 
-QHY cameras run at bin 1 in this version, and QHY's SDK does not report dropped frames, so they are shown as unknown.
+- **Operating system:** Windows 10 or 11 (64-bit). SeleneWatch never blocks frame acquisition on disk writes, GUI drawing, or mount commands; a local SSD and adequate RAM (default 2048 MiB ceiling) support high frame rates.
+- **Installing:** Releases ship in two forms (versioned e.g. `2026.11-01`):
+  - `SeleneWatch-<version>-win64.msi` — installs per-user into `%LOCALAPPDATA%\SeleneWatch` with a Start Menu shortcut (no admin rights required). Uninstalling keeps all saved data in your output folder intact.
+  - `SeleneWatch-<version>-win64.zip` — portable archive; extract into any writable folder and run `SeleneWatch.exe`.
+  - Both ship Qt 6 (`LGPLv3`), OpenCV, CFITSIO, LGPL FFmpeg (`win64-lgpl-shared`), ZWO's ASI library, Visual C++ runtime DLLs, and licenses (`LICENSE.txt`, `THIRD_PARTY_LICENSES.md`, `licenses/`).
+- **Camera drivers:** Install your camera vendor's Windows driver before connecting hardware:
+
+| Camera family | What you need | Status |
+| --- | --- | --- |
+| **ZWO ASI** | ZWO's Windows driver. `ASICamera2.dll` ships with SeleneWatch. | Bench-tested (ASI120MM Mini) |
+| **QHYCCD** | QHY's Windows *All-In-One* driver & SDK package. Discovered automatically when selected. | Built; hardware test pending |
+| **Player One** | Player One driver + `PlayerOneCamera.dll` (x64). Discovered from N.I.N.A., 64-bit SharpCap, next to `SeleneWatch.exe`, or via **Choose Player One DLL…**. | Built; hardware test pending |
+| **ToupTek & OEMs** *(Altair Astro, etc.)* | Camera driver + `toupcam.dll` (x64). Discovered from N.I.N.A., 64-bit SharpCap, ToupTek ASCOM x64, next to `SeleneWatch.exe`, or via **Choose ToupTek DLL…**. | Built; hardware test pending |
+
+Use **Session → Camera support…** at any time while stopped to inspect all four camera families, discovered SDK paths/versions, and connected cameras, or to choose/reset a custom x64 DLL. **Mount (optional):** For Workflows 1–3, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver if you want automated pulse guiding.
+
+### 2.2 Choosing your output folder
+
+Open **Session → Output folder…** (while stopped) to set the single remembered root directory (default `%USERPROFILE%\SeleneWatch`) used across restarts and version upgrades (`settingsVersion = 1`). All SeleneWatch outputs organize cleanly beneath it:
+
+```text
+<output folder>/
+    events/
+        moon/<UTC>/      Lunar flash & darkening clips, candidates.txt, guiding.txt
+        sky/<UTC>/       Sky watch clips, candidates.txt
+    recordings/<UTC>/    Manual (Preview or Monitoring) and scheduled continuous SER files
+    timelapses/<UTC>/    Lucky-imaging FITS stacks, sharpened FITS, MP4/GIF, timelapse.txt
+```
+
+![Session -> Output folder dialog showing single root layout and free disk space](docs/images/manual-output-folder.png)
+
+***Session → Output folder…**: shows the unified output layout, checks live free space, and warns if a cloud-synced directory is selected.*
+
+- **Use a fast local folder (SSD):** Avoid cloud-synced paths (`OneDrive`, `Dropbox`, `Google Drive`, `iCloud Drive`); SeleneWatch warns you if one is selected.
+- **No silent fallbacks:** Before starting **Monitoring**, **Record**, or **Time-lapse**, SeleneWatch verifies the folder exists, is writable, and leaves at least your **Disk reserve** free. If an external drive is unplugged, it refuses with an error rather than silently writing elsewhere.
+- **Session → Open the output folder** opens it in Windows Explorer. Read-only archive recordings you open are never modified.
+
+### 2.3 Site, instrument & clock accuracy
+
+Open **Session → Site and instrument…** once before serious observing:
+
+![Site and instrument dialog showing site coordinates, telescope image scale, and clock check](docs/images/manual-site-instrument.png)
+
+***Session → Site and instrument…**: records observer metadata, computes image scale in arcseconds per pixel, and configures optional NTP clock checking.*
+
+- **Observer and site:** Name, site label, and **Position known** (North latitude, East longitude, height in meters). Required for **Watch from dusk to dawn** in Workflow 4.
+- **Instrument:** Telescope, aperture, focal length, and binned pixel size in microns. SeleneWatch calculates image scale (`″/px`) so clip overviews report moving object speeds in `°/s`. Telescope name also embeds in SER headers.
+- **Time:** Windows Time service status is always logged at Start. Tick **Compare the PC clock with an NTP server at each Start** to measure PC clock offset via SNTP for multi-site lunar flash or occultation timing comparisons (off by default).
+
+### 2.4 Selecting a camera or recording & starting Preview
+
+1. With the stream stopped, pick your **Source**:
+   - A camera family (**ZWO ASI**, **QHY**, **Player One**, **ToupTek**) — optionally tick **Connect at startup** so future launches pre-select it automatically. Press **Refresh cameras** in its dock and select your camera.
+   - **Recording file** — click **Open…** and load an `.ser` file (8- or 16-bit mono with trailer timestamps) or uncompressed `.avi` file (`8-bit`, `Y800`, `24/32-bit RGB`, `YUY2`; compressed AVIs are refused). Matching FireCapture `.txt` logs automatically supply UTC start time, exposure, gain, and true mean duration/FPS. Use **Speed** (`Real time` / `Fast`) and **Loop first … s** for tuning and playback tests.
+   - **Synthetic** *(via **View → Testing tools**)* — renders a test Moon with craters, a quiet moving pacing marker, configurable `Mono8` / `12-bit` / `16-bit` / `Bayer RGGB` bit depth, and calibrated flash test buttons without hardware.
+2. Press **Start preview**. Nothing is recorded to `events/` or `candidates.txt` while in Preview (unless you explicitly press **Record**).
+3. In your **Camera** dock, adjust live controls (**Exposure**, **Gain**, **Offset**, **USB bandwidth**, high-speed mode) — edits apply shortly in Preview, with **Settling** shown briefly as detection relearns. Changing **Raw format** (`RAW8`/`RAW16`), **Binning**, or **ROI** uses **Apply settings** and briefly restarts Preview.
+   - **RAW16** preserves every bit delivered by the camera without truncation; sensor ADC bit depth is recorded separately in metadata.
 
 ![Camera dock beside the Detection dock in Preview mode](docs/images/manual-camera-settings.png)
 
-*The **Camera** dock on the left alongside **Detection** on the right in **Preview** mode (shown with a simulated ZWO ASI120MM Mini device): requested vs. read-back geometry and live controls appear below the inputs.*
+*Connecting a camera: the **Camera** dock on the left lists requested vs. read-back geometry, **Refresh cameras**, and live controls during **Preview**.*
 
----
+### 2.5 Display stretch & the native-ADU histogram
 
-## 6. Display, levels and histogram
-
-Everything in this section changes **only what you see**. The saved pixels and the detector always use the original samples.
-
-The **Display and capture** tab offers three display modes:
-
-- **Linear / high bits:** the full sample range shown as it is.
-- **Black / white levels:** set the black and white points in native sample units (ADU), with the number fields or the sliders. Useful for the faint earthshine side.
-- **Auto-stretch:** levels chosen from the frame.
-
-**Invert brightness** and **Show Bayer colour** (for colour sensors) are further display options. Level controls work while the stream is stopped too.
-
-**View → Histogram** shows the distribution of the original samples, before any stretch or colour conversion, in native ADU. It reports the observed range and the share of samples at zero and at the highest possible value, which shows clipping at a glance. **Fit range** zooms to the values present. **Log counts** makes sparse values visible.
+Everything in **Display and capture** (right dock tab) and **View → Histogram** affects **only what you see on screen**—raw SER pixels and the detector always receive unmodified linear samples.
 
 ![Display and capture levels stretched with the native-ADU histogram](docs/images/manual-display-histogram.png)
 
-*Adjusting **Black / white levels** (`18` to `115 ADU`) in **Display and capture** to brighten dark lunar shadows while **Histogram** displays the unmodified `0–141 ADU` distribution.*
+*Adjusting **Black / white levels** (`18` to `115 ADU`) in **Display and capture** while **Histogram** displays the raw `0–141 ADU` distribution.*
+
+- **Display modes:**
+  - **Linear / high bits** — shows full dynamic range unstretched (shifted cleanly for high-bit sensors).
+  - **Black / white levels** — adjust Black and White points in native ADU using sliders or spin boxes to reveal dim earthshine or deep shadows.
+  - **Auto-stretch** — automatic percentile & midtones stretch computed from the frame.
+- **Invert brightness** & **Show Bayer colour:** flip tones (helpful when inspecting faint features against bright skies) or live-debayer colour sensors on screen without debayering saved SER evidence.
+- **Histogram (`View → Histogram`):** plots raw native ADU distribution before stretch/debayering (`Fit range`, `Log counts`) and displays the exact min/max range plus percentage of clipped pixels at `0` and `max code`.
 
 ---
 
-## 7. Detection
+## 3. Feature Lock & Mount Guiding (Shared for Lunar & Planetary Workflows)
 
-### How it works, briefly
+**Applicable workflows:** Workflow 1 (Lunar flashes), Workflow 2 (Transits/shadows), and Workflow 3 (Lunar/planetary time-lapses). *(Automatically disabled in Workflow 4: **The sky**).*
 
-For every pixel, SeleneWatch learns the usual brightness and how much that pixel normally varies (its noise), from the last few seconds. A pixel stands out when the new frame is brighter than usual by more than **K** times its own noise. A candidate needs a compact group of such neighbouring pixels (a *patch*), not a single hot pixel. Bright moving edges and big changes are rejected by the size and shape limits. While a patch is active, the background keeps learning everywhere else, and new separate patches are still caught.
-
-### Watching the Moon or the sky
-
-**Watching**, at the top of the Detection panel, chooses **The Moon** or **The sky**. Change it while stopped. Each keeps its own detection and capture settings, so tuning one never changes the other. Every clip and candidate line records which one it was recorded in (`mode: moon` or `mode: sky`).
-
-**The sky** is for a camera with a wide lens watching the open sky for meteors and fireballs, aircraft, satellites and lightning. Its starting values differ from the Moon's: patches up to 3000 px, a box / patch ratio up to 30 so a meteor streak at an angle passes, 3 s of history, a 5 s quiet tail and 20 s at most after a trigger. It adds three settings:
-
-| Control | Meaning | Starting value |
-| --- | --- | --- |
-| **Large brightening** | A frame fires when this share of the unmasked frame rises by K at once, as with lightning or a fireball's flare. Repeated strokes within the quiet tail stay in one clip. Slow changes such as twilight are learned and do not fire. | 2 % of the frame |
-| **Learn a patch after** | A patch that keeps firing this long is learned into the background. A star or planet drifting past a fixed camera then stops firing; aircraft and satellites move on faster and keep firing. | 20 s |
-| **Mask** | Areas left out of detection: the ground, trees, roofs, street lights. Turn on **Draw mask**, then drag a rectangle on the preview, or click the corners of a shape and double-click to close it. **Clear** removes them all. Up to 16 shapes of up to 32 corners. Masked pixels are still recorded in the clips. | None |
-| **Watch from dusk to dawn**, **Sun below** | Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it rises again. Needs the site's position (Session → Site and instrument). The panel shows the Sun's altitude and the next start or stop. It starts once a night: if you press **Stop** during the night, or the camera stops, it waits for the next dusk. At dawn it stops only what it started (if your stream was already running at dusk, it ends only Monitoring). | Off, −10° |
-| **Follow the sky's brightness** | With a camera: keeps the sky's median, outside the mask, between 8% and 30% of full scale. After a minute outside, Monitoring stops (the clip in hand is saved), the exposure changes within **Exposure** *from … to …* (then the gain, by its step, up to **Gain up to**), and Monitoring starts again; at most one change every two minutes. Each change is logged in `candidates.txt` as `exposure_change`. | Off |
-
-Guiding is for the Moon and is off while the sky is watched.
-
-![Sky watch mode with polygon horizon mask and dusk-to-dawn settings](docs/images/manual-sky-mask.png)
-
-***The sky** target showing a hatched polygon **Mask** drawn over a treeline/roofline horizon, **Watch from dusk to dawn** with the calculated Sun altitude, and **Follow the sky's brightness**.*
-
-### Controls (View → Detection)
-
-| Control | Meaning | Starting value |
-| --- | --- | --- |
-| **Sensitivity K** | How many noise units above normal a pixel must be | 6 sigma |
-| **Minimum patch** / **Maximum patch** | Allowed patch size in pixels | 8 / 400 px |
-| **Maximum box / patch** | How spread out a patch may be: its bounding box area divided by its pixel count | 4.0 × |
-| **Allow a one-frame trigger** | Fire on a single frame; when off, two consecutive frames must pass | On |
-| **Background and noise → Reference time** | How quickly the learned background follows changes | 2.0 s |
-| **Background and noise → Minimum noise** | The smallest noise assumed for any pixel, in ADU | 0.5 ADU |
-| **Preview overlay** | **Sigma map** (pixels at or above K in red) or **Noise map** (local noise in ADU), on screen only | None |
-| **Also trigger on darkening** | Also fire when a patch gets *darker* by K: a plane, the ISS or a bird crossing the sunlit Moon. Dark patches never merge with bright ones. | Off |
-| **Maximum dark patch** / **Maximum dark box / patch** | Size and shape limits for dark patches. Silhouettes are much larger than flashes; **Minimum patch**, **K** and the one-frame rule are shared. | 20000 px / 10 × |
-| **Large darkening** | Fire when this share of the frame darkens by K at once: a plane or bird filling the field. A cloud edge does the same. | Off |
-
-Changes apply from the next frame. Every saved candidate records the settings it was found with. A darkening candidate is recorded as `kind=darkening`; its overview shows the path in blue.
-
-### Reading the panel
-
-- **Peak sigma** is shown against K, with a percentage and a recent high (amber marks). The sigma history covers the last ten seconds.
-- **Patch** shows the size and shape of the strongest patch against the limits, and names the check it failed when it is rejected.
-- **Would trigger — capture OFF** in Preview, or **Candidate — capture ON** in Monitoring, shows the detector firing.
-- Clicking a pixel in the preview makes the panel and the test-flash readout report the noise at that pixel.
-- With darkening on, the bottom of the panel shows the deepest fall in sigma and the largest dark patch against its limits.
-
-The starting values are not a calibrated recommendation. Tune them on your own recordings (next section).
-
----
-
-## 8. Testing sensitivity with a test flash
-
-A test flash adds a small, known Gaussian spot to real frames, so you can see what the detector would catch. It is a testing tool: turn on **View → Testing tools** first.
-
-1. Start Preview, or play a recording.
-2. Click the preview where the flash should appear. The earthshine side is the interesting case.
-3. Under **Test flash**, set:
-   - **FWHM:** the spot's width in frame pixels;
-   - **Peak:** the brightness added, in native ADU (12-bit units for 12-bit data);
-   - **Duration:** the number of frames.
-4. Press **Inject blip**.
-
-The readout gives the requested peak in noise units at that pixel. In Preview the Detection panel shows whether it **would trigger**. In Monitoring a triggered test flash is saved like any candidate, and **every injected frame is marked as test data** in the clip and the log.
-
-A good routine: play a recording with no injection to see its normal noise, then inject flashes of decreasing peak until they are no longer caught. Saturation and bright moving edges near the limb limit what can be recovered there.
-
-![Test flash injected on the dark lunar limb showing Would trigger](docs/images/manual-test-flash.png)
-
-*Injecting a calibrated **Test flash** (`FWHM 4.0 px`, `Peak 140.0 ADU`, `8 frames`) at `(155, 432)` on the dark limb: the spot triggers **Would trigger — capture OFF** and spikes above `K 12.0` in the 10-second sigma history.*
-
----
-
-## 9. History, clip length and memory
-
-Set these under **Display and capture → Capture settings** before pressing Start:
-
-| Setting | Meaning | Default |
-| --- | --- | --- |
-| **Pre-event history** | Seconds kept *before* a trigger | 5 s |
-| **Quiet tail** | Seconds kept after activity stops | 3 s |
-| **Maximum after trigger** | Longest a single clip continues after its trigger; longer activity continues in a new, linked clip | 10 s |
-| **RAM ceiling** | Memory for frames, analysis and clips waiting to be written | 2048 MiB |
-| **Disk reserve** | Free space to keep on the output drive. Below it, clips are not written; their candidates are still logged as *not saved: disk reserve*, and the status bar says saving has stopped. | 10 GiB |
-
-These are the Moon's defaults; the sky has its own (see section 7). The status bar shows how much history is actually held and how much RAM is in use. At high frame rates or large frames, the RAM ceiling may hold less than the requested history; the clip metadata then says why collection ended. If the writer falls behind and its share is full, a clip that does not fit is not saved, but its candidate is still logged as *not saved*.
-
-### Continuous recording
-
-For predicted events (an ISS transit, a lunar occultation, a graze) or manual high-speed captures in **Preview**, record every frame continuously into one lossless SER file:
-- **Record**, beside **Save now**, works in **both Preview and Monitoring**. Optionally set a frame limit in the spin box beside **Record** (**Unlimited** = `0` records until stopped; otherwise stops automatically after that exact number of frames). Every recorded frame is written unchanged. Recordings started from **Preview** write to `<output folder>/recordings/<UTC>/` without running flash detection or touching `candidates.txt`. Stopping the stream, pressing **Stop recording**, or reaching the frame limit / playback end finishes the SER cleanly.
-- **Session → Schedule a recording…** sets a UTC start time and a length. While Monitoring, the recording starts on the first frame at or after that time and ends at its end. Start it a little before the prediction.
-- The capture mode line shows `● RECORDING` with the seconds, frames, size and write rate.
-- Each recording goes in a folder of its own inside `<output folder>/recordings/<UTC>/`: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (`session_mode: preview` or `monitoring`, optional `frame_limit:`, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
-- **Session → Output folder…** sets the single parent output folder for events, recordings, and time-lapses (section 1). Monitoring clips continue into `events/<target>/` and log `recording_start` / `recording_stop` lines in `candidates.txt`.
-- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve (checked on the output folder's drive) it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
-- Detection keeps running during Monitoring recordings: clips written meanwhile say `during_recording:` with the recording's name.
-
-When an event lasts longer than **Maximum after trigger**, it continues in a new clip whose `event.txt` names the clip before (`continues_clip:`). On the Moon each such clip starts with its own history, so it stands on its own. On the sky it starts with the next frame, so a plane crossing for minutes is not saved twice.
-
----
-
-## 10. What SeleneWatch saves
-
-Everything goes under your chosen **Output folder** (**Session → Output folder…**, default `%USERPROFILE%\SeleneWatch`):
-- **`events/moon/`** and **`events/sky/`** (Monitoring only): candidate clips, `candidates.txt`, and `guiding.txt`
-- **`recordings/`** (Preview or Monitoring **Record**, and scheduled recordings): `<UTC>/recording.ser`, `frames.txt`, `recording.txt`
-- **`timelapses/`** (**Time-lapse** mode): `<UTC>/stacks/*.fits`, `sharpened/*.fits`, `sharpening_profile.json`, `timelapse.txt`, `timelapse.mp4`, optional `timelapse.gif` and `raw/*.ser`
-
-### One folder per clip
-
-Each clip folder is named by its UTC trigger time, for example `20261115-143156-930`.
-
-| File | Contents |
-| --- | --- |
-| `event.ser` | The frames, lossless and exactly as delivered, at their native bit depth, with per-frame UTC times |
-| `event.txt` | Everything needed to interpret the clip, listed below |
-| `00_overview.png` | The clip at a glance; see below. A display image, not evidence. |
-| `01_baseline.png`, `02_event_peak.png`, `03_diff_annotated.png` | Quick-look previews for review. Display images only, not evidence. |
-
-**The overview** (`00_overview.png`) is the picture to start a review with:
-- **Top:** the peak frame, stretched so the earthshine shows. Everything that changed during the clip is drawn over it: rises in orange, falls in blue. A flash is an orange dot, a meteor an orange line, and a plane or the ISS crossing the sunlit Moon a blue band. Each trigger has a yellow box with ticks pointing at it, numbered when there are several, so it can be found even in a thumbnail.
-- **Strip:** enlarged crops of the frame before the activity, its first frame, the peak, its last frame and the frame after, each with its time from the trigger. The crops follow a moving object. The last cell shows the change around the peak.
-- **Caption:** the UTC time and frame number, the trigger's measurement, the clip's length and why it ended, flags such as *during mount correction* or *dropped frames*, and a line describing the activity: how many frames it lasted, its strongest rise or fall, and whether it stayed in place or moved, with its speed.
-
-The caption's last line suggests what the clip shows: **flash**, **meteor**, **satellite**, **aircraft**, **dark transit**, **lightning**, **seeing** or **unclear**, with the reason (for example "a straight, fast rise at 12°/s for 0.4 s"). It is a suggestion to help sort a night's clips, not a decision; nothing is moved or deleted by it. It is also in `event.txt` (`suggested_kind:`) and on the clip's line in `candidates.txt`. Speeds are in degrees per second when the site and instrument give the image scale.
-
-Many marks scattered along crater rims usually mean seeing, not an event. The overview finds changes in the clip's frames itself, so a **Save now** clip gets one too, even when nothing triggered. If it cannot be made (for example when the RAM limit refuses it), the clip is still complete and `event.txt` says why on its `overview:` line.
-
-![Example 00_overview.png clip summary](docs/images/manual-clip-overview.png)
-
-*An actual `00_overview.png` saved by Monitoring: yellow trigger ticks on the dark limb (`Moon_165506.ser` with an injected test flash), enlarged crop strip (`before` through `after` plus `change`), and diagnostic caption.*
-`event.txt` contains:
-- whether the Moon or the sky was watched;
-- the observer, site and instrument, the last clock check, and the frame intervals (how evenly the frames came);
-- the camera and its settings, and the stream description;
-- each trigger, with its detector settings;
-- test-signal marks;
-- the guiding state and any mount pulses during the clip;
-- the capture limits and why collection ended;
-- each frame's number and time.
-
-A clip is complete when `event.txt` ends with `complete: yes`. Clips are never rewritten after they are finished.
-
-### `candidates.txt`
-
-The session's running record. It gets:
-- a `session_start` line each time Monitoring starts, naming the source and camera settings;
-- a `candidate_pending` line *before* a clip is written;
-- an outcome line afterwards: `clip=<folder>` or `not_saved=<reason>`.
-
-Manual saves are marked `kind=manual`, test signals `contains_test_signal=yes`, and triggers during a mount correction `during_mount_correction=yes`.
-
-### `guiding.txt`
-
-The lock and the mount's record, written while Monitoring:
-- the lock and its quality;
-- one offset line per second;
-- every guide pulse, with the estimate that caused it and the mount's state;
-- calibration results;
-- guiding starts and stops, with reasons.
-
-### If SeleneWatch crashes
-
-Finished clips and log lines already written are safe. A clip still being collected, or still waiting in memory for the writer, can be lost. Its `candidate_pending` line remains, so you know it existed.
-
----
-
-## 11. Feature lock and guiding
-
-Open **View → Guiding**. The dock has three parts: **Feature lock**, **Mount**, and **Guiding**.
-
-### Locking on a feature
-
-The lock measures how far the image drifts. It works on its own, without a mount.
-
-- **Drag a rectangle** on the preview around a crater or other detail with structure in more than one direction. A plain click still selects a pixel.
-- Or click a pixel and press **Lock at selection** for a 64 × 64 pixel box around it.
-
-A region is refused, with the reason, if it is:
-- **mostly saturated**;
-- **too flat** (too little detail against the noise);
-- **detailed in one direction only**, such as a straight piece of limb or terminator, which fixes the position across it but not along it.
-
-Once locked:
-- the **dashed box** marks where the feature was locked;
-- the **solid box** marks where it is now: green while the lock holds, amber when the last search failed.
-
-**Drift** is the median of the last few seconds of measurements, in frame pixels. Positive is right and down. It is also shown in arcseconds once a calibration knows the image scale.
-
-If the feature is not found for 2 s (cloud, a bump), the state becomes **lock lost, searching**, and SeleneWatch looks in a wider area. It resumes when it finds the feature twice in the same place. After 60 s it stops searching; lock again.
-
-The lock survives Stop and Start of the stream. A change of frame size or format releases it. **Unlock** releases it by hand.
+Even with lunar tracking enabled, the Moon moves continuously in declination (~0.25″/s) and polar/periodic mount errors push the disk across the sensor over minutes or hours. **Feature lock** tracks drift on screen even without a connected mount; **Guiding** sends gentle, bounded ASCOM pulse corrections to hold the target inside a configurable box.
 
 ![Feature lock locked onto a lunar crater in the Guiding dock](docs/images/manual-guiding.png)
 
-***Feature lock** locked onto a lunar crater (`State: Locked`): the green box tracks the crater across frames while **Guiding** reports pixel drift (`dx`, `dy`) in the dock and status bar.*
+***Guiding** dock locked onto a lunar crater (`State: Locked`): dashed rectangle marks the lock reference, solid green box tracks current position, and status bar shows live drift.*
 
-### Connecting a mount
+### Step-by-step Feature Lock & Guiding
 
-Under **Mount**, choose **ASCOM telescope** and:
+1. **Lock onto a feature:** In **Preview**, open **View → Guiding**. Either **drag a rectangle** around a crater or detailed region (contrast in two dimensions—avoid flat mare or straight limb edges) or click a point and press **Lock at selection** (`64 × 64 px` default box).
+   - **Dashed box:** original locked position. **Solid green box:** current tracked feature (turns amber if temporarily missed; searches wider for 60 s during cloud/bumps before releasing).
+   - **Unlock** releases by hand. A valid lock persists across Preview -> Monitoring transitions and stream restarts unless geometry changes.
+2. **Connect a mount:** Under **Mount**, pick **ASCOM telescope** -> **Choose…** (select 64-bit out-of-process driver such as EQMOD, GS Sky, Device Hub, or ASCOM Simulator) -> **Connect**. Confirm **tracking is ON** in your mount's driver (SeleneWatch never turns mount tracking on/off). Use **Simulated mount** when practicing with the Synthetic source.
+3. **Calibrate:** With a lock held and mount tracking, press **Calibrate** (~1 min). SeleneWatch pulses West/East, takes up Dec backlash, and pulses North/South to measure image axis orientation, drift, and pixels moved per ms of pulse. *Recalibrate if your mount performs a meridian flip.*
+4. **Start guiding:** Set **Tolerance** (default `3.0 %` of shorter frame side—kept comfortably wider than ~1–2 px atmospheric seeing jitter) and press **Start guiding**.
+   - **Gentle correction rule:** Corrections fire only when an axis leaves the tolerance box, removing 70% of error per pulse and settling before re-measuring. Dec pulses never reverse on small overshoots to avoid backlash oscillation.
+   - **Safety bounds:** SeleneWatch sends **pulse-guide commands only** (no slew, sync, park, or rate changes), stops guiding automatically if the lock is lost, tracking turns off, pier side changes, 3 pulses fail to reduce error, per-minute pulse budget (`20 s/min`) is exceeded, or calibration moves `> 0.25 px/frame` (lower guide rate in your mount driver if refused).
+   - **Evidence integrity:** Every pulse and once-per-second offset logs to `guiding.txt`. Any event candidate triggered during a pulse or settle interval stays saved and is marked `during_mount_correction=yes`. On real lunar data, guide corrections at `<= 0.25 px/frame` stayed quiet at `K ≥ 12`; check your guiding candidate rate on your first guided night before leaving unattended.
 
-1. Press **Choose…**. ASCOM's own chooser opens. Select your mount's driver, for example EQMOD, and close the chooser.
-2. Press **Connect**. The dock shows the mount's state: tracking, slewing, parked, pier side, and guide rates.
-3. Make sure **tracking is on** in the mount's driver. SeleneWatch never turns tracking on or off.
+### Guiding Controls Reference
 
-Choose **Simulated mount** to try everything with the **Synthetic** source (testing tools on). The simulated mount drifts the painted Moon slowly and responds to guide pulses.
+| Section | Control / Readout | Purpose |
+| --- | --- | --- |
+| **Feature lock** | **Lock at selection** / **Unlock** / drag box | Lock onto a 2D crater feature and inspect **State**, **Drift** (`dx`, `dy`), **Last match** score, and template quality |
+| **Mount** | **ASCOM telescope** / **Simulated mount**, **Choose…**, **Connect** / **Disconnect** | Connects mount late-bound via ASCOM COM and displays tracking, slewing, park, pier side, and guide rates |
+| **Guiding** | **Calibrate**, **Start guiding**, **Tolerance** (`% of field`) | Measures mount axes once per pier side and holds feature drift inside tolerance (`3 %` default) via bounded guide pulses |
 
-Drivers that run as their own program (EQMOD, GS Sky, Device Hub, the ASCOM simulators) work. A 32-bit driver that loads into the program cannot be used by 64-bit SeleneWatch; connecting to one fails with that explanation.
+---
 
-### Calibrating
+## 4. Workflow 1 — Lunar Flashes on the Earth-Illuminated Side
 
-With a lock held and the mount connected and tracking, press **Calibrate**. SeleneWatch:
-1. pulses **west**, then **east** back;
-2. takes up the declination **backlash**;
-3. pulses **north**, then **south** back.
+### Functionality
 
-It measures how the image moves each time, so it needs no focal length, pixel size, or camera angle. This takes about a minute, and the dock shows each step. The result shows each axis's speed and direction on the image, the angle between the axes (near 90°), the field's own drift, and how far a pulse moves the image per frame.
+SeleneWatch models every pixel's running mean brightness and noise variance over a sliding reference time constant (**Background and noise → Reference time**, default `2.0 s`), protected by a robust median-absolute-deviation frame noise floor (**Minimum noise**, default `0.5 ADU`). Because threshold **K** scales each pixel by its *own* local noise, one threshold handles quiet earthshine (where tiny faint flashes clear `K`) and turbulent sunlit rims simultaneously.
 
-A calibration holds for the **side of the pier** it was made on. After a meridian flip, calibrate again; SeleneWatch discards the old one itself.
+Passing pixels (`≥ K` above reference) are grouped into 8-connected patches, verified against **Minimum patch** (default `8 px`, rejecting single hot pixels), **Maximum patch** (`400 px`), and **Maximum box / patch** (`4.00 ×`, rejecting elongated seeing/edge artifacts), with configurable **Allow a one-frame trigger** (on by default so real 20–50 ms flashes are never lost). Triggered patches hold their reference box while the rest of the frame keeps learning continuously—meaning overlapping flashes at separate positions are still caught without going blind.
 
-### Guiding
+### Main Use Case
 
-Set the **Tolerance**: how far the feature may wander before SeleneWatch corrects. It is a percentage of the frame's shorter side, default 3 %, and the dock shows it in pixels (and arcseconds when known). Make it several times larger than the seeing's jitter. Then press **Start guiding**.
+Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect brief **meteoroid impact flashes** (20 ms–1 s duration) and save lossless SER video with pre-event baseline frames, exact UTC timing, visual overviews, and animated GIF previews ready for cross-observer confirmation.
 
-- While the drift stays inside the tolerance on both mount axes, nothing is sent.
-- When an axis leaves it, one short guide pulse removes 70 % of that error. SeleneWatch then waits for the image to settle and for a fresh measurement before deciding again.
-- Declination is not reversed for a small overshoot, which avoids fighting backlash.
+### Step-by-Step Workflow
 
-**What SeleneWatch will and will not do with the mount:**
-- It sends **guide pulses only**: never a slew, sync, park, tracking change, or rate change. A pulse ends by itself, so a crash cannot leave the mount moving.
-- Guiding is **off whenever a stream starts** and ends when the stream stops. Press **Start guiding** again.
-- Guiding **stops and says why** if:
-  - the mount is not tracking, is slewing or parked, cannot pulse-guide, or is alt-azimuth;
-  - the mount changes pier side;
-  - the lock is lost;
-  - three corrections in a row fail to reduce the error;
-  - pulses would add up to more than 20 s in a minute.
+1. Connect your camera, set **Output folder** and **Site and instrument** ([Section 2](#2-common-setup--connecting-a-source)), and press **Start preview**.
+2. Frame the dark earthshine side (keeping enough sunlit detail nearby if you plan to lock **Guiding** on a crater; [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
+3. Under **View → Display and capture**, switch display to **Auto-stretch** or **Black / white levels** to inspect earthshine terrain while confirming in **Histogram** that the bright terminator doesn't overly wash out your earthshine gain/exposure balance. *(Adjust **Pre-event history** `5.0 s`, **Quiet tail** `3.0 s`, **Maximum after trigger** `10.0 s`, **RAM ceiling**, and **Disk reserve** while stopped if needed.)*
+4. Open **View → Detection** with **Watching** set to **The Moon**.
+   - **Optional sensitivity test:** Enable **View → Testing tools**, click on the earthshine area, set **Test flash** (`FWHM`, `Peak ADU`, `Duration frames`), and press **Inject blip** to verify the faintest flash your current **K** catches without false triggers. Remember to turn **View → Testing tools** OFF before a real observing run (`testing_tools="off"`).
+   - Alternatively watch **Peak sigma** and the 10-second trace for ~1 minute in Preview: set **K** comfortably above normal quiet seeing peaks (often `8–16 sigma` depending on seeing and limb proximity; `6.0 sigma` is the starting value).
+5. Turn on **Guiding** if using a mount, then press **Start monitoring**. If using a camera, SeleneWatch briefly reopens the camera with verified locked settings and relearns the reference (re-arm **Start guiding** after the reopen).
+6. Leave Monitoring running. If you spot a flash or anomaly by eye that fell under threshold, press **Save now** to force a manual clip of the pre-event ring + post-event tail.
+7. Press **Stop monitoring** then **Stop stream** when done, and review saved clips in `<output folder>/events/moon/<UTC>/` starting with `00_overview.png` and `04_event_preview.gif`.
 
-  It does not restart by itself.
-- If the mount's guide rate moves the image more than 0.25 pixels per frame, guiding is refused, because the detector would see the motion. Lower the guide rate in the mount's driver and calibrate again.
+### Screenshots
 
-**Evidence.** Every pulse is logged in `guiding.txt` while Monitoring. A candidate whose trigger falls during a pulse, or the settle time after it, is marked `during_mount_correction=yes`, and its `event.txt` lists the pulses inside the clip. The candidate is still saved; the mark tells the reviewer the image was moving.
+![Test flash injected on the dark lunar limb showing Would trigger](docs/images/manual-test-flash.png)
 
-> **Watch this on your first guided session.** Guide pulses move bright edges, which the detector may notice. On recorded lunar frames moved the way corrections move the image, at a K where the unmoved field was quiet (12 to 24), corrections at the allowed speed added at most one candidate in any run, always inside a marked window. At K 6 they added many, almost all marked. The synthetic test scene is sharper and triggers on drift alone. Check how often candidates appear while guiding on your own data before trusting an unattended session. The measurements are in [docs/guide-pulse-detector.md](docs/guide-pulse-detector.md).
+*Tuning **The Moon** flash detection in **Preview** (`Moon_165506.ser`): injecting a calibrated **Test flash** (`FWHM 4.0 px`, `Peak 140.0 ADU`, `8 frames`) at `(155, 432)` on the dark limb spikes the 10 s sigma graph past `K 12.0` (`Would trigger — capture OFF`).*
 
-### Time-lapse outputs and Re-sharpen & Rebuild
+![Example 00_overview.png clip summary](docs/images/manual-clip-overview.png)
 
-Each time-lapse session creates `<output folder>/timelapses/<UTC>/`:
-- **`stacks/`** — aligned linear 32-bit floating-point FITS (`BITPIX = -32`, 2D mono or 3D plane-sequential R,G,B), one per burst period, with headers `DATE-OBS`, `DATE-AVG`, `DATE-END`, `EXPTIME`, `GAIN`, `RAWCOUNT`, `STACKCNT`, `QUALSCOR`, `ALIGNDX`, `ALIGNDY`, `ALIGNROT`, and `SHARPPRO`.
-- **`sharpened/`** — the linear unsharp-masked (`applyLinearSharpening`) 32-bit FITS copy produced with your live sharpening preset (`Off`, `Mild`, `Medium`, or saved custom profile). Never gamma-stretched.
-- **`sharpening_profile.json`** — sharpening and video tone-mapping parameters used for the run.
-- **`timelapse.mp4`** / **`timelapse.gif`** — tone-mapped (brightness-levelled across stacks, session-wide stretch/gamma, overlap-cropped) animation written via LGPL FFmpeg (`libopenh264` for MP4; two-pass palette for GIF).
-- **`raw/*.ser`** — optional raw burst frames saved only if **Save raw burst SER** is ticked.
-- **`timelapse.txt`** — session log recording settings, site/instrument/camera metadata, any skipped overload periods (`skip period=…`), per-stack quality and alignment offsets, stop reason (`stopped by the observer`, `duration complete`, `UTC end time reached`, `target stack count reached`, or `disk reserve`), and exported video paths.
+*Saved `00_overview.png` summary (`Moon_165506.ser` with injected flash): yellow trigger ticks on the dark limb, 6-panel strip (`before` -> `first` -> `peak` -> `last` -> `after` -> `change`), diagnostic caption, and `04_event_preview.gif` saved beside it in the same clip folder.*
 
-Open **Session → Re-sharpen time-lapse…** (or press **Re-sharpen…** on the **Time-lapse** dock) to open a finished session, preview before/after on the highest-quality stack (or any stack), save/reuse named profiles, choose **Rebuild video only** (fast stretch/gamma/fps/GIF tweak without re-sharpening), or apply non-destructively into `<session>/sharpened_<profile>_<UTC>/` without overwriting your original `stacks/`, `sharpened/`, or video.
+### Detection & Capture Controls Reference
+
+| Panel | Control | Purpose & Default |
+| --- | --- | --- |
+| **Detection** | **Watching** | Set to **The Moon** (editable while stopped; keeps Moon & Sky settings separate) |
+| | **Sensitivity K** | Rise threshold in noise units (`sigma`). Sliders show live teal mark (`now`) + amber recent 10 s peak (`6.0 sigma` default) |
+| | **Minimum / Maximum patch** | Allowed connected bright-pixel count (`8 px` / `400 px`) |
+| | **Maximum box / patch** | Bounding-box area ÷ pixel count compactness limit (`4.00 ×`) |
+| | **Allow a one-frame trigger** | On = single-frame flashes trigger immediately; Off = requires 2 consecutive frames |
+| | **Preview overlay** | Screen-only `None`, `Sigma map` (pixels `≥ K` red), or `Noise map` (ADU) |
+| | **Background and noise** | **Reference time** (`2.0 s` exponential learning) & **Minimum noise** (`0.5 ADU` floor) |
+| | **Peak sigma plot & readouts** | 10-second log trace, clicked-pixel noise, patch rejection reason, `Candidate — capture ON` |
+| **Display & capture** | **Pre-event history** / **Quiet tail** / **Max after** | Source seconds kept before trigger (`5.0 s`), after activity (`3.0 s`), cap per clip (`10.0 s`) |
+| | **RAM ceiling** / **Disk reserve** | Shared live frame ceiling (`2048 MiB`) and minimum free disk guard (`10 GiB`) |
+
+---
+
+## 5. Workflow 2 — Objects Passing in Front of the Moon (Shadows & Transits)
+
+### Functionality
+
+Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial aircraft, birds, bats) make pixels *darker* rather than brighter, while predicted events (**ISS transits**, **stellar/planetary occultations**, **grazes**) require every single frame captured continuously across a known UTC window. SeleneWatch supports **both**:
+
+1. **Automated Darkening Detection (`Also trigger on darkening`):** Analyzes negative pixel excursions (`fall ≥ K × noise`) through an independent patch pass that **never merges rising and falling pixels**. Dark patches use separate silhouette-sized limits (**Maximum dark patch** `20000 px`, **Maximum dark box / patch** `10.00 ×`) plus an optional **Large darkening** full-field trigger (`Off` by default) for close aircraft or birds filling the frame. Overviews draw darkened trails in **blue** and suggest `dark transit`, while `04_event_preview.gif` loops up to 10 frames showing the crossing motion.
+2. **Continuous & Scheduled Lossless SER Capture (`Record` / `Schedule a recording…`):** Streams every frame straight to `<output folder>/recordings/<UTC>/recording.ser` with per-frame `frames.txt` and `recording.txt` on a dedicated writer thread. Works manually in **Preview** or **Monitoring** with an **Unlimited** (`0`) or explicit **frame count limit** (`N frames`), or automatically at a predicted UTC start time and duration during **Monitoring** while flash/darkening detection continues uninterrupted.
+
+### Main Use Case
+
+- **Unplanned transits:** Leaving the camera watching sunlit or crescent lunar terrain to automatically catch surprise aircraft, bird, or satellite silhouettes crossing the disk (**Also trigger on darkening**).
+- **Predicted ISS transits & occultations:** Capturing guaranteed, zero-skipped-frame continuous SER files around ephemeris predictions (either manually via **Record** in Preview/Monitoring or unattended via **Schedule a recording…**).
+
+### Step-by-Step Workflow
+
+#### Path A — Automated transit / shadow hunting (**Monitoring**)
+
+1. Frame the sunlit Moon or limb in **Preview** (optionally enable **Guiding**, [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
+2. Under **View → Detection**, ensure **Watching** is **The Moon**, then tick **Also trigger on darkening**.
+3. Set **Sensitivity K** to **`12.0 sigma` or higher** for sunlit lunar terrain. Archive measurements show `K = 6` triggers heavily on sunlit crater-rim seeing, whereas `K ≥ 12` stays completely quiet on normal seeing while catching ~90%-darkness ISS and plane silhouettes.
+4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds).
+5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
+
+#### Path B — Predicted ISS transit or occultation (Manual or Scheduled SER Recording)
+
+1. Verify **Session → Output folder…** points to a fast local SSD, and enable **NTP clock check** in **Session → Site and instrument…** if micro/millisecond timing comparison is needed.
+2. Focus, set ROI/exposure/gain in **Preview**:
+   - **Quick manual capture (Preview or Monitoring):** Leave frame limit at **Unlimited** (`0`)—or enter an exact frame count (`N frames`) to stop automatically—and press **Record** ~10 s before the transit/occultation. Press **Stop recording** afterwards (or let the frame count finish).
+   - **Scheduled UTC capture (Monitoring):** Open **Session → Schedule a recording…**, enter the predicted **From** UTC time (start slightly early, e.g., −15 s) and **For** duration in seconds, press **OK**, and start **Monitoring**. SeleneWatch starts and stops the SER file on the exact frame timestamps and logs `recording_start`/`recording_stop` lines in `candidates.txt`.
+
+### Screenshots
+
+![Monitoring with Also trigger on darkening enabled for lunar transits](docs/images/manual-darkening-transit.png)
+
+*Workflow 2 Detection configuration (`Moon_165506.ser`): **Sensitivity K** at `12.0 sigma` (zero false triggers on sunlit terrain), **Also trigger on darkening** enabled with `20000 px` / `10.00 ×` dark silhouette limits, plus **Record** / `Unlimited` in the top toolbar.*
+
+![00_overview.png of a dark silhouette transit across the Moon](docs/images/manual-transit-overview.png)
+
+*Example `00_overview.png` of a silhouette transit (`Moon_165506.ser` with an injected 0.90-depth crossing ellipse): blue trail across the sunlit Moon, `before / first / peak / after / change` crops, `Suggested: dark transit`, and `04_event_preview.gif` (`10 frames`, `286 × 212`, `282 KB`, `4 fps`).*
+
+### Transit & Continuous Recording Controls Reference
+
+| Panel / Bar | Control | Purpose & Starting Value |
+| --- | --- | --- |
+| **Detection** *(Darkening)* | **Also trigger on darkening** | Enables negative-excursion patch detection (`Off` by default; `ChangeKind::Fall`) |
+| | **Maximum dark patch** | Largest dark silhouette allowed (`20000 px` default) |
+| | **Maximum dark box / patch** | Silhouette bounding-box ratio limit (`10.00 ×` default) |
+| | **Large darkening** | Triggers when this % of unmasked pixels falls by `K` at once (`Off` default) |
+| | **Dark readout** | Live `Deepest fall ... sigma. Largest dark patch ... px` |
+| **Top Bar & Session** | **Record** + Frame limit (`Unlimited` / `N frames`) | Lossless continuous SER writer in both **Preview** and **Monitoring** (`recordings/<UTC>/`); auto-stops cleanly on limit, Stop, or disk guard |
+| | **Session → Schedule a recording…** | Arms a UTC `From` / `For` continuous recording triggered by frame timestamps during **Monitoring** |
+
+---
+
+## 6. Workflow 3 — Lunar and Planetary Time-Lapses
+
+### Functionality
+
+Unlike impact-flash monitoring (which captures long, high-gain earthshine exposures), lucky-imaging time-lapses demand short exposures at high frame rates. SeleneWatch provides **Time-lapse mode** as an independent running state (**flash detection OFF**):
+
+- **Fixed-cadence parallel lucky imaging:** Every **Interval** (e.g. `60 s`), SeleneWatch collects incoming frames over your **Capture window** (e.g. `15 s`), scores sharpness on the target ROI in real time, and retains only the sharpest **Keep best %** capped at **Max frames/period (`100–200` frames max, hard cap 200)** so burst RAM stays bounded.
+- **Overload skip protection:** Heavy two-pass subpixel phase correlation, Lanczos/bicubic resampling, sigma-clipped stacking, session alignment (**Moon** rigid translation + Alt-Az field rotation with optional **Lunar anchor**, or **Planet** limb-centroid centering), linear sharpening, and 32-bit FITS I/O run asynchronously on a dedicated worker thread. If processing ever falls behind the cadence or `MemoryBudget`, the pre-capture gate skips that period cleanly without dropping or queueing unbounded frames in RAM and logs it in `timelapse.txt`.
+- **Linear FITS archive & Re-sharpen & Rebuild:** Every completed period writes unsharpened `stacks/*.fits` (`BITPIX = -32`) and linearly unsharp-masked `sharpened/*.fits` immediately so crashes never lose finished stacks. At stop (or stop condition / `Disk reserve`), FFmpeg builds `timelapse.mp4` (`libopenh264`, target-masked brightness levelling, valid-overlap cropping, stretch/gamma) and optional `timelapse.gif`. Afterwards, **Re-sharpen time-lapse…** lets you tune USM sharpening sliders and tone-mapping live on any session without overwriting `stacks/`.
+
+### Main Use Case
+
+Recording hours-long sequences of **lunar terminator crater shadows creeping across the Moon**, **Jupiter/Saturn rotation movies** (with Great Red Spot / cloud belts moving cleanly while the disk stays centered), or **lunar/solar eclipse sequences**.
+
+### Step-by-Step Workflow
+
+1. In **Preview**, frame the Moon or planet cleanly, tune short lucky-imaging exposure/gain (use **Histogram** so sunlit crater rims or bright cloud belts stay unclipped), and optionally lock & start **Guiding** on a Moon crater ([Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
+2. Open **View → Time-lapse**:
+   - Select **Target preset**: **Moon** (default `25 %` best, `150` max frames/period, rigid translation + rotation alignment) or **Planet** (`15 %` best, `200` max frames/period, limb-centroid centering tolerant of surface rotation).
+   - Set **Interval** (`≥ Capture window`), **Capture window** (for planets keep ≤ 60–90 s to avoid planetary rotation blur during one burst), **Keep best %**, and **Max frames/period** (`100–200`).
+   - *(Moon optional)* Press **Select lunar anchor** and drag a box on the preview around a sunlit crater that will stay illuminated throughout your session, or tick **Crop around locked feature**.
+   - Pick initial **Sharpening** (`Mild (default)`, `Off`, `Medium`, or saved custom profile), **Stop condition** (**Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks**), and **Animation** outputs (**MP4**, optional **GIF**, FPS, optional raw SER burst archival).
+3. Press **Start time-lapse**. Monitor **Latest stack**, **Filmstrip loop**, per-stack stats (`Q` quality, shift, rotation), and any overload/cloud/disk-reserve warnings.
+4. When finished (or on **Stop time-lapse**), inspect `timelapses/<UTC>/timelapse.mp4` / `.gif`. Open **Session → Re-sharpen time-lapse…** (or **Re-sharpen…**) anytime to fine-tune sliders live (`Before` vs `After`), save reusable profiles, choose **Rebuild video only** for fast FPS/gamma/GIF adjustments, or **Apply to all** non-destructively into `<session>/sharpened_<profile>_<UTC>/`.
+
+### Screenshots
 
 ![Time-lapse dock running on Moon_165104.ser with sunlit lunar anchor box and live thumbnails](docs/images/manual-timelapse.png)
 
-***Time-lapse** running in real time on `Moon_165104.ser` (`1296 × 964 Mono8`, `Interval 7.0 s`, `Capture window 4.0 s`, `Keep best 35 %`): the sunlit **Lunar anchor** `(710, 380) 260 × 220 px` tracks `31.6 px` of field drift across 4 completed bursts while updating **Latest stack** and the **Filmstrip loop** (`3 / 4`). Flash detection stays **OFF** and the **Record** control in the top toolbar accepts **Unlimited** or an explicit frame limit.*
+*Live **Time-lapse** (`Moon_165104.ser`): pink **Lunar anchor** `(710, 380) 260 × 220 px` tracks `31.6 px` of drift while updating **Latest stack** and **Filmstrip loop** (`3 / 4`).*
 
 ![Re-sharpen dialog showing Before/After unsharpened vs. USM-sharpened Clavius FITS stack](docs/images/manual-resharpen.png)
 
-***Re-sharpen time-lapse…** inspecting the finished `Moon_165104.ser` session: automatically selects the highest-quality stack (`Q=0.00291`) for live before/after tuning with synced sliders and spin boxes (`USM radius 1.50 px`, `USM amount 1.80`, `Gamma 1.10`) without modifying the linear FITS stacks in `stacks/`.*
+***Re-sharpen time-lapse…** (`Moon_165104.ser`): defaults to the highest-quality FITS stack (`Q=0.00291`), featuring synced live sliders (`25 ms` coalesced updates + cached `Before` image) for non-destructive tuning and export.*
+
+### Time-Lapse & Re-Sharpen Controls Reference
+
+| Window | Control | Purpose |
+| --- | --- | --- |
+| **Time-lapse dock** | **Target preset** (`Moon` / `Planet`) | Switches inter-stack alignment strategy and fills keep-% / cap defaults |
+| | **Interval** & **Capture window** | Fixed cadence `t_k = t_0 + k × interval` and burst sampling duration (`window ≤ interval`) |
+| | **Keep best** & **Max frames/period** | Percentage retained per burst capped at `100–200` frames max (hard cap `200`) |
+| | **Sharpening** | Linear profile (`Off`, `Mild`, `Medium`, or saved `Profile: ...`) |
+| | **Lunar anchor** / **Crop around locked feature** | Moon sunlit anchor box for hours-long shadow shifts, or crop output around guiding lock |
+| | **Stop condition** | **Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks** |
+| | **Animation** (`MP4` / `GIF`, `fps`) & **Save raw SER bursts** | End-of-session video formats, frame rate, and optional bulky raw SER burst preservation |
+| | **Session progress & preview** | Live bar, elapsed/countdown, stack telemetry, warnings, **Latest stack**, & **Filmstrip loop** |
+| **Re-sharpen dialog** | **Linear sharpening sliders** | `USM radius (px)` (`0.30–15.0 px`), `USM amount` (`0.00–6.00`), `Noise threshold`, `Pre-denoise` |
+| | **Video tone-mapping & export** | `Auto stretch`, `Black/White level` sliders, `Gamma`, `Brightness levelling`, `Drop below quality`, `Crop to valid overlap`, `MP4` / `GIF` / `fps` |
+| | **Saved profiles** & **Rebuild video only** | Save/load reusable profiles; **Rebuild video only** re-encodes MP4/GIF fast from existing `sharpened/` FITS; **Apply to all** writes non-destructive `sharpened_<profile>_<UTC>/` |
 
 ---
 
-## 12. An observing session, step by step
+## 7. Workflow 4 — Watching the Sky with a Fixed Camera
 
-### Lunar monitoring
+### Functionality
 
-1. Connect the camera and, if guiding, the mount. Start SeleneWatch.
-2. Choose the camera under **Source** and press **Start preview**.
-3. Focus and frame the Moon. Set exposure and gain in the Camera dock. Use **Display and capture** levels and the **Histogram** to check that the bright limb is not badly clipped and that the earthshine side is visible.
-4. Watch the **Detection** panel for a minute. If **Would trigger** appears often with nothing there, raise **K** a little or check the size limits. A test flash on the earthshine side shows what is still caught.
-5. If guiding:
-   1. Lock on a crater near the area you watch.
-   2. Connect the mount and check that it is tracking.
-   3. **Calibrate**, then **Start guiding**.
-6. Press **Start monitoring**. With a camera, the stream briefly restarts, and you must start guiding again.
-7. Leave it running. Check the status bar now and then: frames, dropped frames, candidates, RAM, and the lock readout.
-8. **Stop monitoring**, then **Stop stream**, at the end.
-9. Review the clip folders and `candidates.txt`. Compare candidates with other observers' records by UTC time.
+Switching **Watching** (at the top of **Detection**) from **The Moon** to **The sky** activates an independent wide-field detector profile engineered for unattended multi-hour sky patrols without affecting Moon settings:
 
-### Sky watch (dusk to dawn)
+- **Streak-friendly limits:** Starting thresholds allow larger patches (**Maximum patch** `3000 px`) and elongated diagonal tracks (**Maximum box / patch** `30.00 ×`) with `3 s` pre-event history, `5 s` quiet tail, and `20 s` post-trigger clip cap. Long events (aircraft crossing for minutes) chain into contiguous linked clips without repeating pre-event history.
+- **Large brightening:** Triggers automatically as `kind=brightening` whenever at least **2 %** (editable) of *unmasked* pixels rise by `K` at once—catching lightning strokes and bright fireball flares while keeping noise statistics intact. Slow dusk/dawn brightness ramps adapt harmlessly.
+- **Slow-drifter release (`Learn a patch after`):** Fixed cameras watch stars drift slowly across pixels. A patch firing continuously beyond `20 s` is released to learn into the background so drifting stars/planets fade cleanly, while fast meteors, aircraft, and satellites continue firing cleanly on fresh pixels.
+- **Horizon polygon & rectangle masks (`Draw mask`):** Excludes trees, rooftops, streetlights, and passing headlights from both detection and noise estimation while saving the masked SER pixels completely unmodified for evidence.
+- **Dusk-to-dawn automation & sky-following exposure:** Computes NOAA solar altitude every 30 s to start Monitoring automatically below **Sun below** (`−10°` default) and stop at dawn, and can step camera exposure/gain smoothly between user limits to keep sky background median inside `8–30 %` of full scale (logged as `exposure_change` in `candidates.txt`).
+- **Triage & compact animated previews:** Every clip generates `00_overview.png` showing the full trajectory, `suggested_kind` classification (`meteor`, `lightning`, `aircraft`, `satellite`, `flash`, `seeing`, `unclear`), and `04_event_preview.gif` (`≤ 10` frames, `≤ 512 px`, `≤ 512 KiB`) for rapid morning scanning.
 
-1. Enter your site position once under **Session → Site and instrument…** with **Position known** ticked.
-2. Choose your camera under **Source** (optionally tick **Connect at startup**), and under **View → Detection** switch **Watching** to **The sky**.
-3. Start Preview briefly to frame the sky, tune initial exposure/gain, and exclude trees, roofs, or streetlights with **Draw mask**.
-4. Tick **Watch from dusk to dawn** and set **Sun below** (default −10°); optionally enable **Follow the sky's brightness** with your allowed exposure and gain limits.
-5. Leave SeleneWatch ready in **Preview** (or stopped with the camera selected); it starts and stops Monitoring automatically at dusk and dawn, and you can inspect saved clips and overviews in `events` the next morning.
+### Main Use Case
 
-### Predicted occultation or transit (continuous recording)
+Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to automatically patrol from dusk to dawn for **meteors, fireballs, lightning, satellites, and aircraft**, ready to inspect the next morning via overviews and GIF loops.
 
-1. Check **Session → Output folder…** so recordings write to a fast local SSD, and verify your PC clock check under **Session → Site and instrument…**.
-2. Start Preview, tune exposure, gain, and ROI. Either record directly in **Preview** (using **Record** with **Unlimited** or an explicit frame count), or press **Start monitoring** a couple of minutes before the predicted time if you also want flash/transit detection running.
-3. Press **Record** manually before the event and **Stop recording** afterwards (or set the UTC start time and duration in **Session → Schedule a recording…** during Monitoring).
+### Step-by-Step Workflow
 
-### Lunar or planetary lucky-imaging time-lapse
+1. Confirm **Position known** with accurate latitude/longitude under **Session → Site and instrument…** ([Section 2.3](#23-site-instrument--clock-accuracy)) and select your camera under **Source** (optionally tick **Connect at startup**).
+2. Under **View → Detection**, while stopped, switch **Watching** to **The sky** (Notice **Guiding** automatically shows `(Moon only)` and disables).
+3. Press **Start preview** briefly at twilight or night, tune initial exposure/gain, and exclude horizon clutter:
+   - Toggle **Draw mask** ON: click corners around trees, roofs, or streetlights and **double-click** to close a polygon (or **drag** for a rectangle; up to `16` shapes of up to `32` corners). Turn **Draw mask** OFF when finished.
+4. Configure unattended options in **The sky** group:
+   - Tick **Watch from dusk to dawn** and set **Sun below** (`−10.0°`).
+   - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation.
+5. Either press **Start monitoring** immediately—or stop/leave Preview ready and let the **Watch from dusk to dawn** schedule arm Monitoring automatically once dusk arrives.
+6. The next morning, open `events/sky/<UTC>/`: browse `04_event_preview.gif` and `00_overview.png` thumbnails plus `candidates.txt` (`suggested_kind=`) to review events quickly before opening full `event.ser` clips.
 
-1. Start **Preview**, frame the Moon or planet, set exposure, gain, and optional ROI, and optionally start **Guiding** on a Moon crater so the field stays centered.
-2. Open **View → Time-lapse** and set **Target preset** to **Moon** (rigid translation + Alt-Az field rotation alignment) or **Planet** (limb-centroid alignment tolerant of planetary rotation). If watching the Moon across hours while shadows move along the terminator, press **Select lunar anchor** and drag a box around a crater area that stays sunlit throughout the session.
-3. Choose **Interval**, **Capture window**, **Keep best**, and **Max frames/period** (`100–200` recommended; capped at `200` per period so burst RAM stays bounded), plus your **Stop condition** (**Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks**), **Sharpening** profile, and **Animation** (**MP4** / **GIF**, frame rate).
-4. Press **Start time-lapse**. Monitor **Latest stack**, the **Filmstrip loop**, and any overload, cloud, guiding-loss, or disk-reserve warnings; press **Stop time-lapse** (or let the stop condition / disk reserve trigger) to assemble `timelapse.mp4` / `.gif`.
-5. Afterwards, use **Re-sharpen…** to tune unsharp masking or video stretch/gamma non-destructively from `stacks/*.fits`.
+### Screenshots
+
+![Sky watch mode with polygon horizon mask and dusk-to-dawn settings](docs/images/manual-sky-mask.png)
+
+***The sky** target in **Detection**: hatched red polygon **Mask** excludes the roofline/horizon, while **Watch from dusk to dawn** (`Sun below -10.0°`), **Follow the sky's brightness**, and streak limits (`3000 px`, `30.00 ×`) prepare an unattended night run.*
+
+![Overnight ZWO ASI120MM Mini Sky capture showing a crisp single-frame streak and hatched rooftop mask](docs/images/manual-sky-streak.jpg)
+
+*Real overnight **Sky** capture with a fixed **ZWO ASI120MM Mini** (`2026-11-18 01:02:56.656 UTC`, frame `473952`): the hatched polygon mask at bottom right excludes rooftops and chimneys while a single-frame streak (`Peak 41.5 σ`, `28 px` in `8 × 24` at `1154, 514`, `K 13.9`) triggers a clean `240`-frame (`7.99 s`) clip.*
+
+![Overnight ZWO ASI120MM Mini Sky capture showing a compact flash/flare candidate](docs/images/manual-sky-flash.jpg)
+
+*Another real event from the same all-night **Sky** run (`2026-11-17 23:56:58.445 UTC`, frame `355544`): a compact flash/flare (`Peak 41.0 σ`, `27 px` in `6 × 8` at `234, 768`, `K 13.9`) captured cleanly across adjacent `before` -> `peak` -> `after` crop frames while masked buildings remain ignored.*
+
+### Sky Watch Controls Reference
+
+| Control | Purpose | Sky Starting Value |
+| --- | --- | --- |
+| **Watching** | Must be **The sky** (changes while stopped; isolated from Moon settings) | `The Moon` initially |
+| **Large brightening** | Share of unmasked pixels rising by `K` in one frame (lightning / fireball flare) | `2.0 % of frame` |
+| **Learn a patch after** | Releases persistent patches (e.g. slowly drifting stars/planets) back to background learning | `20 s` |
+| **Mask** (`Draw mask` / `Clear`) | Polygon (click corners + double-click) or rectangle (drag) exclusion zones, up to 16 × 32 corners | None |
+| **Watch from dusk to dawn** & **Sun below** | NOAA solar altitude scheduler starting/stopping capture automatically once per night | `Off`, `−10.0°` |
+| **Follow the sky's brightness** | Auto-adjusts Exposure (within `ms` bounds, max 2× step) then Gain (up to `maxGain` by step) when median sky leaves `8–30 %` for 60 s (`≥ 2 min` cooldown) | `Off` (`1.00–2000.00 ms`, `Gain fixed`) |
+| **Sensitivity K** / **Min & Max patch** / **Box / patch** | Tuned wider for meteor streaks across the field | `6.0 sigma`, `8–3000 px`, `30.00 ×` |
+| **Capture history / tail / max** | Short pre-event history + longer tail to keep multi-stroke lightning & bright trails whole | `3.0 s` / `5.0 s` / `20.0 s` |
 
 ---
 
-## 13. Troubleshooting
+## 8. What SeleneWatch Saves (Folders, Clips & Logs)
+
+All outputs reside inside your single chosen **Output folder** (**Session → Output folder…**, default `%USERPROFILE%\SeleneWatch`):
+
+```text
+<output folder>/
+    events/
+        moon/
+            candidates.txt
+            guiding.txt
+            <UTC stamp>/          e.g. 20261115-143156-930/
+                event.ser
+                event.txt
+                00_overview.png
+                01_baseline.png
+                02_event_peak.png
+                03_diff_annotated.png
+                04_event_preview.gif
+        sky/
+            candidates.txt
+            <UTC stamp>/
+                (same files as above)
+    recordings/
+        <UTC stamp>/
+            recording.ser
+            frames.txt
+            recording.txt
+    timelapses/
+        <UTC start>/
+            stacks/               0001_<UTC>.fits ... (unsharpened linear 32-bit float)
+            sharpened/            0001_<UTC>.fits ... (linear sharpened; or sharpened_<profile>_<UTC>/)
+            sharpening_profile.json
+            timelapse.mp4
+            timelapse.gif         (optional)
+            timelapse.txt
+            raw/*.ser             (optional raw burst archival)
+```
+
+### Inside each event clip (`events/moon/<UTC>/` & `events/sky/<UTC>/`)
+
+| File | Purpose & Rule |
+| --- | --- |
+| **`event.ser`** | Primary lossless evidence at native 8-bit or 16-bit depth, untouched by stretches/masks/overlays, with per-frame UTC trailer timestamps. |
+| **`event.txt`** | Complete self-describing sidecar: mode (`moon`/`sky`), source, camera geometry/exposure/gain, site/instrument, clock check, trigger measurements, mask, guiding state & overlapping pulses, per-frame index/UTC/gaps, test marks, overview/GIF status, ending with `complete: yes`. |
+| **`00_overview.png`** | **Display only:** auto-stretched peak frame with cumulative changes (rises in orange, falls in blue), numbered yellow trigger marks, hatched mask (Sky), 6-panel tracking crop strip (`before` -> `first` -> `peak` -> `last` -> `after` -> `change`), speed in `px/s` and `°/s`, and `Suggested:` kind. |
+| **`01_baseline.png`**, **`02_event_peak.png`**, **`03_diff_annotated.png`** | **Display only:** quick-look PNGs of the pre-onset frame, strongest peak frame, and pre-update positive reference difference. |
+| **`04_event_preview.gif`** | **Display only:** compact looping animation (`4 fps`) covering `2` frames before onset through peak to `2` frames after end, capped at **10 frames maximum**, anchored to steady auto-stretch levels, and downscaled (`≤ 512 px` long edge, `≤ 512 KiB`) for rapid inspection of both lunar and sky clips. |
+
+- **`candidates.txt`:** Session log inside `events/moon/` and `events/sky/` recording every `session_start`, `candidate_pending`, final `clip=<folder>` or `not_saved=<reason>` outcome, `manual`, `contains_test_signal=yes`, `during_mount_correction=yes`, `recording_start`/`stop`, and `exposure_change`. Even if a clip is refused for RAM or disk reserve, its trigger remains logged.
+- **`guiding.txt`:** Lock initialization, 1-second offsets, calibration vectors, and every guide pulse issued during Monitoring.
+- **If SeleneWatch closes unexpectedly:** Completed clips (`complete: yes`), written `candidates.txt` lines, finished FITS stacks, and flushed continuous `recording.ser` headers up to the last second are preserved. Unfinished clips leave a `candidate_pending` record without `complete: yes`.
+
+---
+
+## 9. Troubleshooting
 
 | Problem | What to try |
 | --- | --- |
-| The camera does not appear under **Source** | That camera family was not built into this copy of SeleneWatch. See [DEVELOPER.md](DEVELOPER.md) (in the source repository). |
-| The camera is not in the device list | Check the cable and the vendor driver, then press **Refresh cameras**. **Session → Camera support…** shows whether the camera maker's SDK library was found, its version, and the cameras it sees. For QHY, Player One and ToupTek, choose the maker's x64 DLL there or with **Choose … DLL** in the camera panel. |
-| **Start monitoring** is greyed out | The source has ended or failed, or a mode change is still in progress. |
-| A recording is refused | Compressed AVI files are not supported. Convert to SER or uncompressed AVI. |
-| "Reading the recording's index" | A large AVI file without an index is read chunk by chunk in the background; playback starts when that is done. The file's frame count and length appear next to its name. |
-| A recording stopped: "disk too slow" | The disk could not keep up with the camera. Record to a faster disk (an SSD), lower the frame rate or the region of interest, or raise **RAM ceiling**. |
-| "RAM ceiling …" messages | Lower the history or the frame size, or raise **RAM ceiling** before starting. |
-| "Saving stopped: … below the disk reserve" | The output drive is nearly full. Free some space or move older clips; candidates are logged meanwhile. Lower **Disk reserve** only if you are sure the drive can take it. |
-| On the sky, clips all night of one star | It drifts past a fixed camera. Check that **Learn a patch after** is not *Never*, or put the camera on a tracking mount. |
-| Too many candidates | Raise **K**, lower **Maximum patch**, or turn off one-frame triggers. Use the sigma map to see what fires. |
-| Lock refused: "one direction only" | Choose a region with craters or detail in two directions, not a straight edge. |
-| Calibration fails: "does not respond" | The mount is not moving the image. Check that the right driver is connected, that the mount accepts guide pulses, and that the guide rate is not tiny. With a simulator and a real camera this is expected. |
-| Calibration fails: axes "not near 90" | The lock may have slipped or the field moved unevenly; calibrate again. |
-| Guiding refused: "pixels per frame" | The guide rate is too fast for this image scale. Lower it in the mount's driver and calibrate again. |
-| Guiding stopped: "corrections have no effect" | The calibration no longer matches the mount, or the lock is on the wrong feature. Check, lock, and calibrate again. |
-| "Mount not responding" | A driver call has not returned. Acquisition and detection continue. Check the mount's connection and its driver window. |
-| `guiding.txt could not be written` | The disk is full or the output folder is not writable. Guiding continues, but its record is incomplete. |
-| Output folder refused at Start | The chosen output drive is unplugged or the folder was deleted. Reconnect the drive or choose a valid local folder in **Session → Output folder…** (SeleneWatch never silently falls back). |
-| Time-lapse "Processing fell behind interval" | Burst stacking took longer than **Interval**, so a period was skipped cleanly by the overload gate instead of piling up in RAM. Increase **Interval**, shorten **Capture window**, lower **Max frames/period**, or crop to an ROI. |
-| Time-lapse "Sharpness dropped sharply (possible cloud)" | Burst quality fell well below the reference stack. The stack is still saved to `stacks/` / `sharpened/`; in **Re-sharpen time-lapse…**, raise **Drop below quality** to exclude cloudy frames from the final MP4/GIF. |
+| Camera missing under **Source** | Check USB cable and vendor driver, click **Refresh cameras**, and inspect **Session → Camera support…** (or pick x64 vendor DLL for QHY / Player One / ToupTek; 32-bit DLLs cannot be loaded). |
+| **Start monitoring** is greyed out | Source is stopped, finished, or currently transitioning modes (or check **Record** / **Time-lapse** state). |
+| Recording file refused | Compressed AVIs are unsupported; convert to `.ser` or uncompressed `.avi`. |
+| *"Reading the recording's index"* | Unindexed large AVI is being walked safely on a background worker thread; Preview starts once complete. |
+| Output folder refused at Start | Configured drive is missing/unplugged or read-only. Reconnect or select a valid local SSD folder in **Session → Output folder…** (never writes to cloud-blocked or fallback folders behind your back). |
+| Recording stops: *"disk too slow"* / *"disk reserve"* | Record to a faster local SSD, crop ROI, lower frame rate, or free space above **Disk reserve**. |
+| *"RAM ceiling …"* / *"writer busy"* messages | Lower **Pre-event history**, **Max after trigger**, or ROI, or increase **RAM ceiling**. |
+| Sky watch triggers all night on one star | Confirm **Learn a patch after** is enabled (e.g. `20 s`), or mount on a tracking equatorial mount. |
+| Too many false candidates on Moon | Raise **Sensitivity K** (especially `K ≥ 12` when **Also trigger on darkening** is used on sunlit terrain), adjust **Minimum/Maximum patch**, or disable 1-frame triggers. Use **Sigma map** overlay to diagnose. |
+| Lock refused: *"one direction only"* | Drag over a 2D crater feature rather than a straight lunar limb or flat mare. |
+| Calibration fails / Guiding stops | Check ASCOM tracking is ON, verify guide pulses move the image, keep guide speed `≤ 0.25 px/frame`, and recalibrate after a meridian flip. |
+| Time-lapse *"Processing fell behind interval"* | Overload gate cleanly skipped a period instead of stalling acquisition/RAM; increase **Interval**, shorten **Capture window**, reduce **Max frames/period**, or tighten ROI. |
+| Time-lapse *"Sharpness dropped sharply (possible cloud)"* | Stack still saved to `stacks/`; raise **Drop below quality** in **Re-sharpen time-lapse…** when building final MP4/GIF. |
 
 ---
 
-## 14. What has been tested
+## 10. What Has Been Tested
 
-| Area | State |
+| Area | Verification status |
 | --- | --- |
-| Synthetic source, recordings, detector, clip writing | Automated tests; checks on the author's SER and AVI archive |
-| ZWO ASI120MM Mini | Bench tests in RAW8 and RAW16, including two 30-minute unattended runs |
-| QHY cameras | Software complete; hardware test pending |
-| Player One and ToupTek cameras | Automated tests with simulated cameras; each maker's DLL loaded and its version read on Windows; hardware test pending |
-| Feature lock | Automated tests; followed features through two archive lunar recordings |
-| Calibration and guiding | Automated tests and a full simulated run; ASCOM checked against the ASCOM telescope simulator |
-| A real mount under the Moon | **Pending** |
-| Detector settings for real observing | Partial; tuning on real earthshine data is pending |
-| Watching the sky | Automated tests with constructed meteors, lightning, drifting stars and masks; the dusk-to-dawn schedule and the exposure follower with a simulated camera. **A night outside is pending**, and its starting values are first guesses |
-| Continuous and scheduled recording | Automated tests on played files and constructed slow disks; **a predicted transit recorded with a schedule is pending** |
-| The clip overview | Automated tests; checked on archive lunar recordings |
-| Darkening (transits) | Automated tests; measured on five archive recordings with injected silhouettes: at K 12 it adds nothing to an unchanged field and catches near-black crossings on four of the five. **A real transit is pending.** |
-| Output folder & Preview recording | Automated core, session, and UI tests verifying single remembered output root (`events/`, `recordings/`, `timelapses/`), cloud-sync warning, missing drive/folder refusal, legacy `events/` notice isolation, and Preview manual recording with optional frame limit |
-| Lucky-imaging time-lapse & Re-sharpen | Automated unit and UI tests verifying CFITSIO 2D/3D linear float FITS + metadata, OpenCV debayer/phase-correlation/sigma-clip/Moon anchor rotation/Planet centroid alignment, fixed-cadence parallel worker + overload skip gate, `diskReserveBytes` stop-and-build, FFmpeg MP4/GIF encoding, and non-destructive `ResharpenDialog`; checked on real archive recordings (`Moon_165104.ser` `1296×964` with sunlit anchor & `Re-sharpen`, and Jupiter `21-26-10-184.avi` at `15.15 fps`); **an overnight Moon/Planet live-camera run is pending** |
+| **Synthetic source, SER/AVI readers, detector, clip writing** | Automated CTest suites; verified across 352 archive AVI and SER files (FireCapture timestamps & unindexed walks) |
+| **Event animated GIF previews (`04_event_preview.gif`)** | Automated `overview`, `sky`, and `darkening` tests verifying `≤ 10` peak-centred frames (`2 before .. 2 after`), `≤ 512 px` downscale, and `≤ 512 KiB` cap across Moon/Sky/Darkening clips; verified on `Moon_165506.ser` transit test |
+| **ZWO ASI120MM Mini** | Bench-tested in `RAW8` & `RAW16`, live readbacks, byte integrity, two 30-minute soak runs, and all-night outdoor fixed-camera Sky Watch sessions |
+| **QHYCCD, Player One & ToupTek adapters** | Automated tests with deterministic fakes + x64 DLL runtime probes on Windows; **physical camera hardware runs pending** |
+| **Feature lock, calibration & ASCOM guiding** | Automated unit/simulation tests, archive drift tracking (`Moon_180548.avi`, `Moon_165104.ser`), `0.25 px/frame` pulse-detector study, and ASCOM OmniSim check; **live equatorial mount under the Moon pending** |
+| **Workflow 1 — Lunar flashes** | Automated core/detection/window suites; archive sunlit-terrain measurements & test-injection brackets; **calibrated earthshine field run pending** |
+| **Workflow 2 — Objects passing in front of the Moon & Continuous recording** | Automated `darkening` & `session_record` suites; archive darkening probe across 5 Moon recordings (`K ≥ 12`); **unplanned real lunar transit & scheduled ephemeris run pending** |
+| **Workflow 3 — Lucky-imaging Time-lapse & Re-sharpen** | Automated 11-test `timelapse` suite (CFITSIO 2D/3D linear float FITS, OpenCV stacking/rotation/centroid, parallel overload skip gate, `diskReserveBytes`, FFmpeg MP4/GIF) & `ui` slider/rebuild tests; checked on real `Moon_165104.ser` (`1296 × 964` with sunlit anchor & `Re-sharpen`) and Jupiter `21-26-10-184.avi`; **multi-hour telescope field run pending** |
+| **Workflow 4 — Watching the sky (fixed camera)** | Automated `sky` & `sky_extras` suites **plus all-night outdoor fixed-camera runs on a ZWO ASI120MM Mini** (`K 13.9`, `patch 20–30761 px`, polygon horizon mask), capturing meteors/streaks, planes, cosmic rays, and brief flashes cleanly |
+| **Unified Output folder & Preview recording** | Automated `core`, `session_record`, `display_capture`, `manual_capture`, `zwo`, and `ui` tests covering persistence, cloud warnings, missing drive refusal, upgrade isolation, and frame-limited Preview recording |
 
-Details are in [features.md](features.md), [implemented features.md](implemented%20features.md), and the validation notes in [docs](docs/).
+Full design specs, validation reports, and feature histories are recorded in [implemented features.md](implemented%20features.md), [features.md](features.md), and [docs/](docs/).

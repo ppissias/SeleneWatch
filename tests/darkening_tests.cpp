@@ -5,8 +5,10 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImageReader>
 #include <QtTest/QTest>
 
 #include <cmath>
@@ -147,6 +149,12 @@ void DarkeningTest::aDarkDiskCrossingIsOneClipShownInBlue()
     const QString text = contents(QDir(results[0].folder).filePath("event.txt"));
     QVERIFY(text.contains(" kind=darkening fall_adu="));
     QVERIFY(text.contains(" darkening=yes max_dark_pixels=20000 max_dark_box_ratio=10"));
+    QVERIFY(text.contains("preview_gif: 04_event_preview.gif "));
+    const QString gifPath = QDir(results[0].folder).filePath("04_event_preview.gif");
+    QVERIFY(QFile::exists(gifPath));
+    QImageReader gif(gifPath);
+    QVERIFY(gif.imageCount() >= 1 && gif.imageCount() <= 10);
+    QVERIFY(QFileInfo(gifPath).size() <= 512 * 1024);
     const QImage saved(QDir(results[0].folder).filePath("00_overview.png"));
     // The main view is 200 pixels wide, enlarged four times; the disk's path
     // runs along row 50.

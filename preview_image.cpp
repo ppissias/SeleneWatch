@@ -83,53 +83,61 @@ double midtones(double m, double value)
     return (m - 1) * value / ((2 * m - 1) * value - m);
 }
 
-} // namespace
-
-QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings, DisplayLevels* levels)
+AutoStretchCurve autoStretchFromFrame(const Frame& frame, double* outMedian = nullptr)
 {
-    if (!hasPreviewSamples(frame) || !settings.valid()
-        || static_cast<int>(frame.bayer) < 0 || static_cast<int>(frame.bayer) > 4) return {};
     const MemoryBudget budget = frame.data.get_allocator().budget;
     const int maximum = maximumCode(frame);
-    double black = settings.mode == DisplayMode::Window ? settings.black * maximum : 0;
-    double white = settings.mode == DisplayMode::Window ? settings.white * maximum : maximum;
-    double median = 0, m = 0.5;
-    if (settings.mode == DisplayMode::Auto)
+    AutoStretchCurve curve{0.0, static_cast<double>(maximum), 0.5};
+    BudgetVector<double> grid{BudgetAllocator<double>(budget)};
+    const size_t count = static_cast<size_t>(frame.width) * frame.height;
+    const size_t step = std::max(size_t{1}, (count + 8191) / 8192);
+    grid.reserve(std::min(count, size_t{8192}));
+    size_t sample = 0;
+    for (size_t base = 0; base < count; base += step, ++sample)
     {
-        BudgetVector<double> grid{BudgetAllocator<double>(budget)};
-        const size_t count = static_cast<size_t>(frame.width) * frame.height;
-        const size_t step = std::max(size_t{1}, (count + 8191) / 8192);
-        grid.reserve(std::min(count, size_t{8192}));
-        size_t sample = 0;
-        for (size_t base = 0; base < count; base += step, ++sample)
-        {
-            // Walk within each stratum so an even stride does not always
-            // sample the same Bayer column/filter phase.
-            grid.push_back(sampleAt(frame, std::min(base + sample % step, count - 1)));
-        }
-        std::sort(grid.begin(), grid.end());
-        black = grid[(grid.size() - 1) / 1000];
-        white = grid[(grid.size() - 1) * 999 / 1000];
-        median = grid[grid.size() / 2];
-        if (white <= black) { black = 0; white = maximum; }
-        const double centre = std::clamp((median - black) / (white - black), 0.0, 1.0);
-        if (centre > 0 && centre < 1) m = std::clamp(midtones(0.25, centre), 0.000001, 0.999999);
+        // Walk within each stratum so an even stride does not always
+        // sample the same Bayer column/filter phase.
+        grid.push_back(sampleAt(frame, std::min(base + sample % step, count - 1)));
     }
-    if (levels) *levels = {black, white, median};
-    const bool bayer = settings.debayer && frame.bayer != BayerPattern::None && frame.format != PixelFormat::RGB888;
+    if (grid.empty()) return curve;
+    std::sort(grid.begin(), grid.end());
+    curve.black = grid[(grid.size() - 1) / 1000];
+    curve.white = grid[(grid.size() - 1) * 999 / 1000];
+    const double median = grid[grid.size() / 2];
+    if (outMedian) *outMedian = median;
+    if (curve.white <= curve.black)
+    {
+        curve.black = 0;
+        curve.white = maximum;
+    }
+    const double centre = std::clamp((median - curve.black) / (curve.white - curve.black), 0.0, 1.0);
+    if (centre > 0 && centre < 1)
+        curve.midtones = std::clamp(midtones(0.25, centre), 0.000001, 0.999999);
+    return curve;
+}
+
+QImage renderSamples(const Frame& frame, bool linear, double black, double white, double m,
+    bool invert, bool debayer)
+{
+    const MemoryBudget budget = frame.data.get_allocator().budget;
+    const double span = std::max(1.0, white - black);
+    const bool bayer = debayer && frame.bayer != BayerPattern::None && frame.format != PixelFormat::RGB888;
     const bool colour = bayer || frame.format == PixelFormat::RGB888;
     QImage image = makeBudgetImage(frame.width, frame.height,
         colour ? QImage::Format_RGB888 : QImage::Format_Grayscale8, budget);
     if (image.isNull()) return {};
     const auto convert = [&](double value) {
         int display;
-        if (settings.mode == DisplayMode::Linear)
+        if (linear)
         {
             const int shift = frame.format == PixelFormat::Mono16 ? std::max(0, frame.significantBits - 8) : 0;
             display = std::clamp(static_cast<int>(value) >> shift, 0, 255);
         }
-        else display = static_cast<int>(std::round(255 * midtones(m, std::clamp((value - black) / (white - black), 0.0, 1.0))));
-        return static_cast<uchar>(settings.invert ? 255 - display : display);
+        else
+        {
+            display = static_cast<int>(std::round(255 * midtones(m, std::clamp((value - black) / span, 0.0, 1.0))));
+        }
+        return static_cast<uchar>(invert ? 255 - display : display);
     };
     for (int y = 0; y < frame.height; ++y)
     {
@@ -142,6 +150,41 @@ QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings, Display
         }
     }
     return image;
+}
+
+} // namespace
+
+AutoStretchCurve computeAutoStretchCurve(const Frame& frame)
+{
+    if (!hasPreviewSamples(frame)) return {};
+    return autoStretchFromFrame(frame);
+}
+
+QImage renderAutoStretchedFrame(const Frame& frame, const AutoStretchCurve& curve, bool invert, bool debayer)
+{
+    if (!hasPreviewSamples(frame) || static_cast<int>(frame.bayer) < 0 || static_cast<int>(frame.bayer) > 4)
+        return {};
+    return renderSamples(frame, false, curve.black, curve.white, curve.midtones, invert, debayer);
+}
+
+QImage frameToPreviewImage(const Frame& frame, DisplaySettings settings, DisplayLevels* levels)
+{
+    if (!hasPreviewSamples(frame) || !settings.valid()
+        || static_cast<int>(frame.bayer) < 0 || static_cast<int>(frame.bayer) > 4) return {};
+    const int maximum = maximumCode(frame);
+    double black = settings.mode == DisplayMode::Window ? settings.black * maximum : 0;
+    double white = settings.mode == DisplayMode::Window ? settings.white * maximum : maximum;
+    double median = 0, m = 0.5;
+    if (settings.mode == DisplayMode::Auto)
+    {
+        const AutoStretchCurve curve = autoStretchFromFrame(frame, &median);
+        black = curve.black;
+        white = curve.white;
+        m = curve.midtones;
+    }
+    if (levels) *levels = {black, white, median};
+    return renderSamples(frame, settings.mode == DisplayMode::Linear, black, white, m,
+        settings.invert, settings.debayer);
 }
 
 PreviewHistogram frameToPreviewHistogram(const Frame& frame, bool fitRange)
