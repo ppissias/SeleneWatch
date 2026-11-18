@@ -1,0 +1,806 @@
+#include "timelapse/stack_processor.h"
+
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/video.hpp>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+
+namespace {
+
+int maxCodeFor(const Frame& frame)
+{
+    return frame.format == PixelFormat::Mono16 ? (1 << std::clamp(frame.significantBits, 1, 16)) - 1 : 255;
+}
+
+int shiftFor(const Frame& frame)
+{
+    return frame.alignment == BitAlignment::High ? std::max(0, 16 - frame.significantBits) : 0;
+}
+
+int bayerToCvRgbCode(BayerPattern pattern)
+{
+    // SeleneWatch names patterns by top-left 2x2 cell; OpenCV names by (1,1)-offset cell.
+    switch (pattern)
+    {
+    case BayerPattern::RGGB: return cv::COLOR_BayerBG2RGB_EA;
+    case BayerPattern::GRBG: return cv::COLOR_BayerGB2RGB_EA;
+    case BayerPattern::GBRG: return cv::COLOR_BayerGR2RGB_EA;
+    case BayerPattern::BGGR: return cv::COLOR_BayerRG2RGB_EA;
+    case BayerPattern::None: break;
+    }
+    return -1;
+}
+
+QRect clampRect(const QRect& r, int w, int h)
+{
+    if (w <= 0 || h <= 0 || !r.isValid()) return QRect(0, 0, w, h);
+    const QRect clamped = r.intersected(QRect(0, 0, w, h));
+    return clamped.width() >= 8 && clamped.height() >= 8 ? clamped : QRect(0, 0, w, h);
+}
+
+// Converts planar FitsImage to interleaved CV_32FC1 or CV_32FC3.
+cv::Mat fitsToMat(const FitsImage& img)
+{
+    if (!img.valid()) return {};
+    const size_t plane = static_cast<size_t>(img.width) * img.height;
+    if (img.channels == 1)
+    {
+        cv::Mat m(img.height, img.width, CV_32FC1);
+        std::memcpy(m.data, img.pixels.data(), plane * sizeof(float));
+        return m;
+    }
+    std::vector<cv::Mat> ch(3);
+    for (int c = 0; c < 3; ++c)
+    {
+        ch[c] = cv::Mat(img.height, img.width, CV_32FC1);
+        std::memcpy(ch[c].data, img.pixels.data() + static_cast<size_t>(c) * plane, plane * sizeof(float));
+    }
+    cv::Mat merged;
+    cv::merge(ch, merged);
+    return merged;
+}
+
+FitsImage matToFits(const cv::Mat& m, const FitsMetadata& meta = {})
+{
+    FitsImage img;
+    img.width = m.cols;
+    img.height = m.rows;
+    img.channels = m.channels() == 3 ? 3 : 1;
+    img.meta = meta;
+    const size_t plane = static_cast<size_t>(img.width) * img.height;
+    img.pixels.resize(plane * img.channels);
+    if (img.channels == 1)
+    {
+        cv::Mat cont = m.isContinuous() ? m : m.clone();
+        std::memcpy(img.pixels.data(), cont.data, plane * sizeof(float));
+    }
+    else
+    {
+        std::vector<cv::Mat> ch;
+        cv::split(m, ch);
+        for (int c = 0; c < 3; ++c)
+        {
+            cv::Mat cont = ch[c].isContinuous() ? ch[c] : ch[c].clone();
+            std::memcpy(img.pixels.data() + static_cast<size_t>(c) * plane, cont.data, plane * sizeof(float));
+        }
+    }
+    return img;
+}
+
+cv::Mat burstFrameToMat(const PreparedBurstFrame& bf)
+{
+    FitsImage tmp;
+    tmp.width = bf.width;
+    tmp.height = bf.height;
+    tmp.channels = bf.channels;
+    tmp.pixels = bf.pixels; // small vector copy only when converting
+    return fitsToMat(tmp);
+}
+
+cv::Mat matLuminance(const cv::Mat& m)
+{
+    if (m.channels() == 1) return m;
+    cv::Mat lum;
+    // OpenCV RGB order (we keep R=0, G=1, B=2).
+    cv::transform(m, lum, cv::Matx13f(0.2126f, 0.7152f, 0.0722f));
+    return lum;
+}
+
+// Foreground mask separating illuminated target from dark sky when dark sky is present.
+cv::Mat targetForegroundMask(const cv::Mat& lum, double* outTargetMean = nullptr)
+{
+    double minVal = 0, maxVal = 0;
+    cv::minMaxLoc(lum, &minVal, &maxVal);
+    const cv::Scalar allMean = cv::mean(lum);
+    // Estimate dark background via 15th percentile sample on a coarse grid.
+    std::vector<float> samples;
+    const int stepY = std::max(1, lum.rows / 64);
+    const int stepX = std::max(1, lum.cols / 64);
+    samples.reserve(4200);
+    for (int y = 0; y < lum.rows; y += stepY)
+    {
+        const float* row = lum.ptr<float>(y);
+        for (int x = 0; x < lum.cols; x += stepX) samples.push_back(row[x]);
+    }
+    double bg = minVal;
+    if (!samples.empty())
+    {
+        const size_t idx = samples.size() * 15 / 100;
+        std::nth_element(samples.begin(), samples.begin() + static_cast<ptrdiff_t>(idx), samples.end());
+        bg = samples[idx];
+    }
+    const double span = maxVal - bg;
+    cv::Mat mask;
+    if (span > 0.02 && (allMean[0] - bg) < 0.65 * span)
+    {
+        const double thresh = bg + 0.08 * span;
+        cv::compare(lum, thresh, mask, cv::CMP_GT);
+    }
+    else
+    {
+        mask = cv::Mat(lum.size(), CV_8UC1, cv::Scalar(255));
+    }
+    if (cv::countNonZero(mask) < 16)
+        mask = cv::Mat(lum.size(), CV_8UC1, cv::Scalar(255));
+    if (outTargetMean)
+        *outTargetMean = std::max(1e-5, cv::mean(lum, mask)[0]);
+    return mask;
+}
+
+// Estimates subpixel shift needed to align `moving` onto `ref` using a Hann window.
+// Returns (dx, dy) such that shifting `moving` by (+dx, +dy) aligns it with `ref`.
+cv::Point2d estimateShiftPhase(const cv::Mat& refLum, const cv::Mat& movLum, const cv::Mat& hann, double* outResponse = nullptr)
+{
+    cv::Mat r, m;
+    refLum.convertTo(r, CV_32F);
+    movLum.convertTo(m, CV_32F);
+    // Suppress broad illumination domes / shadow gradients so phase correlation
+    // locks onto crisp craters and limbs rather than the patch window center.
+    if (r.cols >= 24 && r.rows >= 24)
+    {
+        cv::Mat rLow, mLow;
+        cv::GaussianBlur(r, rLow, cv::Size(21, 21), 4.0);
+        cv::GaussianBlur(m, mLow, cv::Size(21, 21), 4.0);
+        cv::Mat rHp = r - rLow;
+        cv::Mat mHp = m - mLow;
+        cv::Scalar stdR, stdM;
+        cv::meanStdDev(rHp, cv::noArray(), stdR);
+        cv::meanStdDev(mHp, cv::noArray(), stdM);
+        if (stdR[0] > 1e-4 && stdM[0] > 1e-4)
+        {
+            r = std::move(rHp);
+            m = std::move(mHp);
+        }
+    }
+    r -= cv::mean(r)[0];
+    m -= cv::mean(m)[0];
+    const cv::Mat win = (!hann.empty() && hann.size() == r.size()) ? hann : cv::Mat();
+    double response = 0;
+    // phaseCorrelate(src1, src2) returns shift of src2 relative to src1.
+    // Shifting `m` by -shift aligns `m` onto `r`.
+    const cv::Point2d shift = cv::phaseCorrelate(r, m, win, &response);
+    if (outResponse) *outResponse = response;
+    if (!std::isfinite(shift.x) || !std::isfinite(shift.y) || response < 0.015)
+        return {0.0, 0.0};
+    return {-shift.x, -shift.y};
+}
+
+} // namespace
+
+PreparedBurstFrame prepareBurstFrame(const Frame& raw,
+    const std::optional<QRect>& cropRoi,
+    const std::optional<QRect>& qualityRoi)
+{
+    PreparedBurstFrame out;
+    if (raw.width <= 0 || raw.height <= 0 || bytesPerPixel(raw.format) == 0
+        || raw.data.size() != frameBytes(raw.width, raw.height, raw.format))
+    {
+        return out;
+    }
+
+    const int maxCode = maxCodeFor(raw);
+    const QRect fullRect(0, 0, raw.width, raw.height);
+    const QRect crop = cropRoi ? clampRect(*cropRoi, raw.width, raw.height) : fullRect;
+
+    cv::Mat colorOrGray;
+    if (raw.format == PixelFormat::RGB888)
+    {
+        const cv::Mat full(raw.height, raw.width, CV_8UC3, const_cast<uint8_t*>(raw.data.data()));
+        const cv::Mat sub = full(cv::Rect(crop.x(), crop.y(), crop.width(), crop.height()));
+        sub.convertTo(colorOrGray, CV_32FC3, 1.0 / 255.0);
+    }
+    else if (raw.bayer != BayerPattern::None)
+    {
+        const int code = bayerToCvRgbCode(raw.bayer);
+        // Keep even top-left coordinates and a small margin before debayering so Bayer phase is preserved.
+        const int pad = 4;
+        const int ex0 = std::max(0, (crop.x() - pad) & ~1);
+        const int ey0 = std::max(0, (crop.y() - pad) & ~1);
+        const int ex1 = std::min(raw.width, (crop.x() + crop.width() + pad + 1) & ~1);
+        const int ey1 = std::min(raw.height, (crop.y() + crop.height() + pad + 1) & ~1);
+        const int ew = ex1 - ex0;
+        const int eh = ey1 - ey0;
+
+        cv::Mat debayered;
+        if (raw.format == PixelFormat::Mono8)
+        {
+            const cv::Mat full(raw.height, raw.width, CV_8UC1, const_cast<uint8_t*>(raw.data.data()));
+            const cv::Mat bayerSub = full(cv::Rect(ex0, ey0, ew, eh));
+            cv::demosaicing(bayerSub, debayered, code);
+            debayered.convertTo(debayered, CV_32FC3, 1.0 / maxCode);
+        }
+        else
+        {
+            const int bitShift = shiftFor(raw);
+            cv::Mat bayerSub(eh, ew, CV_16UC1);
+            const auto* src = reinterpret_cast<const uint16_t*>(raw.data.data());
+            for (int y = 0; y < eh; ++y)
+            {
+                uint16_t* dstRow = bayerSub.ptr<uint16_t>(y);
+                const uint16_t* srcRow = src + static_cast<size_t>(ey0 + y) * raw.width + ex0;
+                for (int x = 0; x < ew; ++x)
+                    dstRow[x] = static_cast<uint16_t>(srcRow[x] >> bitShift);
+            }
+            cv::demosaicing(bayerSub, debayered, code);
+            debayered.convertTo(debayered, CV_32FC3, 1.0 / maxCode);
+        }
+        const cv::Rect inner(crop.x() - ex0, crop.y() - ey0, crop.width(), crop.height());
+        colorOrGray = debayered(inner).clone();
+    }
+    else if (raw.format == PixelFormat::Mono8)
+    {
+        const cv::Mat full(raw.height, raw.width, CV_8UC1, const_cast<uint8_t*>(raw.data.data()));
+        const cv::Mat sub = full(cv::Rect(crop.x(), crop.y(), crop.width(), crop.height()));
+        sub.convertTo(colorOrGray, CV_32FC1, 1.0 / maxCode);
+    }
+    else
+    {
+        const int bitShift = shiftFor(raw);
+        colorOrGray = cv::Mat(crop.height(), crop.width(), CV_32FC1);
+        const auto* src = reinterpret_cast<const uint16_t*>(raw.data.data());
+        const float inv = 1.0f / static_cast<float>(maxCode);
+        for (int y = 0; y < crop.height(); ++y)
+        {
+            float* dstRow = colorOrGray.ptr<float>(y);
+            const uint16_t* srcRow = src + static_cast<size_t>(crop.y() + y) * raw.width + crop.x();
+            for (int x = 0; x < crop.width(); ++x)
+                dstRow[x] = static_cast<float>(srcRow[x] >> bitShift) * inv;
+        }
+    }
+
+    const cv::Mat lum = matLuminance(colorOrGray);
+    QRect qRoi(0, 0, crop.width(), crop.height());
+    if (qualityRoi)
+    {
+        const QRect shifted = qualityRoi->translated(-crop.x(), -crop.y());
+        qRoi = clampRect(shifted, crop.width(), crop.height());
+    }
+    const cv::Mat qPatch = lum(cv::Rect(qRoi.x(), qRoi.y(), qRoi.width(), qRoi.height()));
+    double targetBrightness = 0;
+    const cv::Mat fgMask = targetForegroundMask(qPatch, &targetBrightness);
+
+    cv::Mat smoothed, lap;
+    cv::GaussianBlur(qPatch, smoothed, cv::Size(5, 5), 1.0);
+    cv::Laplacian(smoothed, lap, CV_32F, 3);
+    cv::Mat lapSq = lap.mul(lap);
+    const double rawSharpness = cv::mean(lapSq, fgMask)[0];
+    const double normSharpness = rawSharpness / (targetBrightness * targetBrightness + 1e-5);
+
+    const FitsImage packed = matToFits(colorOrGray);
+    out.frameIndex = raw.frameIndex;
+    out.timestamp = raw.timestamp;
+    out.width = packed.width;
+    out.height = packed.height;
+    out.channels = packed.channels;
+    out.rawMaxAdu = maxCode;
+    out.pixels = std::move(packed.pixels);
+    out.sharpness = normSharpness;
+    out.targetBrightness = targetBrightness;
+    return out;
+}
+
+BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
+    const std::optional<QRect>& alignRoi,
+    std::atomic<bool>* cancel)
+{
+    BurstStackResult result;
+    if (kept.empty())
+    {
+        result.error = "no frames in burst";
+        return result;
+    }
+
+    const int w = kept.front().width;
+    const int h = kept.front().height;
+    const int ch = kept.front().channels;
+    if (w <= 0 || h <= 0)
+    {
+        result.error = "invalid burst frame size";
+        return result;
+    }
+
+    // Order indices by sharpness descending so pass 1 averages the cleanest frames.
+    std::vector<size_t> order(kept.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return kept[a].sharpness > kept[b].sharpness;
+    });
+
+    const QRect roi = alignRoi ? clampRect(*alignRoi, w, h) : QRect(0, 0, w, h);
+    const cv::Rect cvRoi(roi.x(), roi.y(), roi.width(), roi.height());
+    cv::Mat hann;
+    cv::createHanningWindow(hann, cv::Size(roi.width(), roi.height()), CV_32F);
+
+    const cv::Mat bestMat = burstFrameToMat(kept[order.front()]);
+    const cv::Mat bestLum = matLuminance(bestMat);
+    const cv::Mat bestPatch = bestLum(cvRoi);
+
+    // Pass 1: align top subset to sharpest frame to build a low-noise reference.
+    const size_t refCount = std::min(kept.size(), std::max<size_t>(1, std::max<size_t>(4, kept.size() / 4)));
+    cv::Mat refAccum = cv::Mat::zeros(h, w, CV_32FC1);
+    for (size_t i = 0; i < refCount; ++i)
+    {
+        if (cancel && cancel->load())
+        {
+            result.error = "cancelled";
+            return result;
+        }
+        const cv::Mat lum = (i == 0) ? bestLum : matLuminance(burstFrameToMat(kept[order[i]]));
+        cv::Point2d delta(0.0, 0.0);
+        if (i > 0)
+        {
+            delta = estimateShiftPhase(bestPatch, lum(cvRoi), hann);
+            if (std::abs(delta.x) > roi.width() * 0.4 || std::abs(delta.y) > roi.height() * 0.4)
+                delta = {0.0, 0.0};
+        }
+        const cv::Matx23d M(1.0, 0.0, delta.x, 0.0, 1.0, delta.y);
+        cv::Mat warped;
+        cv::warpAffine(lum, warped, M, cv::Size(w, h), cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0));
+        refAccum += warped;
+    }
+    const cv::Mat meanRefLum = refAccum * (1.0 / static_cast<double>(refCount));
+    const cv::Mat meanRefPatch = meanRefLum(cvRoi);
+
+    // Pass 2a: align every kept frame to meanRefLum, track common overlap, sum and sumSq.
+    const int cvType = ch == 3 ? CV_32FC3 : CV_32FC1;
+    cv::Mat sum = cv::Mat::zeros(h, w, cvType);
+    cv::Mat sumSq = cv::Mat::zeros(h, w, cvType);
+    std::vector<cv::Point2d> shifts(kept.size());
+    double minDx = 0, maxDx = 0, minDy = 0, maxDy = 0;
+    for (size_t i = 0; i < kept.size(); ++i)
+    {
+        if (cancel && cancel->load())
+        {
+            result.error = "cancelled";
+            return result;
+        }
+        const cv::Mat frameMat = burstFrameToMat(kept[i]);
+        const cv::Mat lum = matLuminance(frameMat);
+        cv::Point2d delta = estimateShiftPhase(meanRefPatch, lum(cvRoi), hann);
+        if (std::abs(delta.x) > roi.width() * 0.4 || std::abs(delta.y) > roi.height() * 0.4)
+            delta = {0.0, 0.0};
+        shifts[i] = delta;
+        if (i == 0) { minDx = maxDx = delta.x; minDy = maxDy = delta.y; }
+        else
+        {
+            minDx = std::min(minDx, delta.x); maxDx = std::max(maxDx, delta.x);
+            minDy = std::min(minDy, delta.y); maxDy = std::max(maxDy, delta.y);
+        }
+
+        const cv::Matx23d M(1.0, 0.0, delta.x, 0.0, 1.0, delta.y);
+        cv::Mat warped;
+        cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+        cv::max(warped, 0.0f, warped);
+        sum += warped;
+        sumSq += warped.mul(warped);
+    }
+
+    const double invN = 1.0 / static_cast<double>(kept.size());
+    cv::Mat mean = sum * invN;
+
+    // Pass 2b: sigma-clipped average when >= 6 frames to suppress hot pixels / transits.
+    if (kept.size() >= 6)
+    {
+        cv::Mat var = sumSq * invN - mean.mul(mean);
+        cv::max(var, 1e-8f, var);
+        cv::Mat stdDev;
+        cv::sqrt(var, stdDev);
+        const cv::Mat clipTol = stdDev * 2.5 + cv::Scalar::all(0.015);
+
+        std::vector<cv::Mat> meanCh, tolCh, clipSumCh(ch), clipWeightCh(ch);
+        cv::split(mean, meanCh);
+        cv::split(clipTol, tolCh);
+        for (int c = 0; c < ch; ++c)
+        {
+            clipSumCh[c] = cv::Mat::zeros(h, w, CV_32FC1);
+            clipWeightCh[c] = cv::Mat::zeros(h, w, CV_32FC1);
+        }
+        for (size_t i = 0; i < kept.size(); ++i)
+        {
+            if (cancel && cancel->load())
+            {
+                result.error = "cancelled";
+                return result;
+            }
+            const cv::Mat frameMat = burstFrameToMat(kept[i]);
+            const cv::Matx23d M(1.0, 0.0, shifts[i].x, 0.0, 1.0, shifts[i].y);
+            cv::Mat warped;
+            cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+            cv::max(warped, 0.0f, warped);
+
+            std::vector<cv::Mat> wCh;
+            cv::split(warped, wCh);
+            for (int c = 0; c < ch; ++c)
+            {
+                cv::Mat diff, inlierMask, wMask;
+                cv::absdiff(wCh[c], meanCh[c], diff);
+                cv::compare(diff, tolCh[c], inlierMask, cv::CMP_LE);
+                inlierMask.convertTo(wMask, CV_32FC1, 1.0 / 255.0);
+                clipSumCh[c] += wCh[c].mul(wMask);
+                clipWeightCh[c] += wMask;
+            }
+        }
+        for (int c = 0; c < ch; ++c)
+        {
+            cv::Mat hasWeight, safeWeight;
+            cv::compare(clipWeightCh[c], 0.5f, hasWeight, cv::CMP_GT);
+            cv::max(clipWeightCh[c], 1.0f, safeWeight);
+            cv::Mat clippedMean = clipSumCh[c] / safeWeight;
+            clippedMean.copyTo(meanCh[c], hasWeight);
+        }
+        cv::merge(meanCh, mean);
+    }
+
+    cv::min(mean, 1.0f, mean);
+    cv::max(mean, 0.0f, mean);
+
+    const int left = std::clamp(static_cast<int>(std::ceil(std::max(0.0, maxDx))), 0, w - 1);
+    const int top = std::clamp(static_cast<int>(std::ceil(std::max(0.0, maxDy))), 0, h - 1);
+    const int right = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -minDx))), left + 1, w);
+    const int bottom = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -minDy))), top + 1, h);
+
+    result.stack = matToFits(mean);
+    result.stack.meta.rawMaxAdu = kept.front().rawMaxAdu;
+    result.validOverlap = QRect(left, top, right - left, bottom - top);
+    result.ok = true;
+    return result;
+}
+
+SessionAlignResult alignStackToReference(const FitsImage& stack,
+    const FitsImage& reference,
+    TimelapsePreset preset,
+    const std::optional<QRect>& lunarAnchor)
+{
+    SessionAlignResult out;
+    out.aligned = stack;
+    out.validOverlap = QRect(0, 0, stack.width, stack.height);
+    if (!stack.valid() || !reference.valid() || stack.width != reference.width || stack.height != reference.height)
+    {
+        out.usedFallback = true;
+        return out;
+    }
+
+    const int w = stack.width;
+    const int h = stack.height;
+    const cv::Mat srcMat = fitsToMat(stack);
+    const cv::Mat refMat = fitsToMat(reference);
+    const cv::Mat srcLum = matLuminance(srcMat);
+    const cv::Mat refLum = matLuminance(refMat);
+
+    if (preset == TimelapsePreset::Planet)
+    {
+        const auto centroidOf = [](const cv::Mat& lum) -> std::optional<cv::Point2d> {
+            const cv::Mat mask = targetForegroundMask(lum);
+            cv::Mat masked;
+            lum.copyTo(masked, mask);
+            const cv::Moments mom = cv::moments(masked, false);
+            if (mom.m00 <= 1e-6) return std::nullopt;
+            return cv::Point2d(mom.m10 / mom.m00, mom.m01 / mom.m00);
+        };
+        const auto cRef = centroidOf(refLum);
+        const auto cSrc = centroidOf(srcLum);
+        if (cRef && cSrc)
+        {
+            out.shiftX = cRef->x - cSrc->x;
+            out.shiftY = cRef->y - cSrc->y;
+        }
+        else
+        {
+            cv::Mat hann;
+            cv::createHanningWindow(hann, refLum.size(), CV_32F);
+            const cv::Point2d d = estimateShiftPhase(refLum, srcLum, hann);
+            out.shiftX = d.x;
+            out.shiftY = d.y;
+            out.usedFallback = true;
+        }
+
+        const cv::Matx23d M(1.0, 0.0, out.shiftX, 0.0, 1.0, out.shiftY);
+        cv::Mat warped;
+        cv::warpAffine(srcMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+        cv::min(warped, 1.0f, warped);
+        cv::max(warped, 0.0f, warped);
+        out.aligned = matToFits(warped, stack.meta);
+
+        const int lx = std::clamp(static_cast<int>(std::ceil(std::max(0.0, out.shiftX))), 0, w - 1);
+        const int ty = std::clamp(static_cast<int>(std::ceil(std::max(0.0, out.shiftY))), 0, h - 1);
+        const int rx = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -out.shiftX))), lx + 1, w);
+        const int by = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -out.shiftY))), ty + 1, h);
+        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+        return out;
+    }
+
+    // Moon: 2D rigid translation + rotation, anchored to lunarAnchor if selected.
+    cv::Mat fullHann;
+    cv::createHanningWindow(fullHann, refLum.size(), CV_32F);
+    double coarseResp = 0;
+    cv::Point2d coarse = estimateShiftPhase(refLum, srcLum, fullHann, &coarseResp);
+
+    std::vector<cv::Point2d> initialShifts;
+    cv::Mat mask(h, w, CV_8UC1, cv::Scalar(255));
+    if (lunarAnchor && lunarAnchor->isValid())
+    {
+        const QRect anchor = clampRect(*lunarAnchor, w, h);
+        mask.setTo(0);
+        mask(cv::Rect(anchor.x(), anchor.y(), anchor.width(), anchor.height())).setTo(255);
+
+        // If user selected a constant sunlit anchor, prefer coarse shift inside the anchor
+        // so moving shadows outside the anchor cannot bias the initial translation.
+        if (anchor.width() >= 32 && anchor.height() >= 32)
+        {
+            cv::Mat aHann;
+            cv::createHanningWindow(aHann, cv::Size(anchor.width(), anchor.height()), CV_32F);
+            const cv::Rect ar(anchor.x(), anchor.y(), anchor.width(), anchor.height());
+            double anchorResp = 0;
+            const cv::Point2d anchorShift = estimateShiftPhase(refLum(ar), srcLum(ar), aHann, &anchorResp);
+            if (anchorResp > 0.04) initialShifts.push_back(anchorShift);
+        }
+    }
+    initialShifts.push_back(coarse);
+    if (std::hypot(coarse.x, coarse.y) > 1.0)
+        initialShifts.emplace_back(0.0, 0.0);
+
+    // Build coarse-to-fine Gaussian pyramid for large shifts + off-center rotation.
+    std::vector<cv::Mat> pyrRef{refLum};
+    std::vector<cv::Mat> pyrSrc{srcLum};
+    std::vector<cv::Mat> pyrMask{mask};
+    while (pyrRef.size() < 3 && pyrRef.back().cols >= 192 && pyrRef.back().rows >= 192)
+    {
+        cv::Mat rDown, sDown, mDown;
+        cv::pyrDown(pyrRef.back(), rDown);
+        cv::pyrDown(pyrSrc.back(), sDown);
+        cv::resize(pyrMask.back(), mDown, rDown.size(), 0, 0, cv::INTER_NEAREST);
+        if (cv::countNonZero(mDown) < 64) break;
+        pyrRef.push_back(std::move(rDown));
+        pyrSrc.push_back(std::move(sDown));
+        pyrMask.push_back(std::move(mDown));
+    }
+
+    const int topLvl = static_cast<int>(pyrRef.size()) - 1;
+    const float scaleDown = static_cast<float>(1 << topLvl);
+    cv::Mat warpMatrix;
+    bool eccOk = false;
+    try
+    {
+        double bestTopCc = -2.0;
+        for (const cv::Point2d& init : initialShifts)
+        {
+            cv::Mat cand(cv::Matx23f(
+                1.0f, 0.0f, static_cast<float>(-init.x / scaleDown),
+                0.0f, 1.0f, static_cast<float>(-init.y / scaleDown)));
+            try
+            {
+                const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 60, 1e-4);
+                const double cc = cv::findTransformECC(pyrRef[static_cast<size_t>(topLvl)],
+                    pyrSrc[static_cast<size_t>(topLvl)], cand, cv::MOTION_EUCLIDEAN, criteria,
+                    pyrMask[static_cast<size_t>(topLvl)]);
+                if (cc > bestTopCc)
+                {
+                    bestTopCc = cc;
+                    warpMatrix = cand.clone();
+                }
+                if (bestTopCc >= 0.99) break;
+            }
+            catch (const cv::Exception&) {}
+        }
+
+        if (!warpMatrix.empty())
+        {
+            for (int lvl = topLvl; lvl >= 0; --lvl)
+            {
+                if (lvl < topLvl)
+                {
+                    warpMatrix.at<float>(0, 2) *= 2.0f;
+                    warpMatrix.at<float>(1, 2) *= 2.0f;
+                    const int iters = lvl == 0 ? 80 : 60;
+                    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, iters, 1e-4);
+                    cv::findTransformECC(pyrRef[static_cast<size_t>(lvl)], pyrSrc[static_cast<size_t>(lvl)],
+                        warpMatrix, cv::MOTION_EUCLIDEAN, criteria, pyrMask[static_cast<size_t>(lvl)]);
+                }
+            }
+            const double cosT = warpMatrix.at<float>(0, 0);
+            const double sinT = warpMatrix.at<float>(1, 0);
+            const double angleDeg = std::atan2(sinT, cosT) * 180.0 / 3.14159265358979323846;
+            const double tx = warpMatrix.at<float>(0, 2);
+            const double ty = warpMatrix.at<float>(1, 2);
+            if (std::isfinite(angleDeg) && std::abs(angleDeg) <= 25.0
+                && std::abs(tx) < w * 0.5 && std::abs(ty) < h * 0.5)
+            {
+                eccOk = true;
+            }
+        }
+    }
+    catch (const cv::Exception&)
+    {
+        eccOk = false;
+    }
+
+    cv::Mat warped;
+    if (eccOk)
+    {
+        cv::warpAffine(srcMat, warped, warpMatrix, cv::Size(w, h),
+            cv::INTER_LANCZOS4 | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+        // Compute forward translation of frame center and rotation angle for telemetry.
+        const cv::Matx23d invM(
+            warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
+            warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
+        cv::Mat fwdM;
+        cv::invertAffineTransform(cv::Mat(invM), fwdM);
+        const double cx = w * 0.5;
+        const double cy = h * 0.5;
+        const double nx = fwdM.at<double>(0, 0) * cx + fwdM.at<double>(0, 1) * cy + fwdM.at<double>(0, 2);
+        const double ny = fwdM.at<double>(1, 0) * cx + fwdM.at<double>(1, 1) * cy + fwdM.at<double>(1, 2);
+        out.shiftX = nx - cx;
+        out.shiftY = ny - cy;
+        out.rotationDeg = std::atan2(fwdM.at<double>(1, 0), fwdM.at<double>(0, 0)) * 180.0 / 3.14159265358979323846;
+
+        // Compute valid overlap rect by warping a white mask with nearest-neighbor.
+        cv::Mat ones(h, w, CV_8UC1, cv::Scalar(255));
+        cv::Mat validMask;
+        cv::warpAffine(ones, validMask, warpMatrix, cv::Size(w, h),
+            cv::INTER_NEAREST | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT, cv::Scalar(0));
+        // Shrink inward by 2 px from warped bounding edges where rotated borders step.
+        const cv::Rect nz = cv::boundingRect(validMask);
+        const int margin = std::abs(out.rotationDeg) > 0.05 ? 4 : 0;
+        const int lx = std::clamp(nz.x + margin, 0, w - 1);
+        const int ty = std::clamp(nz.y + margin, 0, h - 1);
+        const int rx = std::clamp(nz.x + nz.width - margin, lx + 1, w);
+        const int by = std::clamp(nz.y + nz.height - margin, ty + 1, h);
+        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+    }
+    else
+    {
+        out.usedFallback = true;
+        out.shiftX = coarse.x;
+        out.shiftY = coarse.y;
+        out.rotationDeg = 0.0;
+        const cv::Matx23d M(1.0, 0.0, coarse.x, 0.0, 1.0, coarse.y);
+        cv::warpAffine(srcMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+        const int lx = std::clamp(static_cast<int>(std::ceil(std::max(0.0, coarse.x))), 0, w - 1);
+        const int ty = std::clamp(static_cast<int>(std::ceil(std::max(0.0, coarse.y))), 0, h - 1);
+        const int rx = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -coarse.x))), lx + 1, w);
+        const int by = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -coarse.y))), ty + 1, h);
+        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+    }
+
+    cv::min(warped, 1.0f, warped);
+    cv::max(warped, 0.0f, warped);
+    out.aligned = matToFits(warped, stack.meta);
+    return out;
+}
+
+FitsImage applyLinearSharpening(const FitsImage& unsharpened, const SharpeningSettings& settings)
+{
+    if (!unsharpened.valid()) return unsharpened;
+    cv::Mat src = fitsToMat(unsharpened);
+    if (settings.denoise > 0.0)
+    {
+        cv::Mat denoised;
+        cv::bilateralFilter(src, denoised, 5, 0.04 * settings.denoise, 1.2 + 1.5 * settings.denoise);
+        src = denoised;
+    }
+    if (settings.amount > 0.0 && settings.preset != SharpeningPreset::Off)
+    {
+        cv::Mat blurred;
+        cv::GaussianBlur(src, blurred, cv::Size(0, 0), settings.radius);
+        cv::Mat diff = src - blurred;
+        if (settings.threshold > 0.0)
+        {
+            const float thresh = static_cast<float>(settings.threshold);
+            cv::Mat absDiff = cv::abs(diff);
+            cv::Mat excess = absDiff - cv::Scalar::all(thresh);
+            cv::max(excess, 0.0f, excess);
+            cv::Mat denom;
+            cv::max(absDiff, 1e-6f, denom);
+            cv::Mat sign;
+            cv::divide(diff, denom, sign);
+            diff = sign.mul(excess);
+        }
+        src = src + diff * static_cast<float>(settings.amount);
+    }
+    cv::min(src, 1.0f, src);
+    cv::max(src, 0.0f, src);
+    FitsImage out = matToFits(src, unsharpened.meta);
+    out.meta.sharpeningProfile = settings.profileName.toStdString();
+    return out;
+}
+
+double measureTargetBrightness(const FitsImage& image)
+{
+    if (!image.valid()) return 0.0;
+    const cv::Mat m = fitsToMat(image);
+    const cv::Mat lum = matLuminance(m);
+    double targetMean = 0;
+    (void)targetForegroundMask(lum, &targetMean);
+    return targetMean;
+}
+
+void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite)
+{
+    outBlack = 0.0;
+    outWhite = 1.0;
+    if (!image.valid()) return;
+    const cv::Mat lum = matLuminance(fitsToMat(image));
+    std::vector<float> grid;
+    const int stepY = std::max(1, lum.rows / 96);
+    const int stepX = std::max(1, lum.cols / 96);
+    grid.reserve(10000);
+    for (int y = 0; y < lum.rows; y += stepY)
+    {
+        const float* row = lum.ptr<float>(y);
+        for (int x = 0; x < lum.cols; x += stepX) grid.push_back(row[x]);
+    }
+    if (grid.empty()) return;
+    std::sort(grid.begin(), grid.end());
+    outBlack = std::clamp(static_cast<double>(grid[(grid.size() - 1) / 1000]), 0.0, 0.99);
+    outWhite = std::clamp(static_cast<double>(grid[(grid.size() - 1) * 999 / 1000]), outBlack + 0.01, 1.0);
+}
+
+QImage toneMapFitsToImage(const FitsImage& image,
+    double black, double white, double gamma, double brightnessScale,
+    const QRect& crop, int maxLongSide)
+{
+    if (!image.valid()) return {};
+    cv::Mat m = fitsToMat(image);
+    if (crop.isValid() && !crop.isEmpty())
+    {
+        const QRect r = crop.intersected(QRect(0, 0, image.width, image.height));
+        if (r.width() >= 2 && r.height() >= 2)
+            m = m(cv::Rect(r.x(), r.y(), r.width(), r.height()));
+    }
+    if (maxLongSide > 0 && std::max(m.cols, m.rows) > maxLongSide)
+    {
+        const double scale = static_cast<double>(maxLongSide) / std::max(m.cols, m.rows);
+        const int nw = std::max(2, static_cast<int>(std::lround(m.cols * scale)));
+        const int nh = std::max(2, static_cast<int>(std::lround(m.rows * scale)));
+        cv::Mat resized;
+        cv::resize(m, resized, cv::Size(nw, nh), 0, 0, cv::INTER_AREA);
+        m = resized;
+    }
+
+    const double safeSpan = std::max(1e-5, white - black);
+    const double invGamma = 1.0 / std::clamp(gamma, 0.2, 4.0);
+    const float bScale = static_cast<float>(std::clamp(brightnessScale, 0.25, 4.0));
+    cv::Mat scaled = (m * bScale - cv::Scalar::all(black)) * static_cast<float>(1.0 / safeSpan);
+    cv::min(scaled, 1.0f, scaled);
+    cv::max(scaled, 0.0f, scaled);
+    if (std::abs(invGamma - 1.0) > 1e-3)
+        cv::pow(scaled, invGamma, scaled);
+
+    cv::Mat u8;
+    scaled.convertTo(u8, image.channels == 3 ? CV_8UC3 : CV_8UC1, 255.0);
+    const QImage::Format fmt = image.channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
+    QImage out(u8.cols, u8.rows, fmt);
+    const int rowBytes = u8.cols * u8.channels();
+    for (int y = 0; y < u8.rows; ++y)
+        std::memcpy(out.scanLine(y), u8.ptr<uint8_t>(y), static_cast<size_t>(rowBytes));
+    return out;
+}

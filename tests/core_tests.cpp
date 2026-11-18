@@ -6,6 +6,7 @@
 #include "frame_pool.h"
 #include "frame_ring_buffer.h"
 #include "recording/avi_reader.h"
+#include "recording/output_paths.h"
 #include "sources/frame_source.h"
 #include "latest_frame_slot.h"
 #include "preview_image.h"
@@ -2395,7 +2396,7 @@ void SessionTest::serFileThroughSessionWritesAClip()
     QVERIFY(text.contains("trigger: onset_frame_index=20 trigger_frame_index=21 "));
     QVERIFY(text.trimmed().endsWith("complete: yes"));
 
-    const QStringList lines = candidateLines(root);
+    const QStringList lines = candidateLines(eventsFolder(root, Target::Moon));
     QCOMPARE(lines.size(), static_cast<qsizetype>(2));
     QVERIFY2(lines[0].contains(" session_start camera=\"TestCam\" playback=\"whole file once, frames 0 to 59\" observer="),
         qPrintable(lines[0]));
@@ -2494,8 +2495,8 @@ void SessionTest::loopJumpFiresNoCandidate()
 
     QCOMPARE(candidates, 0);
     QVERIFY(results.empty());
-    QVERIFY(clipFolders(root).isEmpty());
-    const QStringList lines = candidateLines(root);
+    QVERIFY(clipFolders(eventsFolder(root, Target::Moon)).isEmpty());
+    const QStringList lines = candidateLines(eventsFolder(root, Target::Moon));
     QCOMPARE(lines.size(), static_cast<qsizetype>(1));
     QVERIFY(lines[0].contains(" session_start "));
 }
@@ -2636,7 +2637,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
             QCOMPARE(frame.data[0], 10);
         }
     }
-    QVERIFY(candidateLines(root).back().contains("contains_test_signal=yes"));
+    QVERIFY(candidateLines(eventsFolder(root, Target::Moon)).back().contains("contains_test_signal=yes"));
     QVERIFY(original.open(QIODevice::ReadOnly));
     QCOMPARE(original.readAll(), originalBytes);
 }

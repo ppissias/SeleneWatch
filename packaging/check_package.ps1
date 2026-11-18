@@ -24,12 +24,16 @@ try {
     $app = (Get-ChildItem $check -Directory | Select-Object -First 1).FullName
 
     $expected = 'SeleneWatch.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms\qwindows.dll',
-        'msvcp140.dll', 'vcruntime140.dll', 'LICENSE.txt', 'README.md', 'MANUAL.md', 'THIRD_PARTY_LICENSES.md',
+        'msvcp140.dll', 'vcruntime140.dll', 'opencv_world4140.dll', 'cfitsio.dll', 'ffmpeg.exe',
+        'avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll',
+        'swresample-7.dll', 'swscale-10.dll', 'LICENSE.txt', 'README.md', 'MANUAL.md', 'THIRD_PARTY_LICENSES.md',
         'ACKNOWLEDGEMENTS.md', 'icons\selenewatch-256.png', 'docs\images\readme-main-window.png',
         'docs\images\manual-camera-settings.png', 'docs\images\manual-display-histogram.png',
         'docs\images\manual-test-flash.png', 'docs\images\manual-sky-mask.png',
         'docs\images\manual-clip-overview.png', 'docs\images\manual-guiding.png',
-        'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt'
+        'docs\images\manual-output-folder.png', 'docs\images\manual-timelapse.png', 'docs\images\manual-resharpen.png',
+        'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt',
+        'licenses\OpenCV-LICENSE.txt', 'licenses\CFITSIO-LICENSE.txt', 'licenses\FFmpeg-LICENSE.txt'
     foreach ($file in $expected) {
         if (-not (Test-Path (Join-Path $app $file))) { throw "The package lacks $file" }
     }

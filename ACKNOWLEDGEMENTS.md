@@ -35,6 +35,9 @@ SeleneWatch's design is original work: how it detects, captures and keeps the ev
 ### Open Source Software & Libraries
 
 - **Qt 6**, by The Qt Company and contributors ([qt.io](https://www.qt.io)): the window, images and threads, under the GNU LGPL version 3.
+- **OpenCV**, by the OpenCV team ([opencv.org](https://opencv.org)): debayering, phase-correlation subpixel alignment, rigid/ECC Lunar field-rotation alignment, and image stacking/sharpening utilities, under the Apache License 2.0.
+- **CFITSIO**, by NASA/GSFC HEASARC ([heasarc.gsfc.nasa.gov/fitsio](https://heasarc.gsfc.nasa.gov/fitsio/)): reading and writing linear 32-bit floating-point FITS stacks with astronomy metadata headers, under the NASA permissive open-source license.
+- **FFmpeg**, by the FFmpeg developers ([ffmpeg.org](https://ffmpeg.org)): encoding MP4 (`libopenh264`) and palette-optimized GIF time-lapse animations, shipped as an external LGPLv3 shared build (`win64-lgpl-shared`).
 
 ### Camera and Mount Software
 

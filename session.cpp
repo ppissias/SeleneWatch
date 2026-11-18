@@ -2,6 +2,8 @@
 
 #include "clock_check.h"
 #include "recording/metadata_text.h"
+#include "recording/output_paths.h"
+#include "selenewatch_version.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QMetaObject>
@@ -13,7 +15,7 @@
 Session::Session(QObject* context, QString outputRoot, Notifications notifications)
     : context_(context)
     , notifications_(std::move(notifications))
-    , writer_(context, outputRoot, captureSettings_.memoryBytes * 2 / 5,
+    , writer_(context, ::eventsFolder(outputRoot, captureSettings_.target), captureSettings_.memoryBytes * 2 / 5,
           [done = notifications_.clipWritten](const ClipWriteResult& result) {
               if (done)
               {
@@ -42,9 +44,13 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
     , outputRoot_(std::move(outputRoot))
     , recorder_([this](const RecordingWriter::Status& status) {
           // Writer thread: the recording ended, by a stop or by itself.
-          writer_.logRecord(QString("%1 recording_stop name=%2 frames=%3 bytes=%4 seconds=%5 ended=\"%6\"\n")
-              .arg(utcText(std::chrono::system_clock::now()), status.name).arg(status.frames).arg(status.bytes)
-              .arg(status.streamSeconds, 0, 'f', 3).arg(QString::fromStdString(status.endReason)));
+          // Evidence rule 5: Preview creates no candidate records.
+          if (status.sessionMode == "monitoring")
+          {
+              writer_.logRecord(QString("%1 recording_stop name=%2 frames=%3 bytes=%4 seconds=%5 ended=\"%6\"\n")
+                  .arg(utcText(std::chrono::system_clock::now()), status.name).arg(status.frames).arg(status.bytes)
+                  .arg(status.streamSeconds, 0, 'f', 3).arg(QString::fromStdString(status.endReason)));
+          }
           post(notifications_.recordingChanged);
       })
 {
@@ -73,21 +79,26 @@ void Session::setTestingTools(bool on)
     testingTools_ = on;
 }
 
-void Session::setRecordingFolder(const QString& folder)
+void Session::setOutputRoot(const QString& outputRoot)
 {
-    std::lock_guard lock(requestMutex_);
-    recordingFolder_ = folder;
+    if (running_) throw std::logic_error("output folder must be changed while stopped");
+    outputRoot_ = outputRoot;
+    writer_.setOutputRoot(::eventsFolder(outputRoot_, captureSettings_.target));
 }
 
 QString Session::recordingFolder() const
 {
-    std::lock_guard lock(requestMutex_);
-    return recordingFolder_.isEmpty() ? defaultRecordingFolder() : recordingFolder_;
+    return ::recordingsFolder(outputRoot_);
 }
 
-QString Session::defaultRecordingFolder() const
+QString Session::eventsRoot() const
 {
-    return QDir(outputRoot_).filePath("recordings");
+    return ::eventsFolder(outputRoot_, captureSettings_.target);
+}
+
+QString Session::timelapsesFolder() const
+{
+    return ::timelapsesFolder(outputRoot_);
 }
 
 void Session::setClockCheck(bool enabled, std::string ntpServer)
@@ -127,11 +138,12 @@ void Session::startClockCheck()
     });
 }
 
-bool Session::requestRecording(bool record)
+bool Session::requestRecording(bool record, uint64_t maxFrames)
 {
     std::lock_guard lock(requestMutex_);
-    if (!running_ || sourceFinished_.load() || mode_.load() != Mode::Monitoring) return false;
+    if (!running_ || sourceFinished_.load() || mode_.load() == Mode::TimeLapse) return false;
     recordRequest_ = record;
+    recordMaxFrames_ = record ? maxFrames : 0;
     return true;
 }
 
@@ -163,17 +175,20 @@ RecordingWriter::Status Session::recordingStatus() const
 void Session::updateRecording(const FramePtr& frame)
 {
     std::optional<bool> request;
+    uint64_t requestMaxFrames = 0;
     std::optional<Schedule> schedule;
     {
         std::lock_guard lock(requestMutex_);
         request = recordRequest_;
+        requestMaxFrames = recordMaxFrames_;
         recordRequest_.reset();
+        recordMaxFrames_ = 0;
         schedule = schedule_;
     }
     const bool monitoring = mode_.load() == Mode::Monitoring;
     if (recording_)
     {
-        if (!monitoring) endRecording("monitoring stopped");
+        if (scheduledRecording_ && !monitoring) endRecording("monitoring stopped");
         else if (request && !*request) endRecording("stopped by the observer");
         else if (scheduledRecording_ && schedule && frame->timestamp >= schedule->end)
         {
@@ -184,7 +199,13 @@ void Session::updateRecording(const FramePtr& frame)
     }
     if (recording_)
     {
-        if (recorder_.push(frame)) recordingLastIndex_ = frame->frameIndex;
+        if (recorder_.push(frame))
+        {
+            recordingLastIndex_ = frame->frameIndex;
+            ++recordingFrames_;
+            if (recordingMaxFrames_ > 0 && recordingFrames_ >= recordingMaxFrames_)
+                endRecording("reached frame limit");
+        }
         else
         {
             // It ended by itself; its writer has the reason and reports it.
@@ -193,12 +214,12 @@ void Session::updateRecording(const FramePtr& frame)
         }
         return;
     }
-    if (!monitoring) return;
     if (request && *request)
     {
-        beginRecording(frame, "the observer");
+        beginRecording(frame, "the observer", requestMaxFrames);
         return;
     }
+    if (!monitoring) return;
     if (schedule && frame->timestamp >= schedule->start)
     {
         if (frame->timestamp < schedule->end)
@@ -217,7 +238,7 @@ void Session::updateRecording(const FramePtr& frame)
     }
 }
 
-void Session::beginRecording(const FramePtr& first, const std::string& startedBy)
+void Session::beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames)
 {
     RecordingWriter::Start start;
     start.folder = recordingFolder();
@@ -228,17 +249,26 @@ void Session::beginRecording(const FramePtr& first, const std::string& startedBy
         start.clockRecord = clockRecord_;
     }
     start.target = captureSettings_.target;
+    start.sessionMode = mode_.load() == Mode::Monitoring ? "monitoring" : "preview";
+    start.maxFrames = maxFrames;
     start.diskReserveBytes = captureSettings_.diskReserveBytes;
     start.startedBy = startedBy;
     start.queueBytes = recordingQueueBytes_ ? recordingQueueBytes_ : captureSettings_.memoryBytes / 8;
     if (!recorder_.start(start, first)) return;
     recording_ = true;
-    recordingKnown_ = true;
-    recordingName_ = utcStamp(first->timestamp).toStdString();
+    recordingFrames_ = 1;
+    recordingMaxFrames_ = maxFrames;
     recordingFirstIndex_ = recordingLastIndex_ = first->frameIndex;
-    writer_.logRecord(QString("%1 recording_start name=%2 first_frame_index=%3 started_by=\"%4\" folder=\"%5\"\n")
-        .arg(utcText(first->timestamp), QString::fromStdString(recordingName_)).arg(first->frameIndex)
-        .arg(QString::fromStdString(startedBy), QDir::toNativeSeparators(start.folder)));
+    if (mode_.load() == Mode::Monitoring)
+    {
+        recordingKnown_ = true;
+        recordingName_ = utcStamp(first->timestamp).toStdString();
+        writer_.logRecord(QString("%1 recording_start name=%2 first_frame_index=%3 started_by=\"%4\" folder=\"%5\"\n")
+            .arg(utcText(first->timestamp), QString::fromStdString(recordingName_)).arg(first->frameIndex)
+            .arg(QString::fromStdString(startedBy), QDir::toNativeSeparators(start.folder)));
+    }
+    if (recordingMaxFrames_ > 0 && recordingFrames_ >= recordingMaxFrames_)
+        endRecording("reached frame limit");
     post(notifications_.recordingChanged);
 }
 
@@ -260,6 +290,7 @@ void Session::setCaptureSettings(CaptureSettings settings)
 {
     if (running_ || !settings.valid()) throw std::invalid_argument("capture settings must be valid and changed while stopped");
     captureSettings_ = settings;
+    writer_.setOutputRoot(::eventsFolder(outputRoot_, captureSettings_.target));
 }
 
 bool Session::start(QString& error, Mode mode)
@@ -325,7 +356,14 @@ void Session::stop(std::string reason)
     {
         return;
     }
+    std::shared_ptr<TimelapseSession> tl;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        tl = std::move(timelapse_);
+    }
+    if (tl) tl->stop(reason);
     source_->stop();
+    if (tl) tl->waitFinished();
     // The source thread is joined, so its recording state is this thread's now.
     endRecording("the stream stopped");
     // Safety rule 8: no guiding without frames. Only pulses were sent, so nothing is undone.
@@ -341,7 +379,8 @@ void Session::stop(std::string reason)
 bool Session::requestMonitoring(bool monitoring)
 {
     std::lock_guard lock(requestMutex_);
-    if (!running_ || sourceFinished_.load() || monitoringRequest_ || (monitoring && cameraTuned_)) return false;
+    if (!running_ || sourceFinished_.load() || monitoringRequest_
+        || mode_.load() == Mode::TimeLapse || (monitoring && cameraTuned_)) return false;
     monitoringRequest_ = monitoring;
     return true;
 }
@@ -371,6 +410,8 @@ void Session::applyModeRequest()
         }
     }
     if (!request) return;
+    if (recording_)
+        endRecording(*request ? "monitoring started" : "monitoring stopped");
     applyManualSave();
     capture_.setMonitoring(*request);
     if (*request && mode_.load() != Mode::Monitoring)
@@ -473,6 +514,97 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
     displayRequest_.probeY = probeY;
 }
 
+bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
+    FreeSpaceQuery freeSpace, std::chrono::milliseconds stackDelay)
+{
+    if (!settings.valid())
+    {
+        error = "invalid time-lapse settings";
+        return false;
+    }
+    if (mode_.load() == Mode::Monitoring || modeChangePending() || recordingStatus().active)
+    {
+        error = "stop Monitoring and recording before starting a time-lapse";
+        return false;
+    }
+    {
+        std::lock_guard lock(timelapseMutex_);
+        if (timelapse_ && timelapse_->active())
+        {
+            error = "a time-lapse is already running";
+            return false;
+        }
+    }
+    if (!running_)
+    {
+        if (!start(error, Mode::Preview)) return false;
+    }
+    else
+    {
+        capture_.reset();
+    }
+
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = timelapsesFolder();
+    cfg.settings = settings;
+    {
+        std::lock_guard lock(requestMutex_);
+        cfg.stream = streamInfo_;
+        cfg.site = site_;
+    }
+    cfg.softwareVersion = std::string(SELENEWATCH_VERSION) + " (" + SELENEWATCH_REVISION + ")";
+    cfg.diskReserveBytes = captureSettings_.diskReserveBytes;
+    cfg.memory = memory_;
+    const auto gStatus = guider_.status();
+    if (gStatus.lock.state == LockState::Locked)
+        cfg.lockRegion = gStatus.lock.region;
+    cfg.freeSpace = std::move(freeSpace);
+    cfg.statusChanged = notifications_.timeLapseChanged;
+    cfg.finished = [this](const TimelapseFinishResult& res) {
+        {
+            std::lock_guard lock(timelapseMutex_);
+            if (timelapse_ && !timelapse_->active()) timelapse_.reset();
+        }
+        if (running_ && mode_.load() == Mode::TimeLapse)
+        {
+            mode_.store(Mode::Preview);
+            post(notifications_.modeChanged);
+        }
+        if (notifications_.timeLapseFinished) notifications_.timeLapseFinished(res);
+    };
+
+    auto tl = std::make_shared<TimelapseSession>(context_, std::move(cfg));
+    if (stackDelay.count() > 0) tl->setStackDelay(stackDelay);
+    {
+        std::lock_guard lock(timelapseMutex_);
+        timelapse_ = tl;
+    }
+    mode_.store(Mode::TimeLapse);
+    post(notifications_.modeChanged);
+    return true;
+}
+
+void Session::stopTimeLapse(const std::string& reason)
+{
+    std::shared_ptr<TimelapseSession> tl;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        tl = timelapse_;
+    }
+    if (tl) tl->stop(reason);
+    if (running_ && mode_.load() == Mode::TimeLapse)
+    {
+        mode_.store(Mode::Preview);
+        post(notifications_.modeChanged);
+    }
+}
+
+TimelapseStatus Session::timeLapseStatus() const
+{
+    std::lock_guard lock(timelapseMutex_);
+    return timelapse_ ? timelapse_->status() : TimelapseStatus{};
+}
+
 // From the moment the frame is held as a FramePtr it is published: nobody
 // writes it again. Test injection is the last write before publication.
 void Session::onFrame(std::shared_ptr<Frame> frame)
@@ -500,6 +632,28 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
     if (frame->sourceDroppedFrames) droppedFrames_.store(*frame->sourceDroppedFrames);
     dropsKnown_.store(frame->sourceDroppedFrames.has_value());
+
+    std::shared_ptr<TimelapseSession> activeTl;
+    if (mode_.load() == Mode::TimeLapse)
+    {
+        std::lock_guard lock(timelapseMutex_);
+        activeTl = timelapse_;
+    }
+    if (activeTl && activeTl->active())
+    {
+        const FramePtr published = std::move(frame);
+        activeTl->onFrame(published);
+        guider_.offer(published, false);
+        const GuiderStatus gs = guider_.status();
+        activeTl->setGuidingStatus(gs, gs.guide.mode == GuideMode::Guiding);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastPreviewTime_ >= std::chrono::milliseconds{50})
+        {
+            lastPreviewTime_ = now;
+            if (previewSlot_.put(published, nullptr)) post(notifications_.previewReady);
+        }
+        return;
+    }
 
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);
@@ -567,6 +721,12 @@ void Session::onIdle() { applyModeRequest(); }
 void Session::onEnded()
 {
     sourceFinished_.store(true);
+    std::shared_ptr<TimelapseSession> tl;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        tl = timelapse_;
+    }
+    if (tl) tl->stop("source ended");
     applyManualSave();
     endRecording("the source ended");
     capture_.finishPartial("source ended");
@@ -576,6 +736,12 @@ void Session::onEnded()
 void Session::onFailed(const std::string& message)
 {
     sourceFinished_.store(true);
+    std::shared_ptr<TimelapseSession> tl;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        tl = timelapse_;
+    }
+    if (tl) tl->stop("source failure: " + message);
     applyManualSave();
     endRecording("source failure: " + message);
     capture_.finishPartial("source failure: " + message);

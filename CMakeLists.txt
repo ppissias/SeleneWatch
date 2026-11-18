@@ -29,6 +29,26 @@ endfunction()
 
 # One processing library, shared by the application and tests. It has no
 # Widgets dependency; the UI library and its tests use Widgets separately.
+set(SELENEWATCH_OPENCV_DIR "" CACHE PATH "Path to OpenCV build directory containing OpenCVConfig.cmake")
+set(SELENEWATCH_CFITSIO_DIR "" CACHE PATH "Path to CFITSIO install root")
+set(SELENEWATCH_FFMPEG_DIR "" CACHE PATH "Path to FFmpeg LGPL shared distribution root")
+
+if(SELENEWATCH_OPENCV_DIR AND NOT OpenCV_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_OPENCV_DIR}" _opencv_hint)
+    if(EXISTS "${_opencv_hint}/x64/vc16/lib/OpenCVConfig.cmake")
+        set(OpenCV_DIR "${_opencv_hint}/x64/vc16/lib")
+    else()
+        set(OpenCV_DIR "${_opencv_hint}")
+    endif()
+endif()
+find_package(OpenCV REQUIRED COMPONENTS world)
+
+if(SELENEWATCH_CFITSIO_DIR AND NOT cfitsio_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_CFITSIO_DIR}" _cfitsio_hint)
+    set(cfitsio_DIR "${_cfitsio_hint}/lib/cmake/cfitsio")
+endif()
+find_package(cfitsio CONFIG REQUIRED)
+
 add_library(selenewatch_core STATIC
     blip_injector.cpp frame_pool.cpp memory_budget.cpp preview_image.cpp session.cpp
     frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
@@ -38,17 +58,60 @@ add_library(selenewatch_core STATIC
     cameras/playerone_source.cpp cameras/playerone_sdk.cpp cameras/touptek_source.cpp cameras/touptek_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
-    recording/metadata_text.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
+    recording/metadata_text.cpp recording/output_paths.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
+    timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
+    timelapse/video_exporter.cpp timelapse/timelapse_session.cpp
     detection_mask.cpp sky_schedule.cpp sky_exposure.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(selenewatch_core SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+if(SELENEWATCH_CFITSIO_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_CFITSIO_DIR}" _cfitsio_root)
+    target_include_directories(selenewatch_core SYSTEM PRIVATE "${_cfitsio_root}/include")
+endif()
 target_link_libraries(selenewatch_core PUBLIC Qt6::Core Qt6::Gui)
+target_link_libraries(selenewatch_core PRIVATE opencv_world CFITSIO::cfitsio)
 add_dependencies(selenewatch_core selenewatch_version)
 if(WIN32)
     target_link_libraries(selenewatch_core PRIVATE winmm ws2_32 version)
+    set(_timelapse_copy_cmds
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:opencv_world>" "${CMAKE_CURRENT_BINARY_DIR}"
+    )
+    if(SELENEWATCH_CFITSIO_DIR)
+        file(TO_CMAKE_PATH "${SELENEWATCH_CFITSIO_DIR}" _cfitsio_root)
+        if(EXISTS "${_cfitsio_root}/bin/cfitsio.dll")
+            list(APPEND _timelapse_copy_cmds
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_cfitsio_root}/bin/cfitsio.dll" "${CMAKE_CURRENT_BINARY_DIR}"
+            )
+        endif()
+    endif()
+    if(SELENEWATCH_FFMPEG_DIR)
+        file(TO_CMAKE_PATH "${SELENEWATCH_FFMPEG_DIR}" _ffmpeg_root)
+        if(EXISTS "${_ffmpeg_root}/bin/ffmpeg.exe")
+            target_compile_definitions(selenewatch_core PRIVATE
+                "SELENEWATCH_FFMPEG_BIN_HINT=\"${_ffmpeg_root}/bin\""
+            )
+            foreach(_ff_file
+                ffmpeg.exe avcodec-63.dll avdevice-63.dll avfilter-12.dll
+                avformat-63.dll avutil-61.dll swresample-7.dll swscale-10.dll
+            )
+                if(EXISTS "${_ffmpeg_root}/bin/${_ff_file}")
+                    list(APPEND _timelapse_copy_cmds
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_ffmpeg_root}/bin/${_ff_file}"
+                        "${CMAKE_CURRENT_BINARY_DIR}"
+                    )
+                endif()
+            endforeach()
+        endif()
+    endif()
+    add_custom_target(selenewatch_timelapse_runtime ALL ${_timelapse_copy_cmds}
+        COMMENT "Copy OpenCV, CFITSIO, and FFmpeg runtime binaries to build directory"
+    )
+    add_dependencies(selenewatch_core selenewatch_timelapse_runtime)
 endif()
 selenewatch_compile_options(selenewatch_core)
 
@@ -131,7 +194,8 @@ endif()
 
 add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
-    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
+    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
+    elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
     camera_family_panel.h runtime_chooser.h runtime_chooser.cpp camera_support_dialog.h camera_support_dialog.cpp
     playerone_camera_panel.h playerone_camera_panel.cpp touptek_camera_panel.h touptek_camera_panel.cpp)
@@ -305,3 +369,10 @@ target_link_libraries(SeleneWatchCameraProbeTests PRIVATE selenewatch_camera_pro
 selenewatch_compile_options(SeleneWatchCameraProbeTests)
 add_test(NAME camera_probe COMMAND SeleneWatchCameraProbeTests -o -,tap)
 set_tests_properties(camera_probe PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchTimelapseTests tests/timelapse_tests.cpp)
+target_include_directories(SeleneWatchTimelapseTests SYSTEM PRIVATE "${_cfitsio_root}/include")
+target_link_libraries(SeleneWatchTimelapseTests PRIVATE selenewatch_core CFITSIO::cfitsio Qt6::Test)
+selenewatch_compile_options(SeleneWatchTimelapseTests)
+add_test(NAME timelapse COMMAND SeleneWatchTimelapseTests -o -,tap)
+set_tests_properties(timelapse PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

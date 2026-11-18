@@ -25,7 +25,9 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 - **Keep pre-event history in RAM** — maintain a time-sized ring buffer of shared, immutable frames under a configurable RAM ceiling so frames from *before* a trigger are saved alongside the event.
 - **Detect flashes, transits, and sky events** — analyse every frame per pixel against its own learned background and noise, with separate profiles for **The Moon** (flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon masks, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
 - **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), and annotated visual summaries (`00_overview.png`) with suggested classifications.
-- **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, or record predicted events (occultations, transits) continuously to SER manually or by UTC schedule without silently dropping frames.
+- **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, record continuously to SER in **Preview** or **Monitoring** with **Record** (unlimited or for a chosen frame count), or schedule predicted events by UTC start and duration without silently dropping frames.
+- **Build lunar & planetary time-lapses** — run **Time-lapse** lucky-imaging bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), write linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assemble `timelapse.mp4` / `timelapse.gif`, and non-destructively **Re-sharpen time-lapse…** with saved profiles.
+- **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks.
 - **Measure sensitivity directly** — inject calibrated **Test flash** signals onto real data to check recovery limits; every affected frame and clip is explicitly marked as test data.
 - **Hold the field gently** — lock onto a lunar feature to track drift, and optionally guide an **ASCOM** mount with small, bounded, logged guide pulses so monitoring stays on target without slewing or syncing the telescope.
 
@@ -54,7 +56,7 @@ Synthetic source / Recording (SER, AVI) / Cameras (ZWO, QHY, Player One, ToupTek
                                   |
                      Writer (separate thread)
                                   |
-          events/<UTC>/, recordings/, candidates.txt
+   <output folder>/{events/, recordings/, timelapses/}
 
             Qt GUI: live preview with stretch, histogram,
                     controls, and status readouts
@@ -84,7 +86,7 @@ SeleneWatch follows strict evidence rules so saved clips remain reliable observa
 
 Windows 64-bit releases are distributed in two forms:
 
-- **`SeleneWatch-<version>-win64.msi`** — installs per user (no administrator rights needed) under `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry, keeping your `events` folder on upgrades and uninstall.
+- **`SeleneWatch-<version>-win64.msi`** — installs per user (no administrator rights needed) under `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry; saved data under your chosen output folder (`%USERPROFILE%\SeleneWatch` by default) is kept untouched on upgrades and uninstall.
 - **`SeleneWatch-<version>-win64.zip`** — portable archive; unpack into a writable folder and run `SeleneWatch.exe`.
 
 Install your camera vendor's Windows driver before connecting a camera. ZWO's SDK library ships with SeleneWatch; for QHYCCD, Player One, and ToupTek, SeleneWatch automatically discovers the vendor's x64 SDK DLL installed on your system (or lets you pick it in **Session → Camera support…**). See [User Manual §1](MANUAL.md#1-before-you-start) for exact driver, DLL, and optional ASCOM Platform setup.
@@ -93,13 +95,13 @@ Install your camera vendor's Windows driver before connecting a camera. ZWO's SD
 
 ## Scope and current status
 
-**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and scheduled continuous recording, visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
+**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and manual/scheduled continuous recording, lucky-imaging time-lapses (FITS stacking, linear sharpening, MP4/GIF assembly, and re-sharpening), visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
 
 **Not in scope:** pointing the telescope. SeleneWatch does not slew, sync, park, or turn mount tracking on or off; the observer centres the target, and guiding only holds it there.
 
 **Current maturity:**
 
-- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), `00_overview.png` summaries, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
+- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), single output folder management, lucky-imaging Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
 - **Verified on bench hardware:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, and two 30-minute unattended soak runs) and ASCOM simulator guiding checks.
 - **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; real earthshine/transit calibration; and unattended overnight Sky runs.
 - **Planned next:** additional camera families, frame registration, transit tracking, and an in-app event browser/exporter.

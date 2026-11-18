@@ -15,6 +15,7 @@
 #include "mainwindow.h"
 #include "preview_widget.h"
 #include "site_dialog.h"
+#include "recording/output_paths.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "sources/synthetic_scene.h"
@@ -65,6 +66,11 @@ void useSynthetic(MainWindow& window)
 }
 }
 
+#include "recording/output_paths.h"
+#include "resharpen_dialog.h"
+#include "timelapse/timelapse_settings.h"
+#include "timelapse_panel.h"
+
 // Drives the offscreen window to check controls, saved preferences and capture workflows.
 class UiTest : public QObject
 {
@@ -101,6 +107,8 @@ private slots:
     void playerOneAndToupTekInTheWindow();
     void cameraSupportShowsEachFamily();
     void testingToolsAndConnectAtStartup();
+    void outputFolderSafetyAndMigration();
+    void timelapsePanelAndResharpenWorkflow();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -144,7 +152,7 @@ void UiTest::testingToolsAndConnectAtStartup()
         window.setTestingTools(false); // refused while running
         QVERIFY(tools->isChecked());
         window.findChild<QPushButton*>("monitoringButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(text(dir.path() + "/candidates.txt").contains(" testing_tools=\"on\" "), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(dir.path(), Target::Moon) + "/candidates.txt").contains(" testing_tools=\"on\" "), 3000);
         stop->click();
         QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
         // Off again: the synthetic source goes, and nothing is chosen.
@@ -532,7 +540,7 @@ void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
     QCOMPARE(api->starts.load(),1);
     QCOMPARE(api->stops.load(),0);
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("sigmaReading")->text().contains("Settling"),3000);
-    QVERIFY(!QFile::exists(dir.path()+"/candidates.txt"));
+    QVERIFY(!QFile::exists(eventsFolder(dir.path(), Target::Moon)+"/candidates.txt"));
 
     monitoring->click();
     QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),2,3000);
@@ -578,16 +586,17 @@ void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
     QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/qhy-window.png"));
     api->connected=false;
     QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(),3000);
+    const QString moonDir=eventsFolder(dir.path(),Target::Moon);
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         int complete=0;
-        for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
-            complete+=text(dir.path()+"/"+folder+"/event.txt").contains("complete: yes");
+        for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+            complete+=text(moonDir+"/"+folder+"/event.txt").contains("complete: yes");
         return complete>=2;
     })(),5000);
     int before=0,after=0;
-    for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
     {
-        const auto note=text(dir.path()+"/"+folder+"/event.txt");
+        const auto note=text(moonDir+"/"+folder+"/event.txt");
         if (note.contains("pixel_format: Mono8"))
         {
             QVERIFY(note.contains("gain: 13.25\n"));
@@ -641,7 +650,7 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QCOMPARE(panel->profile().current.controls.at(ZwoControl::Bandwidth),int64_t{60});
     QCOMPARE(api->opened.load(),previewOpens); QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("sigmaReading")->text().contains("Settling"),3000);
-    QVERIFY(!QFile::exists(dir.path()+"/candidates.txt"));
+    QVERIFY(!QFile::exists(eventsFolder(dir.path(), Target::Moon)+"/candidates.txt"));
     QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
     QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: 3"),3000);
@@ -684,16 +693,17 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QVERIFY(window.grab().save(QString(SELENEWATCH_CAMERA_QA_DIR)+"/window-simulated.png"));
     api->connected=false;
     QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(),3000);
+    const QString moonDir=eventsFolder(dir.path(),Target::Moon);
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         int complete=0;
-        for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
-            complete+=text(dir.path()+"/"+folder+"/event.txt").contains("complete: yes");
+        for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+            complete+=text(moonDir+"/"+folder+"/event.txt").contains("complete: yes");
         return complete>=2;
     })(),5000);
     int old=0,changed=0;
-    for (const auto& folder:QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
     {
-        const auto note=text(dir.path()+"/"+folder+"/event.txt");
+        const auto note=text(moonDir+"/"+folder+"/event.txt");
         if (note.contains("pixel_format: Mono16")) { QVERIFY(note.contains("collection_end: monitoring stopped")); QVERIFY(note.contains("gain: 12\n")); ++old; }
         if (note.contains("pixel_format: Mono8")) { QVERIFY(note.contains("source failure: TEST camera disconnected")); QVERIFY(note.contains("gain: 20\n")); ++changed; }
         QVERIFY(note.contains("kind=manual")); QVERIFY(note.contains("contains_test_signal: yes"));
@@ -736,11 +746,12 @@ void UiTest::saveARecordingManuallyThroughTheWindow()
     window.findChild<QPushButton*>("monitoringButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QVERIFY(save->isEnabled()); save->click();
+    const QString moonOutput=eventsFolder(output,Target::Moon);
     QString folder;
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
-        for (const auto& name:QDir(output).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+        for (const auto& name:QDir(moonOutput).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
         {
-            const QString candidate=output+"/"+name;
+            const QString candidate=moonOutput+"/"+name;
             if (text(candidate+"/event.txt").contains("complete: yes")) { folder=candidate; return true; }
         }
         return false;
@@ -904,47 +915,56 @@ void UiTest::siteAndRecordingControls()
     QCOMPARE(QSettings().value("site/latitude").toDouble(), 37.98);
     QCOMPARE(QSettings().value("time/ntp").toBool(), false);
     auto* record = window.findChild<QPushButton*>("recordButton");
-    QVERIFY(record);
+    auto* recordFrames = window.findChild<QSpinBox*>("recordFramesSpinBox");
+    QVERIFY(record && recordFrames);
     QVERIFY(!record->isEnabled());
-    // A recordings folder that cannot be written is refused; the default stays.
+    // An unwritable output folder is refused; the existing root stays.
     QFile blocker(QDir(directory.path()).filePath("blocker"));
     QVERIFY(blocker.open(QIODevice::WriteOnly));
     blocker.close();
     QString error;
-    QVERIFY(!window.applyRecordingFolder(QDir(directory.path()).filePath("blocker/recordings"), error));
-    QVERIFY(error.contains("cannot write"));
-    QVERIFY(QSettings().value("recording/folder").toString().isEmpty());
-    const auto recordOnce = [&] {
+    QVERIFY(!window.applyOutputFolder(QDir(directory.path()).filePath("blocker/out"), error));
+    QVERIFY(error.contains("could not create") || error.contains("cannot write") || error.contains("not a folder"));
+
+    // Preview manual recording works with an optional frame limit and leaves no candidates.txt.
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 3000);
+    recordFrames->setValue(5);
+    record->click();
+    QTRY_VERIFY_WITH_TIMEOUT(record->text() == QString("Record") &&
+        QDir(recordingsFolder(directory.path())).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1, 5000);
+    window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!record->isEnabled(), 3000);
+    QVERIFY(!QFile::exists(QDir(eventsFolder(directory.path(), Target::Moon)).filePath("candidates.txt")));
+
+    recordFrames->setValue(0);
+    const auto recordInMonitoring = [&] {
         window.findChild<QPushButton*>("startButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
-        QVERIFY(!record->isEnabled());
         window.findChild<QPushButton*>("monitoringButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 3000);
         record->click();
         QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Stop recording"), 3000);
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("RECORDING"), 3000);
         record->click();
         QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
         window.findChild<QPushButton*>("stopButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!record->isEnabled(), 3000);
     };
-    recordOnce();
-    QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
+    recordInMonitoring();
+    QCOMPARE(QDir(recordingsFolder(directory.path())).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), qsizetype{2});
 
-    // A chosen folder takes the next recording; the clips' log names it.
+    // A chosen output folder routes recordings, events/moon, and events/sky underneath it.
     QTemporaryDir elsewhere;
     const QString chosen = QDir(elsewhere.path()).filePath("long nights");
-    QVERIFY(window.applyRecordingFolder(chosen, error));
-    QCOMPARE(QSettings().value("recording/folder").toString(), QDir::cleanPath(chosen));
-    recordOnce();
-    const QStringList made = QDir(chosen).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QVERIFY(window.applyOutputFolder(chosen, error));
+    recordInMonitoring();
+    const QStringList made = QDir(recordingsFolder(chosen)).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     QCOMPARE(made.size(), qsizetype{1});
-    QVERIFY(QFile::exists(QDir(QDir(chosen).filePath(made.front())).filePath("recording.ser")));
-    QVERIFY(QDir(QDir(directory.path()).filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
-    QTRY_VERIFY_WITH_TIMEOUT(text(directory.path() + "/candidates.txt").contains(" recording_start name=" + made.front() + " "), 3000);
-    QVERIFY(text(directory.path() + "/candidates.txt").contains("folder=\"" + QDir::toNativeSeparators(QDir::cleanPath(chosen)) + "\""));
-    // The default again: saved as empty.
-    QVERIFY(window.applyRecordingFolder(QDir(directory.path()).filePath("recordings"), error));
-    QVERIFY(QSettings().value("recording/folder").toString().isEmpty());
+    QVERIFY(QFile::exists(QDir(QDir(recordingsFolder(chosen)).filePath(made.front())).filePath("recording.ser")));
+    const QString moonLog = eventsFolder(chosen, Target::Moon) + "/candidates.txt";
+    QTRY_VERIFY_WITH_TIMEOUT(text(moonLog).contains(" recording_start name=" + made.front() + " "), 3000);
+    QVERIFY(text(moonLog).contains("folder=\"" + QDir::toNativeSeparators(QDir::cleanPath(recordingsFolder(chosen))) + "\""));
 }
 
 // The release (year.month-number) is in the title and the About text, with
@@ -1075,7 +1095,7 @@ void UiTest::nightScheduleAndExposureFollower()
         QTRY_COMPARE_WITH_TIMEOUT(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{500}, 5000);
         QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
         window.findChild<QPushButton*>("stopButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(text(directory.path() + "/candidates.txt").contains(" exposure_change exposure_ms=1 to 0.5 "), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(directory.path(), Target::Sky) + "/candidates.txt").contains(" exposure_change exposure_ms=1 to 0.5 "), 3000);
     }
 }
 
@@ -1246,11 +1266,12 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(1);
         inject->click();
         QString clipFolder;
+        const QString moonOut = eventsFolder(output.path(), Target::Moon);
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
-            const auto dirs = QDir(output.path()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+            const auto dirs = QDir(moonOut).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
             for (const auto& dir : dirs)
             {
-                const QString path = QDir(output.path()).filePath(dir);
+                const QString path = QDir(moonOut).filePath(dir);
                 if (text(QDir(path).filePath("event.txt")).contains("complete: yes")) { clipFolder = path; return true; }
             }
             return false;
@@ -1358,7 +1379,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         inject->click();
         QString folder;
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
-            QDir events(QDir(output.path()).filePath("events"));
+            QDir events(eventsFolder(QDir(output.path()).filePath("events"), Target::Moon));
             for (const auto& entry : events.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
                 if (text(events.filePath(entry + "/event.txt")).contains("complete: yes")) { folder = events.filePath(entry); return true; }
             return false;
@@ -1402,6 +1423,233 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
     QCOMPARE(panel->displaySettings().black, savedDisplay.black);
     QCOMPARE(panel->captureSettings().historySeconds, chosen.historySeconds);
     QCOMPARE(panel->captureSettings().memoryBytes, chosen.memoryBytes);
+}
+
+void UiTest::outputFolderSafetyAndMigration()
+{
+    // Non-cloud local default and cloud-sync heuristic.
+    const QString defRoot = defaultOutputFolder();
+    QVERIFY(!defRoot.isEmpty());
+    QVERIFY(!isCloudSyncedPath(defRoot));
+    QVERIFY(isCloudSyncedPath("C:/Users/Alice/OneDrive/SeleneWatch"));
+    QVERIFY(isCloudSyncedPath("D:/Dropbox/Astro"));
+    QVERIFY(!isCloudSyncedPath("D:/Astro/SeleneWatch"));
+
+    // Unplugged / missing drive letter check never silently falls back.
+    QString missingDrive;
+    for (char letter = 'Z'; letter >= 'G'; --letter)
+    {
+        const QString cand = QString("%1:/").arg(letter);
+        if (!QDir(cand).exists())
+        {
+            missingDrive = QString("%1:/MissingSeleneWatch").arg(letter);
+            break;
+        }
+    }
+    if (!missingDrive.isEmpty())
+    {
+        const OutputFolderCheck chk = checkOutputFolder(missingDrive, 1024ULL * 1024, false);
+        QVERIFY(!chk.ok);
+        QVERIFY(chk.mountMissing);
+    }
+
+    // Legacy events/ files are left untouched during migration.
+    QTemporaryDir legacyTmp;
+    QVERIFY(legacyTmp.isValid());
+    const QString legacyClip = legacyTmp.filePath("events/20260101-000000-000/clip.txt");
+    QDir().mkpath(QFileInfo(legacyClip).absolutePath());
+    {
+        QFile f(legacyClip);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("legacy evidence untouched");
+    }
+    QSettings().setValue("recording/folder", legacyTmp.filePath("old_rec"));
+    migrateOutputSettings();
+    QCOMPARE(QSettings().value("settingsVersion").toInt(), kCurrentSettingsVersion);
+    QVERIFY(!QSettings().contains("recording/folder"));
+    QVERIFY(QFileInfo::exists(legacyClip));
+
+    // Persistence across MainWindow restart + refusal when custom folder vanishes.
+    QTemporaryDir rootTmp;
+    QVERIFY(rootTmp.isValid());
+    const QString customRoot = rootTmp.filePath("AstroOut");
+    QDir().mkpath(customRoot);
+
+    QSettings().setValue("output/folder", customRoot);
+    {
+        MainWindow w1;
+        QCOMPARE(QDir::cleanPath(QSettings().value("output/folder").toString()), QDir::cleanPath(customRoot));
+    }
+    QCOMPARE(QDir::cleanPath(QSettings().value("output/folder").toString()), QDir::cleanPath(customRoot));
+
+    MainWindow window;
+    useSynthetic(window);
+    auto* startBtn = window.findChild<QPushButton*>("startButton");
+    auto* stopBtn = window.findChild<QPushButton*>("stopButton");
+    QPushButton* monitorBtn = nullptr;
+    for (auto* b : window.findChildren<QPushButton*>())
+    {
+        if (b->objectName() == "monitorButton" || b->objectName() == "startMonitoringButton"
+            || b->text().contains("Start monitoring", Qt::CaseInsensitive))
+        {
+            monitorBtn = b;
+            break;
+        }
+    }
+    auto* recordBtn = window.findChild<QPushButton*>("recordButton");
+    auto* modeLabel = window.findChild<QLabel*>("captureModeLabel");
+    auto* tlPanel = window.findChild<TimelapsePanel*>("timelapsePanel");
+    QVERIFY(startBtn);
+    QVERIFY(stopBtn);
+    QVERIFY(monitorBtn);
+    QVERIFY(recordBtn);
+    QVERIFY(modeLabel);
+    QVERIFY(tlPanel);
+    auto* tlStartBtn = tlPanel->findChild<QPushButton*>("timelapseStartButton");
+    QVERIFY(tlStartBtn);
+
+    startBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(recordBtn->isEnabled(), 5000);
+
+    // Delete the remembered custom output folder while Preview is active;
+    // Monitoring, Manual Record, and Time-lapse must all refuse without fallback.
+    QVERIFY(QDir(customRoot).removeRecursively());
+
+    monitorBtn->click();
+    QCoreApplication::processEvents();
+    QVERIFY(!modeLabel->text().contains("MONITORING"));
+
+    recordBtn->click();
+    QCoreApplication::processEvents();
+    QVERIFY(!recordBtn->text().contains("Stop"));
+
+    tlStartBtn->click();
+    QCoreApplication::processEvents();
+    QVERIFY(!tlStartBtn->text().contains("Stop"));
+
+    stopBtn->click();
+    QVERIFY(!QDir(customRoot).exists());
+}
+
+void UiTest::timelapsePanelAndResharpenWorkflow()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window(nullptr, dir.path());
+    useSynthetic(window);
+
+    auto* tl = window.findChild<TimelapsePanel*>("timelapsePanel");
+    QVERIFY(tl);
+    auto* preset = tl->findChild<QComboBox*>("timelapsePreset");
+    auto* interval = tl->findChild<QDoubleSpinBox*>("timelapseInterval");
+    auto* winSpin = tl->findChild<QDoubleSpinBox*>("timelapseWindow");
+    auto* keepPct = tl->findChild<QDoubleSpinBox*>("timelapseKeepPercent");
+    auto* maxFrames = tl->findChild<QSpinBox*>("timelapseMaxFrames");
+    auto* selectAnchor = tl->findChild<QToolButton*>("timelapseSelectAnchor");
+    auto* anchorLabel = tl->findChild<QLabel*>("timelapseAnchorLabel");
+    auto* startTl = tl->findChild<QPushButton*>("timelapseStartButton");
+    auto* statsLabel = tl->findChild<QLabel*>("timelapseStats");
+    QVERIFY(preset && interval && winSpin && keepPct && maxFrames && selectAnchor && anchorLabel && startTl && statsLabel);
+
+    // Preset switch: Moon <-> Planet.
+    preset->setCurrentIndex(1); // Planet
+    QCOMPARE(keepPct->value(), 15.0);
+    QCOMPARE(maxFrames->value(), 200);
+    QVERIFY(!selectAnchor->isEnabled());
+    preset->setCurrentIndex(0); // Moon
+    QCOMPARE(keepPct->value(), 25.0);
+    QCOMPARE(maxFrames->value(), 150);
+
+    // window <= interval invariant in both directions.
+    interval->setValue(1.0);
+    winSpin->setValue(2.0);
+    QCOMPARE(interval->value(), 2.0);
+    interval->setValue(0.5);
+    QCOMPARE(winSpin->value(), 0.5);
+
+    // Start Preview so we can select a sunlit lunar anchor by dragging on PreviewWidget.
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* preview = window.findChild<PreviewWidget*>();
+    QVERIFY(preview);
+    QTRY_VERIFY_WITH_TIMEOUT(preview->imageRect().width() > 40 && selectAnchor->isEnabled(), 5000);
+
+    selectAnchor->setChecked(true);
+    const QRect imgRect = preview->imageRect();
+    const QPoint p0(imgRect.left() + imgRect.width() / 4, imgRect.top() + imgRect.height() / 4);
+    const QPoint p1(imgRect.left() + (imgRect.width() * 3) / 4, imgRect.top() + (imgRect.height() * 3) / 4);
+    QTest::mousePress(preview, Qt::LeftButton, Qt::NoModifier, p0);
+    QTest::mouseMove(preview, (p0 + p1) / 2);
+    QTest::mouseMove(preview, p1);
+    QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, p1);
+    QTRY_VERIFY_WITH_TIMEOUT(tl->settings().lunarAnchor.has_value(), 2000);
+    QVERIFY(anchorLabel->text().contains("Anchor ("));
+
+    // Configure rapid synthetic session and start / run / stop Time-lapse.
+    interval->setValue(0.45);
+    winSpin->setValue(0.25);
+    tl->findChild<QComboBox*>("timelapseStopKind")->setCurrentIndex(0); // Manual stop
+    tl->findChild<QCheckBox*>("timelapseMp4")->setChecked(true);
+    tl->findChild<QCheckBox*>("timelapseGif")->setChecked(false);
+    tl->findChild<QSpinBox*>("timelapseVideoFps")->setValue(5);
+
+    startTl->click();
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->text().contains("Stop"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(statsLabel->text().contains("Stacks: 2"), 15000);
+
+    auto* timingLabel = tl->findChild<QLabel*>("timelapseTiming");
+    QVERIFY(timingLabel);
+
+    startTl->click(); // Stop time-lapse manually -> builds MP4
+    QTRY_VERIFY_WITH_TIMEOUT(timingLabel->text().startsWith("Finished ("), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->text().contains("Start"), 5000);
+
+    const QString tlRoot = timelapsesFolder(dir.path());
+    const QStringList sessions = QDir(tlRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    QCOMPARE(sessions.size(), 1);
+    const QString sessionDir = QDir(tlRoot).filePath(sessions.first());
+    QVERIFY(QDir(QDir(sessionDir).filePath("stacks")).entryList({"*.fits"}, QDir::Files).size() >= 2);
+    QVERIFY(QDir(QDir(sessionDir).filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size() >= 2);
+    QVERIFY2(QFileInfo::exists(QDir(sessionDir).filePath("timelapse.mp4")),
+        qPrintable(timingLabel->text() + " | " + tl->findChild<QLabel*>("timelapseWarning")->text()));
+    // Flash detection stays OFF during Time-lapse: no candidates log created.
+    QVERIFY(!QFileInfo::exists(QDir(eventsFolder(dir.path(), Target::Moon)).filePath("candidates.txt")));
+
+    // Test ResharpenDialog: opens session, previews best stack, applies & saves profile.
+    SavedSharpeningProfile customProf;
+    customProf.name = "UI Crisp";
+    customProf.sharpening = sharpeningForPreset(SharpeningPreset::Medium);
+    customProf.sharpening.amount = 1.8;
+    customProf.sharpening.profileName = "UI Crisp";
+    saveNamedSharpeningProfile(customProf);
+    tl->refreshProfiles();
+    QVERIFY(tl->findChild<QComboBox*>("timelapseSharpening")->findData("profile:UI Crisp") >= 0);
+
+    ResharpenDialog dlg(tlRoot, sessionDir, &window);
+    dlg.show();
+    QCoreApplication::processEvents();
+    auto* stackCombo = dlg.findChild<QComboBox*>("resharpenStackCombo");
+    auto* beforeLbl = dlg.findChild<QLabel*>("resharpenBefore");
+    auto* afterLbl = dlg.findChild<QLabel*>("resharpenAfter");
+    auto* statusLbl = dlg.findChild<QLabel*>("resharpenStatus");
+    auto* applyBtn = dlg.findChild<QPushButton*>("resharpenApply");
+    QVERIFY(stackCombo && beforeLbl && afterLbl && statusLbl && applyBtn);
+    QVERIFY(stackCombo->count() >= 2);
+    QVERIFY(!beforeLbl->pixmap().isNull());
+    QVERIFY(!afterLbl->pixmap().isNull());
+
+    dlg.findChild<QDoubleSpinBox*>("resharpenAmount")->setValue(2.1);
+    dlg.findChild<QDoubleSpinBox*>("resharpenGamma")->setValue(1.25);
+    QCoreApplication::processEvents();
+    applyBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(statusLbl->text().startsWith("Done:"), 15000);
+
+    const QStringList reDirs = QDir(sessionDir).entryList({"sharpened_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
+    QCOMPARE(reDirs.size(), 1);
+    const QString reOut = QDir(sessionDir).filePath(reDirs.first());
+    QVERIFY(QFileInfo::exists(QDir(reOut).filePath("timelapse.mp4")));
+    QVERIFY(QDir(QDir(reOut).filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size() >= 2);
+
+    window.findChild<QPushButton*>("stopButton")->click();
 }
 
 int main(int argc, char** argv)

@@ -5,6 +5,8 @@
 #include "elided_label.h"
 #include "histogram_panel.h"
 #include "guiding_panel.h"
+#include "timelapse_panel.h"
+#include "resharpen_dialog.h"
 #include "camera_panel.h"
 #include "camera_support_dialog.h"
 #include "playerone_camera_panel.h"
@@ -15,6 +17,7 @@
 #include "guiding/simulated_mount.h"
 #include "preview_image.h"
 #include "recording/metadata_text.h"
+#include "recording/output_paths.h"
 #include "camera_settings_editor.h"
 #include "selenewatch_version.h"
 #include "site_dialog.h"
@@ -95,8 +98,26 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     ui_->setupUi(this);
     setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
 
-    // Clips are written next to the executable.
-    if (outputRoot.isEmpty()) outputRoot = QDir(QCoreApplication::applicationDirPath()).filePath("events");
+    // Remembered output root across restarts and upgrades, or isolated root in tests.
+    customOutputRoot_ = !outputRoot.isEmpty();
+    if (!customOutputRoot_)
+    {
+        const QString savedFolder = QSettings().value("output/folder").toString().trimmed();
+        if (savedFolder.isEmpty())
+        {
+            outputRoot = defaultOutputFolder();
+            QDir().mkpath(outputRoot);
+        }
+        else
+        {
+            outputRoot = QDir::cleanPath(savedFolder);
+        }
+    }
+    else
+    {
+        // Tests may pass an uncreated subdirectory under a temporary folder.
+        QDir().mkpath(outputRoot);
+    }
 
     Session::Notifications notifications;
     notifications.previewReady = [this] { showLatestFrame(); };
@@ -119,6 +140,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
     notifications.lockChanged = [this] { onLockChanged(); };
     notifications.recordingChanged = [this] { onRecordingChanged(); };
+    notifications.timeLapseChanged = [this](const TimelapseStatus& status) {
+        if (timelapsePanel_) timelapsePanel_->updateStatus(status);
+    };
+    notifications.timeLapseFinished = [this](const TimelapseFinishResult& result) {
+        onTimeLapseFinished(result);
+    };
     session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
@@ -126,6 +153,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupDisplayPanel();
     setupHistogramPanel();
     setupGuidingPanel();
+    setupTimelapsePanel();
     setupSessionMenu();
     setupHelpMenu();
     applyTarget();
@@ -164,6 +192,13 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     });
     connect(ui_->previewWidget, &PreviewWidget::shapeClosed, this, [this] { closeMaskShape(); });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
+        if (timelapsePanel_ && timelapsePanel_->selectingAnchor())
+        {
+            timelapsePanel_->setLunarAnchor(region);
+            ui_->previewWidget->setAnchorBox(region);
+            showMessage("Lunar time-lapse anchor region set.", 4000);
+            return;
+        }
         // Feature-11: in Sky mode a drag draws the mask, and guiding is off.
         if (detectionPanel_->drawingMask())
         {
@@ -198,6 +233,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     updateControls();
     updateStatusLabel();
     updateBlipReadout();
+    QTimer::singleShot(0, this, &MainWindow::checkLegacyEventsNotice);
 }
 
 void MainWindow::setupSourceChoice()
@@ -291,6 +327,8 @@ MainWindow::~MainWindow()
     if (histogramPanel_) disconnect(histogramPanel_, nullptr, this, nullptr);
     if (guidingDock_) disconnect(guidingDock_, nullptr, this, nullptr);
     if (guidingPanel_) disconnect(guidingPanel_, nullptr, this, nullptr);
+    if (timelapseDock_) disconnect(timelapseDock_, nullptr, this, nullptr);
+    if (timelapsePanel_) disconnect(timelapsePanel_, nullptr, this, nullptr);
     if (guidingTimer_) guidingTimer_->stop();
     if (prepareTimer_) prepareTimer_->stop();
     // A recording being read is let finish; its result is dropped.
@@ -456,6 +494,7 @@ void MainWindow::onTargetRequested(Target target)
     detectionPanel_->setTarget(target_);
     detectionPanel_->setSettings(savedDetectionSettings(target_));
     displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+    session_->setCaptureSettings(displayPanel_->captureSettings());
     session_->setDetectionSettings(detectionPanel_->settings());
     applyTarget();
     showMessage(target_ == Target::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
@@ -637,6 +676,7 @@ void MainWindow::setupDisplayPanel()
     display.invert = saved.value("display/invert", false).toBool(); display.debayer = saved.value("display/debayer", true).toBool();
     displayPanel_->setDisplaySettings(display.valid() ? display : DisplaySettings{});
     displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+    session_->setCaptureSettings(displayPanel_->captureSettings());
     connect(displayPanel_, &DisplayPanel::displayChanged, this, &MainWindow::renderPreview);
     displayDock_->raise();
     updateBufferReadout();
@@ -726,6 +766,95 @@ void MainWindow::setupGuidingPanel()
     guidingTimer_->start();
 }
 
+void MainWindow::setupTimelapsePanel()
+{
+    timelapsePanel_ = new TimelapsePanel(this);
+    timelapseDock_ = new QDockWidget("Time-lapse", this);
+    timelapseDock_->setObjectName("timelapseDock");
+    timelapseDock_->setWidget(timelapsePanel_);
+    addDockWidget(Qt::RightDockWidgetArea, timelapseDock_);
+    tabifyDockWidget(guidingDock_, timelapseDock_);
+    viewMenu_->addAction(timelapseDock_->toggleViewAction());
+    connect(timelapsePanel_, &TimelapsePanel::startRequested, this, &MainWindow::onStartTimeLapse);
+    connect(timelapsePanel_, &TimelapsePanel::stopRequested, this, &MainWindow::onStopTimeLapse);
+    connect(timelapsePanel_, &TimelapsePanel::resharpenRequested, this, &MainWindow::onOpenResharpen);
+    connect(timelapsePanel_, &TimelapsePanel::anchorSelectionChanged, this, [this](bool active) {
+        if (active) showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
+    });
+    connect(timelapsePanel_, &TimelapsePanel::anchorChanged, this, [this](const std::optional<QRect>& rect) {
+        ui_->previewWidget->setAnchorBox(rect);
+    });
+}
+
+void MainWindow::onStartTimeLapse()
+{
+    if (!ensureOutputFolderReady("time-lapse")) return;
+    if (!session_->isRunning())
+    {
+        startStream(Session::Mode::Preview);
+        if (!session_->isRunning()) return;
+    }
+    if (session_->mode() != Session::Mode::Preview)
+    {
+        showMessage("Stop Monitoring before starting a time-lapse.", 4000);
+        return;
+    }
+    if (session_->recordingStatus().active)
+    {
+        showMessage("Stop the active recording before starting a time-lapse.", 4000);
+        return;
+    }
+    const TimelapseSettings tlSettings = timelapsePanel_->settings();
+    if (!tlSettings.valid())
+    {
+        showMessage("Check time-lapse settings (capture window must be <= interval).", 5000);
+        return;
+    }
+    timelapsePanel_->clearRunVisuals();
+    QString error;
+    if (!session_->startTimeLapse(tlSettings, error))
+    {
+        showMessage(QString("Cannot start time-lapse: %1").arg(error), 5000);
+        return;
+    }
+    timelapseDock_->raise();
+    showMessage("Time-lapse started (flash detection is off).", 4000);
+    updateControls();
+    updateStatusLabel();
+}
+
+void MainWindow::onStopTimeLapse()
+{
+    session_->stopTimeLapse("stopped by the observer");
+    showMessage("Stopping time-lapse and building video…", 4000);
+    updateControls();
+    updateStatusLabel();
+}
+
+void MainWindow::onTimeLapseFinished(const TimelapseFinishResult& result)
+{
+    if (timelapsePanel_) timelapsePanel_->onSessionFinished(result);
+    if (result.ok)
+    {
+        showMessage(QString("Time-lapse complete: %1 stacks (%2 skipped) saved to %3.")
+            .arg(result.stacksCompleted).arg(result.periodsSkipped)
+            .arg(QDir::toNativeSeparators(result.sessionDir)), 8000);
+    }
+    else
+    {
+        showMessage(QString("Time-lapse finished with export warning: %1").arg(result.exportResult.error), 8000);
+    }
+    updateControls();
+    updateStatusLabel();
+}
+
+void MainWindow::onOpenResharpen(const QString& sessionDir)
+{
+    ResharpenDialog dialog(session_->timelapsesFolder(), sessionDir, this);
+    connect(&dialog, &ResharpenDialog::profilesChanged, timelapsePanel_, &TimelapsePanel::refreshProfiles);
+    dialog.exec();
+}
+
 void MainWindow::saveGuidingSettings()
 {
     if (!guidingPanel_) return;
@@ -748,29 +877,39 @@ void MainWindow::setupSessionMenu()
     auto* schedule = menu->addAction("Schedule a recording…");
     schedule->setObjectName("scheduleAction");
     connect(schedule, &QAction::triggered, this, &MainWindow::onScheduleRecording);
-    auto* folder = menu->addAction("Recordings folder…");
-    folder->setObjectName("recordingFolderAction");
-    connect(folder, &QAction::triggered, this, &MainWindow::onRecordingFolder);
+    auto* resharpen = menu->addAction("Re-sharpen time-lapse…");
+    resharpen->setObjectName("resharpenAction");
+    connect(resharpen, &QAction::triggered, this, [this] { onOpenResharpen(); });
+    auto* folder = menu->addAction("Output folder…");
+    folder->setObjectName("outputFolderAction");
+    connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
     menu->addSeparator();
-    auto* events = menu->addAction("Open the events folder");
+    auto* events = menu->addAction("Open the output folder");
     events->setObjectName("openEventsAction");
-    events->setToolTip("Clips, candidates.txt and guiding.txt; beside SeleneWatch.exe");
+    events->setToolTip("Events (moon, sky), recordings, and time-lapses");
     connect(events, &QAction::triggered, this, [this] {
         QDir().mkpath(session_->outputRoot());
         QDesktopServices::openUrl(QUrl::fromLocalFile(session_->outputRoot()));
     });
 
-    // Record, beside Save now: every frame until pressed again (Feature-14).
+    // Record, beside Save now: every frame until pressed again or frame limit reached (Feature-14 / Feature-17).
     recordButton_ = new QPushButton("Record", this);
     recordButton_->setObjectName("recordButton");
-    recordButton_->setToolTip("While Monitoring, writes every frame to one SER file in the recordings folder "
-        "(Session → Recordings folder; events/recordings unless chosen) until pressed again.");
-    ui_->controlsLayout->insertWidget(ui_->controlsLayout->indexOf(ui_->saveNowButton) + 1, recordButton_);
+    recordButton_->setToolTip("In Preview or Monitoring, writes every frame to one SER file in recordings/ until stopped (or the optional frame limit is reached).");
+    recordFramesSpinBox_ = new QSpinBox(this);
+    recordFramesSpinBox_->setObjectName("recordFramesSpinBox");
+    recordFramesSpinBox_->setRange(0, 10000000);
+    recordFramesSpinBox_->setValue(0);
+    recordFramesSpinBox_->setSpecialValueText("Unlimited");
+    recordFramesSpinBox_->setSuffix(" frames");
+    recordFramesSpinBox_->setToolTip("Optional frame count limit for manual recording (Unlimited = record until stopped).");
+    const int saveIdx = ui_->controlsLayout->indexOf(ui_->saveNowButton);
+    ui_->controlsLayout->insertWidget(saveIdx + 1, recordButton_);
+    ui_->controlsLayout->insertWidget(saveIdx + 2, recordFramesSpinBox_);
     connect(recordButton_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
     session_->setSite(savedSite());
     const QSettings saved;
-    session_->setRecordingFolder(saved.value("recording/folder").toString());
     session_->setClockCheck(true, saved.value("time/ntp", false).toBool()
         ? saved.value("time/ntpServer", "pool.ntp.org").toString().toStdString() : std::string());
 }
@@ -947,67 +1086,197 @@ void MainWindow::onScheduleRecording()
     updateStatusLabel();
 }
 
-void MainWindow::onRecordingFolder()
+void MainWindow::onOutputFolder()
 {
+    if (session_->isRunning())
+    {
+        showMessage("Stop the stream before changing the output folder.", 4000);
+        return;
+    }
     QDialog dialog(this);
-    dialog.setWindowTitle("Recordings folder");
+    dialog.setWindowTitle("Output folder");
     auto* layout = new QVBoxLayout(&dialog);
-    auto* note = new QLabel("Each continuous recording gets a folder of its own here, named by its UTC start. "
-        "Clips and candidates.txt stay in the events folder, and candidates.txt names where each recording went. "
-        "The disk reserve is checked on this folder's drive.", &dialog);
+    auto* note = new QLabel(
+        "Everything SeleneWatch saves goes into subfolders of this single folder:\n"
+        "events/moon/, events/sky/, recordings/, and timelapses/.\n"
+        "Changing the folder affects new output only; existing files are not moved.",
+        &dialog);
     note->setWordWrap(true);
     layout->addWidget(note);
     auto* row = new QHBoxLayout;
-    auto* path = new QLineEdit(QDir::toNativeSeparators(session_->recordingFolder()), &dialog);
-    path->setObjectName("recordingFolderPath");
-    path->setMinimumWidth(360);
+    auto* path = new QLineEdit(QDir::toNativeSeparators(session_->outputRoot()), &dialog);
+    path->setObjectName("outputFolderPath");
+    path->setMinimumWidth(380);
     auto* choose = new QPushButton("Choose…", &dialog);
     auto* standard = new QPushButton("Default", &dialog);
-    standard->setToolTip("events/recordings beside the clips");
+    standard->setToolTip(QDir::toNativeSeparators(defaultOutputFolder()));
     row->addWidget(path, 1);
     row->addWidget(choose);
     row->addWidget(standard);
     layout->addLayout(row);
+    auto* infoLabel = new QLabel(&dialog);
+    infoLabel->setObjectName("outputFolderInfo");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
+    const auto refreshInfo = [&] {
+        const QString candidate = path->text().trimmed().isEmpty()
+            ? defaultOutputFolder()
+            : QDir::cleanPath(QDir::fromNativeSeparators(path->text().trimmed()));
+        const auto free = freeBytesAt(candidate);
+        QString msg = free
+            ? QString("Free disk space: %1 GiB").arg(static_cast<double>(*free) / kGiB, 0, 'f', 1)
+            : QString("Free disk space: unknown (drive/location not found)");
+        if (isCloudSyncedPath(candidate))
+        {
+            msg += "\nWarning: this folder appears to be inside a cloud-synced folder (OneDrive/Dropbox/Drive). "
+                   "High-rate FITS/SER capture can saturate uploads or lock files.";
+        }
+        infoLabel->setText(msg);
+    };
+    refreshInfo();
+    connect(path, &QLineEdit::textChanged, &dialog, refreshInfo);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(choose, &QPushButton::clicked, &dialog, [&dialog, path] {
-        const QString chosen = QFileDialog::getExistingDirectory(&dialog, "Recordings folder", path->text());
+        const QString chosen = QFileDialog::getExistingDirectory(&dialog, "Output folder", path->text());
         if (!chosen.isEmpty()) path->setText(QDir::toNativeSeparators(chosen));
     });
-    connect(standard, &QPushButton::clicked, &dialog, [path] { path->clear(); });
+    connect(standard, &QPushButton::clicked, &dialog, [path] {
+        path->setText(QDir::toNativeSeparators(defaultOutputFolder()));
+    });
     if (dialog.exec() != QDialog::Accepted) return;
     QString error;
-    if (!applyRecordingFolder(QDir::fromNativeSeparators(path->text().trimmed()), error))
-        QMessageBox::warning(this, "Recordings folder", error);
+    if (!applyOutputFolder(QDir::fromNativeSeparators(path->text().trimmed()), error))
+        QMessageBox::warning(this, "Output folder", error);
 }
 
-bool MainWindow::applyRecordingFolder(const QString& folder, QString& error)
+bool MainWindow::applyOutputFolder(const QString& folder, QString& error)
 {
-    // Empty, or the default itself, is saved as empty: the default.
-    QString chosen = folder.isEmpty() ? QString() : QDir::cleanPath(QDir(folder).absolutePath());
-    if (chosen.compare(QDir::cleanPath(session_->defaultRecordingFolder()), Qt::CaseInsensitive) == 0) chosen.clear();
-    if (!chosen.isEmpty())
+    if (session_->isRunning())
     {
-        // A folder that cannot be written is refused now, not at the recording's start.
-        QTemporaryFile probe(QDir(chosen).filePath("selenewatch-write-check-XXXXXX"));
-        if (!QDir().mkpath(chosen) || !probe.open())
-        {
-            error = QString("SeleneWatch cannot write in %1. The recordings folder is unchanged.").arg(QDir::toNativeSeparators(chosen));
-            return false;
-        }
+        error = "Stop the stream before changing the output folder.";
+        return false;
     }
-    QSettings().setValue("recording/folder", chosen);
-    session_->setRecordingFolder(chosen);
-    showMessage(QString("Recordings go to %1 from the next recording on.").arg(QDir::toNativeSeparators(session_->recordingFolder())), 5000);
+    const QString def = QDir::cleanPath(defaultOutputFolder());
+    const QString target = folder.trimmed().isEmpty() ? def : QDir::cleanPath(QDir(folder.trimmed()).absolutePath());
+    const OutputFolderCheck check = checkOutputFolder(target, 0, true);
+    if (!check.ok)
+    {
+        error = QString("%1 The output folder is unchanged.").arg(check.error);
+        return false;
+    }
+    if (!customOutputRoot_)
+    {
+        const QString stored = target.compare(def, Qt::CaseInsensitive) == 0 ? QString() : target;
+        QSettings saved;
+        saved.setValue("output/folder", stored);
+        saved.setValue("settingsVersion", kCurrentSettingsVersion);
+        saved.sync();
+    }
+    session_->setOutputRoot(target);
+    QString msg = QString("Output folder set to %1 (for new output).").arg(QDir::toNativeSeparators(target));
+    if (isCloudSyncedPath(target))
+        msg += " Warning: cloud-synced folders can interfere with high-rate capture.";
+    showMessage(msg, 6000);
     return true;
+}
+
+bool MainWindow::ensureOutputFolderReady(const QString& actionName)
+{
+    const uint64_t reserve = displayPanel_ ? displayPanel_->captureSettings().diskReserveBytes : 0;
+    const OutputFolderCheck check = checkOutputFolder(session_->outputRoot(), reserve, false);
+    if (check.ok)
+    {
+        if (check.belowReserve && check.freeBytes)
+        {
+            showMessage(QString("Warning: %1 GiB free on %2, below the disk reserve of %3 GiB.")
+                .arg(static_cast<double>(*check.freeBytes) / kGiB, 0, 'f', 1)
+                .arg(QDir::toNativeSeparators(session_->outputRoot()))
+                .arg(static_cast<double>(reserve) / kGiB, 0, 'f', 0), 8000);
+        }
+        return true;
+    }
+    showMessage(check.error, 8000);
+    if (qEnvironmentVariable("QT_QPA_PLATFORM") == "offscreen")
+    {
+        return false;
+    }
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle("Output folder unavailable");
+    box.setText(QString("Cannot start %1: %2").arg(actionName, check.error));
+    QPushButton* recreateBtn = nullptr;
+    if (check.folderMissing && !check.mountMissing)
+        recreateBtn = box.addButton("Recreate folder", QMessageBox::AcceptRole);
+    QPushButton* chooseBtn = box.addButton("Choose folder…", QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Cancel);
+    box.exec();
+    if (recreateBtn && box.clickedButton() == recreateBtn)
+    {
+        QString error;
+        return applyOutputFolder(session_->outputRoot(), error);
+    }
+    if (box.clickedButton() == chooseBtn)
+    {
+        onOutputFolder();
+        return checkOutputFolder(session_->outputRoot(), reserve, false).ok;
+    }
+    return false;
+}
+
+void MainWindow::checkLegacyEventsNotice()
+{
+    if (customOutputRoot_ || qEnvironmentVariable("QT_QPA_PLATFORM") == "offscreen"
+        || qEnvironmentVariableIsSet("SELENEWATCH_SETTINGS_NAME"))
+    {
+        return;
+    }
+    QSettings saved;
+    if (saved.value("output/legacyNoticeShown", false).toBool()) return;
+    const QString legacyEvents = QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).filePath("events"));
+    const QDir legacyDir(legacyEvents);
+    const bool hasLegacyEvents = legacyDir.exists()
+        && !legacyDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot).isEmpty()
+        && legacyEvents.compare(QDir::cleanPath(session_->outputRoot()), Qt::CaseInsensitive) != 0;
+    const QString legacyRec = saved.value("output/legacyRecordingFolder").toString();
+    if (!hasLegacyEvents && legacyRec.isEmpty())
+    {
+        saved.setValue("output/legacyNoticeShown", true);
+        return;
+    }
+    saved.setValue("output/legacyNoticeShown", true);
+    QString text = QString("New SeleneWatch output is now saved in %1.")
+        .arg(QDir::toNativeSeparators(session_->outputRoot()));
+    if (hasLegacyEvents)
+        text += QString("\n\nExisting files in %1 were left where they are.").arg(QDir::toNativeSeparators(legacyEvents));
+    if (!legacyRec.isEmpty())
+        text += QString("\n\nPrevious recordings in %1 were left where they are.").arg(QDir::toNativeSeparators(legacyRec));
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Information);
+    box.setWindowTitle("Output folder location");
+    box.setText(text);
+    QPushButton* openBtn = hasLegacyEvents ? box.addButton("Open old folder", QMessageBox::ActionRole) : nullptr;
+    box.addButton(QMessageBox::Ok);
+    box.exec();
+    if (openBtn && box.clickedButton() == openBtn)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(legacyEvents));
 }
 
 void MainWindow::onRecordClicked()
 {
     const bool recording = session_->recordingStatus().active;
-    if (!session_->requestRecording(!recording)) showMessage("Recording needs Monitoring.", 4000);
+    if (!recording && !ensureOutputFolderReady("recording"))
+    {
+        updateControls();
+        return;
+    }
+    const uint64_t maxFrames = (!recording && recordFramesSpinBox_)
+        ? static_cast<uint64_t>(recordFramesSpinBox_->value())
+        : 0;
+    if (!session_->requestRecording(!recording, maxFrames))
+        showMessage("Start Preview or Monitoring before recording.", 4000);
     updateControls();
 }
 
@@ -1018,7 +1287,9 @@ void MainWindow::onRecordingChanged()
         showMessage(QString("Recording %1 ended: %2. %3 frames.")
             .arg(status.name, QString::fromStdString(status.endReason)).arg(status.frames));
     else if (status.active)
-        showMessage(QString("Recording every frame to %1.").arg(QDir::toNativeSeparators(session_->recordingFolder())));
+        showMessage(QString("Recording %1to %2.")
+            .arg(status.frameLimit > 0 ? QString("up to %1 frames ").arg(status.frameLimit) : QString("every frame "))
+            .arg(QDir::toNativeSeparators(session_->recordingFolder())));
     updateControls();
     updateStatusLabel();
 }
@@ -1027,9 +1298,17 @@ QString MainWindow::recordingReadout() const
 {
     const auto status = session_->recordingStatus();
     if (status.active)
+    {
+        if (status.frameLimit > 0)
+        {
+            return QString("● RECORDING %1/%2 frames (%3 s, %4 GB at %5 MB/s).")
+                .arg(status.frames).arg(status.frameLimit).arg(status.streamSeconds, 0, 'f', 0)
+                .arg(static_cast<double>(status.bytes) / 1e9, 0, 'f', 2).arg(status.megabytesPerSecond, 0, 'f', 0);
+        }
         return QString("● RECORDING %1 s, %2 frames, %3 GB written at %4 MB/s.")
             .arg(status.streamSeconds, 0, 'f', 0).arg(status.frames)
             .arg(static_cast<double>(status.bytes) / 1e9, 0, 'f', 2).arg(status.megabytesPerSecond, 0, 'f', 0);
+    }
     if (const auto schedule = session_->schedule())
         return QString("Recording scheduled from %1 UTC for %2 s; it runs while Monitoring.")
             .arg(utcText(schedule->start).replace('T', ' ').chopped(1))
@@ -1242,6 +1521,7 @@ void MainWindow::updateControls()
     const bool running = session_->isRunning();
     const bool recording = recordingSelected();
     const bool monitoring = session_->mode()==Session::Mode::Monitoring;
+    const bool timeLapsing = session_->mode()==Session::Mode::TimeLapse;
     const bool pending = session_->modeChangePending();
 
     CameraFamilyPanel* selected = selectedCamera();
@@ -1255,16 +1535,18 @@ void MainWindow::updateControls()
     }
     if (testingAction_) testingAction_->setEnabled(!running);
     ui_->stopButton->setEnabled(running);
-    ui_->monitoringButton->setEnabled(running && !session_->sourceFinished() && !pending);
+    ui_->monitoringButton->setEnabled(running && !timeLapsing && !session_->sourceFinished() && !pending);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
     if (recordButton_)
     {
         const bool writing = session_->recordingStatus().active;
         recordButton_->setText(writing ? "Stop recording" : "Record");
-        recordButton_->setEnabled(writing || (running && monitoring && !pending && !session_->sourceFinished()));
+        recordButton_->setEnabled(writing || (running && !timeLapsing && !pending && !session_->sourceFinished()));
     }
-    ui_->injectFlashButton->setEnabled(running && synthetic_ != nullptr);
+    if (recordFramesSpinBox_)
+        recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing);
+    ui_->injectFlashButton->setEnabled(running && !timeLapsing && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!running);
     if (detectionPanel_) detectionPanel_->setTargetEditable(!running);
@@ -1280,9 +1562,15 @@ void MainWindow::updateControls()
     {
         const bool thisFamily = family.panel == selected;
         family.dock->setEnabled(thisFamily);
-        family.panel->setRunning(running && thisFamily, running && (monitoring || pending));
+        family.panel->setRunning(running && thisFamily, running && (monitoring || timeLapsing || pending));
     }
     if (guidingPanel_) guidingPanel_->setAvailable(running, ui_->previewWidget->selectedPosition().has_value());
+    if (timelapsePanel_)
+    {
+        const bool hasLock = session_->guider().status().lock.state == LockState::Locked;
+        timelapsePanel_->setStreamInfo(running, monitoring, session_->recordingStatus().active, timeLapsing,
+            measuredFps_, lastFrameWidth_, lastFrameHeight_, lastFrameBpp_, hasLock);
+    }
 }
 
 void MainWindow::updateBufferReadout()
@@ -1317,8 +1605,11 @@ void MainWindow::updateStreamReadout()
     if (elapsed > 0.0)
     {
         const double fps = static_cast<double>(acquired - lastAcquiredSample_) / elapsed;
+        if (fps > 0.1) measuredFps_ = fps;
         fpsLabel_->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
     }
+    if (session_->mode() == Session::Mode::TimeLapse && timelapsePanel_)
+        timelapsePanel_->updateStatus(session_->timeLapseStatus());
 
     lastAcquiredSample_ = acquired;
     lastFpsSampleTime_ = now;
@@ -1356,7 +1647,9 @@ void MainWindow::updateStatusLabel()
     }
     else if (session_->isRunning())
     {
-        statusLabel_->setText(session_->mode()==Session::Mode::Monitoring?"Status: Monitoring":"Status: Preview");
+        const auto m = session_->mode();
+        statusLabel_->setText(m == Session::Mode::Monitoring ? "Status: Monitoring"
+            : m == Session::Mode::TimeLapse ? "Status: Time-lapse" : "Status: Preview");
     }
     else if (playbackEnded_)
     {
@@ -1367,12 +1660,17 @@ void MainWindow::updateStatusLabel()
         statusLabel_->setText("Status: Stopped");
     }
     const bool monitoring=session_->mode()==Session::Mode::Monitoring;
+    const bool timeLapsing=session_->mode()==Session::Mode::TimeLapse;
     detectionPanel_->setMonitoring(monitoring);
-    modeLabel_->setStyleSheet(monitoring?"background:#164b3c; color:white; font-weight:bold;":"background:#26364e; color:white; font-weight:bold;");
+    modeLabel_->setStyleSheet(monitoring ? "background:#164b3c; color:white; font-weight:bold;"
+        : timeLapsing ? "background:#4a2f6e; color:white; font-weight:bold;"
+        : "background:#26364e; color:white; font-weight:bold;");
     if (session_->modeChangePending())
         modeLabel_->setText(monitoring?"Stopping monitoring… finishing the current capture before returning to Preview.":"Starting monitoring… applying the capture boundary at the next frame.");
     else if (!session_->isRunning())
         modeLabel_->setText("STOPPED — select an input and start Preview to tune it.");
+    else if (timeLapsing)
+        modeLabel_->setText("TIME-LAPSE — stacking bursts into FITS. Flash detection is OFF.");
     else if (monitoring)
         modeLabel_->setText(recordFailed_?"MONITORING — recording failed. Check the reported storage error.":"MONITORING — event capture ON. Stop monitoring to return to Preview and tune camera settings.");
     else
@@ -1554,6 +1852,7 @@ void MainWindow::startStream(Session::Mode mode)
     updateControls();
     updateStatusLabel();
     updateBlipReadout();
+    QTimer::singleShot(0, this, &MainWindow::checkLegacyEventsNotice);
 }
 
 void MainWindow::onStopClicked()
@@ -1567,6 +1866,7 @@ void MainWindow::onMonitoringClicked()
 {
     if (!session_->isRunning() || session_->modeChangePending()) return;
     const bool monitoring=session_->mode()==Session::Mode::Monitoring;
+    if (!monitoring && !ensureOutputFolderReady("monitoring")) return;
     if (!monitoring && activeCamera())
     {
         // Reopen with the requested controls, then read them back before any
@@ -1728,7 +2028,8 @@ bool MainWindow::validateCameraSettings()
 
 void MainWindow::onApplyCamera()
 {
-    if (session_->mode()==Session::Mode::Monitoring || session_->modeChangePending() || !validateCameraSettings()) return;
+    if (session_->mode()==Session::Mode::Monitoring || session_->mode()==Session::Mode::TimeLapse
+        || session_->modeChangePending() || !validateCameraSettings()) return;
     if (session_->isRunning())
     {
         bufferReadoutTimer_->stop(); session_->stop("camera settings changed");
@@ -1804,6 +2105,9 @@ void MainWindow::showLatestFrame()
     const FramePtr& frame = packet.frame;
     if (frame)
     {
+        lastFrameWidth_ = frame->width;
+        lastFrameHeight_ = frame->height;
+        lastFrameBpp_ = static_cast<int>(bytesPerPixel(frame->format));
         updateFrameLabel(*frame);
         latestFrame_ = frame;
         if (const int side = std::min(frame->width, frame->height); side != frameShortSide_)

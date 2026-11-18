@@ -279,6 +279,18 @@ void EventWriter::setByteLimit(size_t bytes)
     maxQueuedBytes_ = bytes;
 }
 
+void EventWriter::setOutputRoot(QString outputRoot)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (ended_) return;
+        Job job;
+        job.setOutputRoot = std::move(outputRoot);
+        queue_.push_back(std::move(job));
+    }
+    ready_.notify_one();
+}
+
 void EventWriter::setFreeSpace(FreeSpace freeSpace)
 {
     std::lock_guard lock(mutex_);
@@ -508,6 +520,17 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             }
             job = std::move(queue_.front());
             queue_.pop_front();
+        }
+
+        if (job.setOutputRoot)
+        {
+            if (outputRoot_ != *job.setOutputRoot)
+            {
+                outputRoot_ = std::move(*job.setOutputRoot);
+                pulses_.clear();
+                guideStates_.clear();
+            }
+            continue;
         }
 
         // Guiding lines are not part of the candidate record; a failure is counted.

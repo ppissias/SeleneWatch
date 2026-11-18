@@ -42,7 +42,10 @@
         "SELENEWATCH_ZWO_SDK_DIR": "C:/dev/tools/SDKs/ASI SDK",
         "SELENEWATCH_QHY_SDK_DIR": "C:/dev/tools/SDKs/QHY sdk",
         "SELENEWATCH_PLAYERONE_SDK_DIR": "C:/dev/tools/SDKs/PlayerOne SDK",
-        "SELENEWATCH_TOUPTEK_SDK_DIR": "C:/dev/tools/SDKs/ToupTek SDK"
+        "SELENEWATCH_TOUPTEK_SDK_DIR": "C:/dev/tools/SDKs/ToupTek SDK",
+        "SELENEWATCH_OPENCV_DIR": "C:/dev/tools/opencv/build",
+        "SELENEWATCH_CFITSIO_DIR": "C:/dev/tools/cfitsio",
+        "SELENEWATCH_FFMPEG_DIR": "C:/dev/tools/ffmpeg"
       }
     },
     {

@@ -34,6 +34,41 @@ if(SELENEWATCH_ZWO_SDK_DIR)
     install(FILES "${SELENEWATCH_ZWO_SDK_DIR}/license.txt" DESTINATION licenses RENAME ZWO-ASI-SDK.txt)
 endif()
 
+if(TARGET opencv_world)
+    install(FILES "$<TARGET_FILE:opencv_world>" DESTINATION .)
+endif()
+if(SELENEWATCH_OPENCV_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_OPENCV_DIR}" _opencv_pkg_dir)
+    if(EXISTS "${_opencv_pkg_dir}/../LICENSE.txt")
+        install(FILES "${_opencv_pkg_dir}/../LICENSE.txt" DESTINATION licenses RENAME OpenCV-LICENSE.txt)
+    endif()
+endif()
+
+if(SELENEWATCH_CFITSIO_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_CFITSIO_DIR}" _cfitsio_pkg_dir)
+    if(EXISTS "${_cfitsio_pkg_dir}/bin/cfitsio.dll")
+        install(FILES "${_cfitsio_pkg_dir}/bin/cfitsio.dll" DESTINATION .)
+    endif()
+    if(EXISTS "${_cfitsio_pkg_dir}/License.txt")
+        install(FILES "${_cfitsio_pkg_dir}/License.txt" DESTINATION licenses RENAME CFITSIO-LICENSE.txt)
+    endif()
+endif()
+
+if(SELENEWATCH_FFMPEG_DIR)
+    file(TO_CMAKE_PATH "${SELENEWATCH_FFMPEG_DIR}" _ffmpeg_pkg_dir)
+    foreach(_ff_file
+        ffmpeg.exe avcodec-63.dll avdevice-63.dll avfilter-12.dll
+        avformat-63.dll avutil-61.dll swresample-7.dll swscale-10.dll
+    )
+        if(EXISTS "${_ffmpeg_pkg_dir}/bin/${_ff_file}")
+            install(FILES "${_ffmpeg_pkg_dir}/bin/${_ff_file}" DESTINATION .)
+        endif()
+    endforeach()
+    if(EXISTS "${_ffmpeg_pkg_dir}/LICENSE.txt")
+        install(FILES "${_ffmpeg_pkg_dir}/LICENSE.txt" DESTINATION licenses RENAME FFmpeg-LICENSE.txt)
+    endif()
+endif()
+
 # The Visual C++ runtime beside the executable, so no separate installer is
 # needed. The Universal CRT is part of Windows 10 and 11.
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)

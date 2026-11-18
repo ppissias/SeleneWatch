@@ -1,5 +1,9 @@
 #include "mainwindow.h"
+#include "recording/output_paths.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
+#include <QtCore/QSettings>
 #include <QtGui/QIcon>
 #include <QtWidgets/QApplication>
 
@@ -13,6 +17,19 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("SeleneWatch");
     const QString settingsName = qEnvironmentVariable("SELENEWATCH_SETTINGS_NAME");
     QCoreApplication::setApplicationName(settingsName.isEmpty() ? QString("SeleneWatch") : settingsName);
+
+    // Optional portable mode: a SeleneWatch.ini file beside the executable takes
+    // priority over the per-user registry store when not running isolated tests.
+    if (settingsName.isEmpty())
+    {
+        const QString portableIni = QDir(QCoreApplication::applicationDirPath()).filePath("SeleneWatch.ini");
+        if (QFileInfo::exists(portableIni))
+        {
+            QSettings::setDefaultFormat(QSettings::IniFormat);
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QCoreApplication::applicationDirPath());
+        }
+    }
+    migrateOutputSettings();
 
     // The window icon, at the sizes the title bar and the task switcher use.
     QIcon icon;

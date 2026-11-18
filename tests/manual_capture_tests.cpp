@@ -1,6 +1,7 @@
 #include "event_capture.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
+#include "recording/output_paths.h"
 #include "session.h"
 
 #include <QtCore/QDir>
@@ -285,7 +286,7 @@ private slots:
         }
         QCoreApplication::processEvents();
         QCOMPARE(handled.size(),size_t{1}); QVERIFY(!handled[0]);
-        QCOMPARE(QDir(dir.path()).entryList(QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
+        QCOMPARE(QDir(eventsFolder(dir.path(), Target::Moon)).entryList(QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
     }
     void nativeManualEvidenceAndRefusedRequestsStayOnRecord()
     {

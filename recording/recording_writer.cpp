@@ -89,6 +89,8 @@ bool RecordingWriter::start(Start start, const FramePtr& first)
     allowance_ = start.queueBytes;
     status_ = {};
     status_.active = true;
+    status_.sessionMode = start.sessionMode;
+    status_.frameLimit = start.maxFrames;
     Job job;
     job.start = std::move(start);
     job.frame = first;
@@ -272,7 +274,9 @@ void RecordingWriter::run(std::stop_token stopToken)
             QTextStream out(&open->noteFile);
             out << "software: SeleneWatch " << SELENEWATCH_VERSION << "\n";
             out << "kind: continuous recording\n";
+            out << "session_mode: " << QString::fromStdString(open->start.sessionMode) << "\n";
             out << "mode: " << targetName(open->start.target) << "\n";
+            if (open->start.maxFrames > 0) out << "frame_limit: " << open->start.maxFrames << "\n";
             out << "started_by: " << QString::fromStdString(open->start.startedBy) << "\n";
             writeSiteLines(out, open->start.site);
             writeStreamLines(out, open->start.stream, &first);

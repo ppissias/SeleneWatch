@@ -67,13 +67,22 @@ Camera SDKs (not part of the repository)
     .\out\build\release\SeleneWatchRuntimeProbe.exe qhy
   All these paths contain a space; quote them in CMake and on the command line.
   Since 2026-11-15 the Debug-x64 and Release-x64 presets build the camera adapters: they inherit the hidden
-  Camera-SDKs preset in CMakeUserPresets.json, which sets SELENEWATCH_ZWO_SDK_DIR and SELENEWATCH_QHY_SDK_DIR
-  (and since 2026-11-17 SELENEWATCH_PLAYERONE_SDK_DIR and SELENEWATCH_TOUPTEK_SDK_DIR) to the paths above. A Run or Debug from Visual Studio therefore lists ZWO ASI camera, QHY camera, Player One camera, and ToupTek camera
-  under Source, and ASICamera2.dll plus licenses\ZWO-ASI-SDK.txt are copied into out\build\debug (or release).
-  Separate single-adapter builds (below) are still possible but no longer needed for daily work.
+  Camera-SDKs preset in CMakeUserPresets.json, which sets SELENEWATCH_ZWO_SDK_DIR, SELENEWATCH_QHY_SDK_DIR,
+  SELENEWATCH_PLAYERONE_SDK_DIR, SELENEWATCH_TOUPTEK_SDK_DIR, and (for Feature-18 time-lapse) SELENEWATCH_OPENCV_DIR,
+  SELENEWATCH_CFITSIO_DIR, and SELENEWATCH_FFMPEG_DIR to:
+    OpenCV 4.14.0 (Apache-2.0): C:/dev/tools/opencv/build
+    CFITSIO 4.7.0 (NASA permissive, shared DLL with static zlib): C:/dev/tools/cfitsio
+    FFmpeg 9.0 (win64-lgpl-shared, LGPLv3): C:/dev/tools/ffmpeg
+  A Run or Debug from Visual Studio therefore includes all camera adapters plus opencv_world4140[d].dll, cfitsio.dll,
+  and ffmpeg.exe + FFmpeg LGPL DLLs copied into out\build\debug (or release).
+  Separate single-adapter builds (below) are still possible with the time-lapse library flags passed explicitly.
   Older separate SDK builds: out\build\zwo-debug and out\build\zwo-release.
   Configure from the development PowerShell environment, for example:
-    cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
+    cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QTDIR" `
+      -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK" `
+      -DSELENEWATCH_OPENCV_DIR="C:/dev/tools/opencv/build" `
+      -DSELENEWATCH_CFITSIO_DIR="C:/dev/tools/cfitsio" `
+      -DSELENEWATCH_FFMPEG_DIR="C:/dev/tools/ffmpeg"
     cmake --build out/build/zwo-release
     ctest --test-dir out/build/zwo-release --output-on-failure
     .\out\build\zwo-release\SeleneWatch.exe

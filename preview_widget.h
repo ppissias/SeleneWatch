@@ -30,6 +30,8 @@ public:
     void setDetectionOverlay(QImage image, QRect frameBox);
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
+    // Frame coordinates. Optional lunar constant anchor region (Feature-18).
+    void setAnchorBox(std::optional<QRect> anchor);
     // Frame coordinates. The detection mask (Feature-11), drawn hatched, and
     // the corners of a shape being drawn (Feature-15), joined by a line.
     void setMask(std::vector<QPolygon> mask);
@@ -62,6 +64,7 @@ private:
     std::optional<QPoint> selected_;
     std::optional<QRect> lockBox_;
     std::optional<QRectF> foundBox_;
+    std::optional<QRect> anchorBox_;
     bool foundValid_{false};
     std::vector<QPolygon> mask_;
     std::vector<QPoint> pending_;

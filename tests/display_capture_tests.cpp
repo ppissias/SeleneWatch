@@ -3,6 +3,7 @@
 #include "frame_pool.h"
 #include "preview_image.h"
 #include "recording/ser_writer.h"
+#include "recording/output_paths.h"
 #include "session.h"
 #include "sources/synthetic_frame_source.h"
 
@@ -409,7 +410,7 @@ void DisplayCaptureTest::memoryCapSplitsTheRunAndLeavesRoomForItsDifference()
             // Fast playback can fill the active+queued allowance before
             // the first clip's previews finish. The continuation must be logged.
             QCOMPARE(result.notSaved, QString("writer busy"));
-            QFile log(QDir(output.path()).filePath("candidates.txt"));
+            QFile log(QDir(eventsFolder(output.path(), Target::Moon)).filePath("candidates.txt"));
             QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
             const auto text = log.readAll();
             QVERIFY(text.contains("continues_previous_clip"));

@@ -128,6 +128,9 @@ public:
     // Writes what is queued, then stops the thread.
     void shutdown();
     void setByteLimit(size_t bytes);
+    // Any thread. Queues a folder switch so previously queued clips finish
+    // writing to the old folder first.
+    void setOutputRoot(QString outputRoot);
     // Before the first submit. Replaces the drive query, for tests.
     void setFreeSpace(FreeSpace freeSpace);
     [[nodiscard]] WriterUsage usage() const;
@@ -148,6 +151,7 @@ private:
     // to be logged).
     struct Job
     {
+        std::optional<QString> setOutputRoot;
         std::optional<SessionStart> sessionStart;
         bool guiding{false};
         QString guidingLines;
@@ -181,7 +185,7 @@ private:
     [[nodiscard]] bool duringMountCorrection(std::chrono::system_clock::time_point time) const;
 
     QObject* context_;
-    const QString outputRoot_;
+    QString outputRoot_;
     size_t maxQueuedBytes_;
     Finished finished_;
     FreeSpace freeSpace_;

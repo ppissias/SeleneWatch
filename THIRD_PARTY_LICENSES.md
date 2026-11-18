@@ -123,6 +123,29 @@ None of them grants redistribution clearly. Any of them therefore follows the QH
 
 ---
 
+### OpenCV 4.14.0 (Shipped — Dynamic Link)
+- **Component:** `opencv_world4140.dll` (`opencv_world4140d.dll` in Debug)
+- **License:** Apache License 2.0 (`licenses/OpenCV-LICENSE.txt`)
+- **Upstream:** https://opencv.org/ (`opencv-4.14.0-windows.exe`, SHA-256 `5f266a8b73bed535962d7e861a6457e32a0dd5f463ad0a7cf8707a135469be63`)
+- **Usage:** Demosaicing, phase-correlation burst alignment, rigid Euclidean/ECC lunar field-rotation alignment, linear unsharp masking, and frame resampling in **Time-lapse** mode.
+- **Obligations:** Permissive (`Apache-2.0`). Include `licenses/OpenCV-LICENSE.txt` and attribution notice in distributions. Compatible with BSD-2-Clause.
+
+### CFITSIO 4.7.0 (Shipped — Dynamic Link)
+- **Component:** `cfitsio.dll`
+- **License:** NASA/GSFC permissive open-source license (`licenses/CFITSIO-LICENSE.txt`)
+- **Upstream:** https://heasarc.gsfc.nasa.gov/fitsio/ (`cfitsio-4.7.0.zip`, SHA-256 `5fa2107a3567c2769b4ec3f3759380c117d53cc20f89225ddea69c54454823d3`, Release build with static zlib)
+- **Usage:** Reading and writing linear 32-bit floating-point FITS stacks (`BITPIX = -32`, 2D mono and 3D plane-sequential R,G,B) and FITS astronomy headers (`DATE-OBS`, `DATE-AVG`, `DATE-END`, `EXPTIME`, `GAIN`, `RAWCOUNT`, `STACKCNT`, `QUALSCOR`, `ALIGNDX`, `ALIGNDY`, `ALIGNROT`, `SHARPPRO`).
+- **Obligations:** Permissive. Include `licenses/CFITSIO-LICENSE.txt` with copyright notice and warranty disclaimer in all distributions. Compatible with BSD-2-Clause.
+
+### FFmpeg 9.0 LGPL Shared (Shipped — External CLI Subprocess)
+- **Component:** `ffmpeg.exe` + `avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll` (`n9.0.2-57-gd838f9f9ae-20261118` `win64-lgpl-shared`)
+- **License:** GNU Lesser General Public License v3.0 (LGPLv3, `licenses/FFmpeg-LICENSE.txt`), built **without** `--enable-gpl` / `libx264`
+- **Upstream:** https://www.ffmpeg.org/ / BtbN `win64-lgpl-shared` (`ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`, SHA-256 `3616f1027c0f9c08cdfc92bfaea84282db4398234cdcd861347d438c8edeb088`)
+- **Usage:** Invoked out-of-process over `stdin` raw RGB24 pipe via `QProcess` to encode `timelapse.mp4` (`libopenh264`, `yuv420p`) and palette-optimized `timelapse.gif`.
+- **Obligations:** LGPLv3 dynamic/external binary. Ship `licenses/FFmpeg-LICENSE.txt`, keep shared DLLs replaceable, and make corresponding FFmpeg source version metadata available. No GPL components included.
+
+---
+
 ## Dependency Evaluation Guidelines
 
 When proposing or introducing any new third-party dependency into SeleneWatch:

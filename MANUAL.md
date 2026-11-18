@@ -30,10 +30,10 @@ For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md) (in the s
 **Computer.** Windows 10 or 11, 64-bit. SeleneWatch is a native Qt application. It never waits on the disk, the display or the mount, but a fast disk and enough RAM help it keep long histories.
 
 **Installing.** Each release comes in two forms, named by its version (for example `2026.11-01`: year, month, and the release's number in that month). **Help → About SeleneWatch** shows the version you run, and **Help → Acknowledgements** credits the methods and tools SeleneWatch builds on.
-- `SeleneWatch-<version>-win64.msi` installs for your Windows account, without administrator rights, into `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older version. Uninstalling removes the program but keeps your `events` folder.
-- `SeleneWatch-<version>-win64.zip` needs no installation: unpack it into a folder you can write in, and run `SeleneWatch.exe`. To update, unpack the new version and copy your `events` folder across if you want it in the same place.
+- `SeleneWatch-<version>-win64.msi` installs for your Windows account, without administrator rights, into `%LOCALAPPDATA%\SeleneWatch`, with a Start-menu entry. A newer installer replaces an older version. Uninstalling removes the program while keeping your saved data in your output folder intact.
+- `SeleneWatch-<version>-win64.zip` needs no installation: unpack it into a folder you can write in, and run `SeleneWatch.exe`.
 
-Either way, the Qt and Visual C++ libraries the program needs come with it. The licenses of SeleneWatch and of everything shipped with it are in `LICENSE.txt` and the `licenses` folder.
+Either way, Qt 6, OpenCV, CFITSIO, FFmpeg (`win64-lgpl-shared`), and the Visual C++ libraries the program needs come with it. The licenses of SeleneWatch and of everything shipped with it are in `LICENSE.txt` and the `licenses` folder.
 
 **Cameras.** Install the camera maker's Windows driver before you connect the camera.
 
@@ -59,7 +59,16 @@ Player One cameras work like ZWO ones: bin 1 or more for mono cameras (binned pi
 
 **Mount (optional).** To let SeleneWatch keep the Moon in the field, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's ASCOM driver, for example EQMOD. SeleneWatch only sends small guide pulses; it never slews or parks the mount.
 
-**Where files go.** Clips and logs are written to a folder called `events` next to `SeleneWatch.exe`; **Session → Open the events folder** opens it. Continuous recordings can go to another folder (section 9). SeleneWatch never writes into the folders it reads recordings from.
+**Where files go.** Everything SeleneWatch writes lives under a single remembered output folder (**Session → Output folder…**, defaulting to `%USERPROFILE%\SeleneWatch`, stored with `settingsVersion = 1`):
+- `events/moon/` and `events/sky/` — triggered candidate clips, `00_overview.png`, `candidates.txt`, and `guiding.txt`
+- `recordings/` — manual and scheduled continuous SER recordings
+- `timelapses/` — lucky-imaging time-lapse sessions (`stacks/`, `sharpened/`, `timelapse.mp4`, `timelapse.gif`, `timelapse.txt`)
+
+**Session → Open the output folder** opens it. Prefer a fast local folder rather than a cloud-synced drive (OneDrive, Dropbox, Google Drive, iCloud Drive); if a cloud-synced path is chosen, SeleneWatch warns you. Before Monitoring, recording, or starting a time-lapse, SeleneWatch checks that the chosen folder exists, is writable, and has at least **Disk reserve** free space—if the drive is unplugged or the folder is deleted, it refuses with an explanation instead of silently writing elsewhere. If an older version saved a legacy `events/` folder next to `SeleneWatch.exe`, a one-time notice lets you move or inspect it yourself without moving files behind your back. SeleneWatch never writes into the folders it reads recordings from.
+
+![Session -> Output folder dialog showing single root layout and free disk space](docs/images/manual-output-folder.png)
+
+***Session → Output folder…**: configures the single output root (`events/moon/`, `events/sky/`, `recordings/`, and `timelapses/`) and checks free space and cloud-sync warnings live.*
 
 **Settings are remembered.** Detection, display, capture, histogram and guiding choices are saved when you stop a stream or close the window, and restored the next time you start SeleneWatch.
 
@@ -76,12 +85,12 @@ All of it goes into every clip, every recording and the `session_start` lines, s
 
 From top to bottom:
 
-- **Top row:** the **Source** selector, **Connect at startup** (for a camera), and **Open…** (for recordings). With the testing tools on, an amber **TESTING TOOLS ON** mark. Then **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, and, with the testing tools on, **Fixed flash** (synthetic source only). Then the **Target FPS**, playback **Speed**, and **Loop first … s** controls.
-- **Banner:** a coloured line that always says whether capture is **OFF** (Preview) or **ON** (Monitoring).
+- **Top row:** the **Source** selector, **Connect at startup** (for a camera), and **Open…** (for recordings). With the testing tools on, an amber **TESTING TOOLS ON** mark. Then **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** (with optional frame limit: **Unlimited** or **N frames**), and, with the testing tools on, **Fixed flash** (synthetic source only). Then the **Target FPS**, playback **Speed**, and **Loop first … s** controls.
+- **Banner:** a coloured line that always says whether capture is **OFF** (Preview), **ON** (Monitoring), or **TIME-LAPSE**.
 - **Test flash** (testing tools only): controls for injecting a known, marked test signal (see [section 8](#8-testing-sensitivity-with-a-test-flash)).
-- **Preview:** the live or recorded image, fitted to the window. Click to select a pixel; drag to lock on a feature.
+- **Preview:** the live or recorded image, fitted to the window. Click to select a pixel; drag to lock on a feature (or drag a sunlit lunar anchor box when **Select anchor** is checked in **Time-lapse**).
 - **Docks:** panels you can show, hide, move or float from the **View** menu.
-  - **Detection**, **Display and capture**, and **Guiding** share the right-hand side as tabs.
+  - **Detection**, **Display and capture**, **Time-lapse**, and **Guiding** share the right-hand side as tabs.
   - Each camera family's panel (**Camera** for ZWO, **QHY camera**, **Player One camera**, **ToupTek camera**) appears on the left when that camera is the source.
   - **Histogram** opens below the preview.
 - **Status bar** (bottom), in two lines:
@@ -152,14 +161,15 @@ See [section 1](#1-before-you-start) for driver/DLL discovery and [section 5](#5
 
 ---
 
-## 4. Preview and Monitoring
+## 4. Preview, Monitoring, and Time-lapse
 
-SeleneWatch has two running states. In both, every frame goes through the same detector.
+SeleneWatch has three running states:
 
 | State | What happens | Camera controls | What is written |
 | --- | --- | --- | --- |
-| **Preview** | Frames are shown, analysed and kept in the history | Live, where the camera allows | Nothing |
-| **Monitoring** | Same analysis; candidates are captured as clips | Fixed | Clips, the candidate log, the guiding log |
+| **Preview** | Frames are shown, analysed and kept in the history | Live, where the camera allows | Nothing unless **Record** is pressed (which writes only `recordings/<UTC>/`, never `candidates.txt`) |
+| **Monitoring** | Same analysis; candidates are captured as clips | Fixed | Clips under `events/<target>/`, `candidates.txt`, `guiding.txt`, plus optional **Record** / scheduled SER |
+| **Time-lapse** | Periodic lucky-imaging bursts stacked & aligned into linear 32-bit FITS and MP4/GIF (flash detection OFF) | Fixed | Under `timelapses/<UTC>/`: `stacks/*.fits`, `sharpened/*.fits`, optional `raw/*.ser`, `timelapse.txt`, `timelapse.mp4`/`.gif` |
 
 **Start preview** is the normal first step: focus, frame the Moon, set exposure and gain, and watch the detector's readout. The banner says **capture OFF**. The Detection panel shows **Would trigger — capture OFF** when the detector would have fired.
 
@@ -307,14 +317,14 @@ These are the Moon's defaults; the sky has its own (see section 7). The status b
 
 ### Continuous recording
 
-For predicted events (an ISS transit, a lunar occultation, a graze), record every frame instead of waiting for a trigger.
-- **Record**, beside **Save now**, works while Monitoring. Every frame from the press until you press **Stop recording** goes into one SER file, unchanged. Stopping monitoring or the stream, or the end of a recording being played, also ends it.
+For predicted events (an ISS transit, a lunar occultation, a graze) or manual high-speed captures in **Preview**, record every frame continuously into one lossless SER file:
+- **Record**, beside **Save now**, works in **both Preview and Monitoring**. Optionally set a frame limit in the spin box beside **Record** (**Unlimited** = `0` records until stopped; otherwise stops automatically after that exact number of frames). Every recorded frame is written unchanged. Recordings started from **Preview** write to `<output folder>/recordings/<UTC>/` without running flash detection or touching `candidates.txt`. Stopping the stream, pressing **Stop recording**, or reaching the frame limit / playback end finishes the SER cleanly.
 - **Session → Schedule a recording…** sets a UTC start time and a length. While Monitoring, the recording starts on the first frame at or after that time and ends at its end. Start it a little before the prediction.
 - The capture mode line shows `● RECORDING` with the seconds, frames, size and write rate.
-- Each recording goes in a folder of its own, named by its UTC start, in the recordings folder: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (what it is, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
-- The recordings folder is `events/recordings` unless you choose another with **Session → Recordings folder…**, for example on a larger or faster drive. **Default** returns to `events/recordings`. A folder SeleneWatch cannot write in is refused when you choose it. Clips and `candidates.txt` stay in `events`; the `recording_start` line names the folder each recording went to.
-- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve (checked on the recordings folder's drive) it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
-- Detection keeps running: clips written meanwhile say `during_recording:` with the recording's name, and `candidates.txt` has `recording_start` and `recording_stop` lines.
+- Each recording goes in a folder of its own inside `<output folder>/recordings/<UTC>/`: `recording.ser`, `frames.txt` (each frame's index and UTC time, and any dropped-frame gaps) and `recording.txt` (`session_mode: preview` or `monitoring`, optional `frame_limit:`, the camera, site and clock record, and why it ended). `complete: yes` at the end of `recording.txt` marks a finished recording.
+- **Session → Output folder…** sets the single parent output folder for events, recordings, and time-lapses (section 1). Monitoring clips continue into `events/<target>/` and log `recording_start` / `recording_stop` lines in `candidates.txt`.
+- **A recording never loses frames silently.** If the disk cannot keep up, it stops with *disk too slow*; below the disk reserve (checked on the output folder's drive) it stops with *disk reserve*. Either way the file is finished and the window says why. After a crash, the SER file can still be read up to the last second before it.
+- Detection keeps running during Monitoring recordings: clips written meanwhile say `during_recording:` with the recording's name.
 
 When an event lasts longer than **Maximum after trigger**, it continues in a new clip whose `event.txt` names the clip before (`continues_clip:`). On the Moon each such clip starts with its own history, so it stands on its own. On the sky it starts with the next frame, so a plane crossing for minutes is not saved twice.
 
@@ -322,7 +332,10 @@ When an event lasts longer than **Maximum after trigger**, it continues in a new
 
 ## 10. What SeleneWatch saves
 
-Everything goes under the `events` folder next to `SeleneWatch.exe`, and only while **Monitoring**. Continuous recordings can go elsewhere (section 9, *Continuous recording*).
+Everything goes under your chosen **Output folder** (**Session → Output folder…**, default `%USERPROFILE%\SeleneWatch`):
+- **`events/moon/`** and **`events/sky/`** (Monitoring only): candidate clips, `candidates.txt`, and `guiding.txt`
+- **`recordings/`** (Preview or Monitoring **Record**, and scheduled recordings): `<UTC>/recording.ser`, `frames.txt`, `recording.txt`
+- **`timelapses/`** (**Time-lapse** mode): `<UTC>/stacks/*.fits`, `sharpened/*.fits`, `sharpening_profile.json`, `timelapse.txt`, `timelapse.mp4`, optional `timelapse.gif` and `raw/*.ser`
 
 ### One folder per clip
 
@@ -461,6 +474,26 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 
 > **Watch this on your first guided session.** Guide pulses move bright edges, which the detector may notice. On recorded lunar frames moved the way corrections move the image, at a K where the unmoved field was quiet (12 to 24), corrections at the allowed speed added at most one candidate in any run, always inside a marked window. At K 6 they added many, almost all marked. The synthetic test scene is sharper and triggers on drift alone. Check how often candidates appear while guiding on your own data before trusting an unattended session. The measurements are in [docs/guide-pulse-detector.md](docs/guide-pulse-detector.md).
 
+### Time-lapse outputs and Re-sharpen & Rebuild
+
+Each time-lapse session creates `<output folder>/timelapses/<UTC>/`:
+- **`stacks/`** — aligned linear 32-bit floating-point FITS (`BITPIX = -32`, 2D mono or 3D plane-sequential R,G,B), one per burst period, with headers `DATE-OBS`, `DATE-AVG`, `DATE-END`, `EXPTIME`, `GAIN`, `RAWCOUNT`, `STACKCNT`, `QUALSCOR`, `ALIGNDX`, `ALIGNDY`, `ALIGNROT`, and `SHARPPRO`.
+- **`sharpened/`** — the linear unsharp-masked (`applyLinearSharpening`) 32-bit FITS copy produced with your live sharpening preset (`Off`, `Mild`, `Medium`, or saved custom profile). Never gamma-stretched.
+- **`sharpening_profile.json`** — sharpening and video tone-mapping parameters used for the run.
+- **`timelapse.mp4`** / **`timelapse.gif`** — tone-mapped (brightness-levelled across stacks, session-wide stretch/gamma, overlap-cropped) animation written via LGPL FFmpeg (`libopenh264` for MP4; two-pass palette for GIF).
+- **`raw/*.ser`** — optional raw burst frames saved only if **Save raw burst SER** is ticked.
+- **`timelapse.txt`** — session log recording settings, site/instrument/camera metadata, any skipped overload periods (`skip period=…`), per-stack quality and alignment offsets, stop reason (`stopped by the observer`, `duration complete`, `UTC end time reached`, `target stack count reached`, or `disk reserve`), and exported video paths.
+
+Open **Session → Re-sharpen time-lapse…** (or press **Re-sharpen…** on the **Time-lapse** dock) to open a finished session, preview before/after on the highest-quality stack (or any stack), save/reuse named profiles, choose **Rebuild video only** (fast stretch/gamma/fps/GIF tweak without re-sharpening), or apply non-destructively into `<session>/sharpened_<profile>_<UTC>/` without overwriting your original `stacks/`, `sharpened/`, or video.
+
+![Time-lapse dock running on Moon_165104.ser with sunlit lunar anchor box and live thumbnails](docs/images/manual-timelapse.png)
+
+***Time-lapse** running in real time on `Moon_165104.ser` (`1296 × 964 Mono8`, `Interval 7.0 s`, `Capture window 4.0 s`, `Keep best 35 %`): the sunlit **Lunar anchor** `(710, 380) 260 × 220 px` tracks `31.6 px` of field drift across 4 completed bursts while updating **Latest stack** and the **Filmstrip loop** (`3 / 4`). Flash detection stays **OFF** and the **Record** control in the top toolbar accepts **Unlimited** or an explicit frame limit.*
+
+![Re-sharpen dialog showing Before/After unsharpened vs. USM-sharpened Clavius FITS stack](docs/images/manual-resharpen.png)
+
+***Re-sharpen time-lapse…** inspecting the finished `Moon_165104.ser` session: automatically selects the highest-quality stack (`Q=0.00377`) for side-by-side comparison (`USM radius 1.50 px`, `USM amount 1.80`, `Gamma 1.10`) without modifying the linear FITS stacks in `stacks/`.*
+
 ---
 
 ## 12. An observing session, step by step
@@ -490,9 +523,17 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 
 ### Predicted occultation or transit (continuous recording)
 
-1. Check **Session → Recordings folder…** if you want the continuous SER file written to a larger or faster SSD, and verify your PC clock check under **Session → Site and instrument…**.
-2. Start Preview, tune exposure, gain, and ROI, then press **Start monitoring** a couple of minutes before the predicted time.
-3. Either press **Record** manually before the event and **Stop recording** afterwards, or set the UTC start time and duration in **Session → Schedule a recording…** before it arrives. Detection keeps running meanwhile.
+1. Check **Session → Output folder…** so recordings write to a fast local SSD, and verify your PC clock check under **Session → Site and instrument…**.
+2. Start Preview, tune exposure, gain, and ROI. Either record directly in **Preview** (using **Record** with **Unlimited** or an explicit frame count), or press **Start monitoring** a couple of minutes before the predicted time if you also want flash/transit detection running.
+3. Press **Record** manually before the event and **Stop recording** afterwards (or set the UTC start time and duration in **Session → Schedule a recording…** during Monitoring).
+
+### Lunar or planetary lucky-imaging time-lapse
+
+1. Start **Preview**, frame the Moon or planet, set exposure, gain, and optional ROI, and optionally start **Guiding** on a Moon crater so the field stays centered.
+2. Open **View → Time-lapse** and set **Target preset** to **Moon** (rigid translation + Alt-Az field rotation alignment) or **Planet** (limb-centroid alignment tolerant of planetary rotation). If watching the Moon across hours while shadows move along the terminator, press **Select lunar anchor** and drag a box around a crater area that stays sunlit throughout the session.
+3. Choose **Interval**, **Capture window**, **Keep best**, and **Max frames/period** (`100–200` recommended; capped at `200` per period so burst RAM stays bounded), plus your **Stop condition** (**Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks**), **Sharpening** profile, and **Animation** (**MP4** / **GIF**, frame rate).
+4. Press **Start time-lapse**. Monitor **Latest stack**, the **Filmstrip loop**, and any overload, cloud, guiding-loss, or disk-reserve warnings; press **Stop time-lapse** (or let the stop condition / disk reserve trigger) to assemble `timelapse.mp4` / `.gif`.
+5. Afterwards, use **Re-sharpen…** to tune unsharp masking or video stretch/gamma non-destructively from `stacks/*.fits`.
 
 ---
 
@@ -516,7 +557,10 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Guiding refused: "pixels per frame" | The guide rate is too fast for this image scale. Lower it in the mount's driver and calibrate again. |
 | Guiding stopped: "corrections have no effect" | The calibration no longer matches the mount, or the lock is on the wrong feature. Check, lock, and calibrate again. |
 | "Mount not responding" | A driver call has not returned. Acquisition and detection continue. Check the mount's connection and its driver window. |
-| `guiding.txt could not be written` | The disk is full or the `events` folder is not writable. Guiding continues, but its record is incomplete. |
+| `guiding.txt could not be written` | The disk is full or the output folder is not writable. Guiding continues, but its record is incomplete. |
+| Output folder refused at Start | The chosen output drive is unplugged or the folder was deleted. Reconnect the drive or choose a valid local folder in **Session → Output folder…** (SeleneWatch never silently falls back). |
+| Time-lapse "Processing fell behind interval" | Burst stacking took longer than **Interval**, so a period was skipped cleanly by the overload gate instead of piling up in RAM. Increase **Interval**, shorten **Capture window**, lower **Max frames/period**, or crop to an ROI. |
+| Time-lapse "Sharpness dropped sharply (possible cloud)" | Burst quality fell well below the reference stack. The stack is still saved to `stacks/` / `sharpened/`; in **Re-sharpen time-lapse…**, raise **Drop below quality** to exclude cloudy frames from the final MP4/GIF. |
 
 ---
 
@@ -536,5 +580,7 @@ Set the **Tolerance**: how far the feature may wander before SeleneWatch correct
 | Continuous and scheduled recording | Automated tests on played files and constructed slow disks; **a predicted transit recorded with a schedule is pending** |
 | The clip overview | Automated tests; checked on archive lunar recordings |
 | Darkening (transits) | Automated tests; measured on five archive recordings with injected silhouettes: at K 12 it adds nothing to an unchanged field and catches near-black crossings on four of the five. **A real transit is pending.** |
+| Output folder & Preview recording | Automated core, session, and UI tests verifying single remembered output root (`events/`, `recordings/`, `timelapses/`), cloud-sync warning, missing drive/folder refusal, legacy `events/` notice isolation, and Preview manual recording with optional frame limit |
+| Lucky-imaging time-lapse & Re-sharpen | Automated unit and UI tests verifying CFITSIO 2D/3D linear float FITS + metadata, OpenCV debayer/phase-correlation/sigma-clip/Moon anchor rotation/Planet centroid alignment, fixed-cadence parallel worker + overload skip gate, `diskReserveBytes` stop-and-build, FFmpeg MP4/GIF encoding, and non-destructive `ResharpenDialog`; checked on real archive recordings (`Moon_165104.ser` `1296×964` with sunlit anchor & `Re-sharpen`, and Jupiter `21-26-10-184.avi` at `15.15 fps`); **an overnight Moon/Planet live-camera run is pending** |
 
 Details are in [features.md](features.md), [implemented features.md](implemented%20features.md), and the validation notes in [docs](docs/).

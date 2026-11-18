@@ -10,6 +10,7 @@
 #include "sources/frame_source.h"
 #include "latest_frame_slot.h"
 #include "stream_info.h"
+#include "timelapse/timelapse_session.h"
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -41,7 +42,8 @@ class Session final : private FrameSourceListener
 {
 public:
     // Preview analyses the stream with capture off. Monitoring also collects evidence clips.
-    enum class Mode { Stopped, Preview, Monitoring };
+    // TimeLapse stacks bursts at fixed intervals with flash detection off.
+    enum class Mode { Stopped, Preview, Monitoring, TimeLapse };
     // Each one runs on the context object's thread, queued. Any may be empty.
     struct Notifications
     {
@@ -57,6 +59,9 @@ public:
         std::function<void()> lockChanged;
         // A continuous recording started or ended. Read recordingStatus().
         std::function<void()> recordingChanged;
+        // Time-lapse progress or finished (Feature-18).
+        std::function<void(const TimelapseStatus&)> timeLapseChanged;
+        std::function<void(const TimelapseFinishResult&)> timeLapseFinished;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -115,13 +120,16 @@ public:
     // Context thread. Whether the window's testing tools (synthetic source,
     // test flash) are on; recorded on each session_start line.
     void setTestingTools(bool on);
-    // Context thread. Where the next recording goes, each in a folder of its
-    // own; empty means the default, <outputRoot>/recordings. Clips stay in
-    // outputRoot.
-    void setRecordingFolder(const QString& folder);
+    // Feature-17. Context thread, while stopped only. Updates the single
+    // output root used for events/<mode>/, recordings/, and timelapses/.
+    void setOutputRoot(const QString& outputRoot);
+    // Where the next recording goes (<outputRoot>/recordings).
     [[nodiscard]] QString recordingFolder() const;
-    [[nodiscard]] QString defaultRecordingFolder() const;
-    // Where clips and candidates.txt go.
+    // Where events and candidates.txt go for the active target (<outputRoot>/events/<mode>).
+    [[nodiscard]] QString eventsRoot() const;
+    // Where time-lapses go (<outputRoot>/timelapses).
+    [[nodiscard]] QString timelapsesFolder() const;
+    // The unified output root (<outputRoot>).
     [[nodiscard]] QString outputRoot() const { return outputRoot_; }
     // Context thread. At each Start, on its own thread: the Windows time
     // service's status and, with a server given, an SNTP check. The result
@@ -129,9 +137,10 @@ public:
     void setClockCheck(bool enabled, std::string ntpServer);
     [[nodiscard]] std::string clockRecord() const;
 
-    // Feature-14 continuous recording. Context thread. Starts or stops one
-    // while Monitoring; applied before the next frame. False when not Monitoring.
-    bool requestRecording(bool record);
+    // Feature-14 / Feature-17 manual continuous recording. Context thread.
+    // Starts or stops one while Preview or Monitoring; maxFrames > 0 stops
+    // automatically after that many frames. False when stopped.
+    bool requestRecording(bool record, uint64_t maxFrames = 0);
     // A scheduled recording: from start, for seconds, by frame time. It runs
     // while Monitoring; a new schedule replaces the last.
     struct Schedule
@@ -148,6 +157,13 @@ public:
     void logRecord(const QString& lines) { writer_.logRecord(lines); }
     // Tests: the recording writer's drive query and pace.
     [[nodiscard]] RecordingWriter& recordingWriter() { return recorder_; }
+
+    // Feature-18 time-lapse mode. Starts from Preview (or starts Preview if
+    // Stopped) with flash detection off.
+    bool startTimeLapse(const TimelapseSettings& settings, QString& error,
+        FreeSpaceQuery freeSpace = {}, std::chrono::milliseconds stackDelay = {});
+    void stopTimeLapse(const std::string& reason = "stopped by the observer");
+    [[nodiscard]] TimelapseStatus timeLapseStatus() const;
 
     // Started and not yet stopped. Stays true after the recording has
     // ended, until stop().
@@ -183,7 +199,7 @@ private:
     void applyModeRequest();
     // Source thread: starts, feeds and ends the continuous recording.
     void updateRecording(const FramePtr& frame);
-    void beginRecording(const FramePtr& first, const std::string& startedBy);
+    void beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames = 0);
     void endRecording(const std::string& reason);
     void startClockCheck();
 
@@ -223,7 +239,6 @@ private:
     // Feature-14. The site, the clock check and the requests are under
     // requestMutex_; the recording's state is the source thread's.
     QString outputRoot_;
-    QString recordingFolder_;
     bool testingTools_{false};
     ObservingSite site_;
     std::string clockRecord_;
@@ -232,15 +247,19 @@ private:
     std::atomic<bool> clockBusy_{false};
     std::jthread clockThread_;
     std::optional<bool> recordRequest_;
+    uint64_t recordMaxFrames_{0};
     std::optional<Schedule> schedule_;
     RecordingWriter recorder_;
     bool recording_{false};
     bool scheduledRecording_{false};
     std::string recordingName_;
     uint64_t recordingFirstIndex_{0}, recordingLastIndex_{0};
+    uint64_t recordingFrames_{0}, recordingMaxFrames_{0};
     bool recordingKnown_{false};
     size_t recordingQueueBytes_{0};
 
     // Declared last, so it is stopped and destroyed before what it feeds.
+    mutable std::mutex timelapseMutex_;
+    std::shared_ptr<TimelapseSession> timelapse_;
     std::unique_ptr<FrameSource> source_;
 };

@@ -16,6 +16,8 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-14 — The full session record](#feature-14--the-full-session-record) | Continuous & scheduled SER recording, clock checks, site & instrument | Built; scheduled transit recording pending |
 | [Feature-15 — Sky extras](#feature-15--sky-extras) | Dusk-to-dawn schedule, sky-following exposure, suggested kind, polygon masks | Built; overnight sky run pending |
 | [Feature-16 — A third camera family](#feature-16--a-third-camera-family) | Player One and ToupTek adapters & vendor DLL discovery | Built & tested with deterministic fakes and DLL probes; physical cameras pending |
+| [Feature-17 — One remembered output folder and Preview manual recording](#feature-17--one-remembered-output-folder-and-preview-manual-recording) | Single output root outside install folder, upgrade persistence, manual SER recording in Preview with optional frame limit | Implemented; automated core, session & UI tests passing |
+| [Feature-18 — Time-lapse mode](#feature-18--time-lapse-mode) | Lucky-imaging lunar/planetary time-lapse, parallel overload protection, rotation alignment, linear float FITS, MP4/GIF & Re-sharpen | Implemented; automated unit & UI tests passing; overnight field run pending |
 
 ## Feature-9 — A measured trigger
 
@@ -1370,3 +1372,206 @@ The loader already skips a copy without the exports SeleneWatch needs, for examp
 - N.I.N.A.'s and 64-bit SharpCap's copies are found, and a 32-bit SharpCap folder is passed over;
 - a file with a version comes before those without, and missing files are left out;
 - the loader refuses a non-DLL and a DLL lacking an export, each with its reason, takes the first usable one, and names a chosen file that is missing.
+
+---
+
+## Feature-17 — One remembered output folder and Preview manual recording
+
+*Proposed on 18 November 2026, from a discussion with the observer.*
+
+SeleneWatch currently writes clips, `candidates.txt` and `guiding.txt` into `events/` next to `SeleneWatch.exe`, with only a separate override for continuous recordings (`Session → Recordings folder…`). Placing data inside the install folder breaks when upgrading a `.zip` install, fails if installed into a read-only location, and splits outputs across directories. In addition, the **Record** button currently works only during `Monitoring`, even though observers tuning a lunar or planetary camera in `Preview` often want to capture a raw `.ser` video immediately—either continuously or for a chosen number of frames—without running impact-flash monitoring.
+
+### What shapes the design
+
+1. **One configurable root for everything SeleneWatch writes.** Events, continuous/manual recordings, and time-lapses live in fixed subfolders of one user-chosen folder, remembered across restarts and version upgrades.
+2. **Safe Windows defaults and cloud-sync awareness.** Never default to the program directory or silently fall back to another location if an external drive is unplugged. Avoid `OneDrive`-redirected folders by default, and warn if a cloud-synced directory is chosen.
+3. **Manual SER capture belongs in Preview as well as Monitoring.** Tuning planetary or sunlit lunar captures happens in Preview (Evidence rule 5 separates Preview from Monitoring's candidate log). Manual recording in Preview must produce complete, unmodified `.ser` evidence without creating candidate records.
+4. **Preserve scheduled recordings and existing disk-reserve protection.** The existing UTC schedule dialog stays intact for predicted events while Monitoring, and the existing free-space reserve continues to guard every writer.
+
+### Part A — one remembered output folder
+
+- **Settings > Output folder:** A folder picker showing the active path and available free space on its volume. Replaces the separate `Session → Recordings folder…` override so all outputs stay under one root (removing split-folder surprises).
+- **Subfolder layout:**
+  ```text
+  <output folder>/
+      events/
+          moon/<UTC>/      clips, guiding.txt, and session candidates.txt
+          sky/<UTC>/       clips, guiding.txt, and session candidates.txt
+      recordings/<UTC>/    manual and scheduled SER recordings (recording.ser, frames.txt, recording.txt)
+      timelapses/<UTC>/    time-lapse stacks, sharpened copies, MP4/GIF, and metadata (Feature-18)
+  ```
+  - Splitting `events/moon/` and `events/sky/` keeps both modes separated cleanly without needing extra folder settings.
+  - Putting `candidates.txt` inside each session/mode folder rather than loose at the root keeps every session folder self-contained and archivable.
+  - All `<UTC>` folder and file stamps use Windows-safe formatting without colons (matching `utcStamp()`).
+- **First-run default:** A local non-synced folder under the user profile (for example `%USERPROFILE%\SeleneWatch`, or `Videos\SeleneWatch` when `Pictures`/`Documents` are redirected into OneDrive). If the observer explicitly picks a folder inside `OneDrive`, `Dropbox`, or `Google Drive`, Settings warns that high-rate FITS/SER writes can saturate uploads or cause file-locking conflicts.
+- **Surviving upgrades:**
+  - Persist the setting outside the install directory using `QSettings()` (already configured in `main.cpp` with `SeleneWatch` / `SeleneWatch` and `SELENEWATCH_SETTINGS_NAME` test isolation), or an INI file in `%APPDATA%\SeleneWatch\` (`QStandardPaths::AppConfigLocation`) if unified across settings, with a `settingsVersion` key for future migrations and optional priority for a portable settings file placed beside the executable.
+  - Never key settings by release version or executable path.
+- **Missing folder, permissions, and legacy data:**
+  - Before starting Monitoring, a manual/scheduled Recording, or a Time-lapse, verify that the root exists (distinguishing an unplugged external drive from a deleted subfolder on a mounted drive), is writable (`QStorageInfo` + write probe), and meets `diskReserveBytes`. If missing or unwritable, warn clearly and offer to choose another folder or recreate it—never silently fall back to another location.
+  - Handle mid-session USB drive disconnects gracefully by stopping writes visibly without crashing.
+  - Changing the output folder applies to new output only; existing files are never moved automatically. On first run after upgrading, if legacy `events/` folders exist next to `SeleneWatch.exe`, show a one-time notice with an option to open the old folder rather than risking slow or UAC-blocked cross-drive moves.
+
+### Part B — manual recording in Preview with optional frame limit
+
+- **Available in Preview and Monitoring:** The **Record** button works whenever a stream is running (`Mode::Preview` or `Mode::Monitoring`), writing raw frames via `RecordingWriter` to `<output folder>/recordings/<UTC>/` (`recording.ser`, `frames.txt`, `recording.txt`).
+- **Optional frame count limit:**
+  - An optional frame count control next to `Record` (for example a numeric box where `0` / blank means **Unlimited**, i.e., record until stopped).
+  - When a positive count `N` is set, the recording stops automatically after `N` frames with reason `reached frame limit` and `complete: yes` in `recording.txt`.
+  - When left blank / `0`, recording continues until the observer presses Stop (`Record` again), stops the stream, or hits `disk too slow` / `disk reserve`.
+- **Mode transitions and scheduled recording:**
+  - Keeping `Session → Schedule a recording…` unchanged preserves UTC-scheduled captures while Monitoring.
+  - If a manual recording is active in Preview and the observer clicks **Start monitoring** (which reopens camera devices to flush buffered frames) or edits a stream-restarting control (ROI, pixel format, binning), the active Preview recording finishes cleanly first (`monitoring started` / `stream restarted`).
+  - `recording.txt` records the session mode (`preview` vs `monitoring` and target `moon`/`sky`) and `frame_limit` when set.
+
+### Evidence
+
+Manual recordings in Preview preserve Evidence rules 1–4 and 8 (`recording.ser` holds raw unaltered samples with native bit depth, `frames.txt` records every index/UTC/gap, and `recording.txt` records source, layout, site, clock check, and completion). In line with Evidence rule 5, recording in Preview never starts flash detection or writes entries into `candidates.txt`; only recordings active during Monitoring appear in `candidates.txt`.
+
+### Done when
+
+1. Choosing an output folder in Settings persists across restarts, `.zip`/`.msi` upgrades, and `SELENEWATCH_SETTINGS_NAME` isolation, and updates `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under that root without touching old files.
+2. First-run default avoids `OneDrive`-redirected folders and warns when a cloud-synced folder is selected.
+3. Attempting to start Monitoring or Recording when the configured drive/folder is missing or read-only warns before starting and never silently writes elsewhere.
+4. A one-time upgrade notice appears (without moving files) when old output folders exist beside the executable.
+5. Clicking **Record** in Preview writes a valid, complete `recording.ser`, `frames.txt`, and `recording.txt` with no `candidates.txt` entries created.
+6. Setting an optional frame count `N` stops the recording cleanly at `N` frames (`complete: yes`), while leaving it unset records continuously until Stop or `disk reserve` / `disk too slow`.
+7. Existing scheduled recordings while Monitoring continue to pass their tests unchanged.
+
+### Out of this step
+
+- Moving or migrating historical `events/` archives in the background.
+- Compressed video formats (MP4/GIF) for raw manual recordings (manual recordings stay lossless SER; time-lapse video encoding is Feature-18).
+
+### Order
+
+Feature-17 comes before Feature-18 so Time-lapse builds directly on the unified `<output folder>/timelapses/` root and updated `Session` output ownership.
+
+---
+
+### Feature-17 status & verification
+- **Status:** Implemented (`recording/output_paths.h/.cpp`, `recording/event_writer.h/.cpp`, `recording/recording_writer.h/.cpp`, `main.cpp`, `mainwindow.h/.cpp`, `session.h/.cpp`).
+- **Automated tests:** `core`, `session_record`, `display_capture`, `manual_capture`, `zwo`, `ui` (`outputFolderSafetyAndMigration` testing custom root persistence, `isCloudSyncedPath`, missing drive/folder refusal without fallback, legacy `events/` notice isolation, and Preview manual `Record` with optional frame count).
+
+---
+
+## Feature-18 — Time-lapse mode
+
+*Proposed on 18 November 2026, from a discussion with the observer.*
+
+Observers want to record multi-minute to multi-hour sessions of the Moon (e.g., crater shadows advancing along the terminator) or a planet (e.g., Jupiter rotating) and turn them into smooth, sharp animations. Impact-flash monitoring cannot serve this well: flash monitoring uses long exposures and high gain for faint earthshine, whereas bright lunar/planetary lucky imaging requires short exposures, lower gain, high frame rates, and multi-frame registration/stacking.
+
+### What shapes the design
+
+1. **A separate mode, not part of Monitoring.** Time-lapse runs as a third `Session::Mode` alongside `Preview` and `Monitoring`. Impact-flash detection is off while it runs, keeping Monitoring's "never go blind" rule untouched.
+2. **Bounded per-period lucky imaging (100–200 frames max per period).** Each period collects up to 100–200 frames max (selecting the sharpest `N%` from the period's capture window), keeping RAM usage, alignment latency, and `MemoryBudget` impact predictable for both lunar and planetary targets.
+3. **Fixed-cadence parallel pipeline with overload protection.** Waiting sequentially *after* processing causes cadence drift (`interval + window + T_proc`), making planetary rotation or shadow movement stutter. Instead, acquisition/collection runs on fixed period timestamps while heavy alignment/stacking/FITS writing runs in parallel on a worker thread behind a **depth-1 pending queue** with a **pre-capture overload skip gate**.
+4. **Scientific preservation and non-destructive re-sharpening.** Every finished stack is saved immediately as **linear 32-bit float FITS** (both unsharpened `stacks/` and sharpened `sharpened/`), so a crash or early stop never loses data and the entire sequence can be re-sharpened and re-encoded later without touching the unsharpened data.
+5. **Respect existing SeleneWatch protections and compatible third-party packaging.** Honors `CaptureSettings::diskReserveBytes` (`freeBytesAt()`), integrates with `MemoryBudget` and `FeatureLock` / ASCOM guiding, and uses compatible permissive/LGPL libraries (**OpenCV**, **CFITSIO**, and **LGPL FFmpeg**) dynamically linked and shipped with their license texts alongside `SeleneWatch.exe` (just like ZWO's DLL).
+
+### User flow and controls
+
+1. **Set up in Preview:** Focus, frame, tune exposure/gain/ROI, inspect histogram, and optionally enable `FeatureLock` and ASCOM guiding.
+2. **Configure Time-lapse panel:**
+   - **Target preset:** `Moon` or `Planet` (fills editable defaults).
+   - **Cadence:** `Interval` (default `60 s`) and `Capture window` (default `15 s`, validated `captureWindow <= interval`), showing the expected frame count at current FPS.
+   - **Keep best & cap:** Percentage of sharpest frames to stack (Moon default `25%`, Planet default `15%`), capped at **100–200 frames max per period**.
+   - **Region & Lunar constant anchor:** Full frame or crop around the locked feature; for `Moon`, an **optional user-selected constant sunlit area** (away from the terminator where shadows will not shift significantly over the session) to anchor multi-hour rotation/translation alignment.
+   - **Sharpening:** `Off`, `Mild` (default), `Medium`, or a saved named profile.
+   - **Stop condition:** Fixed duration, explicit date + UTC end time (with clear rollover preview), stack count, or "until I press Stop".
+   - **Output options:** `MP4` and/or `GIF`, animation frame rate (`10–15 fps`, default `12–15 fps`), and optional raw `SER` burst saving (off by default, displaying estimated GB/hr).
+3. **Start / Stop:** Pressing Stop early (or hitting a stop condition / low-disk stop) cleanly finishes any active stack and builds the animation from all completed stacks.
+
+### Live feedback while running
+
+- Progress bar (elapsed/remaining time for bounded runs, elapsed for manual stop), stacks completed, and countdown to next capture period.
+- **Latest stack thumbnail** beside the live preview so improvement over raw frames is immediately visible.
+- **Mini-filmstrip / live loop preview** backed by lightweight downscaled (≤512 px) 8-bit thumbnails of completed stacks.
+- **Per-stack telemetry:** Frames captured, frames kept, brightness-normalized quality score, shift `(dx, dy)` and rotation angle.
+- **Warnings:** Guiding lost, sudden cloud brightness/quality drop, processing falling behind the interval (period skipped), and low disk space approaching `diskReserveBytes`.
+
+### Fixed-cadence parallel pipeline and overload protection
+
+- **Cadence clock:** Periods open on fixed timestamps `t_k = t_0 + k × interval` (`steady_clock` for live cameras; source frame time during recorded playback).
+- **Collector (source-side / lightweight):** During `[t_k, t_k + captureWindow)`, copies (and crops if ROI is active) incoming frames out of `FramePtr` immediately so `FramePool` slots are never held and acquisition never stalls. Frames are scored on arrival so at most the top `100–200` frames are retained for the period. At `t_k + captureWindow`, the burst (`BurstJob`) is handed to the stacker worker.
+- **Stacker worker & depth-1 queue:** A dedicated worker thread processes one active `BurstJob` at a time behind a **single-slot (depth-1) pending queue**. Processing overlaps cleanly with idle time and even the next capture window as long as average processing time `T_proc <= interval` (only `captureWindow <= interval` is required, not `captureWindow + T_proc <= interval`).
+- **Pre-capture overload skip gate:** Before opening period `k` at `t_k`, check:
+  1. Is the depth-1 pending slot still occupied (worker has not yet started the previous queued burst), **or**
+  2. Would admitting another burst exceed `MemoryBudget`?
+  If either is true, **skip period `k` immediately** without collecting frames, increment the skipped counter, log the timestamp and reason (`processing overload` / `memory limit`) in `timelapse.txt`, and surface a warning in the UI (suggesting larger interval, tighter ROI, or lower frame cap if skips repeat). As a final safety backstop, if the pending slot or `MemoryBudget` rejects at window end, the newly collected burst is dropped non-blockingly and logged without stalling acquisition or interrupting the active stack.
+- **Existing disk-reserve protection:** Before starting and before writing each stack (or optional SER burst), check `freeBytesAt(outputRoot)` against `CaptureSettings::diskReserveBytes`. If free space falls below the reserve, stop capture cleanly with reason `disk reserve` and immediately assemble the video from all completed stacks.
+
+### Per-period image processing
+
+1. **Color handling (v1):** If the stream is Bayer color, debayer frames before scoring and alignment; use luminance/green channel for quality scoring and alignment transforms. (Raw Bayer stacking / Bayer-drizzle stays out of v1.)
+2. **Quality scoring & cloud tracking:** Measure sharpness on the illuminated target ROI (not dark sky) using a mildly smoothed gradient/Laplacian-of-Gaussian normalized by mean target intensity, so high-gain noise and thin cloud dimming do not distort sharpness ranks. Track mean target brightness separately to flag cloud-affected frames/stacks.
+3. **Within-burst alignment & stacking:**
+   - Two-pass apodized (Hann-windowed, mean-subtracted) subpixel phase correlation: align the sharpest subset to build a low-noise temporary mean reference, then align all kept frames (`<= 200`) to that reference.
+   - Resample with bicubic/Lanczos interpolation and stack using floating-point sigma-clipped (or trimmed) averaging to remove hot pixels and brief transits, cropping/tracking valid pixel coverage cleanly.
+4. **Inter-stack session alignment:**
+   - **Planet:** Align finished stacks across the session using **planetary disc centroid / limb fit** so rotating surface features (e.g., Jupiter's belts / Great Red Spot) do not pull the planet across the frame over hours.
+   - **Moon:** Best-effort **2D rigid alignment (translation + rotation)** against the session reference (handling Alt-Az field rotation and polar drift), prioritizing the **user-selected constant sunlit anchor region** when defined (or full lit region / sequential local keyframe fallback as shadows evolve).
+5. **Sharpening & linear 32-bit float FITS output:**
+   - Write **both** the unsharpened stack (`stacks/<idx>_<UTC>.fits`) and the sharpened copy (`sharpened/<idx>_<UTC>.fits`) immediately as **linear 32-bit IEEE float FITS** (`NAXIS=2` mono or plane-sequential `NAXIS=3` RGB).
+   - Headers carry standard FITS keywords: `DATE-OBS`, `DATE-AVG`, `DATE-END`, `EXPTIME`, `GAIN`, camera/site/instrument metadata, frames captured and kept, quality score, shift `(dx, dy)` and rotation angle, and sharpening profile (`none` for `stacks/`).
+   - **Limits to respect:** Warn in the UI if the Planet capture window exceeds ~60–120 s (planetary rotation smearing) or if expected kept frames per period at current FPS fall too low (e.g., `< 10` frames).
+
+### End-of-session video assembly & Re-sharpen window
+
+```text
+<output folder>/timelapses/<UTC start>/
+    stacks/                 0001_<UTC>.fits, 0002_<UTC>.fits ...  (unsharpened, linear 32-bit float)
+    sharpened/              0001_<UTC>.fits ...                   (linear sharpened, current profile)
+    sharpening_profile.json
+    timelapse.mp4
+    timelapse.gif           (optional)
+    timelapse.txt           (settings, skipped periods, UTC times, per-stack stats)
+```
+
+- **Video encoding:**
+  - Optionally filter out cloud-ruined stacks below a quality threshold, crop to the common valid overlap (rounded to even width/height for H.264 `yuv420p`), apply **target-masked multiplicative brightness levelling** (measuring foreground target intensity rather than whole-frame mean), and apply a **consistent session black/white stretch + gamma** solely during 8-bit video export (never altering the linear FITS files).
+  - Encode high-quality `MP4` (low CRF / high bitrate so crater rims aren't crushed); when `GIF` is enabled, downscale to a safe maximum width (e.g., ≤800 px) with palette optimization so multi-hundred-frame GIFs remain practical.
+- **Re-sharpen / Rebuild window:**
+  - Opens any existing session folder, defaulting its preview to the **highest-quality stack** in `stacks/` (with any stack selectable).
+  - Live before/after tuning split into:
+    - **Linear sharpening:** method (`Unsharp Mask` in v1; wavelet layers later), radius, amount, noise threshold/floor, and optional slight denoise (applied to FITS + video).
+    - **Video export & tone-mapping:** black/white point stretch, gamma, brightness levelling, quality-drop threshold, crop, and FPS (applied to MP4/GIF only).
+  - Save/load named reusable profiles (sanitizing profile names for Windows paths) and optionally set a default profile for new sessions.
+  - **Apply to all** writes non-destructively into a new `sharpened_<profile>_<UTC>/` folder (never overwriting `stacks/` or earlier runs), and provides a fast **"Rebuild video only"** action when only video/tone settings change.
+
+### Architecture and dependencies
+
+- All added dependencies follow [AGENTS.md](AGENTS.md), [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), and [packaging/package.cmake](packaging/package.cmake), dynamically linked and distributed with their required license texts beside `SeleneWatch.exe`:
+  - **OpenCV 4.14.0 (`Apache-2.0`):** `phaseCorrelate` (Hanning-windowed subpixel translation), `findTransformECC` / `estimateAffinePartial2D` (2D rigid translation + rotation alignment), `warpAffine` (Lanczos-4 / bicubic resampling), edge-aware Bayer debayering (`cvtColor`), LoG/Sobel quality metrics, and unsharp mask / float image processing.
+  - **CFITSIO 4.7.0 (`NASA / BSD-like permissive`):** Reading and writing standard 2D (`NAXIS=2`) and plane-sequential RGB (`NAXIS=3`) 32-bit float (`BITPIX=-32`) FITS stacks with strict 2880-byte formatting and full astronomical headers (`DATE-OBS`, `DATE-AVG`, `DATE-END`, `EXPTIME`, `GAIN`, site/instrument, alignment, and sharpening metadata), while also allowing Re-sharpen to open external FITS stacks from tools like Siril or PixInsight.
+  - **FFmpeg 9.0 (`win64-lgpl-shared`, `LGPL` without `--enable-gpl`):** High-quality `MP4` encoding (e.g., `libopenh264` / `h264_mf` via `libavcodec` / `libavformat` / `libswscale` or LGPL `ffmpeg.exe`) and two-pass palette-optimized `GIF` generation (`palettegen` / `paletteuse`) with no GPL components (`libx264` excluded).
+
+### Evidence
+
+Time-lapse never modifies raw frames from the `FramePool`, writes strictly linear unaltered float averages to `stacks/*.fits`, preserves full provenance and UTC timing in FITS headers and `timelapse.txt`, and keeps video stretch/brightness-levelling separate from FITS pixel data. Raw SER bursts remain available as an opt-in lossless archive setting.
+
+### Done when
+
+1. Starting Time-lapse runs independently of Monitoring (flash detector off) on synthetic, recorded, and camera streams, and stopping early or hitting `diskReserveBytes` still produces a playable video from completed stacks.
+2. Each period enforces the `100–200` max kept frame cap and stream-scores frames without holding `FramePool` buffers or exceeding `MemoryBudget`.
+3. Under an artificially slowed stacker (`T_proc > interval`), the pre-capture skip gate prevents queue/RAM growth, logs skipped periods in `timelapse.txt`, and triggers the overload UI warning.
+4. Synthetic moving/rotating lunar test sequences align cleanly using rigid translation + rotation around a selected anchor region, while rotating synthetic planetary sequences stay centered via disc centroid alignment.
+5. Output `stacks/*.fits` and `sharpened/*.fits` (both Mono 2D and RGB 3D) read back validly in tests and open cleanly in standard astronomical tools (such as Siril), with linear pixel values preserved and full FITS headers written.
+6. End-of-session and Re-sharpen/Rebuild produce valid `MP4` (even dimensions, consistent stretch, target-masked brightness levelling) and `GIF` outputs into non-destructive `sharpened_<profile>_<UTC>/` folders without overwriting `stacks/`.
+
+### Out of this step
+
+- Multi-point (local/de-warping) lunar alignment and planetary surface map derotation (WinJUPOS-style).
+- Raw Bayer-drizzle stacking without prior debayering.
+- Wavelet layer sharpening in v1 (architecture leaves method extensible from Unsharp Mask to wavelets).
+- Automatic PNG copies of every stack (optional later export).
+
+### Order
+
+After Feature-17 (which provides `<output folder>/timelapses/` and the unified output settings). Internal build order: FITS reader/writer (CFITSIO) & OpenCV stacking/alignment pipeline (tested synthetically) → Time-lapse session controller & parallel overload gate → Time-lapse UI & live filmstrip → FFmpeg MP4 / GIF encoder → Re-sharpen / Rebuild window.
+
+### Feature-18 status & verification
+
+- **Status:** Implemented (`timelapse/timelapse_settings.h/.cpp`, `timelapse/fits_io.h/.cpp`, `timelapse/stack_processor.h/.cpp`, `timelapse/video_exporter.h/.cpp`, `timelapse/timelapse_session.h/.cpp`, `timelapse_panel.h/.cpp`, `resharpen_dialog.h/.cpp`, `session.h/.cpp`, `mainwindow.h/.cpp`, `preview_widget.h/.cpp`).
+- **Automated tests:** `timelapse` (`SeleneWatchTimelapseTests`, 11 test cases covering CFITSIO 2D/3D `BITPIX=-32` FITS + metadata & external 16-bit integer FITS loading, OpenCV Bayer RGGB/BGGR demosaic + brightness-normalized sharpness, 2-pass phase correlation + sigma clipping, Planet centroid + Moon rigid translation/rotation with `lunarAnchor` against moving shadows, linear sharpening, `100–200` per-period cap + parallel pipeline without skips, pre-capture overload skip gate + `MemoryBudget`, `diskReserveBytes` stop-and-build, `Session::startTimeLapse` MP4/GIF export, and non-destructive `resharpenTimelapseSession` + `rebuildVideoOnly`) and `ui` (`timelapsePanelAndResharpenWorkflow`).
+- **Pending field verification:** overnight Moon and Planet hardware capture at the telescope.

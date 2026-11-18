@@ -82,7 +82,10 @@ You can configure any subset of options in a separate build directory. For examp
 
 ```powershell
 cmake -S . -B out/build/zwo-release -G Ninja -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK"
+  -DCMAKE_PREFIX_PATH="$env:QTDIR" -DSELENEWATCH_ZWO_SDK_DIR="C:/dev/tools/SDKs/ASI SDK" `
+  -DSELENEWATCH_OPENCV_DIR="C:/dev/tools/opencv/build" `
+  -DSELENEWATCH_CFITSIO_DIR="C:/dev/tools/cfitsio" `
+  -DSELENEWATCH_FFMPEG_DIR="C:/dev/tools/ffmpeg"
 cmake --build out/build/zwo-release
 ctest --test-dir out/build/zwo-release --output-on-failure
 .\out\build\zwo-release\SeleneWatch.exe
@@ -100,6 +103,9 @@ Camera SDKs stay outside the repository. Each adapter is enabled when its CMake 
 | `SELENEWATCH_QHY_SDK_DIR` | `include/qhyccd.h` | Compiles against headers only; discovers and loads the user-installed x64 `qhyccd.dll` on demand at run time (`cameras/vendor_runtime`). |
 | `SELENEWATCH_PLAYERONE_SDK_DIR` | `include/PlayerOneCamera.h` | Compiles against headers only; loads `PlayerOneCamera.dll` on demand (user choice, program folder, or N.I.N.A. / 64-bit SharpCap installs). |
 | `SELENEWATCH_TOUPTEK_SDK_DIR` | `inc/toupcam.h` | Compiles against headers (`TOUPCAM_NOIMPORTS`); loads `toupcam.dll` on demand (user choice, program folder, or N.I.N.A. / 64-bit SharpCap / ToupTek ASCOM driver installs). |
+| `SELENEWATCH_OPENCV_DIR` | `OpenCVConfig.cmake` (or `x64/vc16/lib/OpenCVConfig.cmake`), `x64/vc16/bin/opencv_world4140[d].dll` | Required for time-lapse demosaicing, phase-correlation/ECC alignment, stacking, and sharpening; copies the runtime DLL into build and release outputs. |
+| `SELENEWATCH_CFITSIO_DIR` | `include/fitsio.h`, `lib/cmake/cfitsio/cfitsioConfig.cmake`, `bin/cfitsio.dll` | Required for 32-bit float FITS reading/writing (`CFITSIO::cfitsio`); copies `cfitsio.dll` into build and release outputs. |
+| `SELENEWATCH_FFMPEG_DIR` | `bin/ffmpeg.exe` + LGPL shared DLLs, `LICENSE.txt` | Bundles external LGPLv3 `ffmpeg.exe` + shared DLLs for time-lapse MP4 (`libopenh264`) and GIF export. |
 | `SELENEWATCH_WITH_ASCOM` | Boolean (default `ON` on Windows) | Links `ole32` and `oleaut32` for late-bound COM against the installed ASCOM Platform. Requires no ASCOM SDK at build time. |
 | `SELENEWATCH_WIX_ROOT` | Folder holding `bin/candle.exe` | Enables `.msi` generation in Release packaging (also reads `$ENV{WIX}`). Without it, packaging creates only the `.zip`. |
 
@@ -117,7 +123,7 @@ With Qt's `bin` directory on `PATH` and `QT_PLUGIN_PATH` set:
 ctest --test-dir out/build/debug --output-on-failure
 ```
 
-- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
+- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
 - Camera tests run against deterministic boundary implementations (`FakeZwoApi`, `FakeQhyApi`, `FakePlayerOneApi`, `FakeToupTekApi`) and never open physical hardware.
 - Window and offscreen rendering tests set `QT_QPA_PLATFORM=offscreen` and isolate QSettings under a test namespace.
 - CTest invokes Qt Test targets with `-o -,tap` so test output reaches stdout on Windows even when launched without an attached console.
@@ -149,7 +155,8 @@ These targets are built alongside the application and are never executed by CTes
 | `sources/` | `FrameSource` interface, `SyntheticFrameSource`, `RecordingSource` |
 | `cameras/` | Per-vendor SDK wrappers (`*_sdk.cpp`), sources (`*_source.cpp`), `vendor_runtime` DLL discovery, and shared `raw_camera_layout.h` |
 | `guiding/` | `FeatureLock`, `LockTracker`, `Calibrator`, `Guider`, `GuideController`, `Mount` interface, `SimulatedMount`, `AscomMount` |
-| `recording/` | SER/AVI readers, FireCapture `.txt` log reader, SER event & continuous writers, `metadata_text`, `frame_timing`, `clip_overview` |
+| `recording/` | SER/AVI readers, FireCapture `.txt` log reader, SER event & continuous writers, `output_paths`, `metadata_text`, `frame_timing`, `clip_overview` |
+| `timelapse/` | `TimelapseSession`, CFITSIO 32-bit float FITS I/O (`fits_io`), OpenCV burst stacking/alignment/sharpening (`stack_processor`), FFmpeg video export & re-sharpen (`video_exporter`), `timelapse_settings` |
 | `packaging/` | CPack/WiX rules, post-build `.zip` verification script, Qt notice generator, release script |
 | `tests/` | Automated Qt Test suites and deterministic vendor fakes |
 | `tools/` | Manual probe executables and experimental prototypes (such as `translation_estimator`) |
@@ -192,9 +199,10 @@ Both packages contain:
 - Required Qt DLLs and plugins collected by `windeployqt` (explicitly excluding Qt Network, Qt Svg, translations, and software OpenGL)
 - Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`; Universal CRT comes from Windows 10/11)
 - `ASICamera2.dll` (when configured with `SELENEWATCH_ZWO_SDK_DIR`)
+- `opencv_world4140.dll`, `cfitsio.dll`, and external LGPLv3 `ffmpeg.exe` + FFmpeg shared DLLs (`avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`)
 - `LICENSE.txt`, `README.md`, `MANUAL.md`, `THIRD_PARTY_LICENSES.md`, `ACKNOWLEDGEMENTS.md`
 - `icons/selenewatch-256.png` and `docs/images/` (logo and documentation screenshots referenced by `README.md` and `MANUAL.md`)
-- `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), and `ZWO-ASI-SDK.txt` (when built with ZWO)
+- `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), `ZWO-ASI-SDK.txt` (when built with ZWO), `OpenCV-LICENSE.txt`, `CFITSIO-LICENSE.txt`, and `FFmpeg-LICENSE.txt`
 
 Tests, probes, and QHY / Player One / ToupTek vendor files are never shipped. Debug builds have no `package` target.
 

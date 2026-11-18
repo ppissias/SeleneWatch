@@ -21,6 +21,7 @@ class QAction;
 class QCheckBox;
 class QMenu;
 class QPushButton;
+class QSpinBox;
 class QTimer;
 class RecordingReader;
 class RecordingSource;
@@ -29,6 +30,8 @@ class DetectionPanel;
 class DisplayPanel;
 class HistogramPanel;
 class GuidingPanel;
+class TimelapsePanel;
+class ResharpenDialog;
 class SimulatedPointing;
 class CameraFamilyPanel;
 class ZwoApi;
@@ -88,7 +91,9 @@ private:
     void onSiteAndInstrument();
     void onCameraSupport();
     void onScheduleRecording();
-    void onRecordingFolder();
+    void onOutputFolder();
+    bool ensureOutputFolderReady(const QString& actionName);
+    void checkLegacyEventsNotice();
     void onRecordClicked();
     void onRecordingChanged();
     // The recording's line under the capture mode, or none.
@@ -99,9 +104,9 @@ public:
     // Saves the site and the clock check and hands them to the session; the
     // dialog's OK, and the window test.
     void applySite(const ObservingSite& site, bool ntp, const QString& server);
-    // Saves where recordings go (empty: the default) after checking that the
-    // folder can be written; the dialog's OK, and the window test.
-    bool applyRecordingFolder(const QString& folder, QString& error);
+    // Saves the single remembered output folder (empty: the default) after
+    // checking that it can be written; the dialog's OK, and the window test.
+    bool applyOutputFolder(const QString& folder, QString& error);
     // Help → About: the release, the source revision and the licenses.
     [[nodiscard]] static QString aboutText();
     // Help → Acknowledgements: ACKNOWLEDGEMENTS.md, built into the program.
@@ -139,6 +144,11 @@ private:
     void setupDisplayPanel();
     void setupHistogramPanel();
     void setupGuidingPanel();
+    void setupTimelapsePanel();
+    void onStartTimeLapse();
+    void onStopTimeLapse();
+    void onTimeLapseFinished(const TimelapseFinishResult& result);
+    void onOpenResharpen(const QString& sessionDir = {});
     void onLockChanged();
     void onLockAtSelection();
     void onConnectMount();
@@ -220,6 +230,12 @@ private:
     QDockWidget* histogramDock_{nullptr};
     GuidingPanel* guidingPanel_{nullptr};
     QDockWidget* guidingDock_{nullptr};
+    TimelapsePanel* timelapsePanel_{nullptr};
+    QDockWidget* timelapseDock_{nullptr};
+    double measuredFps_{30.0};
+    int lastFrameWidth_{640};
+    int lastFrameHeight_{480};
+    int lastFrameBpp_{1};
     QLabel* lockLabel_{nullptr};
     QTimer* guidingTimer_{nullptr};
     // Moves the synthetic Moon for the simulated mount. Shared with the
@@ -282,6 +298,8 @@ private:
     QLabel* modeLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
     QPushButton* recordButton_{nullptr};
+    QSpinBox* recordFramesSpinBox_{nullptr};
+    bool customOutputRoot_{false};
 
     uint64_t lastAcquiredSample_{0};
     std::chrono::steady_clock::time_point lastFpsSampleTime_{};

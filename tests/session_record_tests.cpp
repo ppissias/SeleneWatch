@@ -1,6 +1,7 @@
 #include "clock_check.h"
 #include "recording/clip_overview.h"
 #include "recording/frame_timing.h"
+#include "recording/output_paths.h"
 #include "recording/recording_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
@@ -163,6 +164,8 @@ private slots:
     void frameIntervalsAreMeasured();
     void theClockIsComparedWithAnNtpServer();
     void theSiteIsRecordedEverywhere();
+    void previewRecordingWithFrameLimitWritesExactFramesWithoutCandidates();
+    void outputPathsAndValidationSeparateModesAndDetectIssues();
 };
 
 // Done-when items 1 and 2: by frame time, on a played file, with a clip in it.
@@ -220,14 +223,15 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
     QCOMPARE(frames.size(), qsizetype{46});
     QVERIFY(frames.front().startsWith("0 40 ") && frames.back().startsWith("45 85 "));
 
-    const QString log = contents(QDir(output).filePath("candidates.txt"));
+    const QString moonEvents = eventsFolder(output, Target::Moon);
+    const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
     QVERIFY2(log.contains(" recording_start name=" + folder.dirName() + " first_frame_index=40")
         && log.contains(" recording_stop name=" + folder.dirName() + " frames=46"), qPrintable(log));
     // The flash on frame 60 made a clip that names the recording.
-    const QStringList clips = QDir(output).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList clips = QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     bool named = false;
     for (const QString& clip : clips)
-        named = named || contents(QDir(QDir(output).filePath(clip)).filePath("event.txt")).contains("during_recording: " + folder.dirName() + "\n");
+        named = named || contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("during_recording: " + folder.dirName() + "\n");
     QVERIFY(named);
 }
 
@@ -440,7 +444,8 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     session.recordingWriter().waitIdle();
     QTest::qWait(200);
 
-    const QString log = contents(QDir(output).filePath("candidates.txt"));
+    const QString moonEvents = eventsFolder(output, Target::Moon);
+    const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
     QVERIFY2(log.contains(" observer=\"A. Observer\" site=\"Test field\" latitude_deg=37.98000 longitude_deg=23.73000 "
         "height_m=100 telescope=\"C9.25\""), qPrintable(log));
     const QDir folder = recordingFolder(output);
@@ -450,8 +455,8 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     QVERIFY(ser.open(QIODevice::ReadOnly));
     QCOMPARE(QByteArray(ser.read(178).constData() + 122), QByteArray("C9.25"));
     bool clipHasSite = false;
-    for (const QString& clip : QDir(output).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
-        clipHasSite = clipHasSite || contents(QDir(QDir(output).filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n");
+    for (const QString& clip : QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+        clipHasSite = clipHasSite || contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n");
     QVERIFY(clipHasSite);
 
     // The overview gives the speed in degrees per second.
@@ -471,6 +476,69 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     request.arcsecPerPixel = site.arcsecPerPixel();
     const ClipOverview overview = makeClipOverview(frames, request);
     QVERIFY2(overview.activity.contains("°/s)"), qPrintable(overview.activity));
+}
+
+// Feature-17: manual recording in Preview works with an optional frame limit,
+// writes complete SER evidence, and never touches candidates.txt.
+void SessionRecordTest::previewRecordingWithFrameLimitWritesExactFramesWithoutCandidates()
+{
+    QTemporaryDir directory;
+    const QString input = makeRecording(directory.path(), 40, -1);
+    const QString root = QDir(directory.path()).filePath("root");
+    QDir().mkpath(root);
+    QObject context;
+    Session session(&context, root, {});
+    session.setSource(std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString())));
+    QString error;
+    QVERIFY2(session.start(error, Session::Mode::Preview), qPrintable(error));
+    QVERIFY(session.requestRecording(true, 10));
+    QTRY_VERIFY_WITH_TIMEOUT(session.recordingStatus().frames == 10 && !session.recordingStatus().active, 5000);
+    session.recordingWriter().waitIdle();
+    session.stop();
+
+    const QDir folder = recordingFolder(root);
+    QVERIFY(folder.exists());
+    const QString note = contents(folder.filePath("recording.txt"));
+    QVERIFY2(note.contains("session_mode: preview\n") && note.contains("frame_limit: 10\n")
+        && note.contains("frames_written: 10\n") && note.contains("ended: reached frame limit\n")
+        && note.endsWith("complete: yes\n"), qPrintable(note));
+    SerReader reader;
+    std::string readError;
+    QVERIFY2(reader.open(std::filesystem::path(folder.filePath("recording.ser").toStdWString()), 30, readError), readError.c_str());
+    QCOMPARE(reader.frameCount(), 10);
+    QVERIFY(!QFile::exists(QDir(eventsFolder(root, Target::Moon)).filePath("candidates.txt")));
+}
+
+void SessionRecordTest::outputPathsAndValidationSeparateModesAndDetectIssues()
+{
+    QTemporaryDir dir;
+    const QString root = QDir(dir.path()).filePath("astro");
+    QCOMPARE(eventsFolder(root, Target::Moon), QDir(root).filePath("events/moon"));
+    QCOMPARE(eventsFolder(root, Target::Sky), QDir(root).filePath("events/sky"));
+    QCOMPARE(recordingsFolder(root), QDir(root).filePath("recordings"));
+    QCOMPARE(timelapsesFolder(root), QDir(root).filePath("timelapses"));
+
+    QVERIFY(!isCloudSyncedPath(defaultOutputFolder()));
+    QVERIFY(isCloudSyncedPath("C:/Users/Test/OneDrive/Pictures/SeleneWatch"));
+
+    const OutputFolderCheck missing = checkOutputFolder(root, 0, false);
+    QVERIFY(!missing.ok && missing.folderMissing && !missing.mountMissing);
+
+    const OutputFolderCheck created = checkOutputFolder(root, 0, true);
+    QVERIFY(created.ok && !created.belowReserve);
+
+    const OutputFolderCheck lowSpace = checkOutputFolder(root, 10 * kGiB, false,
+        [](const QString&) { return std::optional<uint64_t>{kGiB}; });
+    QVERIFY(lowSpace.ok && lowSpace.belowReserve);
+
+    QFile blocker(QDir(dir.path()).filePath("blocker"));
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    const OutputFolderCheck blocked = checkOutputFolder(QDir(dir.path()).filePath("blocker/out"), 0, true);
+    QVERIFY(!blocked.ok && blocked.notWritable);
+
+    const OutputFolderCheck missingDrive = checkOutputFolder("Z:/DefinitelyMissingDriveXYZ/SeleneWatch", 0, true);
+    QVERIFY(!missingDrive.ok && missingDrive.mountMissing);
 }
 
 int main(int argc, char** argv)

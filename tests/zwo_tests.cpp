@@ -1,6 +1,7 @@
 #include "tests/fake_zwo_api.h"
 #include "cameras/zwo_source.h"
 #include "session.h"
+#include "recording/output_paths.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "tests/detector_observation.h"
@@ -237,7 +238,7 @@ private slots:
         QCOMPARE(f.significantBits,16); QCOMPARE(f.alignment,BitAlignment::Low);
         for (size_t i=0;i<static_cast<size_t>(f.width)*f.height;++i)
             QCOMPARE(static_cast<int>(f.data[2*i]|(f.data[2*i+1]<<8)),static_cast<int>((400+i%13)<<4));
-        QVERIFY(text(dir.path()+"/candidates.txt").contains("sdk=\"TEST SDK 1\""));
+        QVERIFY(text(eventsFolder(dir.path(), Target::Moon)+"/candidates.txt").contains("sdk=\"TEST SDK 1\""));
     }
 };
 int main(int argc,char** argv) { QGuiApplication app(argc,argv); ZwoTest tests; return QTest::qExec(&tests,argc,argv); }

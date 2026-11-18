@@ -49,6 +49,12 @@ void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRec
     update();
 }
 
+void PreviewWidget::setAnchorBox(std::optional<QRect> anchor)
+{
+    anchorBox_ = anchor;
+    update();
+}
+
 void PreviewWidget::setMask(std::vector<QPolygon> mask)
 {
     mask_ = std::move(mask);
@@ -184,10 +190,15 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
         }
         painter.restore();
     }
-    if (lockBox_ || foundBox_ || dragging_)
+    if (lockBox_ || foundBox_ || anchorBox_ || dragging_)
     {
         painter.save();
         painter.setClipRect(image);
+        if (anchorBox_ && anchorBox_->isValid())
+        {
+            painter.setPen(QPen(QColor("#ff99dd"), 1.5, Qt::DashDotLine));
+            painter.drawRect(toWidget(*anchorBox_));
+        }
         if (lockBox_)
         {
             painter.setPen(QPen(QColor("#65e5ff"), 1, Qt::DashLine));

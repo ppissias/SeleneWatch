@@ -43,6 +43,8 @@ public:
         StreamInfo stream;
         ObservingSite site;
         Target target{Target::Moon};
+        std::string sessionMode{"monitoring"};
+        uint64_t maxFrames{0};
         uint64_t diskReserveBytes{0};
         std::string clockRecord;
         // Who started it: the observer, or a schedule.
@@ -57,7 +59,9 @@ public:
         bool active{false};
         // The folder's name, once made.
         QString name;
+        std::string sessionMode;
         uint64_t frames{0};
+        uint64_t frameLimit{0};
         uint64_t bytes{0};
         double streamSeconds{0};
         double megabytesPerSecond{0};
