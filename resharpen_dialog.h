@@ -17,7 +17,9 @@ class QDoubleSpinBox;
 class QLabel;
 class QProgressBar;
 class QPushButton;
+class QSlider;
 class QSpinBox;
+class QTimer;
 
 class ResharpenDialog : public QDialog
 {
@@ -35,6 +37,7 @@ signals:
 private:
     void loadSelectedStack();
     void updatePreview();
+    void schedulePreviewUpdate();
     void refreshSavedProfiles();
     [[nodiscard]] SharpeningSettings currentSharpening() const;
     [[nodiscard]] VideoToneSettings currentTone() const;
@@ -49,7 +52,15 @@ private:
     std::optional<FitsImage> loadedRaw_;
     std::vector<SavedSharpeningProfile> savedProfiles_;
     bool updating_{false};
+    double cachedAutoBlack_{0.0};
+    double cachedAutoWhite_{1.0};
+    bool autoLevelsValid_{false};
+    QImage cachedBeforeImg_;
+    double cachedBeforeBlack_{-1.0};
+    double cachedBeforeWhite_{-1.0};
+    double cachedBeforeGamma_{-1.0};
 
+    QTimer* previewTimer_{nullptr};
     QLabel* sessionLabel_{nullptr};
     QPushButton* browseBtn_{nullptr};
     QComboBox* stackCombo_{nullptr};
@@ -58,14 +69,21 @@ private:
     QPushButton* deleteProfileBtn_{nullptr};
 
     QDoubleSpinBox* radius_{nullptr};
+    QSlider* radiusSlider_{nullptr};
     QDoubleSpinBox* amount_{nullptr};
+    QSlider* amountSlider_{nullptr};
     QDoubleSpinBox* threshold_{nullptr};
+    QSlider* thresholdSlider_{nullptr};
     QDoubleSpinBox* denoise_{nullptr};
+    QSlider* denoiseSlider_{nullptr};
 
     QCheckBox* autoStretch_{nullptr};
     QDoubleSpinBox* blackLevel_{nullptr};
+    QSlider* blackSlider_{nullptr};
     QDoubleSpinBox* whiteLevel_{nullptr};
+    QSlider* whiteSlider_{nullptr};
     QDoubleSpinBox* gamma_{nullptr};
+    QSlider* gammaSlider_{nullptr};
     QCheckBox* brightnessLevel_{nullptr};
     QDoubleSpinBox* minQualityPct_{nullptr};
     QCheckBox* cropOverlap_{nullptr};

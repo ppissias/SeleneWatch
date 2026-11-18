@@ -6,6 +6,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QSignalBlocker>
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QPixmap>
@@ -22,10 +23,44 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressBar>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
+
+namespace {
+
+QWidget* makeSliderRow(QWidget* parent, QDoubleSpinBox* spin, QSlider*& outSlider,
+    const QString& sliderObjectName, double sliderMin, double sliderMax, double scale)
+{
+    auto* row = new QWidget(parent);
+    auto* lay = new QHBoxLayout(row);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(6);
+    outSlider = new QSlider(Qt::Horizontal, row);
+    outSlider->setObjectName(sliderObjectName);
+    outSlider->setRange(static_cast<int>(std::lround(sliderMin * scale)),
+                        static_cast<int>(std::lround(sliderMax * scale)));
+    outSlider->setValue(std::clamp(static_cast<int>(std::lround(spin->value() * scale)),
+                                   outSlider->minimum(), outSlider->maximum()));
+    spin->setMinimumWidth(84);
+    lay->addWidget(outSlider, 1);
+    lay->addWidget(spin);
+
+    QObject::connect(outSlider, &QSlider::valueChanged, spin, [spin, scale](int v) {
+        spin->setValue(static_cast<double>(v) / scale);
+    });
+    QObject::connect(spin, &QDoubleSpinBox::valueChanged, outSlider, [outSlider, scale](double v) {
+        const QSignalBlocker b(outSlider);
+        outSlider->setValue(std::clamp(static_cast<int>(std::lround(v * scale)),
+                                       outSlider->minimum(), outSlider->maximum()));
+    });
+    return row;
+}
+
+} // namespace
 
 ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialSessionDir, QWidget* parent)
     : QDialog(parent)
@@ -116,10 +151,10 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     denoise_->setDecimals(2);
     denoise_->setSingleStep(0.05);
     denoise_->setValue(0.0);
-    sharpForm->addRow("USM radius (px)", radius_);
-    sharpForm->addRow("USM amount", amount_);
-    sharpForm->addRow("Noise threshold", threshold_);
-    sharpForm->addRow("Pre-denoise", denoise_);
+    sharpForm->addRow("USM radius (px)", makeSliderRow(sharpBox, radius_, radiusSlider_, "resharpenRadiusSlider", 0.30, 6.00, 100.0));
+    sharpForm->addRow("USM amount", makeSliderRow(sharpBox, amount_, amountSlider_, "resharpenAmountSlider", 0.00, 4.00, 100.0));
+    sharpForm->addRow("Noise threshold", makeSliderRow(sharpBox, threshold_, thresholdSlider_, "resharpenThresholdSlider", 0.0000, 0.0500, 10000.0));
+    sharpForm->addRow("Pre-denoise", makeSliderRow(sharpBox, denoise_, denoiseSlider_, "resharpenDenoiseSlider", 0.00, 1.00, 100.0));
     ctrlCol->addWidget(sharpBox);
 
     auto* videoBox = new QGroupBox("Video tone-mapping && export (MP4/GIF only)", this);
@@ -167,9 +202,9 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     rebuildVideoOnly_->setObjectName("resharpenRebuildOnly");
 
     videoForm->addRow(autoStretch_);
-    videoForm->addRow("Black level", blackLevel_);
-    videoForm->addRow("White level", whiteLevel_);
-    videoForm->addRow("Gamma", gamma_);
+    videoForm->addRow("Black level", makeSliderRow(videoBox, blackLevel_, blackSlider_, "resharpenBlackSlider", 0.00, 0.98, 1000.0));
+    videoForm->addRow("White level", makeSliderRow(videoBox, whiteLevel_, whiteSlider_, "resharpenWhiteSlider", 0.02, 1.00, 1000.0));
+    videoForm->addRow("Gamma", makeSliderRow(videoBox, gamma_, gammaSlider_, "resharpenGammaSlider", 0.20, 2.50, 100.0));
     videoForm->addRow(brightnessLevel_);
     videoForm->addRow("Drop below quality", minQualityPct_);
     videoForm->addRow(cropOverlap_);
@@ -212,16 +247,27 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     });
     connect(stackCombo_, &QComboBox::currentIndexChanged, this, [this] { loadSelectedStack(); });
 
+    previewTimer_ = new QTimer(this);
+    previewTimer_->setSingleShot(true);
+    connect(previewTimer_, &QTimer::timeout, this, &ResharpenDialog::updatePreview);
+
     for (auto* sb : {radius_, amount_, threshold_, denoise_, blackLevel_, whiteLevel_, gamma_})
-        connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) updatePreview(); });
+        connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) schedulePreviewUpdate(); });
     connect(autoStretch_, &QCheckBox::toggled, this, [this](bool on) {
         blackLevel_->setEnabled(!on);
+        blackSlider_->setEnabled(!on);
         whiteLevel_->setEnabled(!on);
+        whiteSlider_->setEnabled(!on);
         if (!updating_) updatePreview();
     });
     connect(rebuildVideoOnly_, &QCheckBox::toggled, this, [this](bool only) {
-        for (QWidget* w : std::initializer_list<QWidget*>{radius_, amount_, threshold_, denoise_})
+        for (QWidget* w : std::initializer_list<QWidget*>{
+                 radius_, radiusSlider_, amount_, amountSlider_,
+                 threshold_, thresholdSlider_, denoise_, denoiseSlider_})
+        {
             w->setEnabled(!only);
+        }
+        if (!updating_) updatePreview();
     });
 
     connect(profileCombo_, &QComboBox::currentIndexChanged, this, [this](int idx) {
@@ -271,7 +317,9 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 
     refreshSavedProfiles();
     blackLevel_->setEnabled(!autoStretch_->isChecked());
+    blackSlider_->setEnabled(!autoStretch_->isChecked());
     whiteLevel_->setEnabled(!autoStretch_->isChecked());
+    whiteSlider_->setEnabled(!autoStretch_->isChecked());
 
     QString startDir = initialSessionDir;
     if (startDir.isEmpty() && !timelapsesRoot_.isEmpty())
@@ -313,7 +361,9 @@ void ResharpenDialog::setControlsFromSettings(const SharpeningSettings& sharp, c
     blackLevel_->setValue(tone.blackLevel);
     whiteLevel_->setValue(tone.whiteLevel);
     blackLevel_->setEnabled(!tone.autoStretch);
+    blackSlider_->setEnabled(!tone.autoStretch);
     whiteLevel_->setEnabled(!tone.autoStretch);
+    whiteSlider_->setEnabled(!tone.autoStretch);
     gamma_->setValue(tone.gamma);
     brightnessLevel_->setChecked(tone.brightnessLevelling);
     minQualityPct_->setValue(tone.minQualityRatio * 100.0);
@@ -387,6 +437,8 @@ void ResharpenDialog::loadSelectedStack()
         return;
     }
     loadedRaw_ = std::move(img);
+    autoLevelsValid_ = false;
+    cachedBeforeImg_ = {};
     updatePreview();
 }
 
@@ -419,20 +471,45 @@ VideoToneSettings ResharpenDialog::currentTone() const
     return v;
 }
 
+void ResharpenDialog::schedulePreviewUpdate()
+{
+    if (previewTimer_) previewTimer_->start(25);
+}
+
 void ResharpenDialog::updatePreview()
 {
     if (!loadedRaw_) return;
+    if (previewTimer_ && previewTimer_->isActive()) previewTimer_->stop();
+
     const VideoToneSettings tone = currentTone();
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
     if (tone.autoStretch)
-        computeAutoStretchLevels(*loadedRaw_, black, white);
+    {
+        if (!autoLevelsValid_)
+        {
+            computeAutoStretchLevels(*loadedRaw_, cachedAutoBlack_, cachedAutoWhite_);
+            autoLevelsValid_ = true;
+        }
+        black = cachedAutoBlack_;
+        white = cachedAutoWhite_;
+    }
 
-    const QImage before = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, {}, 512);
-    const FitsImage sharp = applyLinearSharpening(*loadedRaw_, currentSharpening());
-    const QImage after = toneMapFitsToImage(sharp, black, white, tone.gamma, 1.0, {}, 512);
+    if (cachedBeforeImg_.isNull() || cachedBeforeBlack_ != black
+        || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma)
+    {
+        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, {}, 512);
+        cachedBeforeBlack_ = black;
+        cachedBeforeWhite_ = white;
+        cachedBeforeGamma_ = tone.gamma;
+        beforeLabel_->setPixmap(QPixmap::fromImage(cachedBeforeImg_)
+            .scaled(beforeLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
 
-    beforeLabel_->setPixmap(QPixmap::fromImage(before).scaled(beforeLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    const QImage after = rebuildVideoOnly_->isChecked()
+        ? cachedBeforeImg_
+        : toneMapFitsToImage(applyLinearSharpening(*loadedRaw_, currentSharpening()),
+                             black, white, tone.gamma, 1.0, {}, 512);
     afterLabel_->setPixmap(QPixmap::fromImage(after).scaled(afterLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 

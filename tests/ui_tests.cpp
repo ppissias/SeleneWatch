@@ -1637,9 +1637,42 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(!beforeLbl->pixmap().isNull());
     QVERIFY(!afterLbl->pixmap().isNull());
 
-    dlg.findChild<QDoubleSpinBox*>("resharpenAmount")->setValue(2.1);
-    dlg.findChild<QDoubleSpinBox*>("resharpenGamma")->setValue(1.25);
-    QCoreApplication::processEvents();
+    auto* radiusSlider = dlg.findChild<QSlider*>("resharpenRadiusSlider");
+    auto* amountSlider = dlg.findChild<QSlider*>("resharpenAmountSlider");
+    auto* thresholdSlider = dlg.findChild<QSlider*>("resharpenThresholdSlider");
+    auto* denoiseSlider = dlg.findChild<QSlider*>("resharpenDenoiseSlider");
+    auto* gammaSlider = dlg.findChild<QSlider*>("resharpenGammaSlider");
+    auto* blackSlider = dlg.findChild<QSlider*>("resharpenBlackSlider");
+    auto* whiteSlider = dlg.findChild<QSlider*>("resharpenWhiteSlider");
+    auto* autoStretch = dlg.findChild<QCheckBox*>("resharpenAutoStretch");
+    auto* rebuildOnly = dlg.findChild<QCheckBox*>("resharpenRebuildOnly");
+    auto* amountSpin = dlg.findChild<QDoubleSpinBox*>("resharpenAmount");
+    auto* gammaSpin = dlg.findChild<QDoubleSpinBox*>("resharpenGamma");
+    QVERIFY(radiusSlider && amountSlider && thresholdSlider && denoiseSlider
+        && gammaSlider && blackSlider && whiteSlider && autoStretch && rebuildOnly && amountSpin && gammaSpin);
+
+    // Sync slider -> spin box and verify coalesced live after-preview refreshes.
+    const QImage afterBefore = afterLbl->pixmap().toImage();
+    amountSlider->setValue(260); // 2.60
+    QVERIFY(std::abs(amountSpin->value() - 2.60) < 1e-4);
+    QTRY_VERIFY_WITH_TIMEOUT(afterLbl->pixmap().toImage() != afterBefore, 2000);
+
+    // Sync spin box -> slider and check enable/disable states.
+    gammaSpin->setValue(1.25);
+    QCOMPARE(gammaSlider->value(), 125);
+    QVERIFY(!blackSlider->isEnabled() && !whiteSlider->isEnabled());
+    autoStretch->setChecked(false);
+    QVERIFY(blackSlider->isEnabled() && whiteSlider->isEnabled());
+    autoStretch->setChecked(true);
+    QVERIFY(!blackSlider->isEnabled() && !whiteSlider->isEnabled());
+
+    rebuildOnly->setChecked(true);
+    QVERIFY(!amountSlider->isEnabled() && !radiusSlider->isEnabled());
+    rebuildOnly->setChecked(false);
+    QVERIFY(amountSlider->isEnabled() && radiusSlider->isEnabled());
+
+    amountSpin->setValue(2.1);
+    QTRY_VERIFY_WITH_TIMEOUT(amountSlider->value() == 210, 1000);
     applyBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(statusLbl->text().startsWith("Done:"), 15000);
 

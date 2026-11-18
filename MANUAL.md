@@ -492,7 +492,7 @@ Open **Session → Re-sharpen time-lapse…** (or press **Re-sharpen…** on the
 
 ![Re-sharpen dialog showing Before/After unsharpened vs. USM-sharpened Clavius FITS stack](docs/images/manual-resharpen.png)
 
-***Re-sharpen time-lapse…** inspecting the finished `Moon_165104.ser` session: automatically selects the highest-quality stack (`Q=0.00377`) for side-by-side comparison (`USM radius 1.50 px`, `USM amount 1.80`, `Gamma 1.10`) without modifying the linear FITS stacks in `stacks/`.*
+***Re-sharpen time-lapse…** inspecting the finished `Moon_165104.ser` session: automatically selects the highest-quality stack (`Q=0.00291`) for live before/after tuning with synced sliders and spin boxes (`USM radius 1.50 px`, `USM amount 1.80`, `Gamma 1.10`) without modifying the linear FITS stacks in `stacks/`.*
 
 ---
 
