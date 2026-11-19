@@ -190,12 +190,22 @@ VideoToneSettings videoFromJson(const QJsonObject& obj)
 } // namespace
 
 bool saveProfileJson(const QString& path, const SharpeningSettings& sharpening,
-    const VideoToneSettings& video, QString& error)
+    const VideoToneSettings& video, QString& error,
+    const std::optional<QRect>& commonOverlap)
 {
     QJsonObject root;
     root["version"] = 1;
     root["sharpening"] = toJson(sharpening);
     root["video"] = toJson(video);
+    if (commonOverlap && commonOverlap->isValid() && !commonOverlap->isEmpty())
+    {
+        QJsonObject ov;
+        ov["x"] = commonOverlap->x();
+        ov["y"] = commonOverlap->y();
+        ov["width"] = commonOverlap->width();
+        ov["height"] = commonOverlap->height();
+        root["commonOverlap"] = ov;
+    }
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
@@ -212,8 +222,10 @@ bool saveProfileJson(const QString& path, const SharpeningSettings& sharpening,
 }
 
 bool loadProfileJson(const QString& path, SharpeningSettings& sharpening,
-    VideoToneSettings& video, QString& error)
+    VideoToneSettings& video, QString& error,
+    std::optional<QRect>* outCommonOverlap)
 {
+    if (outCommonOverlap) outCommonOverlap->reset();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
     {
@@ -232,6 +244,16 @@ bool loadProfileJson(const QString& path, SharpeningSettings& sharpening,
         sharpening = sharpeningFromJson(root["sharpening"].toObject());
     if (root.contains("video") && root["video"].isObject())
         video = videoFromJson(root["video"].toObject());
+    if (outCommonOverlap && root.contains("commonOverlap") && root["commonOverlap"].isObject())
+    {
+        const QJsonObject ov = root["commonOverlap"].toObject();
+        const int x = ov["x"].toInt(-1);
+        const int y = ov["y"].toInt(-1);
+        const int w = ov["width"].toInt(0);
+        const int h = ov["height"].toInt(0);
+        if (x >= 0 && y >= 0 && w >= 2 && h >= 2)
+            *outCommonOverlap = QRect(x, y, w, h);
+    }
     return true;
 }
 

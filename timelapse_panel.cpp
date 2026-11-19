@@ -256,8 +256,19 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         if (v > interval_->value()) interval_->setValue(v);
         if (!updating_) { saveToQSettings(); updateEstimates(); }
     });
+    connect(stopKind_, &QComboBox::currentIndexChanged, this, [this] {
+        if (updating_) return;
+        const auto kind = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
+        if (kind == StopConditionKind::UtcEnd && utcEnd_->dateTime() <= QDateTime::currentDateTimeUtc())
+        {
+            const QSignalBlocker b(utcEnd_);
+            utcEnd_->setDateTime(QDateTime::currentDateTimeUtc().addSecs(3600));
+        }
+        saveToQSettings();
+        updateEstimates();
+    });
     for (QObject* w : std::initializer_list<QObject*>{keepPercent_, maxFrames_, sharpening_, cropToLock_,
-             stopKind_, durationMin_, utcEnd_, targetStacks_, writeMp4_, writeGif_, videoFps_, saveRawSer_})
+             durationMin_, utcEnd_, targetStacks_, writeMp4_, writeGif_, videoFps_, saveRawSer_})
     {
         if (auto* sb = qobject_cast<QDoubleSpinBox*>(w))
             connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
@@ -350,6 +361,7 @@ TimelapseSettings TimelapsePanel::settings() const
             {
                 s.sharpening = p.sharpening;
                 s.sharpening.profileName = p.name;
+                s.video = p.video;
                 break;
             }
         }
@@ -388,7 +400,8 @@ void TimelapsePanel::setSettings(const TimelapseSettings& s)
 }
 
 void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording, bool timeLapsing,
-    double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock)
+    double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock,
+    bool finalizing)
 {
     running_ = running;
     monitoring_ = monitoring;
@@ -400,7 +413,8 @@ void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording
     if (bytesPerPixel > 0) bytesPerPixel_ = bytesPerPixel;
     hasLock_ = hasLock;
 
-    const bool editable = !timeLapsing_;
+    const bool busy = timeLapsing_ || finalizing;
+    const bool editable = !busy;
     for (QWidget* w : std::initializer_list<QWidget*>{preset_, interval_, window_, keepPercent_, maxFrames_,
              sharpening_, cropToLock_, clearAnchor_, stopKind_, durationMin_, utcEnd_, targetStacks_,
              writeMp4_, writeGif_, videoFps_, saveRawSer_})
@@ -411,9 +425,17 @@ void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording
         && static_cast<TimelapsePreset>(preset_->currentData().toInt()) == TimelapsePreset::Moon);
     cropToLock_->setEnabled(editable && hasLock_);
 
-    startStopButton_->setText(timeLapsing_ ? "Stop time-lapse" : "Start time-lapse");
-    startStopButton_->setEnabled(timeLapsing_ || (!monitoring_ && !recording_));
-    resharpenButton_->setEnabled(!timeLapsing_);
+    if (finalizing)
+    {
+        startStopButton_->setText("Finalizing…");
+        startStopButton_->setEnabled(false);
+    }
+    else
+    {
+        startStopButton_->setText(timeLapsing_ ? "Stop time-lapse" : "Start time-lapse");
+        startStopButton_->setEnabled(timeLapsing_ || (!monitoring_ && !recording_));
+    }
+    resharpenButton_->setEnabled(!busy);
     updateEstimates();
 }
 
@@ -531,7 +553,19 @@ void TimelapsePanel::updateStatus(const TimelapseStatus& s)
         const QPixmap pm = QPixmap::fromImage(s.latestThumbnail)
             .scaled(latestThumb_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         latestThumb_->setPixmap(pm);
-        filmstripFrames_.push_back(s.latestThumbnail);
+
+        QImage compactThumb = s.latestThumbnail;
+        if (std::max(compactThumb.width(), compactThumb.height()) > kFilmstripThumbMaxEdge)
+        {
+            compactThumb = compactThumb.scaled(kFilmstripThumbMaxEdge, kFilmstripThumbMaxEdge,
+                Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        if (filmstripFrames_.size() >= kMaxFilmstripFrames)
+        {
+            filmstripFrames_.pop_front();
+            if (filmstripIndex_ > 0) --filmstripIndex_;
+        }
+        filmstripFrames_.push_back(std::move(compactThumb));
         if (filmstripFrames_.size() == 1)
         {
             filmstripThumb_->setPixmap(pm);
@@ -540,7 +574,7 @@ void TimelapsePanel::updateStatus(const TimelapseStatus& s)
         {
             filmstripTimer_->start();
         }
-        filmstripInfo_->setText(QString("%1 stacks").arg(filmstripFrames_.size()));
+        filmstripInfo_->setText(QString("%1 stacks").arg(s.stacksCompleted));
     }
 }
 

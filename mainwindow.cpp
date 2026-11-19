@@ -791,6 +791,11 @@ void MainWindow::setupTimelapsePanel()
 
 void MainWindow::onStartTimeLapse()
 {
+    if (session_->timeLapseFinalizing())
+    {
+        showMessage("Wait for the previous time-lapse video to finish finalizing.", 4000);
+        return;
+    }
     if (!ensureOutputFolderReady("time-lapse")) return;
     if (!session_->isRunning())
     {
@@ -811,6 +816,13 @@ void MainWindow::onStartTimeLapse()
     if (!tlSettings.valid())
     {
         showMessage("Check time-lapse settings (capture window must be <= interval).", 5000);
+        return;
+    }
+    if (tlSettings.stopKind == StopConditionKind::UtcEnd
+        && !recording_
+        && tlSettings.utcEndTime <= QDateTime::currentDateTimeUtc())
+    {
+        showMessage("UTC end time is in the past; choose a future UTC end time.", 5000);
         return;
     }
     timelapsePanel_->clearRunVisuals();
@@ -1561,6 +1573,7 @@ void MainWindow::updateControls()
     const bool recording = recordingSelected();
     const bool monitoring = session_->mode()==Session::Mode::Monitoring;
     const bool timeLapsing = session_->mode()==Session::Mode::TimeLapse;
+    const bool timeLapseFinalizing = session_->timeLapseFinalizing();
     const bool pending = session_->modeChangePending();
 
     CameraFamilyPanel* selected = selectedCamera();
@@ -1574,14 +1587,14 @@ void MainWindow::updateControls()
     }
     if (testingAction_) testingAction_->setEnabled(!running);
     ui_->stopButton->setEnabled(running);
-    ui_->monitoringButton->setEnabled(running && !timeLapsing && !session_->sourceFinished() && !pending);
+    ui_->monitoringButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && !session_->sourceFinished() && !pending);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
     if (recordButton_)
     {
         const bool writing = session_->recordingStatus().active;
         recordButton_->setText(writing ? "Stop recording" : "Record");
-        recordButton_->setEnabled(writing || (running && !timeLapsing && !pending && !session_->sourceFinished()));
+        recordButton_->setEnabled(writing || (running && !timeLapsing && !timeLapseFinalizing && !pending && !session_->sourceFinished()));
     }
     if (recordFramesSpinBox_)
         recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing);
@@ -1608,7 +1621,7 @@ void MainWindow::updateControls()
     {
         const bool hasLock = session_->guider().status().lock.state == LockState::Locked;
         timelapsePanel_->setStreamInfo(running, monitoring, session_->recordingStatus().active, timeLapsing,
-            measuredFps_, lastFrameWidth_, lastFrameHeight_, lastFrameBpp_, hasLock);
+            measuredFps_, lastFrameWidth_, lastFrameHeight_, lastFrameBpp_, hasLock, timeLapseFinalizing);
     }
 }
 

@@ -49,16 +49,22 @@ private:
     QString sessionDir_;
     QString lastOutputDir_;
     std::vector<QString> stackFiles_;
+    int bestStackIndex_{-1};
+    std::optional<QRect> sessionOverlap_;
     std::optional<FitsImage> loadedRaw_;
+    std::optional<FitsImage> loadedSharpened_;
+    std::optional<FitsImage> bestRaw_;
+    std::optional<FitsImage> bestSharpened_;
+    std::optional<FitsImage> cachedBestApplied_;
+    SharpeningSettings cachedBestSharpSettings_;
+    bool cachedBestAppliedValid_{false};
     std::vector<SavedSharpeningProfile> savedProfiles_;
     bool updating_{false};
-    double cachedAutoBlack_{0.0};
-    double cachedAutoWhite_{1.0};
-    bool autoLevelsValid_{false};
     QImage cachedBeforeImg_;
     double cachedBeforeBlack_{-1.0};
     double cachedBeforeWhite_{-1.0};
     double cachedBeforeGamma_{-1.0};
+    QRect cachedBeforeCrop_;
 
     QTimer* previewTimer_{nullptr};
     QLabel* sessionLabel_{nullptr};

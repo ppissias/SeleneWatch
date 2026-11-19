@@ -50,3 +50,5 @@ struct FitsImage
 
 bool writeFitsFloat(const QString& path, const FitsImage& image, QString& error);
 bool readFitsFloat(const QString& path, FitsImage& image, QString& error);
+bool readFitsMetadata(const QString& path, FitsMetadata& meta,
+    int& width, int& height, int& channels, QString& error);

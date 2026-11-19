@@ -234,6 +234,12 @@ private slots:
     void overloadPreCaptureSkipGateAndMemoryBound();
     void diskReserveStopsAndStillExportsVideo();
     void sessionStartTimeLapseAndResharpenRebuild();
+    void unicodeFitsPathsAndHeaderOnlyMetadata();
+    void stopMidWindowPreservesBurstAndConcurrentStop();
+    void exposureUnitsAndFailedFitsWriteHandling();
+    void rawSerRetainsOnlyKeptFramesAndWorkerDebayers();
+    void rotatedMoonInscribedOverlapHasNoBlackCorners();
+    void guidingRecoveryCloudBaselineAndMissedWindows();
 };
 
 void TimelapseTests::fitsRoundTripMonoAndRgbAndExternal16Bit()
@@ -884,9 +890,11 @@ void TimelapseTests::sessionStartTimeLapseAndResharpenRebuild()
     QVERIFY2(readFitsFloat(QDir(outDir1).filePath("sharpened/" + reFitsFiles.first()), reSharpFits, err), qPrintable(err));
     QCOMPARE(reSharpFits.meta.sharpeningProfile, std::string("Lunar Crisp"));
 
-    // Fast Rebuild video only from already-sharpened folder: must not rewrite FITS.
+    // Fast Rebuild video only from already-sharpened folder: must not rewrite FITS
+    // AND must write to a new non-destructive video_<UTC>/ folder without touching outDir1/timelapse.mp4.
     const QString reFitsPath = QDir(outDir1).filePath("sharpened/" + reFitsFiles.first());
     const QDateTime reFitsMtime = QFileInfo(reFitsPath).lastModified();
+    const QDateTime reMp4Mtime = QFileInfo(QDir(outDir1).filePath("timelapse.mp4")).lastModified();
     QThread::msleep(20);
     VideoToneSettings toneGif = toneCustom;
     toneGif.gamma = 1.4;
@@ -896,12 +904,449 @@ void TimelapseTests::sessionStartTimeLapseAndResharpenRebuild()
     const TimelapseExportResult r2 = resharpenTimelapseSession(
         sessionDir, QDir(outDir1).filePath("sharpened"), sharpCustom, toneGif, /*rebuildVideoOnly=*/true, outDir2);
     QVERIFY2(r2.ok, qPrintable(r2.error));
-    QCOMPARE(QDir::cleanPath(outDir2), QDir::cleanPath(outDir1));
+    QVERIFY(QDir::cleanPath(outDir2) != QDir::cleanPath(outDir1));
+    QVERIFY(outDir2.contains("video_"));
     QCOMPARE(QFileInfo(reFitsPath).lastModified(), reFitsMtime);
-    QVERIFY(checkFileHasGifSignature(QDir(outDir1).filePath("timelapse.gif")));
-    QVERIFY(decodeWithFfmpeg(QDir(outDir1).filePath("timelapse.mp4")));
+    QCOMPARE(QFileInfo(QDir(outDir1).filePath("timelapse.mp4")).lastModified(), reMp4Mtime);
+    QVERIFY(checkFileHasGifSignature(QDir(outDir2).filePath("timelapse.gif")));
+    QVERIFY(decodeWithFfmpeg(QDir(outDir2).filePath("timelapse.mp4")));
+
+    // Verify persisted commonOverlap in sharpening_profile.json actually crops re-sharpened video.
+    {
+        SharpeningSettings loadedS;
+        VideoToneSettings loadedV;
+        std::optional<QRect> loadedOverlap;
+        QString pErr;
+        QVERIFY2(loadProfileJson(sDir.filePath("sharpening_profile.json"), loadedS, loadedV, pErr, &loadedOverlap),
+            qPrintable(pErr));
+        QVERIFY(loadedOverlap.has_value() && loadedOverlap->isValid());
+
+        // Persist a distinct smaller overlap rect and confirm rebuild honours it.
+        const QRect testOverlap(20, 20, 120, 80);
+        QVERIFY2(saveProfileJson(sDir.filePath("sharpening_profile.json"), loadedS, loadedV, pErr, testOverlap),
+            qPrintable(pErr));
+        VideoToneSettings cropTone = toneCustom;
+        cropTone.cropToOverlap = true;
+        cropTone.writeMp4 = true;
+        cropTone.writeGif = false;
+        QString outDirCrop;
+        const TimelapseExportResult rCrop = resharpenTimelapseSession(
+            sessionDir, {}, sharpCustom, cropTone, /*rebuildVideoOnly=*/true, outDirCrop);
+        QVERIFY2(rCrop.ok, qPrintable(rCrop.error));
+        // Probe video dimensions via ffmpeg stderr/stream check.
+        QProcess probe;
+        probe.setProgram(findFfmpegExecutable());
+        probe.setArguments({"-hide_banner", "-i", QDir(outDirCrop).filePath("timelapse.mp4")});
+        probe.start();
+        QVERIFY(probe.waitForFinished(10000));
+        const QString probeOut = QString::fromUtf8(probe.readAllStandardError());
+        QVERIFY2(probeOut.contains("120x80"), qPrintable(probeOut));
+    }
 
     session.stop();
+    session.waitTimeLapseFinished();
+}
+
+void TimelapseTests::unicodeFitsPathsAndHeaderOnlyMetadata()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString unicodeDir = tmp.filePath(QString::fromUtf8("Πέτρος_Σελήνη"));
+    QVERIFY(QDir().mkpath(unicodeDir));
+
+    FitsImage img;
+    img.width = 32;
+    img.height = 24;
+    img.channels = 3;
+    img.pixels.resize(32 * 24 * 3, 0.42f);
+    img.meta.exptimeSeconds = 0.0125;
+    img.meta.qualityScore = 0.77;
+    img.meta.camera = "ASI178MC";
+    img.meta.sharpeningProfile = "Mild";
+
+    const QString path = QDir(unicodeDir).filePath(QString::fromUtf8("στοίβα_0001.fits"));
+    QString err;
+    QVERIFY2(writeFitsFloat(path, img, err), qPrintable(err));
+    QVERIFY(QFileInfo::exists(path));
+
+    FitsMetadata meta;
+    int w = 0, h = 0, ch = 0;
+    QVERIFY2(readFitsMetadata(path, meta, w, h, ch, err), qPrintable(err));
+    QCOMPARE(w, 32);
+    QCOMPARE(h, 24);
+    QCOMPARE(ch, 3);
+    QVERIFY(std::abs(meta.exptimeSeconds - 0.0125) < 1e-6);
+    QVERIFY(std::abs(meta.qualityScore - 0.77) < 1e-6);
+    QCOMPARE(meta.camera, std::string("ASI178MC"));
+
+    FitsImage back;
+    QVERIFY2(readFitsFloat(path, back, err), qPrintable(err));
+    QCOMPARE(back.width, 32);
+    QCOMPARE(back.height, 24);
+    QCOMPARE(back.channels, 3);
+    QVERIFY(std::abs(back.pixels.front() - 0.42f) < 1e-6f);
+}
+
+void TimelapseTests::stopMidWindowPreservesBurstAndConcurrentStop()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const auto field = makeLunarCraterField(48, 48);
+
+    // Part A: Manual stop mid-window must stack and keep the burst already collected.
+    {
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+        s.intervalSeconds = 10.0;
+        s.captureWindowSeconds = 5.0;
+        s.keepPercent = 100.0;
+        s.maxFramesPerPeriod = 50;
+        s.video.writeMp4 = false;
+        s.video.writeGif = false;
+
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("midstop");
+        cfg.settings = s;
+        cfg.stream.playback = "mid.ser";
+        cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+
+        TimelapseSession session(&ctx, cfg);
+        QVERIFY(session.valid());
+        for (int i = 0; i < 8; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, static_cast<uint64_t>(i), utcPoint(0, i * 100)));
+
+        // Still inside [0, 5s) capture window when observer presses Stop.
+        session.stop("stopped by the observer");
+        session.waitFinished();
+
+        const TimelapseStatus st = session.status();
+        QCOMPARE(st.stacksCompleted, 1);
+        QCOMPARE(cfg.memory.usage().used, size_t{0});
+        QCOMPARE(QDir(QDir(st.sessionDir).filePath("stacks")).entryList({"*.fits"}, QDir::Files).size(), 1);
+    }
+
+    // Part B: Concurrent source-thread onFrame + GUI-thread status()/stop() race test.
+    for (int iter = 0; iter < 5; ++iter)
+    {
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+        s.intervalSeconds = 0.2;
+        s.captureWindowSeconds = 0.15;
+        s.keepPercent = 50.0;
+        s.maxFramesPerPeriod = 30;
+        s.video.writeMp4 = false;
+        s.video.writeGif = false;
+
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath(QString("race_%1").arg(iter));
+        cfg.settings = s;
+        cfg.stream.playback = "race.ser";
+        cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+
+        TimelapseSession session(&ctx, cfg);
+        std::atomic<bool> doneFeeding{false};
+        std::jthread feeder([&] {
+            for (int i = 0; i < 200 && !doneFeeding.load(); ++i)
+            {
+                session.onFrame(makeMono8Frame(48, 48, field, static_cast<uint64_t>(i), utcPoint(0, i * 5)));
+            }
+        });
+        for (int p = 0; p < 10; ++p)
+        {
+            const TimelapseStatus snap = session.status();
+            Q_UNUSED(snap);
+            QThread::msleep(2);
+        }
+        session.stop("concurrent stop");
+        doneFeeding.store(true);
+        feeder.join();
+        session.waitFinished();
+        QCOMPARE(cfg.memory.usage().used, size_t{0});
+    }
+}
+
+void TimelapseTests::exposureUnitsAndFailedFitsWriteHandling()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const auto field = makeLunarCraterField(48, 48);
+
+    // Part A: Live-camera microsecond exposure ("10000 us" -> 0.010 s) and non-numeric gain omitted.
+    {
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+        s.intervalSeconds = 2.0;
+        s.captureWindowSeconds = 1.0;
+        s.keepPercent = 100.0;
+        s.video.writeMp4 = false;
+        s.video.writeGif = false;
+
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("exptime");
+        cfg.settings = s;
+        cfg.stream.playback = "exp.ser";
+        cfg.stream.exposure = "10000 us";
+        cfg.stream.gain = "none (painted test image)";
+
+        TimelapseSession session(&ctx, cfg);
+        for (int i = 0; i < 5; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, static_cast<uint64_t>(i), utcPoint(0, i * 50)));
+        session.stop("done");
+        session.waitFinished();
+
+        const QDir stacksDir(QDir(session.status().sessionDir).filePath("stacks"));
+        const QStringList files = stacksDir.entryList({"*.fits"}, QDir::Files);
+        QCOMPARE(files.size(), 1);
+        FitsMetadata meta;
+        int w = 0, h = 0, ch = 0;
+        QString err;
+        QVERIFY2(readFitsMetadata(stacksDir.filePath(files.first()), meta, w, h, ch, err), qPrintable(err));
+        QVERIFY2(std::abs(meta.exptimeSeconds - 0.010) < 1e-6,
+            qPrintable(QString("exptime=%1").arg(meta.exptimeSeconds)));
+        QVERIFY(!meta.hasGain);
+    }
+
+    // Part B: Failed FITS write must NOT increment stacksCompleted and must stop with error.
+    {
+        // Unwritable root (regular file blocking directory creation) marks session invalid.
+        const QString blocker = tmp.filePath("blocker_file");
+        {
+            QFile f(blocker);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("block");
+        }
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+        s.intervalSeconds = 2.0;
+        s.captureWindowSeconds = 1.0;
+        s.video.writeMp4 = false;
+        s.video.writeGif = false;
+
+        QObject ctx;
+        TimelapseSession::Config badCfg;
+        badCfg.timelapsesRoot = blocker;
+        badCfg.settings = s;
+        TimelapseSession badSession(&ctx, badCfg);
+        QVERIFY(!badSession.valid());
+
+        // Mid-session FITS write failure: replace stacks/ with a regular file after start.
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("failwrite");
+        cfg.settings = s;
+        cfg.stream.playback = "fail.ser";
+        TimelapseSession session(&ctx, cfg);
+        QVERIFY(session.valid());
+        const QString sDir = session.status().sessionDir;
+        QVERIFY(QDir(sDir).rmdir("stacks"));
+        {
+            QFile f(QDir(sDir).filePath("stacks"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("not a dir");
+        }
+
+        for (int i = 0; i < 5; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, static_cast<uint64_t>(i), utcPoint(0, i * 50)));
+        session.onFrame(makeMono8Frame(48, 48, field, 5, utcPoint(1, 50)));
+        session.waitFinished();
+
+        const TimelapseStatus st = session.status();
+        QCOMPARE(st.stacksCompleted, 0);
+        QVERIFY2(st.stopReason.contains("FITS write failed"), qPrintable(st.stopReason));
+        const QString logText = readTextFile(QDir(sDir).filePath("timelapse.txt"));
+        QVERIFY2(logText.contains("stacks_completed: 0"), qPrintable(logText));
+    }
+}
+
+void TimelapseTests::rawSerRetainsOnlyKeptFramesAndWorkerDebayers()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const int w = 48, h = 48;
+    const auto sharpField = makeLunarCraterField(w, h);
+    const auto blurField = gaussianBlur3x3(sharpField, w, h, 8);
+
+    auto makeRggbFrame = [&](const std::vector<float>& lum, uint64_t idx, std::chrono::system_clock::time_point utc) {
+        auto f = std::make_shared<Frame>();
+        f->width = w;
+        f->height = h;
+        f->format = PixelFormat::Mono8;
+        f->bayer = BayerPattern::RGGB;
+        f->significantBits = 8;
+        f->frameIndex = idx;
+        f->timestamp = utc;
+        f->testSource = true;
+        f->data.resize(static_cast<size_t>(w) * h);
+        for (int y = 0; y < h; ++y)
+        {
+            for (int x = 0; x < w; ++x)
+            {
+                const float v = lum[static_cast<size_t>(y) * w + x];
+                const bool evenY = (y % 2) == 0;
+                const bool evenX = (x % 2) == 0;
+                const float c = (evenY && evenX) ? v * 0.9f : ((!evenY && !evenX) ? v * 0.6f : v);
+                f->data[static_cast<size_t>(y) * w + x] = static_cast<uint8_t>(std::lround(std::clamp(c, 0.0f, 1.0f) * 255.0f));
+            }
+        }
+        return f;
+    };
+
+    TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+    s.intervalSeconds = 2.0;
+    s.captureWindowSeconds = 1.0;
+    s.keepPercent = 100.0;
+    s.maxFramesPerPeriod = 5;
+    s.saveRawSer = true;
+    s.video.writeMp4 = false;
+    s.video.writeGif = false;
+
+    QObject ctx;
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = tmp.filePath("rawser");
+    cfg.settings = s;
+    cfg.stream.playback = "bayer.ser";
+    cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+
+    TimelapseSession session(&ctx, cfg);
+    // Feed 10 blurry frames first (filling the cap=5 heap), then 10 sharper frames
+    // that evict them — saveRawSer must retain ONLY the 5 kept frames, not all 15+.
+    for (int i = 0; i < 10; ++i)
+        session.onFrame(makeRggbFrame(blurField, static_cast<uint64_t>(i), utcPoint(0, i * 20)));
+    for (int i = 10; i < 20; ++i)
+        session.onFrame(makeRggbFrame(sharpField, static_cast<uint64_t>(i), utcPoint(0, i * 20)));
+    session.stop("done");
+    session.waitFinished();
+
+    const TimelapseStatus st = session.status();
+    QCOMPARE(st.stacksCompleted, 1);
+    QCOMPARE(cfg.memory.usage().used, size_t{0});
+
+    // Verify FITS stack was debayered to 3-channel RGB on the worker thread.
+    const QDir stacksDir(QDir(st.sessionDir).filePath("stacks"));
+    const QStringList fitsFiles = stacksDir.entryList({"*.fits"}, QDir::Files);
+    QCOMPARE(fitsFiles.size(), 1);
+    FitsImage stackImg;
+    QString err;
+    QVERIFY2(readFitsFloat(stacksDir.filePath(fitsFiles.first()), stackImg, err), qPrintable(err));
+    QCOMPARE(stackImg.channels, 3);
+
+    // Verify raw SER contains strictly the 5 kept frames in chronological order.
+    const QDir rawDir(QDir(st.sessionDir).filePath("raw"));
+    const QStringList serFiles = rawDir.entryList({"*.ser"}, QDir::Files);
+    QCOMPARE(serFiles.size(), 1);
+    std::string serErr;
+    auto reader = openRecordingReader(std::filesystem::path(rawDir.filePath(serFiles.first()).toStdWString()), 10.0, serErr);
+    QVERIFY2(reader != nullptr, serErr.c_str());
+    QCOMPARE(reader->frameCount(), 5);
+    for (int i = 1; i < reader->frameCount(); ++i)
+        QVERIFY(reader->frameTime(i) >= reader->frameTime(i - 1));
+}
+
+void TimelapseTests::rotatedMoonInscribedOverlapHasNoBlackCorners()
+{
+    const int w = 256, h = 256;
+    const auto refField = makeLunarCraterField(w, h);
+    FitsImage ref;
+    ref.width = w; ref.height = h; ref.channels = 1;
+    ref.pixels = refField;
+
+    // Substantial 8-degree Alt-Az rotation + translation: outer boundingRect would
+    // include large black corner triangles, while inscribed validOverlap must not.
+    FitsImage mov;
+    mov.width = w; mov.height = h; mov.channels = 1;
+    mov.pixels = warpFloatField(refField, w, h, 8.0, -6.0, 8.0);
+
+    const SessionAlignResult res = alignStackToReference(mov, ref, TimelapsePreset::Moon);
+    QVERIFY(!res.usedFallback);
+    QVERIFY(res.validOverlap.isValid());
+    QVERIFY(res.validOverlap.width() < w - 20);
+    QVERIFY(res.validOverlap.height() < h - 20);
+
+    // Every single pixel inside validOverlap—including all four corners—must be non-black.
+    const QRect r = res.validOverlap;
+    for (int y = r.top(); y <= r.bottom(); ++y)
+    {
+        for (int x = r.left(); x <= r.right(); ++x)
+        {
+            const float px = res.aligned.pixels[static_cast<size_t>(y) * w + x];
+            QVERIFY2(px > 0.01f, qPrintable(QString("black pixel %1 at (%2,%3) inside overlap (%4,%5 %6x%7)")
+                .arg(px).arg(x).arg(y).arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height())));
+        }
+    }
+}
+
+void TimelapseTests::guidingRecoveryCloudBaselineAndMissedWindows()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const int w = 64, h = 64;
+    const auto sharpField = makeLunarCraterField(w, h);
+    const auto blurryField = gaussianBlur3x3(sharpField, w, h, 14);
+
+    TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+    s.intervalSeconds = 1.0;
+    s.captureWindowSeconds = 0.4;
+    s.keepPercent = 100.0;
+    s.maxFramesPerPeriod = 20;
+    s.video.writeMp4 = false;
+    s.video.writeGif = false;
+
+    QObject ctx;
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = tmp.filePath("polish");
+    cfg.settings = s;
+    cfg.stream.playback = "polish.ser";
+
+    TimelapseSession session(&ctx, cfg);
+
+    // #13: Guiding lock lost sets warning, and recovering clears warningText immediately.
+    GuiderStatus gsLost;
+    gsLost.lock.state = LockState::Lost;
+    session.setGuidingStatus(gsLost, true);
+    QVERIFY(session.status().guidingLostWarning);
+    QVERIFY(session.status().warningText.contains("Guiding lock lost"));
+
+    GuiderStatus gsOk;
+    gsOk.lock.state = LockState::Locked;
+    session.setGuidingStatus(gsOk, true);
+    QVERIFY(!session.status().guidingLostWarning);
+    QVERIFY2(session.status().warningText.isEmpty(), qPrintable(session.status().warningText));
+
+    // #8 + New I:
+    // Period 0: blurry/cloudy opening stack.
+    for (int i = 0; i < 4; ++i)
+        session.onFrame(makeMono8Frame(w, h, blurryField, static_cast<uint64_t>(i), utcPoint(0, i * 60)));
+    session.onFrame(makeMono8Frame(w, h, blurryField, 4, utcPoint(0, 450)));
+    QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= 1, 5000);
+
+    // Jump straight past Period 1 ([1.0, 1.4)) to t = 2.05s (Period 2) -> must log Period 1 missed!
+    for (int i = 0; i < 4; ++i)
+        session.onFrame(makeMono8Frame(w, h, sharpField, static_cast<uint64_t>(20 + i), utcPoint(2, 50 + i * 60)));
+    session.onFrame(makeMono8Frame(w, h, sharpField, 24, utcPoint(2, 450)));
+    QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= 2, 5000);
+
+    // Period 3: another sharp stack -> running median baseline recovers to sharp level.
+    for (int i = 0; i < 4; ++i)
+        session.onFrame(makeMono8Frame(w, h, sharpField, static_cast<uint64_t>(30 + i), utcPoint(3, 50 + i * 60)));
+    session.onFrame(makeMono8Frame(w, h, sharpField, 34, utcPoint(3, 450)));
+    QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= 3, 5000);
+
+    // Period 4: cloudy stack -> must trigger cloudWarning against the recovered baseline!
+    for (int i = 0; i < 4; ++i)
+        session.onFrame(makeMono8Frame(w, h, blurryField, static_cast<uint64_t>(40 + i), utcPoint(4, 50 + i * 60)));
+    session.onFrame(makeMono8Frame(w, h, blurryField, 44, utcPoint(4, 450)));
+    QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= 4, 5000);
+
+    const TimelapseStatus mid = session.status();
+    QVERIFY2(mid.cloudWarning, "Cloud warning should fire after running baseline recovers from blurry stack 1");
+    QVERIFY(mid.periodsSkipped >= 1);
+
+    session.stop("done");
+    session.waitFinished();
+
+    const QString logText = readTextFile(QDir(mid.sessionDir).filePath("timelapse.txt"));
+    QVERIFY2(logText.contains("skip period=1") && logText.contains("window missed"), qPrintable(logText));
 }
 
 QTEST_MAIN(TimelapseTests)

@@ -163,6 +163,8 @@ public:
     bool startTimeLapse(const TimelapseSettings& settings, QString& error,
         FreeSpaceQuery freeSpace = {}, std::chrono::milliseconds stackDelay = {});
     void stopTimeLapse(const std::string& reason = "stopped by the observer");
+    void waitTimeLapseFinished();
+    [[nodiscard]] bool timeLapseFinalizing() const;
     [[nodiscard]] TimelapseStatus timeLapseStatus() const;
 
     // Started and not yet stopped. Stays true after the recording has
@@ -259,7 +261,11 @@ private:
     size_t recordingQueueBytes_{0};
 
     // Declared last, so it is stopped and destroyed before what it feeds.
+    std::atomic<bool> captureResetRequested_{false};
     mutable std::mutex timelapseMutex_;
+    uint64_t nextTimelapseId_{0};
+    uint64_t activeTimelapseId_{0};
     std::shared_ptr<TimelapseSession> timelapse_;
+    std::vector<std::pair<uint64_t, std::shared_ptr<TimelapseSession>>> finishingTimelapses_;
     std::unique_ptr<FrameSource> source_;
 };

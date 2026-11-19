@@ -65,8 +65,9 @@ bool encodeEventPreviewGif(const std::vector<QImage>& frames,
 
 // Re-sharpens every stack in <sessionDir>/stacks/ into a non-destructive
 // <sessionDir>/sharpened_<profile>_<UTC>/ folder and builds its MP4/GIF.
-// When rebuildVideoOnly is true, uses sourceFitsDir (default <sessionDir>/sharpened)
-// directly without re-running FITS sharpening.
+// When rebuildVideoOnly is true, reads sourceFitsDir (default <sessionDir>/sharpened)
+// directly without re-running FITS sharpening and writes the rebuilt video into
+// a non-destructive video_<UTC>/ folder so earlier videos are never overwritten.
 [[nodiscard]] TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     const QString& sourceFitsDir,
     const SharpeningSettings& sharpening,

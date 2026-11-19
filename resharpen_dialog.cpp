@@ -269,6 +269,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         }
         if (!updating_) updatePreview();
     });
+    connect(cropOverlap_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
+    connect(brightnessLevel_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
 
     connect(profileCombo_, &QComboBox::currentIndexChanged, this, [this](int idx) {
         if (updating_ || idx < 0) return;
@@ -381,17 +383,23 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     sessionLabel_->setText(QDir::toNativeSeparators(sessionDir_));
     openDirBtn_->setEnabled(QDir(sessionDir_).exists());
 
+    sessionOverlap_.reset();
     const QString profFile = QDir(sessionDir_).filePath("sharpening_profile.json");
     if (QFileInfo::exists(profFile))
     {
         SharpeningSettings s;
         VideoToneSettings v;
         QString err;
-        if (loadProfileJson(profFile, s, v, err))
+        if (loadProfileJson(profFile, s, v, err, &sessionOverlap_))
             setControlsFromSettings(s, v);
     }
 
     stackFiles_.clear();
+    bestStackIndex_ = -1;
+    bestRaw_.reset();
+    bestSharpened_.reset();
+    cachedBestApplied_.reset();
+    cachedBestAppliedValid_ = false;
     const QSignalBlocker b(stackCombo_);
     stackCombo_->clear();
     const QDir stacksDir(QDir(sessionDir_).filePath("stacks"));
@@ -402,15 +410,30 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     {
         const QString full = stacksDir.filePath(names[i]);
         stackFiles_.push_back(full);
-        FitsImage probe;
+        FitsMetadata meta;
+        int w = 0, h = 0, ch = 0;
         QString err;
         double q = 0.0;
-        if (readFitsFloat(full, probe, err)) q = probe.meta.qualityScore;
+        if (readFitsMetadata(full, meta, w, h, ch, err)) q = meta.qualityScore;
         if (q > bestQual) { bestQual = q; bestIndex = i; }
         stackCombo_->addItem(QString("%1 (Q=%2)").arg(names[i]).arg(q, 0, 'g', 3));
     }
     if (!stackFiles_.empty())
     {
+        bestStackIndex_ = bestIndex;
+        FitsImage bestImg;
+        QString bestErr;
+        if (readFitsFloat(stackFiles_[static_cast<size_t>(bestIndex)], bestImg, bestErr))
+            bestRaw_ = std::move(bestImg);
+        const QString bestSharpPath = QDir(QDir(sessionDir_).filePath("sharpened"))
+            .filePath(QFileInfo(stackFiles_[static_cast<size_t>(bestIndex)]).fileName());
+        if (QFileInfo::exists(bestSharpPath))
+        {
+            FitsImage bs;
+            QString bsErr;
+            if (readFitsFloat(bestSharpPath, bs, bsErr)) bestSharpened_ = std::move(bs);
+        }
+
         stackCombo_->setCurrentIndex(bestIndex);
         loadSelectedStack();
         statusLabel_->setText(QString("Loaded %1 stacks (defaulting preview to highest quality).").arg(stackFiles_.size()));
@@ -418,6 +441,7 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     else
     {
         loadedRaw_.reset();
+        loadedSharpened_.reset();
         beforeLabel_->setText("No FITS stacks found");
         afterLabel_->setText("No FITS stacks found");
         statusLabel_->setText("No stacks/ FITS files found in this folder.");
@@ -429,15 +453,41 @@ void ResharpenDialog::loadSelectedStack()
 {
     const int idx = stackCombo_->currentIndex();
     if (idx < 0 || idx >= static_cast<int>(stackFiles_.size())) return;
-    FitsImage img;
-    QString err;
-    if (!readFitsFloat(stackFiles_[static_cast<size_t>(idx)], img, err))
+    const QString& path = stackFiles_[static_cast<size_t>(idx)];
+    if (idx == bestStackIndex_ && bestRaw_)
     {
-        statusLabel_->setText(err);
-        return;
+        loadedRaw_ = bestRaw_;
     }
-    loadedRaw_ = std::move(img);
-    autoLevelsValid_ = false;
+    else
+    {
+        FitsImage img;
+        QString err;
+        if (!readFitsFloat(path, img, err))
+        {
+            statusLabel_->setText(err);
+            return;
+        }
+        loadedRaw_ = std::move(img);
+    }
+
+    loadedSharpened_.reset();
+    if (idx == bestStackIndex_ && bestSharpened_)
+    {
+        loadedSharpened_ = bestSharpened_;
+    }
+    else
+    {
+        const QString sharpPath = QDir(QDir(sessionDir_).filePath("sharpened"))
+            .filePath(QFileInfo(path).fileName());
+        if (QFileInfo::exists(sharpPath))
+        {
+            FitsImage sImg;
+            QString sErr;
+            if (readFitsFloat(sharpPath, sImg, sErr))
+                loadedSharpened_ = std::move(sImg);
+        }
+    }
+
     cachedBeforeImg_ = {};
     updatePreview();
 }
@@ -482,34 +532,84 @@ void ResharpenDialog::updatePreview()
     if (previewTimer_ && previewTimer_->isActive()) previewTimer_->stop();
 
     const VideoToneSettings tone = currentTone();
+    const SharpeningSettings sharp = currentSharpening();
+    const bool rebuildOnly = rebuildVideoOnly_->isChecked();
+
+    // Match exportTimelapseFromFits overlap cropping (even dimensions).
+    QRect crop;
+    if (tone.cropToOverlap && sessionOverlap_ && sessionOverlap_->isValid() && !sessionOverlap_->isEmpty())
+    {
+        const QRect clipped = sessionOverlap_->intersected(QRect(0, 0, loadedRaw_->width, loadedRaw_->height));
+        if (clipped.width() >= 2 && clipped.height() >= 2)
+        {
+            crop = clipped;
+            crop.setWidth(std::max(2, crop.width() & ~1));
+            crop.setHeight(std::max(2, crop.height() & ~1));
+        }
+    }
+
+    // Build the exact linear After stack (reusing sharpened/ when Rebuild video only is checked).
+    FitsImage computedAfter;
+    const FitsImage* afterFits = nullptr;
+    if (rebuildOnly)
+    {
+        afterFits = loadedSharpened_ ? &*loadedSharpened_ : &*loadedRaw_;
+    }
+    else
+    {
+        computedAfter = applyLinearSharpening(*loadedRaw_, sharp);
+        afterFits = &computedAfter;
+    }
+
+    // Use the sharpened highest-quality stack as the reference for auto-stretch and
+    // brightness levelling, matching exportTimelapseFromFits.
+    const bool viewingBest = (stackCombo_->currentIndex() == bestStackIndex_) || !bestRaw_;
+    const FitsImage* refFits = afterFits;
+    if (!viewingBest)
+    {
+        if (rebuildOnly)
+        {
+            refFits = bestSharpened_ ? &*bestSharpened_ : &*bestRaw_;
+        }
+        else
+        {
+            if (!cachedBestAppliedValid_ || cachedBestSharpSettings_ != sharp)
+            {
+                cachedBestApplied_ = applyLinearSharpening(*bestRaw_, sharp);
+                cachedBestSharpSettings_ = sharp;
+                cachedBestAppliedValid_ = true;
+            }
+            refFits = &*cachedBestApplied_;
+        }
+    }
+
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
     if (tone.autoStretch)
+        computeAutoStretchLevels(*refFits, black, white);
+
+    double scale = 1.0;
+    if (tone.brightnessLevelling && refFits != afterFits)
     {
-        if (!autoLevelsValid_)
-        {
-            computeAutoStretchLevels(*loadedRaw_, cachedAutoBlack_, cachedAutoWhite_);
-            autoLevelsValid_ = true;
-        }
-        black = cachedAutoBlack_;
-        white = cachedAutoWhite_;
+        const double refB = std::max(1e-5, measureTargetBrightness(*refFits));
+        const double curB = measureTargetBrightness(*afterFits);
+        if (curB > 1e-5) scale = std::clamp(refB / curB, 0.4, 2.5);
     }
 
     if (cachedBeforeImg_.isNull() || cachedBeforeBlack_ != black
-        || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma)
+        || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma
+        || cachedBeforeCrop_ != crop)
     {
-        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, {}, 512);
+        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, crop, 512);
         cachedBeforeBlack_ = black;
         cachedBeforeWhite_ = white;
         cachedBeforeGamma_ = tone.gamma;
+        cachedBeforeCrop_ = crop;
         beforeLabel_->setPixmap(QPixmap::fromImage(cachedBeforeImg_)
             .scaled(beforeLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 
-    const QImage after = rebuildVideoOnly_->isChecked()
-        ? cachedBeforeImg_
-        : toneMapFitsToImage(applyLinearSharpening(*loadedRaw_, currentSharpening()),
-                             black, white, tone.gamma, 1.0, {}, 512);
+    const QImage after = toneMapFitsToImage(*afterFits, black, white, tone.gamma, scale, crop, 512);
     afterLabel_->setPixmap(QPixmap::fromImage(after).scaled(afterLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 

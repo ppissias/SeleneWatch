@@ -8,6 +8,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QMetaObject>
 
+#include <algorithm>
 #include <format>
 #include <utility>
 #include <stdexcept>
@@ -59,6 +60,7 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
 Session::~Session()
 {
     stop();
+    waitTimeLapseFinished();
     guider_.shutdown();
     // A recording still being written is finished before the record closes.
     recorder_.stop("the program closed");
@@ -328,6 +330,7 @@ bool Session::start(QString& error, Mode mode)
     sourceFinished_.store(false);
     { std::lock_guard lock(requestMutex_); manualRequest_.reset(); monitoringRequest_.reset(); cameraTuned_ = false; }
     capture_.reset();
+    captureResetRequested_.store(false);
     capture_.setMonitoring(mode == Mode::Monitoring);
     mode_.store(mode);
     settlingUntil_ = {};
@@ -359,11 +362,18 @@ void Session::stop(std::string reason)
     std::shared_ptr<TimelapseSession> tl;
     {
         std::lock_guard lock(timelapseMutex_);
-        tl = std::move(timelapse_);
+        if (timelapse_)
+        {
+            tl = std::move(timelapse_);
+            finishingTimelapses_.emplace_back(activeTimelapseId_, tl);
+            activeTimelapseId_ = 0;
+        }
     }
     if (tl) tl->stop(reason);
     source_->stop();
-    if (tl) tl->waitFinished();
+    // Do not block the GUI thread on FFmpeg finalization here; tl stays alive
+    // in finishingTimelapses_ until its queued finished callback cleans it up
+    // (or ~Session / waitTimeLapseFinished joins it).
     // The source thread is joined, so its recording state is this thread's now.
     endRecording("the stream stopped");
     // Safety rule 8: no guiding without frames. Only pulses were sent, so nothing is undone.
@@ -527,13 +537,15 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
         error = "stop Monitoring and recording before starting a time-lapse";
         return false;
     }
+    uint64_t tlId = 0;
     {
         std::lock_guard lock(timelapseMutex_);
-        if (timelapse_ && timelapse_->active())
+        if (timelapse_ || !finishingTimelapses_.empty())
         {
-            error = "a time-lapse is already running";
+            error = "a time-lapse is still active or finalizing";
             return false;
         }
+        tlId = ++nextTimelapseId_;
     }
     if (!running_)
     {
@@ -541,7 +553,9 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
     }
     else
     {
-        capture_.reset();
+        // Never mutate EventCapture on the GUI thread while the source thread is streaming;
+        // defer the reset to the source thread on the next non-timelapse frame.
+        captureResetRequested_.store(true);
     }
 
     TimelapseSession::Config cfg;
@@ -560,24 +574,40 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
         cfg.lockRegion = gStatus.lock.region;
     cfg.freeSpace = std::move(freeSpace);
     cfg.statusChanged = notifications_.timeLapseChanged;
-    cfg.finished = [this](const TimelapseFinishResult& res) {
+    cfg.finished = [this, tlId](const TimelapseFinishResult& res) {
+        bool clearedActive = false;
         {
             std::lock_guard lock(timelapseMutex_);
-            if (timelapse_ && !timelapse_->active()) timelapse_.reset();
+            if (activeTimelapseId_ == tlId)
+            {
+                timelapse_.reset();
+                activeTimelapseId_ = 0;
+                clearedActive = true;
+            }
+            finishingTimelapses_.erase(
+                std::remove_if(finishingTimelapses_.begin(), finishingTimelapses_.end(),
+                    [tlId](const auto& entry) { return entry.first == tlId; }),
+                finishingTimelapses_.end());
         }
-        if (running_ && mode_.load() == Mode::TimeLapse)
+        if (clearedActive && running_ && mode_.load() == Mode::TimeLapse)
         {
             mode_.store(Mode::Preview);
-            post(notifications_.modeChanged);
         }
+        post(notifications_.modeChanged);
         if (notifications_.timeLapseFinished) notifications_.timeLapseFinished(res);
     };
 
     auto tl = std::make_shared<TimelapseSession>(context_, std::move(cfg));
+    if (!tl->valid())
+    {
+        error = tl->initError();
+        return false;
+    }
     if (stackDelay.count() > 0) tl->setStackDelay(stackDelay);
     {
         std::lock_guard lock(timelapseMutex_);
         timelapse_ = tl;
+        activeTimelapseId_ = tlId;
     }
     mode_.store(Mode::TimeLapse);
     post(notifications_.modeChanged);
@@ -592,17 +622,37 @@ void Session::stopTimeLapse(const std::string& reason)
         tl = timelapse_;
     }
     if (tl) tl->stop(reason);
-    if (running_ && mode_.load() == Mode::TimeLapse)
+    // Keep Mode::TimeLapse until the worker finishes finalizing and cfg.finished runs,
+    // preventing overlapping sessions or premature mode changes while FFmpeg is encoding.
+    post(notifications_.modeChanged);
+}
+
+void Session::waitTimeLapseFinished()
+{
+    std::vector<std::shared_ptr<TimelapseSession>> pending;
     {
-        mode_.store(Mode::Preview);
-        post(notifications_.modeChanged);
+        std::lock_guard lock(timelapseMutex_);
+        if (timelapse_) pending.push_back(timelapse_);
+        for (const auto& entry : finishingTimelapses_)
+            if (entry.second) pending.push_back(entry.second);
     }
+    for (const auto& tl : pending) tl->waitFinished();
+}
+
+bool Session::timeLapseFinalizing() const
+{
+    std::lock_guard lock(timelapseMutex_);
+    if (!finishingTimelapses_.empty()) return true;
+    return timelapse_ && !timelapse_->active();
 }
 
 TimelapseStatus Session::timeLapseStatus() const
 {
     std::lock_guard lock(timelapseMutex_);
-    return timelapse_ ? timelapse_->status() : TimelapseStatus{};
+    if (timelapse_) return timelapse_->status();
+    if (!finishingTimelapses_.empty() && finishingTimelapses_.back().second)
+        return finishingTimelapses_.back().second->status();
+    return TimelapseStatus{};
 }
 
 // From the moment the frame is held as a FramePtr it is published: nobody
@@ -633,19 +683,21 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     if (frame->sourceDroppedFrames) droppedFrames_.store(*frame->sourceDroppedFrames);
     dropsKnown_.store(frame->sourceDroppedFrames.has_value());
 
-    std::shared_ptr<TimelapseSession> activeTl;
     if (mode_.load() == Mode::TimeLapse)
     {
-        std::lock_guard lock(timelapseMutex_);
-        activeTl = timelapse_;
-    }
-    if (activeTl && activeTl->active())
-    {
+        std::shared_ptr<TimelapseSession> activeTl;
+        {
+            std::lock_guard lock(timelapseMutex_);
+            activeTl = timelapse_;
+        }
         const FramePtr published = std::move(frame);
-        activeTl->onFrame(published);
+        if (activeTl && activeTl->active()) activeTl->onFrame(published);
         guider_.offer(published, false);
-        const GuiderStatus gs = guider_.status();
-        activeTl->setGuidingStatus(gs, gs.guide.mode == GuideMode::Guiding);
+        if (activeTl && activeTl->active())
+        {
+            const GuiderStatus gs = guider_.status();
+            activeTl->setGuidingStatus(gs, gs.guide.mode == GuideMode::Guiding);
+        }
         const auto now = std::chrono::steady_clock::now();
         if (now - lastPreviewTime_ >= std::chrono::milliseconds{50})
         {
@@ -654,6 +706,9 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         }
         return;
     }
+
+    if (captureResetRequested_.exchange(false))
+        capture_.reset();
 
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);

@@ -18,6 +18,7 @@
 #include <QtCore/QTimeZone>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -98,6 +99,103 @@ bool readLongKey(fitsfile* fptr, const char* key, uint64_t& out)
     return true;
 }
 
+void readMetadataKeys(fitsfile* fptr, FitsMetadata& m)
+{
+    m.dateObs = parseFitsUtc(readStrKey(fptr, "DATE-OBS").c_str());
+    m.dateAvg = parseFitsUtc(readStrKey(fptr, "DATE-AVG").c_str());
+    m.dateEnd = parseFitsUtc(readStrKey(fptr, "DATE-END").c_str());
+    (void)readDoubleKey(fptr, "EXPTIME", m.exptimeSeconds);
+    m.hasGain = readDoubleKey(fptr, "GAIN", m.gain);
+    m.camera = readStrKey(fptr, "INSTRUME");
+    m.telescope = readStrKey(fptr, "TELESCOP");
+    m.observer = readStrKey(fptr, "OBSERVER");
+    m.siteName = readStrKey(fptr, "SITENAME");
+    m.targetPreset = readStrKey(fptr, "OBJECT");
+    m.softwareVersion = readStrKey(fptr, "SWCREATE");
+    (void)readLongKey(fptr, "RAWCOUNT", m.framesCaptured);
+    (void)readLongKey(fptr, "STACKCNT", m.framesKept);
+    (void)readDoubleKey(fptr, "QUALSCOR", m.qualityScore);
+    (void)readDoubleKey(fptr, "ALIGNDX", m.shiftX);
+    (void)readDoubleKey(fptr, "ALIGNDY", m.shiftY);
+    (void)readDoubleKey(fptr, "ALIGNROT", m.rotationDeg);
+    m.sharpeningProfile = readStrKey(fptr, "SHARPPRO");
+    if (m.sharpeningProfile.empty()) m.sharpeningProfile = "none";
+    (void)readDoubleKey(fptr, "RAWSCALE", m.rawMaxAdu);
+}
+
+struct MallocGuard
+{
+    void** ptr{nullptr};
+    ~MallocGuard()
+    {
+        if (ptr && *ptr) std::free(*ptr);
+    }
+};
+
+// Opens a FITS file through Qt's Unicode-safe QFile (memory-mapped when possible,
+// avoiding CFITSIO's Windows ANSI fopen path limitation) into a read-only memfile.
+struct MappedFitsReader
+{
+    QFile file;
+    uchar* mapped{nullptr};
+    QByteArray ownedBytes;
+    void* memPtr{nullptr};
+    size_t memSize{0};
+    fitsfile* fptr{nullptr};
+
+    ~MappedFitsReader()
+    {
+        if (fptr)
+        {
+            int cs = 0;
+            fits_close_file(fptr, &cs);
+        }
+        if (mapped) file.unmap(mapped);
+    }
+
+    bool open(const QString& path, QString& error)
+    {
+        file.setFileName(path);
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            error = QString("Could not open FITS file %1: %2").arg(path, file.errorString());
+            return false;
+        }
+        const qint64 sz = file.size();
+        if (sz <= 0)
+        {
+            error = QString("FITS file %1 is empty").arg(path);
+            return false;
+        }
+        mapped = file.map(0, sz);
+        if (mapped)
+        {
+            memPtr = mapped;
+            memSize = static_cast<size_t>(sz);
+        }
+        else
+        {
+            ownedBytes = file.readAll();
+            if (ownedBytes.isEmpty())
+            {
+                error = QString("Could not read FITS file %1: %2").arg(path, file.errorString());
+                return false;
+            }
+            memPtr = ownedBytes.data();
+            memSize = static_cast<size_t>(ownedBytes.size());
+        }
+
+        int status = 0;
+        if (fits_open_memfile(&fptr, "mem://fits", READONLY, &memPtr, &memSize, 0, nullptr, &status) != 0)
+        {
+            error = QString("CFITSIO open failed for %1: %2").arg(path, fitsErrorText(status));
+            fptr = nullptr;
+            return false;
+        }
+        return true;
+    }
+};
+
 } // namespace
 
 bool writeFitsFloat(const QString& path, const FitsImage& image, QString& error)
@@ -117,12 +215,18 @@ bool writeFitsFloat(const QString& path, const FitsImage& image, QString& error)
     const QString tmpPath = info.absolutePath() + "/" + info.fileName() + ".tmp";
     QFile::remove(tmpPath);
 
+    // Format the FITS file in memory via CFITSIO and persist via Qt's Unicode-safe QFile,
+    // so non-ASCII Windows paths work regardless of the system ANSI code page.
+    void* memBuf = nullptr;
+    size_t memSize = 0;
+    MallocGuard memGuard{&memBuf};
+
+    const size_t estBytes = ((image.pixels.size() * sizeof(float) + 2880 * 2 + 2879) / 2880) * 2880;
     int status = 0;
     fitsfile* fptr = nullptr;
-    const QByteArray encoded = QFile::encodeName(tmpPath);
-    if (fits_create_diskfile(&fptr, encoded.constData(), &status) != 0)
+    if (fits_create_memfile(&fptr, &memBuf, &memSize, std::max<size_t>(2880, estBytes), std::realloc, &status) != 0)
     {
-        error = QString("CFITSIO create failed for %1: %2").arg(path, fitsErrorText(status));
+        error = QString("CFITSIO memfile create failed for %1: %2").arg(path, fitsErrorText(status));
         return false;
     }
 
@@ -169,9 +273,24 @@ bool writeFitsFloat(const QString& path, const FitsImage& image, QString& error)
     if (status != 0 || closeStatus != 0)
     {
         error = QString("CFITSIO write failed for %1: %2").arg(path, fitsErrorText(status != 0 ? status : closeStatus));
+        return false;
+    }
+
+    QFile outFile(tmpPath);
+    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        error = QString("Could not create FITS file %1: %2").arg(path, outFile.errorString());
+        return false;
+    }
+    const qint64 toWrite = static_cast<qint64>(memSize);
+    if (outFile.write(static_cast<const char*>(memBuf), toWrite) != toWrite || !outFile.flush())
+    {
+        error = QString("Could not write FITS file %1: %2").arg(path, outFile.errorString());
+        outFile.close();
         QFile::remove(tmpPath);
         return false;
     }
+    outFile.close();
 
     QFile::remove(path);
     if (!QFile::rename(tmpPath, path))
@@ -183,29 +302,50 @@ bool writeFitsFloat(const QString& path, const FitsImage& image, QString& error)
     return true;
 }
 
-bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
+bool readFitsMetadata(const QString& path, FitsMetadata& meta,
+    int& width, int& height, int& channels, QString& error)
 {
-    int status = 0;
-    fitsfile* fptr = nullptr;
-    const QByteArray encoded = QFile::encodeName(path);
-    if (fits_open_diskfile(&fptr, encoded.constData(), READONLY, &status) != 0)
-    {
-        error = QString("CFITSIO open failed for %1: %2").arg(path, fitsErrorText(status));
-        return false;
-    }
+    MappedFitsReader reader;
+    if (!reader.open(path, error)) return false;
 
+    int status = 0;
     int bitpix = 0;
     int naxis = 0;
     long naxes[3]{0, 0, 1};
-    fits_get_img_param(fptr, 3, &bitpix, &naxis, naxes, &status);
+    fits_get_img_param(reader.fptr, 3, &bitpix, &naxis, naxes, &status);
     if (status != 0 || (naxis != 2 && !(naxis == 3 && (naxes[2] == 1 || naxes[2] == 3)))
         || naxes[0] <= 0 || naxes[1] <= 0)
     {
         error = status != 0
             ? QString("CFITSIO read header failed: %1").arg(fitsErrorText(status))
             : QString("unsupported FITS image dimensions (NAXIS=%1)").arg(naxis);
-        int cs = 0;
-        fits_close_file(fptr, &cs);
+        return false;
+    }
+
+    width = static_cast<int>(naxes[0]);
+    height = static_cast<int>(naxes[1]);
+    channels = (naxis == 3 && naxes[2] == 3) ? 3 : 1;
+    meta = {};
+    readMetadataKeys(reader.fptr, meta);
+    return true;
+}
+
+bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
+{
+    MappedFitsReader reader;
+    if (!reader.open(path, error)) return false;
+
+    int status = 0;
+    int bitpix = 0;
+    int naxis = 0;
+    long naxes[3]{0, 0, 1};
+    fits_get_img_param(reader.fptr, 3, &bitpix, &naxis, naxes, &status);
+    if (status != 0 || (naxis != 2 && !(naxis == 3 && (naxes[2] == 1 || naxes[2] == 3)))
+        || naxes[0] <= 0 || naxes[1] <= 0)
+    {
+        error = status != 0
+            ? QString("CFITSIO read header failed: %1").arg(fitsErrorText(status))
+            : QString("unsupported FITS image dimensions (NAXIS=%1)").arg(naxis);
         return false;
     }
 
@@ -218,7 +358,7 @@ bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
 
     float nulval = 0.0f;
     int anynul = 0;
-    fits_read_img(fptr, TFLOAT, 1, static_cast<LONGLONG>(total), &nulval, result.pixels.data(), &anynul, &status);
+    fits_read_img(reader.fptr, TFLOAT, 1, static_cast<LONGLONG>(total), &nulval, result.pixels.data(), &anynul, &status);
 
     // Normalize external integer FITS (e.g., 8-bit or 16-bit Siril/SharpCap files) into [0, 1].
     if (status == 0 && bitpix > 0)
@@ -231,30 +371,7 @@ bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
         }
     }
 
-    FitsMetadata& m = result.meta;
-    m.dateObs = parseFitsUtc(readStrKey(fptr, "DATE-OBS").c_str());
-    m.dateAvg = parseFitsUtc(readStrKey(fptr, "DATE-AVG").c_str());
-    m.dateEnd = parseFitsUtc(readStrKey(fptr, "DATE-END").c_str());
-    (void)readDoubleKey(fptr, "EXPTIME", m.exptimeSeconds);
-    m.hasGain = readDoubleKey(fptr, "GAIN", m.gain);
-    m.camera = readStrKey(fptr, "INSTRUME");
-    m.telescope = readStrKey(fptr, "TELESCOP");
-    m.observer = readStrKey(fptr, "OBSERVER");
-    m.siteName = readStrKey(fptr, "SITENAME");
-    m.targetPreset = readStrKey(fptr, "OBJECT");
-    m.softwareVersion = readStrKey(fptr, "SWCREATE");
-    (void)readLongKey(fptr, "RAWCOUNT", m.framesCaptured);
-    (void)readLongKey(fptr, "STACKCNT", m.framesKept);
-    (void)readDoubleKey(fptr, "QUALSCOR", m.qualityScore);
-    (void)readDoubleKey(fptr, "ALIGNDX", m.shiftX);
-    (void)readDoubleKey(fptr, "ALIGNDY", m.shiftY);
-    (void)readDoubleKey(fptr, "ALIGNROT", m.rotationDeg);
-    m.sharpeningProfile = readStrKey(fptr, "SHARPPRO");
-    if (m.sharpeningProfile.empty()) m.sharpeningProfile = "none";
-    (void)readDoubleKey(fptr, "RAWSCALE", m.rawMaxAdu);
-
-    int cs = 0;
-    fits_close_file(fptr, &cs);
+    readMetadataKeys(reader.fptr, result.meta);
     if (status != 0)
     {
         error = QString("CFITSIO read pixels failed: %1").arg(fitsErrorText(status));

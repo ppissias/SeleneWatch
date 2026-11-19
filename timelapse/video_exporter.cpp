@@ -16,8 +16,23 @@
 
 namespace {
 
-bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
-    const std::vector<QImage>& rgbFrames, int w, int h,
+constexpr qsizetype kMaxStderrBytes = 32 * 1024;
+
+void drainStderr(QProcess& proc, QByteArray& buf)
+{
+    const QByteArray chunk = proc.readAllStandardError();
+    if (chunk.isEmpty()) return;
+    if (buf.size() < kMaxStderrBytes)
+    {
+        const qsizetype room = kMaxStderrBytes - buf.size();
+        buf.append(chunk.constData(), std::min(chunk.size(), room));
+    }
+}
+
+using FrameProducer = std::function<QImage(int index, QString& err)>;
+
+bool runFfmpegPipeStream(const QString& ffmpegExe, const QStringList& args,
+    int frameCount, const FrameProducer& produceFrame, int w, int h,
     QString& error, std::atomic<bool>* cancel)
 {
     QProcess proc;
@@ -30,14 +45,25 @@ bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
         return false;
     }
 
+    QByteArray stderrBuf;
     const int rowBytes = w * 3;
-    for (const QImage& img : rgbFrames)
+    for (int i = 0; i < frameCount; ++i)
     {
+        drainStderr(proc, stderrBuf);
         if (cancel && cancel->load())
         {
             proc.kill();
             proc.waitForFinished(2000);
             error = "cancelled";
+            return false;
+        }
+        QString frameErr;
+        const QImage img = produceFrame(i, frameErr);
+        if (img.isNull())
+        {
+            proc.kill();
+            proc.waitForFinished(2000);
+            error = frameErr.isEmpty() ? QString("frame %1 could not be produced").arg(i) : frameErr;
             return false;
         }
         const QImage rgb = (img.format() == QImage::Format_RGB888 && img.width() == w && img.height() == h)
@@ -52,7 +78,8 @@ bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
                 const qint64 n = proc.write(row + written, rowBytes - written);
                 if (n < 0)
                 {
-                    error = QString("FFmpeg pipe write failed: %1").arg(QString::fromUtf8(proc.readAllStandardError()));
+                    drainStderr(proc, stderrBuf);
+                    error = QString("FFmpeg pipe write failed: %1").arg(QString::fromUtf8(stderrBuf).trimmed());
                     proc.kill();
                     proc.waitForFinished(2000);
                     return false;
@@ -62,6 +89,7 @@ bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
         }
         while (proc.bytesToWrite() > 4 * 1024 * 1024)
         {
+            drainStderr(proc, stderrBuf);
             if (cancel && cancel->load())
             {
                 proc.kill();
@@ -77,6 +105,7 @@ bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
     proc.closeWriteChannel();
     while (!proc.waitForFinished(500))
     {
+        drainStderr(proc, stderrBuf);
         if (cancel && cancel->load())
         {
             proc.kill();
@@ -85,13 +114,113 @@ bool runFfmpegPipe(const QString& ffmpegExe, const QStringList& args,
             return false;
         }
     }
+    drainStderr(proc, stderrBuf);
 
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
     {
         error = QString("FFmpeg failed (code %1): %2")
-            .arg(proc.exitCode()).arg(QString::fromUtf8(proc.readAllStandardError()).trimmed());
+            .arg(proc.exitCode()).arg(QString::fromUtf8(stderrBuf).trimmed());
         return false;
     }
+    return true;
+}
+
+bool encodeStreamWithFfmpeg(int frameCount, const FrameProducer& produceFrame,
+    int srcW, int srcH,
+    const QString& mp4Path,
+    const QString& gifPath,
+    int fps,
+    QString& error,
+    std::atomic<bool>* cancel)
+{
+    if (frameCount <= 0 || srcW <= 0 || srcH <= 0)
+    {
+        error = "no frames to encode";
+        return false;
+    }
+    if (mp4Path.isEmpty() && gifPath.isEmpty()) return true;
+
+    const QString ffmpegExe = findFfmpegExecutable();
+    const int evenW = std::max(2, srcW & ~1);
+    const int evenH = std::max(2, srcH & ~1);
+    const int safeFps = std::clamp(fps, 1, 60);
+
+    if (!mp4Path.isEmpty())
+    {
+        const QFileInfo info(mp4Path);
+        QDir().mkpath(info.absolutePath());
+        const QString tmp = info.absolutePath() + "/." + info.fileName() + ".tmp.mp4";
+        QFile::remove(tmp);
+
+        const qint64 pixelsPerSec = static_cast<qint64>(evenW) * evenH * safeFps;
+        const int targetKbps = static_cast<int>(std::clamp<qint64>(pixelsPerSec / 1800, 3000, 35000));
+        const QStringList args{
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo",
+            "-pixel_format", "rgb24",
+            "-video_size", QString("%1x%2").arg(evenW).arg(evenH),
+            "-framerate", QString::number(safeFps),
+            "-i", "pipe:0",
+            "-c:v", "libopenh264",
+            "-profile:v", "high",
+            "-coder", "cabac",
+            "-rc_mode", "quality",
+            "-b:v", QString("%1k").arg(targetKbps),
+            "-allow_skip_frames", "0",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp
+        };
+        if (!runFfmpegPipeStream(ffmpegExe, args, frameCount, produceFrame, evenW, evenH, error, cancel))
+        {
+            QFile::remove(tmp);
+            return false;
+        }
+        QFile::remove(mp4Path);
+        if (!QFile::rename(tmp, mp4Path))
+        {
+            error = QString("Could not move %1 into place").arg(mp4Path);
+            QFile::remove(tmp);
+            return false;
+        }
+    }
+
+    if (!gifPath.isEmpty())
+    {
+        const QFileInfo info(gifPath);
+        QDir().mkpath(info.absolutePath());
+        const QString tmp = info.absolutePath() + "/." + info.fileName() + ".tmp.gif";
+        QFile::remove(tmp);
+
+        const QString statsMode = frameCount > 1 ? "diff" : "full";
+        const QString filter = QString(
+            "scale='min(800,iw)':-2:flags=lanczos,split[s0][s1];"
+            "[s0]palettegen=stats_mode=%1[p];[s1][p]paletteuse=dither=floyd_steinberg").arg(statsMode);
+        const QStringList args{
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo",
+            "-pixel_format", "rgb24",
+            "-video_size", QString("%1x%2").arg(evenW).arg(evenH),
+            "-framerate", QString::number(safeFps),
+            "-i", "pipe:0",
+            "-vf", filter,
+            "-loop", "0",
+            tmp
+        };
+        if (!runFfmpegPipeStream(ffmpegExe, args, frameCount, produceFrame, evenW, evenH, error, cancel))
+        {
+            QFile::remove(tmp);
+            return false;
+        }
+        QFile::remove(gifPath);
+        if (!QFile::rename(tmp, gifPath))
+        {
+            error = QString("Could not move %1 into place").arg(gifPath);
+            QFile::remove(tmp);
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -110,6 +239,19 @@ bool moveTempFileIntoPlace(const QString& tmpPath, const QString& targetPath, QS
     error = QString("Could not move %1 into place").arg(targetPath);
     QFile::remove(tmpPath);
     return false;
+}
+
+QString createUniqueChildDir(const QString& parentPath, const QString& baseName)
+{
+    if (!QDir().mkpath(parentPath)) return {};
+    const QDir parent(parentPath);
+    for (int attempt = 1; attempt <= 999; ++attempt)
+    {
+        const QString name = attempt == 1 ? baseName : QString("%1-%2").arg(baseName).arg(attempt);
+        if (parent.mkdir(name)) return parent.filePath(name);
+        if (!parent.exists(name)) break;
+    }
+    return {};
 }
 
 // Computes even dimensions (minimum 2x2) fitting within maxLongEdge without upscaling.
@@ -156,80 +298,12 @@ bool encodeImagesWithFfmpeg(const std::vector<QImage>& frames,
         error = "no frames to encode";
         return false;
     }
-    if (mp4Path.isEmpty() && gifPath.isEmpty()) return true;
-
-    const QString ffmpegExe = findFfmpegExecutable();
-    const int evenW = std::max(2, frames.front().width() & ~1);
-    const int evenH = std::max(2, frames.front().height() & ~1);
-    const int safeFps = std::clamp(fps, 1, 60);
-
-    if (!mp4Path.isEmpty())
-    {
-        const QFileInfo info(mp4Path);
-        QDir().mkpath(info.absolutePath());
-        const QString tmp = info.absolutePath() + "/." + info.fileName() + ".tmp.mp4";
-        QFile::remove(tmp);
-
-        const qint64 pixelsPerSec = static_cast<qint64>(evenW) * evenH * safeFps;
-        const int targetKbps = static_cast<int>(std::clamp<qint64>(pixelsPerSec / 1800, 3000, 35000));
-        const QStringList args{
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo",
-            "-pixel_format", "rgb24",
-            "-video_size", QString("%1x%2").arg(evenW).arg(evenH),
-            "-framerate", QString::number(safeFps),
-            "-i", "pipe:0",
-            "-c:v", "libopenh264",
-            "-profile", "high",
-            "-coder", "cabac",
-            "-rc_mode", "quality",
-            "-b:v", QString("%1k").arg(targetKbps),
-            "-allow_skip_frames", "0",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            tmp
-        };
-        if (!runFfmpegPipe(ffmpegExe, args, frames, evenW, evenH, error, cancel))
-        {
-            QFile::remove(tmp);
-            return false;
-        }
-        if (!moveTempFileIntoPlace(tmp, mp4Path, error))
-            return false;
-    }
-
-    if (!gifPath.isEmpty())
-    {
-        const QFileInfo info(gifPath);
-        QDir().mkpath(info.absolutePath());
-        const QString tmp = info.absolutePath() + "/." + info.fileName() + ".tmp.gif";
-        QFile::remove(tmp);
-
-        const QString statsMode = frames.size() > 1 ? "diff" : "full";
-        const QString filter = QString(
-            "scale='min(800,iw)':-2:flags=lanczos,split[s0][s1];"
-            "[s0]palettegen=stats_mode=%1[p];[s1][p]paletteuse=dither=floyd_steinberg").arg(statsMode);
-        const QStringList args{
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo",
-            "-pixel_format", "rgb24",
-            "-video_size", QString("%1x%2").arg(evenW).arg(evenH),
-            "-framerate", QString::number(safeFps),
-            "-i", "pipe:0",
-            "-vf", filter,
-            "-loop", "0",
-            tmp
-        };
-        if (!runFfmpegPipe(ffmpegExe, args, frames, evenW, evenH, error, cancel))
-        {
-            QFile::remove(tmp);
-            return false;
-        }
-        if (!moveTempFileIntoPlace(tmp, gifPath, error))
-            return false;
-    }
-
-    return true;
+    return encodeStreamWithFfmpeg(
+        static_cast<int>(frames.size()),
+        [&frames](int i, QString&) -> QImage { return frames[static_cast<size_t>(i)]; },
+        frames.front().width(),
+        frames.front().height(),
+        mp4Path, gifPath, fps, error, cancel);
 }
 
 bool encodeEventPreviewGif(const std::vector<QImage>& frames,
@@ -313,7 +387,9 @@ bool encodeEventPreviewGif(const std::vector<QImage>& frames,
         };
 
         QFile::remove(tmp);
-        if (!runFfmpegPipe(ffmpegExe, args, scaled, sz.width(), sz.height(), error, cancel))
+        if (!runFfmpegPipeStream(ffmpegExe, args, static_cast<int>(scaled.size()),
+                [&scaled](int i, QString&) -> QImage { return scaled[static_cast<size_t>(i)]; },
+                sz.width(), sz.height(), error, cancel))
         {
             QFile::remove(tmp);
             return false;
@@ -365,24 +441,25 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     std::vector<double> qualities;
     qualities.reserve(files.size());
 
-    // First pass: inspect metadata & find best-quality reference stack.
+    // First pass: inspect FITS headers only (no pixel I/O) to find best-quality reference.
     QString bestPath = files.front();
     double bestQuality = -1.0;
     for (const QString& f : files)
     {
         if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
-        FitsImage img;
+        FitsMetadata meta;
+        int w = 0, h = 0, ch = 0;
         QString err;
-        if (!readFitsFloat(f, img, err))
+        if (!readFitsMetadata(f, meta, w, h, ch, err))
         {
             res.error = err;
             return res;
         }
-        entries.push_back({f, img.meta.qualityScore});
-        qualities.push_back(img.meta.qualityScore);
-        if (img.meta.qualityScore > bestQuality)
+        entries.push_back({f, meta.qualityScore});
+        qualities.push_back(meta.qualityScore);
+        if (meta.qualityScore > bestQuality)
         {
-            bestQuality = img.meta.qualityScore;
+            bestQuality = meta.qualityScore;
             bestPath = f;
         }
     }
@@ -420,14 +497,18 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     crop.setWidth(std::max(2, crop.width() & ~1));
     crop.setHeight(std::max(2, crop.height() & ~1));
 
-    std::vector<QImage> frames;
-    frames.reserve(keptPaths.size());
+    QDir().mkpath(outputDir);
+    const QString mp4 = tone.writeMp4 ? QDir(outputDir).filePath("timelapse.mp4") : QString();
+    const QString gif = tone.writeGif ? QDir(outputDir).filePath("timelapse.gif") : QString();
+
     const int total = static_cast<int>(keptPaths.size());
-    for (int i = 0; i < total; ++i)
-    {
-        if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
+    const int passes = (tone.writeMp4 ? 1 : 0) + (tone.writeGif ? 1 : 0);
+    int emitted = 0;
+
+    // Stream one stack at a time into FFmpeg stdin so multi-hour sessions stay O(1) RAM.
+    const auto produceFrame = [&](int i, QString& err) -> QImage {
         FitsImage img;
-        if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, res.error)) return res;
+        if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, err)) return {};
         double scale = 1.0;
         if (tone.brightnessLevelling)
         {
@@ -437,23 +518,21 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
         QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, scale, crop, 0);
         if (mapped.isNull())
         {
-            res.error = "could not tone-map FITS stack";
-            return res;
+            err = "could not tone-map FITS stack";
+            return {};
         }
-        frames.push_back(std::move(mapped));
-        if (progress) progress(i + 1, total);
-    }
+        ++emitted;
+        if (progress) progress(emitted, total * std::max(1, passes));
+        return mapped;
+    };
 
-    QDir().mkpath(outputDir);
-    const QString mp4 = tone.writeMp4 ? QDir(outputDir).filePath("timelapse.mp4") : QString();
-    const QString gif = tone.writeGif ? QDir(outputDir).filePath("timelapse.gif") : QString();
-    if (!encodeImagesWithFfmpeg(frames, mp4, gif, tone.fps, res.error, cancel))
+    if (!encodeStreamWithFfmpeg(total, produceFrame, crop.width(), crop.height(), mp4, gif, tone.fps, res.error, cancel))
         return res;
 
     res.ok = true;
     res.mp4Path = mp4;
     res.gifPath = gif;
-    res.stacksUsed = static_cast<int>(frames.size());
+    res.stacksUsed = total;
     return res;
 }
 
@@ -467,14 +546,38 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     std::atomic<bool>* cancel)
 {
     TimelapseExportResult res;
+
+    // Load persisted commonOverlap from the session profile (if present) so
+    // "Crop to valid overlap" works identically on re-sharpen and rebuild runs.
+    std::optional<QRect> savedOverlap;
+    {
+        SharpeningSettings dummySharp;
+        VideoToneSettings dummyTone;
+        QString dummyErr;
+        const QString sessionProfile = QDir(sessionDir).filePath("sharpening_profile.json");
+        if (QFileInfo::exists(sessionProfile))
+            (void)loadProfileJson(sessionProfile, dummySharp, dummyTone, dummyErr, &savedOverlap);
+    }
+    const QRect overlapRect = savedOverlap.value_or(QRect{});
+
     if (rebuildVideoOnly)
     {
         const QString fitsDir = sourceFitsDir.isEmpty() ? QDir(sessionDir).filePath("sharpened") : sourceFitsDir;
-        outTargetDir = (QDir::cleanPath(fitsDir) == QDir::cleanPath(QDir(sessionDir).filePath("sharpened")))
+        const QString parentBase = (QDir::cleanPath(fitsDir) == QDir::cleanPath(QDir(sessionDir).filePath("sharpened")))
             ? sessionDir
             : QFileInfo(fitsDir).absolutePath();
+        const QString stamp = utcStamp(std::chrono::system_clock::now());
+        outTargetDir = createUniqueChildDir(parentBase, QString("video_%1").arg(stamp));
+        if (outTargetDir.isEmpty())
+        {
+            res.error = QString("Could not create video rebuild folder under %1").arg(parentBase);
+            return res;
+        }
+        QString profileErr;
+        (void)saveProfileJson(QDir(outTargetDir).filePath("sharpening_profile.json"),
+            sharpening, tone, profileErr, savedOverlap);
         if (progress) progress(0, 1, "Encoding video…");
-        res = exportTimelapseFromFits(fitsDir, outTargetDir, tone, {}, [&](int d, int t) {
+        res = exportTimelapseFromFits(fitsDir, outTargetDir, tone, overlapRect, [&](int d, int t) {
             if (progress) progress(d, t, "Encoding video…");
         }, cancel);
         return res;
@@ -490,7 +593,12 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
 
     const QString stamp = utcStamp(std::chrono::system_clock::now());
     const QString prof = sanitizeProfileName(sharpening.profileName);
-    outTargetDir = QDir(sessionDir).filePath(QString("sharpened_%1_%2").arg(prof, stamp));
+    outTargetDir = createUniqueChildDir(sessionDir, QString("sharpened_%1_%2").arg(prof, stamp));
+    if (outTargetDir.isEmpty())
+    {
+        res.error = QString("Could not create re-sharpen folder under %1").arg(sessionDir);
+        return res;
+    }
     const QString sharpOut = QDir(outTargetDir).filePath("sharpened");
     if (!QDir().mkpath(sharpOut))
     {
@@ -511,9 +619,10 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     }
 
     QString profileErr;
-    (void)saveProfileJson(QDir(outTargetDir).filePath("sharpening_profile.json"), sharpening, tone, profileErr);
+    (void)saveProfileJson(QDir(outTargetDir).filePath("sharpening_profile.json"),
+        sharpening, tone, profileErr, savedOverlap);
 
-    res = exportTimelapseFromFits(sharpOut, outTargetDir, tone, {}, [&](int d, int t) {
+    res = exportTimelapseFromFits(sharpOut, outTargetDir, tone, overlapRect, [&](int d, int t) {
         if (progress) progress(d, t, "Encoding video…");
     }, cancel);
     return res;

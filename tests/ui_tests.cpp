@@ -34,6 +34,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QGroupBox>
@@ -1628,9 +1629,26 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     customProf.sharpening = sharpeningForPreset(SharpeningPreset::Medium);
     customProf.sharpening.amount = 1.8;
     customProf.sharpening.profileName = "UI Crisp";
+    customProf.video.gamma = 1.45;
+    customProf.video.autoStretch = false;
     saveNamedSharpeningProfile(customProf);
     tl->refreshProfiles();
-    QVERIFY(tl->findChild<QComboBox*>("timelapseSharpening")->findData("profile:UI Crisp") >= 0);
+    auto* sharpCombo = tl->findChild<QComboBox*>("timelapseSharpening");
+    const int profIdx = sharpCombo->findData("profile:UI Crisp");
+    QVERIFY(profIdx >= 0);
+    sharpCombo->setCurrentIndex(profIdx);
+    // Saved profile in Time-lapse panel must carry over its saved video tone settings too.
+    QVERIFY(std::abs(tl->settings().video.gamma - 1.45) < 1e-4);
+    QVERIFY(!tl->settings().video.autoStretch);
+
+    // Switching stop condition to UTC end when stale must refresh UTC end into the future.
+    auto* utcEndEdit = tl->findChild<QDateTimeEdit*>("timelapseUtcEnd");
+    auto* stopKindCombo = tl->findChild<QComboBox*>("timelapseStopKind");
+    QVERIFY(utcEndEdit && stopKindCombo);
+    utcEndEdit->setDateTime(QDateTime::currentDateTimeUtc().addSecs(-3600));
+    stopKindCombo->setCurrentIndex(2); // StopConditionKind::UtcEnd
+    QVERIFY(utcEndEdit->dateTime() > QDateTime::currentDateTimeUtc());
+    stopKindCombo->setCurrentIndex(0); // Restore Manual stop
 
     ResharpenDialog dlg(tlRoot, sessionDir, &window);
     dlg.show();
@@ -1676,6 +1694,8 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
 
     rebuildOnly->setChecked(true);
     QVERIFY(!amountSlider->isEnabled() && !radiusSlider->isEnabled());
+    // Rebuild video only must preview the existing sharpened/ stack, not the unsharpened stacks/ image.
+    QTRY_VERIFY_WITH_TIMEOUT(afterLbl->pixmap().toImage() != beforeLbl->pixmap().toImage(), 2000);
     rebuildOnly->setChecked(false);
     QVERIFY(amountSlider->isEnabled() && radiusSlider->isEnabled());
 

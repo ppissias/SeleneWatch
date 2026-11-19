@@ -111,6 +111,8 @@ public:
 
     [[nodiscard]] TimelapseStatus status() const;
     [[nodiscard]] bool active() const { return accepting_.load(); }
+    [[nodiscard]] bool valid() const { return initError_.isEmpty(); }
+    [[nodiscard]] QString initError() const { return initError_; }
 
     // Tests: inject processing delay or replace disk-space query.
     void setStackDelay(std::chrono::milliseconds delay);
@@ -122,8 +124,7 @@ private:
         std::chrono::system_clock::time_point windowStartUtc{};
         std::chrono::system_clock::time_point windowEndUtc{};
         uint64_t framesCaptured{0};
-        std::vector<PreparedBurstFrame> frames;
-        std::vector<FramePtr> rawFrames; // Populated only when saveRawSer is true
+        std::vector<RawBurstFrame> frames;
         size_t chargedBytes{0};
     };
 
@@ -145,20 +146,26 @@ private:
     void workerLoop(std::stop_token stopToken);
     void processBurst(BurstJob& job);
     void finalizeSession(const std::string& reason);
-    void writeMetadataLog(const QString& reason, const TimelapseExportResult& exportRes) const;
+    void writeMetadataLog(const QString& reason, const TimelapseExportResult& exportRes,
+        const std::vector<QString>& skippedLogs) const;
     void postStatus();
+    void postStatusSnapshot(TimelapseStatus snap) const;
+    void refreshWarningTextLocked();
     bool tryReserveBurstMemory(size_t bytes);
     void releaseBurstMemory(size_t bytes);
-    void startNextWindowIfDue(double tSec, std::chrono::system_clock::time_point utcNow);
-    void finishCurrentWindow();
-    void discardCurrentBurst();
+    void startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow);
+    void finishCurrentWindowLocked(bool allowAfterStop);
+    void discardCurrentBurstLocked();
 
     QObject* context_;
     Config config_;
     bool useSourceTime_{false};
     std::optional<QRect> effectiveCropRoi_;
+    QString initError_;
 
-    // Source-thread collector state.
+    // Collector state (protected by collectorMutex_; never touched by worker thread).
+    // Lock order: collectorMutex_ before mutex_.
+    std::mutex collectorMutex_;
     bool clockStarted_{false};
     std::chrono::steady_clock::time_point startSteady_{};
     std::chrono::system_clock::time_point startSourceUtc_{};
@@ -170,8 +177,7 @@ private:
     std::chrono::system_clock::time_point windowStartUtc_{};
     std::chrono::system_clock::time_point windowEndUtc_{};
     uint64_t currentCaptured_{0};
-    std::vector<PreparedBurstFrame> currentHeap_; // Min-heap by sharpness
-    std::vector<FramePtr> currentRaw_;
+    std::vector<RawBurstFrame> currentHeap_; // Min-heap by sharpness
     size_t currentBurstBytes_{0};
 
     // Shared queue (depth-1 pending slot) and status.
@@ -188,11 +194,18 @@ private:
     // Worker-only session state.
     QString sessionDir_;
     std::optional<FitsImage> referenceStack_;
+    double referenceQuality_{0};
     QRect commonOverlap_;
     double baselineQuality_{0};
+    std::vector<double> qualityHistory_;
     int consecutiveSkips_{0};
     std::vector<StackLogEntry> stackLogs_;
     std::vector<QString> skippedLogs_;
+
+    // Warning detail messages protected by mutex_.
+    QString fatalWarningText_;
+    QString diskLowWarningText_;
+    QString overloadWarningText_;
 
     TimelapseStatus status_;
     std::jthread worker_;

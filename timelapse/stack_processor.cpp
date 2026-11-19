@@ -12,9 +12,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <numeric>
 
 namespace {
+
+constexpr int kLanczosRadius = 4;
 
 int maxCodeFor(const Frame& frame)
 {
@@ -24,6 +27,16 @@ int maxCodeFor(const Frame& frame)
 int shiftFor(const Frame& frame)
 {
     return frame.alignment == BitAlignment::High ? std::max(0, 16 - frame.significantBits) : 0;
+}
+
+int maxCodeForRaw(PixelFormat format, int significantBits)
+{
+    return format == PixelFormat::Mono16 ? (1 << std::clamp(significantBits, 1, 16)) - 1 : 255;
+}
+
+int shiftForRaw(BitAlignment alignment, int significantBits)
+{
+    return alignment == BitAlignment::High ? std::max(0, 16 - significantBits) : 0;
 }
 
 int bayerToCvRgbCode(BayerPattern pattern)
@@ -47,7 +60,7 @@ QRect clampRect(const QRect& r, int w, int h)
     return clamped.width() >= 8 && clamped.height() >= 8 ? clamped : QRect(0, 0, w, h);
 }
 
-// Converts planar FitsImage to interleaved CV_32FC1 or CV_32FC3.
+// Converts planar FitsImage to interleaved CV_32FC1 or CV_32FC3 (owning copy).
 cv::Mat fitsToMat(const FitsImage& img)
 {
     if (!img.valid()) return {};
@@ -61,8 +74,8 @@ cv::Mat fitsToMat(const FitsImage& img)
     std::vector<cv::Mat> ch(3);
     for (int c = 0; c < 3; ++c)
     {
-        ch[c] = cv::Mat(img.height, img.width, CV_32FC1);
-        std::memcpy(ch[c].data, img.pixels.data() + static_cast<size_t>(c) * plane, plane * sizeof(float));
+        ch[c] = cv::Mat(img.height, img.width, CV_32FC1,
+            const_cast<float*>(img.pixels.data() + static_cast<size_t>(c) * plane));
     }
     cv::Mat merged;
     cv::merge(ch, merged);
@@ -96,14 +109,183 @@ FitsImage matToFits(const cv::Mat& m, const FitsMetadata& meta = {})
     return img;
 }
 
+// Read-only view for mono (zero-copy) or direct merge of non-owning plane wrappers for RGB.
 cv::Mat burstFrameToMat(const PreparedBurstFrame& bf)
 {
-    FitsImage tmp;
-    tmp.width = bf.width;
-    tmp.height = bf.height;
-    tmp.channels = bf.channels;
-    tmp.pixels = bf.pixels; // small vector copy only when converting
-    return fitsToMat(tmp);
+    const size_t plane = static_cast<size_t>(bf.width) * bf.height;
+    if (bf.channels == 1)
+        return cv::Mat(bf.height, bf.width, CV_32FC1, const_cast<float*>(bf.pixels.data()));
+    std::vector<cv::Mat> ch(3);
+    for (int c = 0; c < 3; ++c)
+    {
+        ch[c] = cv::Mat(bf.height, bf.width, CV_32FC1,
+            const_cast<float*>(bf.pixels.data() + static_cast<size_t>(c) * plane));
+    }
+    cv::Mat merged;
+    cv::merge(ch, merged);
+    return merged;
+}
+
+// Converts a worker-side RawBurstFrame into normalized float CV_32FC1 or CV_32FC3
+// (running edge-aware Bayer debayering on the worker thread instead of acquisition).
+cv::Mat rawBurstFrameToMat(const RawBurstFrame& raw)
+{
+    const int maxCode = maxCodeForRaw(raw.format, raw.significantBits);
+    const int bitShift = shiftForRaw(raw.alignment, raw.significantBits);
+
+    if (raw.format == PixelFormat::RGB888)
+    {
+        const cv::Mat full(raw.rawHeight, raw.rawWidth, CV_8UC3, const_cast<uint8_t*>(raw.data.data()));
+        cv::Mat out;
+        full(cv::Rect(raw.innerOffsetX, raw.innerOffsetY, raw.width, raw.height))
+            .convertTo(out, CV_32FC3, 1.0 / 255.0);
+        return out;
+    }
+    if (raw.bayer != BayerPattern::None)
+    {
+        const int code = bayerToCvRgbCode(raw.bayer);
+        cv::Mat debayered;
+        if (raw.format == PixelFormat::Mono8)
+        {
+            const cv::Mat bayerSub(raw.rawHeight, raw.rawWidth, CV_8UC1, const_cast<uint8_t*>(raw.data.data()));
+            cv::demosaicing(bayerSub, debayered, code);
+            debayered.convertTo(debayered, CV_32FC3, 1.0 / maxCode);
+        }
+        else
+        {
+            cv::Mat bayerSub(raw.rawHeight, raw.rawWidth, CV_16UC1);
+            const auto* src = reinterpret_cast<const uint16_t*>(raw.data.data());
+            const size_t n = static_cast<size_t>(raw.rawWidth) * raw.rawHeight;
+            uint16_t* dst = bayerSub.ptr<uint16_t>(0);
+            if (bitShift == 0)
+            {
+                std::memcpy(dst, src, n * sizeof(uint16_t));
+            }
+            else
+            {
+                for (size_t i = 0; i < n; ++i)
+                    dst[i] = static_cast<uint16_t>(src[i] >> bitShift);
+            }
+            cv::demosaicing(bayerSub, debayered, code);
+            debayered.convertTo(debayered, CV_32FC3, 1.0 / maxCode);
+        }
+        return debayered(cv::Rect(raw.innerOffsetX, raw.innerOffsetY, raw.width, raw.height)).clone();
+    }
+    if (raw.format == PixelFormat::Mono8)
+    {
+        const cv::Mat full(raw.rawHeight, raw.rawWidth, CV_8UC1, const_cast<uint8_t*>(raw.data.data()));
+        cv::Mat out;
+        full(cv::Rect(raw.innerOffsetX, raw.innerOffsetY, raw.width, raw.height))
+            .convertTo(out, CV_32FC1, 1.0 / maxCode);
+        return out;
+    }
+    cv::Mat out(raw.height, raw.width, CV_32FC1);
+    const auto* src = reinterpret_cast<const uint16_t*>(raw.data.data());
+    const float inv = 1.0f / static_cast<float>(maxCode);
+    for (int y = 0; y < raw.height; ++y)
+    {
+        float* dstRow = out.ptr<float>(y);
+        const uint16_t* srcRow = src + static_cast<size_t>(raw.innerOffsetY + y) * raw.rawWidth + raw.innerOffsetX;
+        for (int x = 0; x < raw.width; ++x)
+            dstRow[x] = static_cast<float>(srcRow[x] >> bitShift) * inv;
+    }
+    return out;
+}
+
+// Finds the largest axis-aligned rectangle strictly inside a binary valid mask (CV_8UC1 > 0).
+// Conservative downsampling keeps cost <0.5 ms even on 4K frames while guaranteeing zero
+// invalid (black) pixels inside the returned rectangle.
+QRect largestInscribedRect(const cv::Mat& mask)
+{
+    const int fullW = mask.cols;
+    const int fullH = mask.rows;
+    if (fullW <= 0 || fullH <= 0) return {};
+
+    int ds = 1;
+    cv::Mat m = mask;
+    if (fullW > 512 || fullH > 512)
+    {
+        ds = std::max(2, std::max(fullW, fullH) / 512);
+        const int dw = fullW / ds;
+        const int dh = fullH / ds;
+        if (dw >= 4 && dh >= 4)
+        {
+            cv::Mat sub(dh, dw, CV_8UC1, cv::Scalar(0));
+            for (int dy = 0; dy < dh; ++dy)
+            {
+                uint8_t* dstRow = sub.ptr<uint8_t>(dy);
+                for (int dx = 0; dx < dw; ++dx)
+                {
+                    bool allValid = true;
+                    const int y0 = dy * ds;
+                    const int x0 = dx * ds;
+                    for (int yy = 0; yy < ds && allValid; ++yy)
+                    {
+                        const uint8_t* srcRow = mask.ptr<uint8_t>(y0 + yy);
+                        for (int xx = 0; xx < ds; ++xx)
+                        {
+                            if (srcRow[x0 + xx] == 0) { allValid = false; break; }
+                        }
+                    }
+                    dstRow[dx] = allValid ? 255 : 0;
+                }
+            }
+            m = std::move(sub);
+        }
+        else
+        {
+            ds = 1;
+        }
+    }
+
+    const int mw = m.cols;
+    const int mh = m.rows;
+    std::vector<int> heights(static_cast<size_t>(mw), 0);
+    std::vector<int> st;
+    st.reserve(static_cast<size_t>(mw) + 1);
+    int bestArea = 0;
+    QRect best;
+    for (int y = 0; y < mh; ++y)
+    {
+        const uint8_t* row = m.ptr<uint8_t>(y);
+        for (int x = 0; x < mw; ++x)
+            heights[static_cast<size_t>(x)] = row[x] > 0 ? heights[static_cast<size_t>(x)] + 1 : 0;
+        st.clear();
+        for (int x = 0; x <= mw; ++x)
+        {
+            const int curH = x < mw ? heights[static_cast<size_t>(x)] : 0;
+            while (!st.empty() && heights[static_cast<size_t>(st.back())] > curH)
+            {
+                const int hTop = heights[static_cast<size_t>(st.back())];
+                st.pop_back();
+                const int left = st.empty() ? 0 : st.back() + 1;
+                const int width = x - left;
+                const int area = hTop * width;
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    best = QRect(left, y - hTop + 1, width, hTop);
+                }
+            }
+            st.push_back(x);
+        }
+    }
+    if (bestArea <= 0) return {};
+    return QRect(best.x() * ds, best.y() * ds, best.width() * ds, best.height() * ds)
+        .intersected(QRect(0, 0, fullW, fullH));
+}
+
+QRect validShiftOverlap(int w, int h, double minDx, double maxDx, double minDy, double maxDy)
+{
+    const int padL = maxDx > 1e-3 ? static_cast<int>(std::ceil(maxDx)) + kLanczosRadius : 0;
+    const int padT = maxDy > 1e-3 ? static_cast<int>(std::ceil(maxDy)) + kLanczosRadius : 0;
+    const int padR = -minDx > 1e-3 ? static_cast<int>(std::ceil(-minDx)) + kLanczosRadius : 0;
+    const int padB = -minDy > 1e-3 ? static_cast<int>(std::ceil(-minDy)) + kLanczosRadius : 0;
+    const int left = std::clamp(padL, 0, std::max(0, w - 2));
+    const int top = std::clamp(padT, 0, std::max(0, h - 2));
+    const int right = std::clamp(w - padR, left + 1, w);
+    const int bottom = std::clamp(h - padB, top + 1, h);
+    return QRect(left, top, right - left, bottom - top);
 }
 
 cv::Mat matLuminance(const cv::Mat& m)
@@ -195,6 +377,149 @@ cv::Point2d estimateShiftPhase(const cv::Mat& refLum, const cv::Mat& movLum, con
 }
 
 } // namespace
+
+RawBurstFrame captureRawBurstFrame(const Frame& raw,
+    const std::optional<QRect>& cropRoi,
+    const std::optional<QRect>& qualityRoi)
+{
+    RawBurstFrame out;
+    const size_t bpp = bytesPerPixel(raw.format);
+    if (raw.width <= 0 || raw.height <= 0 || bpp == 0
+        || raw.data.size() != frameBytes(raw.width, raw.height, raw.format))
+    {
+        return out;
+    }
+
+    const int maxCode = maxCodeFor(raw);
+    const QRect fullRect(0, 0, raw.width, raw.height);
+    const QRect crop = cropRoi ? clampRect(*cropRoi, raw.width, raw.height) : fullRect;
+
+    int ex0 = crop.x();
+    int ey0 = crop.y();
+    int ew = crop.width();
+    int eh = crop.height();
+    if (raw.bayer != BayerPattern::None && raw.format != PixelFormat::RGB888)
+    {
+        // Keep even top-left coordinates and a 4 px margin so Bayer phase and
+        // edge-aware demosaicing on the worker match full-frame debayering.
+        constexpr int pad = 4;
+        ex0 = std::max(0, (crop.x() - pad) & ~1);
+        ey0 = std::max(0, (crop.y() - pad) & ~1);
+        const int ex1 = std::min(raw.width, (crop.x() + crop.width() + pad + 1) & ~1);
+        const int ey1 = std::min(raw.height, (crop.y() + crop.height() + pad + 1) & ~1);
+        ew = ex1 - ex0;
+        eh = ey1 - ey0;
+    }
+
+    out.frameIndex = raw.frameIndex;
+    out.timestamp = raw.timestamp;
+    out.width = crop.width();
+    out.height = crop.height();
+    out.rawWidth = ew;
+    out.rawHeight = eh;
+    out.innerOffsetX = crop.x() - ex0;
+    out.innerOffsetY = crop.y() - ey0;
+    out.format = raw.format;
+    out.significantBits = raw.significantBits;
+    out.alignment = raw.alignment;
+    out.bayer = raw.bayer;
+    out.rawMaxAdu = maxCode;
+
+    // Copy only the raw bytes for the cropped region (4x-12x smaller than float32 RGB).
+    out.data.resize(static_cast<size_t>(ew) * eh * bpp);
+    const size_t srcStride = static_cast<size_t>(raw.width) * bpp;
+    const size_t dstStride = static_cast<size_t>(ew) * bpp;
+    const uint8_t* srcBase = raw.data.data() + static_cast<size_t>(ey0) * srcStride + static_cast<size_t>(ex0) * bpp;
+    if (ew == raw.width && ex0 == 0)
+    {
+        std::memcpy(out.data.data(), srcBase, out.data.size());
+    }
+    else
+    {
+        for (int y = 0; y < eh; ++y)
+            std::memcpy(out.data.data() + static_cast<size_t>(y) * dstStride,
+                srcBase + static_cast<size_t>(y) * srcStride, dstStride);
+    }
+
+    // Fast sharpness scoring on the quality ROI without debayering or full-frame float copy.
+    QRect qRoi(0, 0, crop.width(), crop.height());
+    if (qualityRoi)
+    {
+        const QRect shifted = qualityRoi->translated(-crop.x(), -crop.y());
+        qRoi = clampRect(shifted, crop.width(), crop.height());
+    }
+
+    const bool isBayer = (raw.bayer != BayerPattern::None && raw.format != PixelFormat::RGB888);
+    const int longSide = std::max(qRoi.width(), qRoi.height());
+    int step = std::max(1, longSide / 320);
+    if (isBayer) step = std::max(2, (step + 1) & ~1);
+
+    // For Bayer sensors, sample pure green pixels directly at even rows.
+    const int qx0 = crop.x() + qRoi.x();
+    const int qy0 = crop.y() + qRoi.y();
+    int startX = qx0;
+    int startY = qy0;
+    if (isBayer)
+    {
+        const int gColParity = (raw.bayer == BayerPattern::RGGB || raw.bayer == BayerPattern::BGGR) ? 1 : 0;
+        if ((startY & 1) != 0) ++startY;
+        if ((startX & 1) != gColParity) ++startX;
+    }
+    const int endX = qx0 + qRoi.width();
+    const int endY = qy0 + qRoi.height();
+    const int sw = std::max(0, (endX - startX + step - 1) / step);
+    const int sh = std::max(0, (endY - startY + step - 1) / step);
+    if (sw < 6 || sh < 6) return out;
+
+    cv::Mat qPatch(sh, sw, CV_32FC1);
+    const float invMax = 1.0f / static_cast<float>(maxCode);
+    const int bitShift = shiftFor(raw);
+    if (raw.format == PixelFormat::RGB888)
+    {
+        for (int py = 0; py < sh; ++py)
+        {
+            float* dst = qPatch.ptr<float>(py);
+            const uint8_t* srcRow = raw.data.data() + static_cast<size_t>(startY + py * step) * raw.width * 3;
+            for (int px = 0; px < sw; ++px)
+            {
+                const uint8_t* p = srcRow + static_cast<size_t>(startX + px * step) * 3;
+                dst[px] = (0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2]) * (1.0f / 255.0f);
+            }
+        }
+    }
+    else if (raw.format == PixelFormat::Mono8)
+    {
+        for (int py = 0; py < sh; ++py)
+        {
+            float* dst = qPatch.ptr<float>(py);
+            const uint8_t* srcRow = raw.data.data() + static_cast<size_t>(startY + py * step) * raw.width;
+            for (int px = 0; px < sw; ++px)
+                dst[px] = static_cast<float>(srcRow[startX + px * step]) * invMax;
+        }
+    }
+    else
+    {
+        const auto* src16 = reinterpret_cast<const uint16_t*>(raw.data.data());
+        for (int py = 0; py < sh; ++py)
+        {
+            float* dst = qPatch.ptr<float>(py);
+            const uint16_t* srcRow = src16 + static_cast<size_t>(startY + py * step) * raw.width;
+            for (int px = 0; px < sw; ++px)
+                dst[px] = static_cast<float>(srcRow[startX + px * step] >> bitShift) * invMax;
+        }
+    }
+
+    double targetBrightness = 0;
+    const cv::Mat fgMask = targetForegroundMask(qPatch, &targetBrightness);
+    cv::Mat smoothed, lap;
+    cv::GaussianBlur(qPatch, smoothed, cv::Size(5, 5), 1.0);
+    cv::Laplacian(smoothed, lap, CV_32F, 3);
+    cv::Mat lapSq = lap.mul(lap);
+    const double rawSharpness = cv::mean(lapSq, fgMask)[0];
+    out.sharpness = rawSharpness / (targetBrightness * targetBrightness + 1e-5);
+    out.targetBrightness = targetBrightness;
+    return out;
+}
 
 PreparedBurstFrame prepareBurstFrame(const Frame& raw,
     const std::optional<QRect>& cropRoi,
@@ -308,20 +633,20 @@ PreparedBurstFrame prepareBurstFrame(const Frame& raw,
     return out;
 }
 
-BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
+namespace {
+
+BurstStackResult stackBurstImpl(size_t count, int w, int h, int ch, double rawMaxAdu,
+    const std::function<double(size_t)>& sharpnessOf,
+    const std::function<cv::Mat(size_t)>& matOf,
     const std::optional<QRect>& alignRoi,
     std::atomic<bool>* cancel)
 {
     BurstStackResult result;
-    if (kept.empty())
+    if (count == 0)
     {
         result.error = "no frames in burst";
         return result;
     }
-
-    const int w = kept.front().width;
-    const int h = kept.front().height;
-    const int ch = kept.front().channels;
     if (w <= 0 || h <= 0)
     {
         result.error = "invalid burst frame size";
@@ -329,10 +654,10 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
     }
 
     // Order indices by sharpness descending so pass 1 averages the cleanest frames.
-    std::vector<size_t> order(kept.size());
+    std::vector<size_t> order(count);
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-        return kept[a].sharpness > kept[b].sharpness;
+        return sharpnessOf(a) > sharpnessOf(b);
     });
 
     const QRect roi = alignRoi ? clampRect(*alignRoi, w, h) : QRect(0, 0, w, h);
@@ -340,12 +665,12 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
     cv::Mat hann;
     cv::createHanningWindow(hann, cv::Size(roi.width(), roi.height()), CV_32F);
 
-    const cv::Mat bestMat = burstFrameToMat(kept[order.front()]);
+    const cv::Mat bestMat = matOf(order.front());
     const cv::Mat bestLum = matLuminance(bestMat);
     const cv::Mat bestPatch = bestLum(cvRoi);
 
     // Pass 1: align top subset to sharpest frame to build a low-noise reference.
-    const size_t refCount = std::min(kept.size(), std::max<size_t>(1, std::max<size_t>(4, kept.size() / 4)));
+    const size_t refCount = std::min(count, std::max<size_t>(1, std::max<size_t>(4, count / 4)));
     cv::Mat refAccum = cv::Mat::zeros(h, w, CV_32FC1);
     for (size_t i = 0; i < refCount; ++i)
     {
@@ -354,7 +679,7 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
             result.error = "cancelled";
             return result;
         }
-        const cv::Mat lum = (i == 0) ? bestLum : matLuminance(burstFrameToMat(kept[order[i]]));
+        const cv::Mat lum = (i == 0) ? bestLum : matLuminance(matOf(order[i]));
         cv::Point2d delta(0.0, 0.0);
         if (i > 0)
         {
@@ -364,7 +689,7 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
         }
         const cv::Matx23d M(1.0, 0.0, delta.x, 0.0, 1.0, delta.y);
         cv::Mat warped;
-        cv::warpAffine(lum, warped, M, cv::Size(w, h), cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0));
+        cv::warpAffine(lum, warped, M, cv::Size(w, h), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
         refAccum += warped;
     }
     const cv::Mat meanRefLum = refAccum * (1.0 / static_cast<double>(refCount));
@@ -374,16 +699,16 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
     const int cvType = ch == 3 ? CV_32FC3 : CV_32FC1;
     cv::Mat sum = cv::Mat::zeros(h, w, cvType);
     cv::Mat sumSq = cv::Mat::zeros(h, w, cvType);
-    std::vector<cv::Point2d> shifts(kept.size());
+    std::vector<cv::Point2d> shifts(count);
     double minDx = 0, maxDx = 0, minDy = 0, maxDy = 0;
-    for (size_t i = 0; i < kept.size(); ++i)
+    for (size_t i = 0; i < count; ++i)
     {
         if (cancel && cancel->load())
         {
             result.error = "cancelled";
             return result;
         }
-        const cv::Mat frameMat = burstFrameToMat(kept[i]);
+        const cv::Mat frameMat = matOf(i);
         const cv::Mat lum = matLuminance(frameMat);
         cv::Point2d delta = estimateShiftPhase(meanRefPatch, lum(cvRoi), hann);
         if (std::abs(delta.x) > roi.width() * 0.4 || std::abs(delta.y) > roi.height() * 0.4)
@@ -398,17 +723,18 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
 
         const cv::Matx23d M(1.0, 0.0, delta.x, 0.0, 1.0, delta.y);
         cv::Mat warped;
-        cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+        // BORDER_REPLICATE prevents Lanczos-4 from pulling constant-0 black edges into the valid area.
+        cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_REPLICATE);
         cv::max(warped, 0.0f, warped);
         sum += warped;
         sumSq += warped.mul(warped);
     }
 
-    const double invN = 1.0 / static_cast<double>(kept.size());
+    const double invN = 1.0 / static_cast<double>(count);
     cv::Mat mean = sum * invN;
 
     // Pass 2b: sigma-clipped average when >= 6 frames to suppress hot pixels / transits.
-    if (kept.size() >= 6)
+    if (count >= 6)
     {
         cv::Mat var = sumSq * invN - mean.mul(mean);
         cv::max(var, 1e-8f, var);
@@ -424,17 +750,17 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
             clipSumCh[c] = cv::Mat::zeros(h, w, CV_32FC1);
             clipWeightCh[c] = cv::Mat::zeros(h, w, CV_32FC1);
         }
-        for (size_t i = 0; i < kept.size(); ++i)
+        for (size_t i = 0; i < count; ++i)
         {
             if (cancel && cancel->load())
             {
                 result.error = "cancelled";
                 return result;
             }
-            const cv::Mat frameMat = burstFrameToMat(kept[i]);
+            const cv::Mat frameMat = matOf(i);
             const cv::Matx23d M(1.0, 0.0, shifts[i].x, 0.0, 1.0, shifts[i].y);
             cv::Mat warped;
-            cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+            cv::warpAffine(frameMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_REPLICATE);
             cv::max(warped, 0.0f, warped);
 
             std::vector<cv::Mat> wCh;
@@ -463,16 +789,48 @@ BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
     cv::min(mean, 1.0f, mean);
     cv::max(mean, 0.0f, mean);
 
-    const int left = std::clamp(static_cast<int>(std::ceil(std::max(0.0, maxDx))), 0, w - 1);
-    const int top = std::clamp(static_cast<int>(std::ceil(std::max(0.0, maxDy))), 0, h - 1);
-    const int right = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -minDx))), left + 1, w);
-    const int bottom = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -minDy))), top + 1, h);
-
     result.stack = matToFits(mean);
-    result.stack.meta.rawMaxAdu = kept.front().rawMaxAdu;
-    result.validOverlap = QRect(left, top, right - left, bottom - top);
+    result.stack.meta.rawMaxAdu = rawMaxAdu;
+    result.validOverlap = validShiftOverlap(w, h, minDx, maxDx, minDy, maxDy);
     result.ok = true;
     return result;
+}
+
+} // namespace
+
+BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
+    const std::optional<QRect>& alignRoi,
+    std::atomic<bool>* cancel)
+{
+    if (kept.empty())
+    {
+        BurstStackResult res;
+        res.error = "no frames in burst";
+        return res;
+    }
+    return stackBurstImpl(kept.size(), kept.front().width, kept.front().height,
+        kept.front().channels, kept.front().rawMaxAdu,
+        [&](size_t i) { return kept[i].sharpness; },
+        [&](size_t i) { return burstFrameToMat(kept[i]); },
+        alignRoi, cancel);
+}
+
+BurstStackResult stackBurst(const std::vector<RawBurstFrame>& kept,
+    const std::optional<QRect>& alignRoi,
+    std::atomic<bool>* cancel)
+{
+    if (kept.empty())
+    {
+        BurstStackResult res;
+        res.error = "no frames in burst";
+        return res;
+    }
+    const int ch = (kept.front().format == PixelFormat::RGB888 || kept.front().bayer != BayerPattern::None) ? 3 : 1;
+    return stackBurstImpl(kept.size(), kept.front().width, kept.front().height,
+        ch, kept.front().rawMaxAdu,
+        [&](size_t i) { return kept[i].sharpness; },
+        [&](size_t i) { return rawBurstFrameToMat(kept[i]); },
+        alignRoi, cancel);
 }
 
 SessionAlignResult alignStackToReference(const FitsImage& stack,
@@ -529,12 +887,7 @@ SessionAlignResult alignStackToReference(const FitsImage& stack,
         cv::min(warped, 1.0f, warped);
         cv::max(warped, 0.0f, warped);
         out.aligned = matToFits(warped, stack.meta);
-
-        const int lx = std::clamp(static_cast<int>(std::ceil(std::max(0.0, out.shiftX))), 0, w - 1);
-        const int ty = std::clamp(static_cast<int>(std::ceil(std::max(0.0, out.shiftY))), 0, h - 1);
-        const int rx = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -out.shiftX))), lx + 1, w);
-        const int by = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -out.shiftY))), ty + 1, h);
-        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+        out.validOverlap = validShiftOverlap(w, h, out.shiftX, out.shiftX, out.shiftY, out.shiftY);
         return out;
     }
 
@@ -614,16 +967,23 @@ SessionAlignResult alignStackToReference(const FitsImage& stack,
 
         if (!warpMatrix.empty())
         {
-            for (int lvl = topLvl; lvl >= 0; --lvl)
+            for (int lvl = topLvl - 1; lvl >= 0; --lvl)
             {
-                if (lvl < topLvl)
+                cv::Mat scaled = warpMatrix.clone();
+                scaled.at<float>(0, 2) *= 2.0f;
+                scaled.at<float>(1, 2) *= 2.0f;
+                try
                 {
-                    warpMatrix.at<float>(0, 2) *= 2.0f;
-                    warpMatrix.at<float>(1, 2) *= 2.0f;
                     const int iters = lvl == 0 ? 80 : 60;
                     const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, iters, 1e-4);
                     cv::findTransformECC(pyrRef[static_cast<size_t>(lvl)], pyrSrc[static_cast<size_t>(lvl)],
-                        warpMatrix, cv::MOTION_EUCLIDEAN, criteria, pyrMask[static_cast<size_t>(lvl)]);
+                        scaled, cv::MOTION_EUCLIDEAN, criteria, pyrMask[static_cast<size_t>(lvl)]);
+                    warpMatrix = std::move(scaled);
+                }
+                catch (const cv::Exception&)
+                {
+                    // Keep the previous converged level's transform scaled to this level's resolution.
+                    warpMatrix = std::move(scaled);
                 }
             }
             const double cosT = warpMatrix.at<float>(0, 0);
@@ -662,19 +1022,22 @@ SessionAlignResult alignStackToReference(const FitsImage& stack,
         out.shiftY = ny - cy;
         out.rotationDeg = std::atan2(fwdM.at<double>(1, 0), fwdM.at<double>(0, 0)) * 180.0 / 3.14159265358979323846;
 
-        // Compute valid overlap rect by warping a white mask with nearest-neighbor.
+        // Compute the largest inscribed valid rectangle strictly inside the warped mask,
+        // eroding warped black borders by the Lanczos-4 kernel radius (4 px) while keeping
+        // unshifted image edges intact via BORDER_CONSTANT=255.
         cv::Mat ones(h, w, CV_8UC1, cv::Scalar(255));
         cv::Mat validMask;
         cv::warpAffine(ones, validMask, warpMatrix, cv::Size(w, h),
             cv::INTER_NEAREST | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT, cv::Scalar(0));
-        // Shrink inward by 2 px from warped bounding edges where rotated borders step.
-        const cv::Rect nz = cv::boundingRect(validMask);
-        const int margin = std::abs(out.rotationDeg) > 0.05 ? 4 : 0;
-        const int lx = std::clamp(nz.x + margin, 0, w - 1);
-        const int ty = std::clamp(nz.y + margin, 0, h - 1);
-        const int rx = std::clamp(nz.x + nz.width - margin, lx + 1, w);
-        const int by = std::clamp(nz.y + nz.height - margin, ty + 1, h);
-        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+        cv::Mat erodedMask;
+        const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
+            cv::Size(2 * kLanczosRadius + 1, 2 * kLanczosRadius + 1));
+        cv::erode(validMask, erodedMask, kernel, cv::Point(-1, -1), 1, cv::BORDER_CONSTANT, cv::Scalar(255));
+        QRect inscribed = largestInscribedRect(erodedMask);
+        if (inscribed.width() < 2 || inscribed.height() < 2)
+            inscribed = largestInscribedRect(validMask);
+        if (inscribed.width() >= 2 && inscribed.height() >= 2)
+            out.validOverlap = inscribed;
     }
     else
     {
@@ -684,11 +1047,7 @@ SessionAlignResult alignStackToReference(const FitsImage& stack,
         out.rotationDeg = 0.0;
         const cv::Matx23d M(1.0, 0.0, coarse.x, 0.0, 1.0, coarse.y);
         cv::warpAffine(srcMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
-        const int lx = std::clamp(static_cast<int>(std::ceil(std::max(0.0, coarse.x))), 0, w - 1);
-        const int ty = std::clamp(static_cast<int>(std::ceil(std::max(0.0, coarse.y))), 0, h - 1);
-        const int rx = std::clamp(w - static_cast<int>(std::ceil(std::max(0.0, -coarse.x))), lx + 1, w);
-        const int by = std::clamp(h - static_cast<int>(std::ceil(std::max(0.0, -coarse.y))), ty + 1, h);
-        out.validOverlap = QRect(lx, ty, rx - lx, by - ty);
+        out.validOverlap = validShiftOverlap(w, h, coarse.x, coarse.x, coarse.y, coarse.y);
     }
 
     cv::min(warped, 1.0f, warped);

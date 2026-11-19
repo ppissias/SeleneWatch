@@ -8,6 +8,7 @@
 #include <QtGui/QImage>
 #include <QtWidgets/QWidget>
 
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -34,7 +35,8 @@ public:
     void refreshProfiles();
 
     void setStreamInfo(bool running, bool monitoring, bool recording, bool timeLapsing,
-        double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock);
+        double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock,
+        bool finalizing = false);
 
     void setLunarAnchor(const std::optional<QRect>& rect);
     [[nodiscard]] bool selectingAnchor() const;
@@ -106,7 +108,10 @@ private:
     QLabel* filmstripInfo_{nullptr};
     QCheckBox* loopFilmstrip_{nullptr};
 
-    std::vector<QImage> filmstripFrames_;
+    static constexpr size_t kMaxFilmstripFrames = 200;
+    static constexpr int kFilmstripThumbMaxEdge = 256;
+
+    std::deque<QImage> filmstripFrames_;
     size_t filmstripIndex_{0};
     QTimer* filmstripTimer_{nullptr};
     QString lastSessionDir_;

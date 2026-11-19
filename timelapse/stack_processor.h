@@ -12,6 +12,29 @@
 #include <optional>
 #include <vector>
 
+// Lightweight raw frame cropped on the source thread without debayering or
+// float32 conversion; converted on the stacker worker thread for the <=200 kept frames.
+struct RawBurstFrame
+{
+    uint64_t frameIndex{0};
+    std::chrono::system_clock::time_point timestamp{};
+    int width{0};
+    int height{0};
+    int rawWidth{0};
+    int rawHeight{0};
+    int innerOffsetX{0};
+    int innerOffsetY{0};
+    PixelFormat format{PixelFormat::Mono8};
+    int significantBits{8};
+    BitAlignment alignment{BitAlignment::Low};
+    BayerPattern bayer{BayerPattern::None};
+    double rawMaxAdu{255.0};
+    std::vector<uint8_t> data;
+    double sharpness{0};
+    double targetBrightness{0};
+    FramePtr rawFullFrame; // Held only when saveRawSer is enabled; evicted with heap entry
+};
+
 // Single frame extracted, optionally debayered/cropped, and scored for burst stacking.
 struct PreparedBurstFrame
 {
@@ -44,6 +67,13 @@ struct SessionAlignResult
     bool usedFallback{false};
 };
 
+// Fast source-thread capture: copies cropped raw bytes (preserving Bayer phase
+// with a small margin) and computes brightness-normalized sharpness without
+// debayering or full-frame float conversion.
+[[nodiscard]] RawBurstFrame captureRawBurstFrame(const Frame& raw,
+    const std::optional<QRect>& cropRoi = {},
+    const std::optional<QRect>& qualityRoi = {});
+
 // Converts raw camera/file Frame into normalized linear float (debayering colour
 // sensors in v1), crops to cropRoi if set, and computes brightness-normalized
 // sharpness and target foreground brightness on qualityRoi.
@@ -54,6 +84,9 @@ struct SessionAlignResult
 // Two-pass apodized subpixel phase-correlation alignment and sigma-clipped
 // floating-point averaging over kept burst frames (<= 200).
 [[nodiscard]] BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
+    const std::optional<QRect>& alignRoi = {},
+    std::atomic<bool>* cancel = nullptr);
+[[nodiscard]] BurstStackResult stackBurst(const std::vector<RawBurstFrame>& kept,
     const std::optional<QRect>& alignRoi = {},
     std::atomic<bool>* cancel = nullptr);
 

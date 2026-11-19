@@ -96,9 +96,11 @@ struct TimelapseSettings
 [[nodiscard]] QString sanitizeProfileName(const QString& name);
 
 bool saveProfileJson(const QString& path, const SharpeningSettings& sharpening,
-    const VideoToneSettings& video, QString& error);
+    const VideoToneSettings& video, QString& error,
+    const std::optional<QRect>& commonOverlap = std::nullopt);
 bool loadProfileJson(const QString& path, SharpeningSettings& sharpening,
-    VideoToneSettings& video, QString& error);
+    VideoToneSettings& video, QString& error,
+    std::optional<QRect>* outCommonOverlap = nullptr);
 
 struct SavedSharpeningProfile
 {
