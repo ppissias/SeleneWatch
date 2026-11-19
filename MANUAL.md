@@ -52,8 +52,11 @@ From top to bottom, the main screen contains:
 | **Monitoring** *(green)* | Automatic event detection & **Save now** active; optional **Record** / scheduled SER allowed | Locked for evidence integrity | `events/moon/` or `events/sky/`, `candidates.txt`, `guiding.txt`, plus optional `recordings/` |
 | **Time-lapse** *(purple)* | Fixed-cadence lucky-imaging bursts stacked into 32-bit float FITS and MP4/GIF *(flash detection OFF)* | Locked | `timelapses/<UTC>/` (`stacks/`, `sharpened/`, `timelapse.mp4`/`.gif`, `timelapse.txt`, optional `raw/*.ser`) |
 
-- **Preview canvas:** fitted live or recorded view. Depending on active tools, clicking selects a pixel (for local noise readout / **Test flash**), dragging locks on a crater (**Guiding**) or lunar anchor (**Time-lapse**), or clicking/dragging defines horizon masks (**The sky**).
-- **Dock panels (right & bottom):** **Detection**, **Display and capture**, **Guiding**, **Time-lapse** share right-hand tabs; the active **Camera** dock opens on the left; **Histogram** opens below the preview.
+- **View bar & Preview canvas:**
+  - **View bar (`Fit` | `100%` | `200%`):** immediately above the preview canvas. Switch between **Fit** (scales the full frame to the window), **100%** (actual sensor pixels `1:1`), and **200%** (`2×` actual pixels), or roll the **mouse wheel** over the image to zoom smoothly (`25%`–`800%`) around the cursor pixel. While zoomed in, **right-drag** or **middle-drag** pans across the frame.
+  - **Preview canvas:** left-clicking selects a pixel (for local noise readout / **Test flash**), left-dragging locks on a crater (**Guiding**) or lunar anchor (**Time-lapse**), and clicking/dragging in Sky mode with **Draw mask** on defines horizon masks. Every click, drag, and overlay stays pixel-accurate at any zoom level.
+- **Dock panels (right & bottom):** **Detection**, **Display and capture**, **Guiding**, **Time-lapse** share right-hand tabs (opening on **Detection** at startup); the active **Camera** dock opens on the left; **Histogram** opens below the preview.
+  - *Mouse-wheel protection:* Spin boxes, sliders, and closed dropdowns across all panels and dialogs ignore mouse-wheel scrolls (forwarding them to the dock scrollbar instead) so you never accidentally alter **Sensitivity K**, exposure, or patch limits while scrolling a panel. When a control is focused, keyboard **Up / Down** arrow keys remain active for fine single-step adjustments.
 - **Two-line status bar (bottom):**
   - Top line: latest status or action message across the full window width (hover if shortened).
   - Bottom line: **Status**, **FPS** & **Frames** (plus SDK dropped frames), **Candidates**, **History** & **RAM** usage (`used / ceiling MiB`), frame geometry/format (`1296 × 964 Mono8`), and **Lock** readout.
@@ -100,7 +103,7 @@ Open **Session → Output folder…** (while stopped) to set the single remember
 ***Session → Output folder…**: shows the unified output layout, checks live free space, and warns if a cloud-synced directory is selected.*
 
 - **Use a fast local folder (SSD):** Avoid cloud-synced paths (`OneDrive`, `Dropbox`, `Google Drive`, `iCloud Drive`); SeleneWatch warns you if one is selected.
-- **No silent fallbacks:** Before starting **Monitoring**, **Record**, or **Time-lapse**, SeleneWatch verifies the folder exists, is writable, and leaves at least your **Disk reserve** free. If an external drive is unplugged, it refuses with an error rather than silently writing elsewhere.
+- **No silent fallbacks:** Before starting **Monitoring**, **Record**, or **Time-lapse**, SeleneWatch verifies the folder exists, is writable, and leaves at least your **Disk reserve** free. If the folder was deleted while **Preview** is already running, clicking **Recreate folder** in the prompt recreates it in place without stopping your preview stream. If an external drive is unplugged, it refuses with an error rather than silently writing elsewhere.
 - **Session → Open the output folder** opens it in Windows Explorer. Read-only archive recordings you open are never modified.
 
 ### 2.3 Site, instrument & clock accuracy
@@ -120,7 +123,7 @@ Open **Session → Site and instrument…** once before serious observing:
 1. With the stream stopped, pick your **Source**:
    - A camera family (**ZWO ASI**, **QHY**, **Player One**, **ToupTek**) — optionally tick **Connect at startup** so future launches pre-select it automatically. Press **Refresh cameras** in its dock and select your camera.
    - **Recording file** — click **Open…** and load an `.ser` file (8- or 16-bit mono with trailer timestamps) or uncompressed `.avi` file (`8-bit`, `Y800`, `24/32-bit RGB`, `YUY2`; compressed AVIs are refused). Matching FireCapture `.txt` logs automatically supply UTC start time, exposure, gain, and true mean duration/FPS. Use **Speed** (`Real time` / `Fast`) and **Loop first … s** for tuning and playback tests.
-   - **Synthetic** *(via **View → Testing tools**)* — renders a test Moon with craters, a quiet moving pacing marker, configurable `Mono8` / `12-bit` / `16-bit` / `Bayer RGGB` bit depth, and calibrated flash test buttons without hardware.
+   - **Synthetic** *(via **View → Testing tools**)* — renders a built-in test scene without hardware: a cratered lunar disk with a moving pacing marker when **Watching** is **The Moon** (with configurable `Mono8` / `12-bit` / `16-bit` / `Bayer RGGB` format), or a starry night sky with realistic sensor noise and a dark tree/roofline horizon silhouette when **Watching** is **The sky**.
 2. Press **Start preview**. Nothing is recorded to `events/` or `candidates.txt` while in Preview (unless you explicitly press **Record**).
 3. In your **Camera** dock, adjust live controls (**Exposure**, **Gain**, **Offset**, **USB bandwidth**, high-speed mode) — edits apply shortly in Preview, with **Settling** shown briefly as detection relearns. Changing **Raw format** (`RAW8`/`RAW16`), **Binning**, or **ROI** uses **Apply settings** and briefly restarts Preview.
    - **RAW16** preserves every bit delivered by the camera without truncation; sensor ADC bit depth is recorded separately in metadata.
@@ -196,7 +199,8 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 2. Frame the dark earthshine side (keeping enough sunlit detail nearby if you plan to lock **Guiding** on a crater; [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
 3. Under **View → Display and capture**, switch display to **Auto-stretch** or **Black / white levels** to inspect earthshine terrain while confirming in **Histogram** that the bright terminator doesn't overly wash out your earthshine gain/exposure balance. *(Adjust **Pre-event history** `5.0 s`, **Quiet tail** `3.0 s`, **Maximum after trigger** `10.0 s`, **RAM ceiling**, and **Disk reserve** while stopped if needed.)*
 4. Open **View → Detection** with **Watching** set to **The Moon**.
-   - **Optional sensitivity test:** Enable **View → Testing tools**, click on the earthshine area, set **Test flash** (`FWHM`, `Peak ADU`, `Duration frames`), and press **Inject blip** to verify the faintest flash your current **K** catches without false triggers. Remember to turn **View → Testing tools** OFF before a real observing run (`testing_tools="off"`).
+   - **Saved detection profiles:** Use the **Profile** row right below **Watching** to load a saved lunar threshold configuration, or click **Save…** after tuning to store named presets (for example *"Earthshine quiet seeing"* vs. *"Terminator windy night"*).
+   - **Optional sensitivity test:** Enable **View → Testing tools**, click on the earthshine area (zoom in to **100%** or **200%** if helpful), choose **Kind: Bright flash** in **Test flash** (`FWHM`, `Peak ADU`, `Duration frames`), and press **Inject blip** to verify the faintest flash your current **K** catches without false triggers. Remember to turn **View → Testing tools** OFF before a real observing run (`testing_tools="off"`).
    - Alternatively watch **Peak sigma** and the 10-second trace for ~1 minute in Preview: set **K** comfortably above normal quiet seeing peaks (often `8–16 sigma` depending on seeing and limb proximity; `6.0 sigma` is the starting value).
 5. Turn on **Guiding** if using a mount, then press **Start monitoring**. If using a camera, SeleneWatch briefly reopens the camera with verified locked settings and relearns the reference (re-arm **Start guiding** after the reopen).
 6. Leave Monitoring running. If you spot a flash or anomaly by eye that fell under threshold, press **Save now** to force a manual clip of the pre-event ring + post-event tail.
@@ -217,6 +221,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 | Panel | Control | Purpose & Default |
 | --- | --- | --- |
 | **Detection** | **Watching** | Set to **The Moon** (editable while stopped; keeps Moon & Sky settings separate) |
+| | **Profile** (`Save…` / `Delete`) | Save, load, or delete named detection profiles for the active target (`The Moon` or `The sky`) |
 | | **Sensitivity K** | Rise threshold in noise units (`sigma`). Sliders show live teal mark (`now`) + amber recent 10 s peak (`6.0 sigma` default) |
 | | **Minimum / Maximum patch** | Allowed connected bright-pixel count (`8 px` / `400 px`) |
 | | **Maximum box / patch** | Bounding-box area ÷ pixel count compactness limit (`4.00 ×`) |
@@ -250,7 +255,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 1. Frame the sunlit Moon or limb in **Preview** (optionally enable **Guiding**, [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
 2. Under **View → Detection**, ensure **Watching** is **The Moon**, then tick **Also trigger on darkening**.
 3. Set **Sensitivity K** to **`12.0 sigma` or higher** for sunlit lunar terrain. Archive measurements show `K = 6` triggers heavily on sunlit crater-rim seeing, whereas `K ≥ 12` stays completely quiet on normal seeing while catching ~90%-darkness ISS and plane silhouettes.
-4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds).
+4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds). *(With **View → Testing tools** on, you can rehearse this directly by choosing **Kind: Dark transit** in the **Test flash** bar, clicking the sunlit lunar disk, and pressing **Inject blip**).*
 5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
 
 #### Path B — Predicted ISS transit or occultation (Manual or Scheduled SER Recording)
@@ -360,6 +365,8 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 2. Under **View → Detection**, while stopped, switch **Watching** to **The sky** (Notice **Guiding** automatically shows `(Moon only)` and disables).
 3. Press **Start preview** briefly at twilight or night, tune initial exposure/gain, and exclude horizon clutter:
    - Toggle **Draw mask** ON: click corners around trees, roofs, or streetlights and **double-click** to close a polygon (or **drag** for a rectangle; up to `16` shapes of up to `32` corners). Turn **Draw mask** OFF when finished.
+   - **Saving Sky detection profiles:** When you click **Save…** on the **Profile** row in Sky mode, the dialog offers an optional **Include horizon mask** checkbox (unchecked by default). Leave it unchecked for sensitivity-only profiles that preserve whatever horizon mask you currently have drawn, or check it (`(+mask)`) to save a site-specific profile that restores its own horizon mask when selected.
+   - **Testing indoors:** With **View → Testing tools** enabled and **Watching** set to **The sky**, the **Synthetic** source generates a realistic starry sky and horizon silhouette, and **Test flash → Kind** lets you inject **Moving streak (meteor)**, **Blinking mover (aircraft)**, **Lightning** (whole frame), or **Bright flash** inside or outside your mask.
 4. Configure unattended options in **The sky** group:
    - Tick **Watch from dusk to dawn** and set **Sun below** (`−10.0°`).
    - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation.
@@ -480,8 +487,8 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
 | **Feature lock, calibration & ASCOM guiding** | Automated unit/simulation tests, archive drift tracking (`Moon_180548.avi`, `Moon_165104.ser`), `0.25 px/frame` pulse-detector study, and ASCOM OmniSim check; **live equatorial mount under the Moon pending** |
 | **Workflow 1 — Lunar flashes** | Automated core/detection/window suites; archive sunlit-terrain measurements & test-injection brackets; **calibrated earthshine field run pending** |
 | **Workflow 2 — Objects passing in front of the Moon & Continuous recording** | Automated `darkening` & `session_record` suites; archive darkening probe across 5 Moon recordings (`K ≥ 12`); **unplanned real lunar transit & scheduled ephemeris run pending** |
-| **Workflow 3 — Lucky-imaging Time-lapse & Re-sharpen** | Automated 11-test `timelapse` suite (CFITSIO 2D/3D linear float FITS, OpenCV stacking/rotation/centroid, parallel overload skip gate, `diskReserveBytes`, FFmpeg MP4/GIF) & `ui` slider/rebuild tests; checked on real `Moon_165104.ser` (`1296 × 964` with sunlit anchor & `Re-sharpen`) and Jupiter `21-26-10-184.avi`; **multi-hour telescope field run pending** |
-| **Workflow 4 — Watching the sky (fixed camera)** | Automated `sky` & `sky_extras` suites **plus all-night outdoor fixed-camera runs on a ZWO ASI120MM Mini** (`K 13.9`, `patch 20–30761 px`, polygon horizon mask), capturing meteors/streaks, planes, cosmic rays, and brief flashes cleanly |
-| **Unified Output folder & Preview recording** | Automated `core`, `session_record`, `display_capture`, `manual_capture`, `zwo`, and `ui` tests covering persistence, cloud warnings, missing drive refusal, upgrade isolation, and frame-limited Preview recording |
+| **Workflow 3 — Lucky-imaging Time-lapse & Re-sharpen** | Automated 23-test `timelapse` suite (CFITSIO 2D/3D linear float FITS with strict `BITPIX` validation, OpenCV stacking/rotation/centroid, off-acquisition Bayer `RGGB`/`GRBG`/`GBRG` demosaicing, 12-bit high-aligned Mono16, parallel overload skip gate, `diskReserveBytes`, streaming FFmpeg MP4/GIF, preview-vs-MP4 parity, and `FakeZwoApi` camera time-lapse) & `ui` slider/rebuild tests; checked on real lunar & planetary archive recordings |
+| **Workflow 4 — Watching the sky (fixed camera)** | Automated `sky` & `sky_extras` suites (including synthetic Sky scene and meteor/lightning/dark-transit injections) **plus all-night outdoor fixed-camera runs on a ZWO ASI120MM Mini** (`K 13.9`, `patch 20–30761 px`, polygon horizon mask), capturing meteors/streaks, planes, cosmic rays, and brief flashes cleanly |
+| **Unified Output folder, Profiles, Zoom & Windows GUI E2E** | Automated `core`, `session_record`, `display_capture`, `manual_capture`, `zwo`, `preview` (zoom/pan pixel accuracy), and 30-test `ui` suite (named detection profiles with optional Sky mask, `WheelGuard`, in-place output folder recreation during Preview), plus real Windows UI Automation E2E verification (`tests/gui_e2e_test.ps1`) |
 
 Full design specs, validation reports, and feature histories are recorded in [implemented features.md](implemented%20features.md), [features.md](features.md), and [docs/](docs/).

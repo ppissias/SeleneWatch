@@ -18,17 +18,29 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 
 ---
 
+## Quick start (60 seconds)
+
+1. **Set your output folder & site once:** Open **Session → Output folder…** (choose a fast local SSD) and **Session → Site and instrument…** (save observer/site coordinates and telescope optics).
+2. **Choose a source & start Preview:** Select your camera (**ZWO ASI**, **QHYCCD**, **Player One**, **ToupTek**), a **Recording file** (`.ser` or uncompressed `.avi`), or **Synthetic** (via **View → Testing tools**), then click **Start preview**.
+3. **Frame, zoom & tune thresholds:** Use **Fit / 100% / 200%** or the mouse wheel (and right/middle-drag to pan) to inspect actual sensor pixels, adjust **Display and capture** stretch and **Histogram**, pick **Watching** (**The Moon** or **The sky**) in **Detection**, tune **Sensitivity K** above the 10-second seeing trace (or load a saved **Profile**), and optionally lock onto a crater in **Guiding**.
+4. **Capture:**
+   - Click **Start monitoring** for automatic flash, darkening/transit, or sky-event capture (plus on-demand **Save now**).
+   - Click **Record** (unlimited or for a fixed frame count, or arm **Session → Schedule a recording…**) for continuous lossless SER video.
+   - Or open **Time-lapse** and click **Start time-lapse** for fixed-cadence lucky-imaging FITS stacks and MP4/GIF movies.
+
+---
+
 ## What SeleneWatch does
 
-- **Monitor continuously across multiple sources** — acquire from **ZWO ASI**, **QHYCCD**, **Player One**, and **ToupTek** (and ToupTek-OEM) cameras, replay **SER** or uncompressed **AVI** recordings (in real time, fast, or looped), or use a built-in **synthetic** test Moon without hardware.
-- **Tune before capturing** — run in **Preview** to focus, frame, inspect the live native-ADU histogram, stretch the display for faint earthshine, and watch detector feedback (`Would trigger`) with live camera edits before arming **Monitoring**.
+- **Monitor continuously across multiple sources** — acquire from **ZWO ASI**, **QHYCCD**, **Player One**, and **ToupTek** (and ToupTek-OEM) cameras, replay **SER** or uncompressed **AVI** recordings (in real time, fast, or looped), or rehearse indoors with built-in **synthetic** Moon and starry Sky scenes.
+- **Tune and inspect at 1:1 pixel resolution before capturing** — run in **Preview** to focus, frame, zoom in smoothly with the mouse wheel or quick **Fit / 100% / 200%** controls (panning with right- or middle-drag), inspect the live native-ADU histogram, stretch the display for faint earthshine, and watch detector feedback (`Would trigger`) before arming **Monitoring**. Spin boxes, sliders, and closed dropdowns ignore stray mouse-wheel scrolls so parameters never drift accidentally while scrolling panels.
 - **Keep pre-event history in RAM** — maintain a time-sized ring buffer of shared, immutable frames under a configurable RAM ceiling so frames from *before* a trigger are saved alongside the event.
-- **Detect flashes, transits, and sky events** — analyse every frame per pixel against its own learned background and noise, with separate profiles for **The Moon** (flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon masks, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
+- **Detect flashes, transits, and sky events with named profiles** — analyse every frame per pixel against its own learned background and noise, with independent target modes and named **Detection profiles** for **The Moon** (impact flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon horizon masks optionally saved with profiles, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
 - **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), annotated visual summaries (`00_overview.png`) with suggested classifications, and compact animated GIF previews (`04_event_preview.gif`, `≤ 10` frames, `≤ 512 KiB`) for both lunar and sky clips.
 - **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, record continuously to SER in **Preview** or **Monitoring** with **Record** (unlimited or for a chosen frame count), or schedule predicted events by UTC start and duration without silently dropping frames.
-- **Build lunar & planetary time-lapses** — run **Time-lapse** lucky-imaging bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), write linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assemble `timelapse.mp4` / `timelapse.gif`, and non-destructively **Re-sharpen time-lapse…** with saved profiles.
-- **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks.
-- **Measure sensitivity directly** — inject calibrated **Test flash** signals onto real data to check recovery limits; every affected frame and clip is explicitly marked as test data.
+- **Build lunar & planetary time-lapses** — run **Time-lapse** lucky-imaging bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), write linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assemble `timelapse.mp4` / `timelapse.gif`, and non-destructively **Re-sharpen time-lapse…** with saved profiles and fast **Rebuild video only**.
+- **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks and one-click in-place folder recreation if a directory was removed during Preview.
+- **Measure sensitivity directly across event kinds** — inject calibrated **Test flash** signals (**Bright flash**, **Dark transit**, **Moving streak (meteor)**, **Blinking mover (aircraft)**, or **Lightning**) onto live or recorded streams to verify recovery limits; every affected frame and clip is explicitly marked as test data.
 - **Hold the field gently** — lock onto a lunar feature to track drift, and optionally guide an **ASCOM** mount with small, bounded, logged guide pulses so monitoring stays on target without slewing or syncing the telescope.
 
 ---

@@ -127,6 +127,8 @@ ctest --test-dir out/build/debug --output-on-failure
 - Camera tests run against deterministic boundary implementations (`FakeZwoApi`, `FakeQhyApi`, `FakePlayerOneApi`, `FakeToupTekApi`) and never open physical hardware.
 - Window and offscreen rendering tests set `QT_QPA_PLATFORM=offscreen` and isolate QSettings under a test namespace.
 - CTest invokes Qt Test targets with `-o -,tap` so test output reaches stdout on Windows even when launched without an attached console.
+- **Optional real archive data (`test_data/`, gitignored):** Placing real `.avi` / `.ser` recordings and matching FireCapture `.txt` logs (`Moon_221449.avi`, `Mars_222831.avi`, `Moon_171311.ser`) into `test_data/` at the repository root enables `TimelapseTest::realArchiveRecordingsIfPresent()`; when `test_data/` is absent, the test skips cleanly via `QSKIP`.
+- **Real Windows GUI end-to-end test (`tests/gui_e2e_test.ps1`):** Launches the real built `out\build\release\SeleneWatch.exe` visibly on Windows using Windows UI Automation with isolated settings (`SELENEWATCH_SETTINGS_NAME=SeleneWatchGuiE2ETest`) and a temporary output folder, exercising Moon Preview zoom + profile save + bright/darkening clips on disk, Sky Watch meteor/lightning clips on disk, Time-lapse + Re-sharpen + non-destructive video rebuild, and real lunar AVI playback, saving verification screenshots to `out\gui-e2e\`.
 
 ### Manual CLI probes
 

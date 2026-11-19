@@ -166,6 +166,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupHistogramPanel();
     setupGuidingPanel();
     setupTimelapsePanel();
+    if (detectionDock_) detectionDock_->raise();
     setupSessionMenu();
     setupHelpMenu();
     applyTarget();
@@ -282,7 +283,7 @@ void MainWindow::setupSourceChoice()
 
 void MainWindow::setTestingTools(bool on)
 {
-    if (session_->isRunning())
+    if (session_->isRunning() || session_->timeLapseFinalizing())
     {
         const QSignalBlocker blocked(testingAction_);
         testingAction_->setChecked(testingTools_);
@@ -497,8 +498,8 @@ void MainWindow::saveCaptureSettings()
 
 void MainWindow::onTargetRequested(Target target)
 {
-    // The choice is disabled while running; a late request is undone.
-    if (session_->isRunning() || target == target_)
+    // The choice is disabled while running or finalizing; a late request is undone.
+    if (session_->isRunning() || session_->timeLapseFinalizing() || target == target_)
     {
         detectionPanel_->setTarget(target_);
         return;
@@ -675,6 +676,18 @@ void MainWindow::applyTarget()
         guidingPanel_->setEnabled(!sky);
         guidingDock_->setWindowTitle(sky ? "Guiding (Moon only)" : "Guiding");
     }
+    if (timelapsePanel_)
+    {
+        if (sky)
+        {
+            timelapsePanel_->cancelAnchorSelection();
+            ui_->previewWidget->setAnchorBox(std::nullopt);
+        }
+        else
+        {
+            ui_->previewWidget->setAnchorBox(timelapsePanel_->settings().lunarAnchor);
+        }
+    }
 }
 
 void MainWindow::setupDisplayPanel()
@@ -813,6 +826,7 @@ void MainWindow::onStartTimeLapse()
     if (!ensureOutputFolderReady("time-lapse")) return;
     if (!session_->isRunning())
     {
+        if (selectedCamera() && !validateCameraSettings()) return;
         startStream(Session::Mode::Preview);
         if (!session_->isRunning()) return;
     }
@@ -1153,7 +1167,7 @@ void MainWindow::onScheduleRecording()
 
 void MainWindow::onOutputFolder()
 {
-    if (session_->isRunning())
+    if (session_->isRunning() || session_->timeLapseFinalizing())
     {
         showMessage("Stop the stream before changing the output folder.", 4000);
         return;
@@ -1219,7 +1233,7 @@ void MainWindow::onOutputFolder()
 
 bool MainWindow::applyOutputFolder(const QString& folder, QString& error)
 {
-    if (session_->isRunning())
+    if (session_->isRunning() || session_->timeLapseFinalizing())
     {
         error = "Stop the stream before changing the output folder.";
         return false;
@@ -1741,18 +1755,19 @@ void MainWindow::updateControls()
     const bool monitoring = session_->mode()==Session::Mode::Monitoring;
     const bool timeLapsing = session_->mode()==Session::Mode::TimeLapse;
     const bool timeLapseFinalizing = session_->timeLapseFinalizing();
+    const bool busy = running || timeLapseFinalizing;
     const bool pending = session_->modeChangePending();
 
     CameraFamilyPanel* selected = selectedCamera();
     const bool chosen = !ui_->sourceComboBox->currentData().toString().isEmpty();
-    ui_->startButton->setEnabled(!running && chosen && (!selected || selected->hasCamera()));
+    ui_->startButton->setEnabled(!busy && chosen && (!selected || selected->hasCamera()));
     if (connectAtStartup_)
     {
-        connectAtStartup_->setEnabled(!running && selected);
+        connectAtStartup_->setEnabled(!busy && selected);
         const QSignalBlocker blocked(connectAtStartup_);
         connectAtStartup_->setChecked(selected && startupCamera_ == selected->sourceKey());
     }
-    if (testingAction_) testingAction_->setEnabled(!running);
+    if (testingAction_) testingAction_->setEnabled(!busy);
     ui_->stopButton->setEnabled(running);
     ui_->monitoringButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && !session_->sourceFinished() && !pending);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
@@ -1764,14 +1779,14 @@ void MainWindow::updateControls()
         recordButton_->setEnabled(writing || (running && !timeLapsing && !timeLapseFinalizing && !pending && !session_->sourceFinished()));
     }
     if (recordFramesSpinBox_)
-        recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing);
-    ui_->injectFlashButton->setEnabled(running && !timeLapsing && synthetic_ != nullptr);
+        recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing && !timeLapseFinalizing);
+    ui_->injectFlashButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && synthetic_ != nullptr);
 
-    ui_->sourceComboBox->setEnabled(!running);
-    if (detectionPanel_) detectionPanel_->setTargetEditable(!running);
-    ui_->openFileButton->setEnabled(!running && recording);
-    ui_->loopCheckBox->setEnabled(!running && recording);
-    ui_->loopSecondsSpinBox->setEnabled(!running && recording && ui_->loopCheckBox->isChecked());
+    ui_->sourceComboBox->setEnabled(!busy);
+    if (detectionPanel_) detectionPanel_->setTargetEditable(!busy);
+    ui_->openFileButton->setEnabled(!busy && recording);
+    ui_->loopCheckBox->setEnabled(!busy && recording);
+    ui_->loopSecondsSpinBox->setEnabled(!busy && recording && ui_->loopCheckBox->isChecked());
 
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);

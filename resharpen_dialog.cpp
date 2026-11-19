@@ -317,7 +317,10 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         const QString target = lastOutputDir_.isEmpty() ? sessionDir_ : lastOutputDir_;
         if (!target.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(target));
     });
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
+    connect(closeBtn, &QPushButton::clicked, this, [this] {
+        cancelFlag_.store(true);
+        accept();
+    });
 
     refreshSavedProfiles();
     blackLevel_->setEnabled(!autoStretch_->isChecked());
@@ -619,6 +622,10 @@ void ResharpenDialog::setBusy(bool busy)
 {
     applyBtn_->setEnabled(!busy && !stackFiles_.empty());
     browseBtn_->setEnabled(!busy);
+    stackCombo_->setEnabled(!busy);
+    profileCombo_->setEnabled(!busy);
+    saveProfileBtn_->setEnabled(!busy);
+    deleteProfileBtn_->setEnabled(!busy);
     cancelBtn_->setEnabled(busy);
 }
 

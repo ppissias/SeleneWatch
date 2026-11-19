@@ -144,6 +144,19 @@ const std::vector<StartupTip>& allStartupTips()
             "<code>event.ser</code>, making morning triage effortless.",
             kSectionOutputs
         },
+        {
+            "Use the <b>View: Fit / 100% / 200%</b> bar above the preview&mdash;or roll the <b>mouse wheel</b> over the "
+            "live image&mdash;to zoom smoothly around the cursor pixel, and <b>right-drag</b> or <b>middle-drag</b> to "
+            "pan while zoomed. Spin boxes and sliders ignore stray wheel scrolls so your detection settings never drift "
+            "accidentally while scrolling a panel.",
+            kSectionDisplay
+        },
+        {
+            "Save named threshold configurations with <b>Profile &rarr; Save&hellip;</b> at the top of <b>Detection</b>. "
+            "In <b>The sky</b> mode, you can optionally tick <b>Include horizon mask</b> to bundle a site's roofline "
+            "mask with the profile, or leave it unticked to switch sensitivity presets without altering your current mask.",
+            kSectionSky
+        },
     };
     return tips;
 }
