@@ -1,16 +1,22 @@
 #include "detection_panel.h"
+#include "detection_profiles.h"
 #include "preview_image.h"
 #include "readout_label.h"
 
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
 #include <QtGui/QPainter>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QDialog>
+#include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
@@ -194,7 +200,7 @@ private:
 DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("detectionPanel");
-    setMinimumWidth(350);
+    setMinimumWidth(380);
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     auto* scroll = new QScrollArea(this);
@@ -214,6 +220,28 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     target_->setToolTip("Each target keeps its own detection and capture settings. Changes only while stopped.");
     targetRow->addWidget(target_, 1);
     column->addLayout(targetRow);
+
+    auto* profileRow = new QHBoxLayout;
+    profileRow->addWidget(new QLabel("Profile", content));
+    profileCombo_ = new QComboBox(content);
+    profileCombo_->setObjectName("detectionProfileCombo");
+    profileCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    profileCombo_->setMinimumContentsLength(10);
+    profileCombo_->setToolTip("Saved detection profiles for the selected target. In Sky mode, the horizon mask is only changed by profiles saved with a mask.");
+    saveProfile_ = new QToolButton(content);
+    saveProfile_->setObjectName("detectionSaveProfile");
+    saveProfile_->setText("Save…");
+    saveProfile_->setToolTip("Save the current detection settings as a named profile.");
+    deleteProfile_ = new QToolButton(content);
+    deleteProfile_->setObjectName("detectionDeleteProfile");
+    deleteProfile_->setText("Delete");
+    deleteProfile_->setToolTip("Remove the currently selected saved detection profile.");
+    deleteProfile_->setEnabled(false);
+    profileRow->addWidget(profileCombo_, 1);
+    profileRow->addWidget(saveProfile_);
+    profileRow->addWidget(deleteProfile_);
+    column->addLayout(profileRow);
+
     sky_ = new QWidget(content);
     sky_->setObjectName("skySettings");
     auto* skyForm = new QFormLayout(sky_);
@@ -270,12 +298,12 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     minExposure_->setObjectName("followMinExposure");
     maxExposure_ = new QDoubleSpinBox(sky_);
     maxExposure_->setObjectName("followMaxExposure");
-    for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); }
+    for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); spin->setMaximumWidth(96); }
     maxGain_ = new QDoubleSpinBox(sky_);
     maxGain_->setObjectName("followMaxGain");
     gainStep_ = new QDoubleSpinBox(sky_);
     gainStep_->setObjectName("followGainStep");
-    for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); }
+    for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); spin->setMaximumWidth(96); }
     gainStep_->setSpecialValueText("Gain fixed");
     followReading_ = new QLabel(sky_);
     followReading_->setObjectName("followReading");
@@ -458,6 +486,10 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         showMask();
         emit settingsChanged();
     });
+    connect(profileCombo_, &QComboBox::currentIndexChanged, this, &DetectionPanel::onProfileComboChanged);
+    connect(saveProfile_, &QToolButton::clicked, this, &DetectionPanel::onSaveProfileClicked);
+    connect(deleteProfile_, &QToolButton::clicked, this, &DetectionPanel::onDeleteProfileClicked);
+    reloadProfiles();
     setSettings({});
 }
 
@@ -492,6 +524,7 @@ void DetectionPanel::setTarget(Target target)
     updating_ = updating;
     sky_->setVisible(target == Target::Sky);
     if (target != Target::Sky) drawMask_->setChecked(false);
+    reloadProfiles();
 }
 
 void DetectionPanel::setTargetEditable(bool editable)
@@ -597,7 +630,153 @@ void DetectionPanel::controlsChanged(bool maximumChanged)
         else values.maxPixels = values.minPixels;
     }
     setSettings(values);
+    if (profileCombo_->currentIndex() != 0)
+    {
+        const QSignalBlocker blocked(profileCombo_);
+        profileCombo_->setCurrentIndex(0);
+        deleteProfile_->setEnabled(false);
+    }
     emit settingsChanged();
+}
+
+void DetectionPanel::reloadProfiles()
+{
+    const QString selectedName = profileCombo_->currentData().toString();
+    const QSignalBlocker blocked(profileCombo_);
+    profileCombo_->clear();
+    profileCombo_->addItem("Custom / current", QString());
+    const auto profiles = loadSavedDetectionProfiles(current_);
+    for (const SavedDetectionProfile& p : profiles)
+    {
+        const QString label = p.hasMask ? QString("%1 (+mask)").arg(p.name) : p.name;
+        profileCombo_->addItem(label, p.name);
+    }
+    const int idx = selectedName.isEmpty() ? 0 : profileCombo_->findData(selectedName);
+    profileCombo_->setCurrentIndex(std::max(0, idx));
+    deleteProfile_->setEnabled(profileCombo_->currentIndex() > 0);
+}
+
+bool DetectionPanel::saveCurrentProfile(const QString& name, bool includeMask)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) return false;
+    SavedDetectionProfile profile;
+    profile.name = trimmed;
+    profile.target = current_;
+    profile.settings = settings();
+    profile.hasMask = (current_ == Target::Sky) && includeMask;
+    if (profile.hasMask)
+        profile.mask = mask_;
+    else
+        profile.settings.mask = {};
+    saveNamedDetectionProfile(profile);
+    reloadProfiles();
+    const int idx = profileCombo_->findData(trimmed);
+    if (idx > 0)
+    {
+        const QSignalBlocker blocked(profileCombo_);
+        profileCombo_->setCurrentIndex(idx);
+        deleteProfile_->setEnabled(true);
+    }
+    return true;
+}
+
+bool DetectionPanel::applyProfile(const QString& name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) return false;
+    const auto profiles = loadSavedDetectionProfiles(current_);
+    for (const SavedDetectionProfile& p : profiles)
+    {
+        if (p.name.compare(trimmed, Qt::CaseInsensitive) != 0) continue;
+        DetectionSettings next = p.settings;
+        if (current_ == Target::Sky)
+            next.mask = p.hasMask ? p.mask : mask_;
+        else
+            next.mask = {};
+        setSettings(next);
+        const int idx = profileCombo_->findData(p.name);
+        if (idx > 0)
+        {
+            const QSignalBlocker blocked(profileCombo_);
+            profileCombo_->setCurrentIndex(idx);
+            deleteProfile_->setEnabled(true);
+        }
+        emit settingsChanged();
+        return true;
+    }
+    return false;
+}
+
+bool DetectionPanel::deleteProfile(const QString& name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) return false;
+    removeNamedDetectionProfile(current_, trimmed);
+    reloadProfiles();
+    return true;
+}
+
+void DetectionPanel::onProfileComboChanged(int index)
+{
+    deleteProfile_->setEnabled(index > 0);
+    if (index <= 0) return;
+    const QString name = profileCombo_->itemData(index).toString();
+    applyProfile(name);
+}
+
+void DetectionPanel::onSaveProfileClicked()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Save detection profile");
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    auto* nameEdit = new QLineEdit(&dialog);
+    nameEdit->setObjectName("detectionProfileNameEdit");
+    nameEdit->setPlaceholderText(current_ == Target::Sky
+        ? "e.g. Backyard meteors, Dark site sky"
+        : "e.g. Moon dark side, Lunar transit");
+    if (profileCombo_->currentIndex() > 0)
+        nameEdit->setText(profileCombo_->currentData().toString());
+    form->addRow("Profile name", nameEdit);
+    layout->addLayout(form);
+
+    QCheckBox* includeMaskBox = nullptr;
+    if (current_ == Target::Sky)
+    {
+        includeMaskBox = new QCheckBox(
+            mask_.empty()
+                ? QString("Include horizon mask (currently empty)")
+                : QString("Include horizon mask (%1 shape(s))").arg(mask_.count()),
+            &dialog);
+        includeMaskBox->setObjectName("detectionProfileIncludeMask");
+        includeMaskBox->setChecked(false);
+        includeMaskBox->setToolTip("Off (default): loading this profile keeps whatever horizon mask you already have. "
+            "On: loading this profile replaces the horizon mask with the saved one.");
+        layout->addWidget(includeMaskBox);
+    }
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    nameEdit->setFocus();
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const QString name = nameEdit->text().trimmed();
+    if (name.isEmpty())
+    {
+        QMessageBox::warning(this, "Save detection profile", "Enter a name for the detection profile.");
+        return;
+    }
+    saveCurrentProfile(name, includeMaskBox && includeMaskBox->isChecked());
+}
+
+void DetectionPanel::onDeleteProfileClicked()
+{
+    if (profileCombo_->currentIndex() <= 0) return;
+    const QString name = profileCombo_->currentData().toString();
+    deleteProfile(name);
 }
 
 DetectionOverlay DetectionPanel::overlay() const { return static_cast<DetectionOverlay>(overlay_->currentIndex()); }

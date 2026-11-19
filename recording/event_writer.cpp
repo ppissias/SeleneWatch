@@ -88,7 +88,14 @@ void writeTestSignalLines(QTextStream& out, const EventClip& clip)
             << " centre_x=" << mark.settings.x << " centre_y=" << mark.settings.y
             << " fwhm_px=" << QString::number(mark.settings.fwhm, 'g', 17)
             << " amplitude_adu=" << QString::number(mark.settings.amplitude, 'g', 17)
-            << " duration_frames=" << mark.settings.frames << "\n";
+            << " duration_frames=" << mark.settings.frames;
+        if (mark.settings.kind != BlipKind::BrightFlash || mark.settings.vx != 0.0 || mark.settings.vy != 0.0)
+        {
+            out << " kind=" << blipKindName(mark.settings.kind)
+                << " vx=" << QString::number(mark.settings.vx, 'g', 17)
+                << " vy=" << QString::number(mark.settings.vy, 'g', 17);
+        }
+        out << "\n";
     }
 }
 

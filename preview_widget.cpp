@@ -3,8 +3,11 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
+#include <QtGui/QResizeEvent>
+#include <QtGui/QWheelEvent>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 PreviewWidget::PreviewWidget(QWidget* parent)
@@ -15,16 +18,23 @@ PreviewWidget::PreviewWidget(QWidget* parent)
     setCursor(Qt::CrossCursor);
     setToolTip("Click the image to select a pixel for a test flash. Drag a rectangle around a crater "
         "or other detail to lock on it. In Sky mode, with Draw mask on, a dragged rectangle is left out "
-        "of detection. Coordinates refer to the original frame.");
+        "of detection. Use the mouse wheel to zoom and right- or middle-drag to pan while zoomed. "
+        "Coordinates refer to the original frame.");
 }
 
 void PreviewWidget::setImage(QImage image)
 {
-    if (image.size() != image_.size())
+    const bool sizeChanged = image.size() != image_.size();
+    if (sizeChanged)
     {
         selected_.reset();
+        pan_ = {0.0, 0.0};
     }
     image_ = std::move(image);
+    if (sizeChanged)
+    {
+        emit zoomChanged(zoom(), fitMode_);
+    }
     update();
 }
 
@@ -38,7 +48,47 @@ void PreviewWidget::clear()
     foundBox_.reset();
     pressPosition_.reset();
     dragging_ = false;
+    pan_ = {0.0, 0.0};
+    panning_ = false;
+    setCursor(Qt::CrossCursor);
     update();
+}
+
+void PreviewWidget::setFitToWindow()
+{
+    fitMode_ = true;
+    pan_ = {0.0, 0.0};
+    panning_ = false;
+    setCursor(Qt::CrossCursor);
+    update();
+    emit zoomChanged(zoom(), true);
+}
+
+void PreviewWidget::setZoom(double factor)
+{
+    zoom_ = std::clamp(factor, kMinZoom, kMaxZoom);
+    fitMode_ = false;
+    if (!image_.isNull())
+    {
+        const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+        const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+        const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+        pan_ = clampedPanOffset(area, w, h, pan_);
+    }
+    else
+    {
+        pan_ = {0.0, 0.0};
+    }
+    update();
+    emit zoomChanged(zoom_, false);
+}
+
+double PreviewWidget::zoom() const
+{
+    if (!fitMode_) return zoom_;
+    if (image_.isNull() || image_.width() <= 0) return 1.0;
+    const QRect r = imageRect();
+    return r.isEmpty() ? 1.0 : r.width() / static_cast<double>(image_.width());
 }
 
 void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid)
@@ -83,17 +133,26 @@ QRectF PreviewWidget::toWidget(const QRectF& frameRect) const
 
 QRect PreviewWidget::dragRegion(QPointF from, QPointF to) const
 {
-    const QRectF image = imageRect();
-    // The image's right and bottom edges belong to the next pixel, outside it.
+    const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+    const QRectF visible = QRectF(imageRect()).intersected(QRectF(area));
+    if (visible.isEmpty()) return {};
+    // The visible image's right and bottom edges belong to the next pixel, outside it.
     auto clamp = [&](QPointF point) {
-        return QPointF(std::clamp(point.x(), image.left(), image.right() - 0.01),
-            std::clamp(point.y(), image.top(), image.bottom() - 0.01));
+        return QPointF(std::clamp(point.x(), visible.left(), visible.right() - 0.01),
+            std::clamp(point.y(), visible.top(), visible.bottom() - 0.01));
     };
     const auto a = framePosition(clamp(from));
     const auto b = framePosition(clamp(to));
     if (!a || !b) return {};
     return QRect(QPoint(std::min(a->x(), b->x()), std::min(a->y(), b->y())),
         QPoint(std::max(a->x(), b->x()), std::max(a->y(), b->y())));
+}
+
+QPointF PreviewWidget::clampedPanOffset(const QRect& area, int scaledW, int scaledH, QPointF desired) const
+{
+    const double maxX = scaledW > area.width() ? (scaledW - area.width()) * 0.5 : 0.0;
+    const double maxY = scaledH > area.height() ? (scaledH - area.height()) * 0.5 : 0.0;
+    return QPointF(std::clamp(desired.x(), -maxX, maxX), std::clamp(desired.y(), -maxY, maxY));
 }
 
 void PreviewWidget::setDetectionOverlay(QImage image, QRect frameBox)
@@ -115,37 +174,58 @@ QRect PreviewWidget::imageRect() const
         return {};
     }
     const QRect area = contentsRect().adjusted(1, 1, -1, -1);
-    const QSize size = image_.size().scaled(area.size(), Qt::KeepAspectRatio);
-    return QRect(area.x() + (area.width() - size.width()) / 2,
-        area.y() + (area.height() - size.height()) / 2, size.width(), size.height());
+    if (fitMode_)
+    {
+        const QSize size = image_.size().scaled(area.size(), Qt::KeepAspectRatio);
+        return QRect(area.x() + (area.width() - size.width()) / 2,
+            area.y() + (area.height() - size.height()) / 2, size.width(), size.height());
+    }
+    const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+    const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+    const QPointF pan = clampedPanOffset(area, w, h, pan_);
+    const int x = area.x() + static_cast<int>(std::lround((area.width() - w) * 0.5 + pan.x()));
+    const int y = area.y() + static_cast<int>(std::lround((area.height() - h) * 0.5 + pan.y()));
+    return QRect(x, y, w, h);
 }
 
 std::optional<QPoint> PreviewWidget::framePosition(QPointF position) const
 {
+    const QRect area = contentsRect().adjusted(1, 1, -1, -1);
     const QRect image = imageRect();
-    if (image.isEmpty() || position.x() < image.x() || position.x() >= image.x() + image.width()
+    if (image.isEmpty()
+        || position.x() < area.x() || position.x() >= area.x() + area.width()
+        || position.y() < area.y() || position.y() >= area.y() + area.height()
+        || position.x() < image.x() || position.x() >= image.x() + image.width()
         || position.y() < image.y() || position.y() >= image.y() + image.height())
     {
         return std::nullopt;
     }
-    return QPoint(static_cast<int>((position.x() - image.x()) * image_.width() / image.width()),
-        static_cast<int>((position.y() - image.y()) * image_.height() / image.height()));
+    const int fx = std::clamp(static_cast<int>((position.x() - image.x()) * image_.width() / image.width()),
+        0, image_.width() - 1);
+    const int fy = std::clamp(static_cast<int>((position.y() - image.y()) * image_.height() / image.height()),
+        0, image_.height() - 1);
+    return QPoint(fx, fy);
 }
 
 void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter painter(this);
     painter.fillRect(rect(), QColor("#121212"));
-    painter.setPen(QColor("#333333"));
-    painter.drawRect(rect().adjusted(0, 0, -1, -1));
     if (image_.isNull())
     {
+        painter.setPen(QColor("#333333"));
+        painter.drawRect(rect().adjusted(0, 0, -1, -1));
         painter.setPen(QColor("#dddddd"));
         painter.drawText(rect(), Qt::AlignCenter, "Choose a source and press Start");
         return;
     }
 
+    const QRect viewport = contentsRect().adjusted(1, 1, -1, -1);
     const QRect image = imageRect();
+    const QRect visibleImage = viewport.intersected(image);
+
+    painter.save();
+    painter.setClipRect(viewport);
     painter.drawImage(image, image_);
     if (!overlay_.isNull())
     {
@@ -167,7 +247,7 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
     if (!mask_.empty() || !pending_.empty())
     {
         painter.save();
-        painter.setClipRect(image);
+        painter.setClipRect(visibleImage);
         for (const QPolygon& shape : mask_)
         {
             QPolygonF area;
@@ -193,7 +273,7 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
     if (lockBox_ || foundBox_ || anchorBox_ || dragging_)
     {
         painter.save();
-        painter.setClipRect(image);
+        painter.setClipRect(visibleImage);
         if (anchorBox_ && anchorBox_->isValid())
         {
             painter.setPen(QPen(QColor("#ff99dd"), 1.5, Qt::DashDotLine));
@@ -220,7 +300,8 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
     {
         const QPointF centre(image.x() + (selected_->x() + 0.5) * image.width() / image_.width(),
             image.y() + (selected_->y() + 0.5) * image.height() / image_.height());
-        painter.setClipRect(image);
+        painter.save();
+        painter.setClipRect(visibleImage);
         // A dark outline keeps the cross visible on bright lunar terrain.
         for (int pass = 0; pass < 2; ++pass)
         {
@@ -232,13 +313,87 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
             painter.drawLine(centre + QPointF(0, -10), centre + QPointF(0, -6));
             painter.drawLine(centre + QPointF(0, 6), centre + QPointF(0, 10));
         }
+        painter.restore();
+    }
+    painter.restore();
+
+    painter.setPen(QColor("#333333"));
+    painter.drawRect(rect().adjusted(0, 0, -1, -1));
+}
+
+void PreviewWidget::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    if (!image_.isNull())
+    {
+        if (!fitMode_)
+        {
+            const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+            const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+            const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+            pan_ = clampedPanOffset(area, w, h, pan_);
+        }
+        else
+        {
+            emit zoomChanged(zoom(), true);
+        }
     }
 }
 
+void PreviewWidget::wheelEvent(QWheelEvent* event)
+{
+    if (image_.isNull())
+    {
+        event->ignore();
+        return;
+    }
+    double delta = event->angleDelta().y();
+    if (delta == 0.0) delta = event->pixelDelta().y();
+    if (delta == 0.0)
+    {
+        event->ignore();
+        return;
+    }
+
+    const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+    const QRect oldRect = imageRect();
+    const double oldScale = zoom();
+    const double steps = delta / 120.0;
+    const double newZoom = std::clamp(oldScale * std::pow(1.25, steps), kMinZoom, kMaxZoom);
+
+    // Keep the frame point under the cursor fixed on screen as zoom changes.
+    const QPointF cursor = event->position();
+    const double fx = (cursor.x() - oldRect.x()) * image_.width() / static_cast<double>(std::max(1, oldRect.width()));
+    const double fy = (cursor.y() - oldRect.y()) * image_.height() / static_cast<double>(std::max(1, oldRect.height()));
+    const double newW = image_.width() * newZoom;
+    const double newH = image_.height() * newZoom;
+    const double newX = cursor.x() - fx * newZoom;
+    const double newY = cursor.y() - fy * newZoom;
+    const QPointF desiredPan(
+        newX - area.x() - (area.width() - newW) * 0.5,
+        newY - area.y() - (area.height() - newH) * 0.5);
+
+    fitMode_ = false;
+    zoom_ = newZoom;
+    pan_ = clampedPanOffset(area, static_cast<int>(std::lround(newW)), static_cast<int>(std::lround(newH)), desiredPan);
+    update();
+    emit zoomChanged(zoom_, false);
+    event->accept();
+}
+
 // A press on the image waits for the release: a short one selects the
-// pressed pixel, a longer movement selects a region.
+// pressed pixel, a longer movement selects a region. Right- or middle-drag
+// pans when zoomed.
 void PreviewWidget::mousePressEvent(QMouseEvent* event)
 {
+    if ((event->button() == Qt::MiddleButton || event->button() == Qt::RightButton) && !image_.isNull() && !fitMode_)
+    {
+        panning_ = true;
+        panLastPos_ = event->position();
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton && framePosition(event->position()))
     {
         pressPosition_ = event->position();
@@ -251,6 +406,21 @@ void PreviewWidget::mousePressEvent(QMouseEvent* event)
 
 void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    if (panning_ && (event->buttons() & (Qt::MiddleButton | Qt::RightButton)))
+    {
+        const QPointF delta = event->position() - panLastPos_;
+        panLastPos_ = event->position();
+        if (!image_.isNull())
+        {
+            const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+            const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+            const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+            pan_ = clampedPanOffset(area, w, h, pan_ + delta);
+            update();
+        }
+        event->accept();
+        return;
+    }
     if (pressPosition_ && (event->buttons() & Qt::LeftButton))
     {
         dragPosition_ = event->position();
@@ -263,6 +433,13 @@ void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
 
 void PreviewWidget::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (panning_ && (event->button() == Qt::MiddleButton || event->button() == Qt::RightButton))
+    {
+        panning_ = false;
+        setCursor(Qt::CrossCursor);
+        event->accept();
+        return;
+    }
     if (event->button() != Qt::LeftButton || !pressPosition_)
     {
         QWidget::mouseReleaseEvent(event);

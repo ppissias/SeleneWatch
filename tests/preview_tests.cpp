@@ -1,7 +1,11 @@
 #include "preview_widget.h"
 
+#include <QtGui/QWheelEvent>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
+#include <QtWidgets/QApplication>
+
+#include <cmath>
 
 // Checks selection coordinates through scaling and letterboxing, and verifies source image bytes.
 class PreviewWidgetTest : public QObject
@@ -13,6 +17,7 @@ private slots:
     void marginsAndRightClicksDoNotSelect();
     void resizingKeepsTheSelectedFramePixel();
     void selectionNeverChangesTheImage();
+    void zoomPanAndCoordinateAccuracy();
 };
 
 void PreviewWidgetTest::mapsTheWholeImageIncludingItsLastPixel()
@@ -88,6 +93,67 @@ void PreviewWidgetTest::selectionNeverChangesTheImage()
     QVERIFY(screen.pixelColor(326, 241) != original.pixelColor(325, 240));
     QCOMPARE(screen.pixelColor(321, 241), original.pixelColor(320, 240));
     QCOMPARE(image, original);
+}
+
+void PreviewWidgetTest::zoomPanAndCoordinateAccuracy()
+{
+    PreviewWidget preview;
+    preview.resize(802, 602);
+    preview.setImage(QImage(640, 480, QImage::Format_Grayscale8));
+
+    QVERIFY(preview.isFitToWindow());
+    QCOMPARE(preview.imageRect(), QRect(1, 1, 800, 600));
+
+    QSignalSpy zoomSpy(&preview, &PreviewWidget::zoomChanged);
+    QSignalSpy selSpy(&preview, &PreviewWidget::positionSelected);
+
+    // 100% actual pixels: 640x480 centered inside 800x600 viewport.
+    preview.setZoom(1.0);
+    QVERIFY(!preview.isFitToWindow());
+    QVERIFY(std::abs(preview.zoom() - 1.0) < 1e-6);
+    QCOMPARE(preview.imageRect(), QRect(81, 61, 640, 480));
+    QCOMPARE(*preview.framePosition({81, 61}), QPoint(0, 0));
+    QCOMPARE(*preview.framePosition({401, 301}), QPoint(320, 240));
+    QCOMPARE(zoomSpy.count(), 1);
+
+    // 200%: 1280x960 centered inside 800x600 viewport -> left = 1 + (800-1280)/2 = -239.
+    preview.setZoom(2.0);
+    QCOMPARE(preview.imageRect().size(), QSize(1280, 960));
+    QCOMPARE(*preview.framePosition({401, 301}), QPoint(320, 240));
+
+    // Right-drag panning shifts the visible portion without selecting a pixel.
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(400, 300), QPointF(400, 300),
+        Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+    QMouseEvent move(QEvent::MouseMove, QPointF(500, 340), QPointF(500, 340),
+        Qt::NoButton, Qt::RightButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, QPointF(500, 340), QPointF(500, 340),
+        Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(&preview, &press);
+    QApplication::sendEvent(&preview, &move);
+    QApplication::sendEvent(&preview, &release);
+    QCOMPARE(selSpy.count(), 0);
+    QCOMPARE(preview.panOffset(), QPointF(100, 40));
+    // Shifted right by 100 widget px (50 frame px at 200%) and down by 40 widget px (20 frame px).
+    QCOMPARE(*preview.framePosition({401, 301}), QPoint(270, 220));
+
+    // Wheel zoom around an off-center cursor keeps that frame pixel pinned under the cursor.
+    const QPointF cursor(250, 200);
+    const auto beforeWheel = preview.framePosition(cursor);
+    QVERIFY(beforeWheel.has_value());
+    QWheelEvent wheel(cursor, cursor, QPoint(), QPoint(0, 120),
+        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(&preview, &wheel);
+    QVERIFY(preview.zoom() > 2.4);
+    const auto afterWheel = preview.framePosition(cursor);
+    QVERIFY(afterWheel.has_value());
+    QVERIFY(std::abs(afterWheel->x() - beforeWheel->x()) <= 1);
+    QVERIFY(std::abs(afterWheel->y() - beforeWheel->y()) <= 1);
+
+    // Back to Fit restores original rect and clears pan.
+    preview.setFitToWindow();
+    QVERIFY(preview.isFitToWindow());
+    QCOMPARE(preview.panOffset(), QPointF(0, 0));
+    QCOMPARE(preview.imageRect(), QRect(1, 1, 800, 600));
 }
 
 QTEST_MAIN(PreviewWidgetTest)

@@ -23,6 +23,8 @@ class QMenu;
 class QPushButton;
 class QSpinBox;
 class QTimer;
+class QToolButton;
+class WheelGuard;
 class RecordingReader;
 class RecordingSource;
 class SyntheticFrameSource;
@@ -81,6 +83,11 @@ private slots:
 
 private:
     void setupStatusBar();
+    void setupPreviewZoomBar();
+    void updateZoomControls(double effectiveZoom, bool fitToWindow);
+    void setupBlipControls();
+    void onBlipKindChanged();
+    [[nodiscard]] BlipKind selectedBlipKind() const;
     // The status bar's message line. A message stays until the next one,
     // or for timeoutMs when that is above zero.
     void showMessage(const QString& text, int timeoutMs = 0);
@@ -109,6 +116,9 @@ public:
     // Saves the single remembered output folder (empty: the default) after
     // checking that it can be written; the dialog's OK, and the window test.
     bool applyOutputFolder(const QString& folder, QString& error);
+    // Recreates the current output folder in place (safe even while Preview
+    // is running because the configured output root does not change).
+    bool recreateOutputFolder(QString& error);
     // Help → About: the release, the source revision and the licenses.
     [[nodiscard]] static QString aboutText();
     // Help → Acknowledgements: ACKNOWLEDGEMENTS.md, built into the program.
@@ -322,4 +332,9 @@ private:
 
     ManualDialog* manualDialog_{nullptr};
     TipsDialog* tipsDialog_{nullptr};
+    WheelGuard* wheelGuard_{nullptr};
+    QToolButton* zoomFitButton_{nullptr};
+    QToolButton* zoom100Button_{nullptr};
+    QToolButton* zoom200Button_{nullptr};
+    QLabel* zoomReadoutLabel_{nullptr};
 };

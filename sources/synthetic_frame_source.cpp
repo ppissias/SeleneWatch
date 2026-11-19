@@ -47,6 +47,12 @@ void SyntheticFrameSource::setPixelLayout(PixelFormat format, int bits, BitAlign
     format_ = format; bits_ = bits; alignment_ = alignment; bayer_ = bayer;
 }
 
+void SyntheticFrameSource::setScene(SyntheticScene scene)
+{
+    if (workerThread_.joinable()) throw std::logic_error("set the synthetic scene while the source is stopped");
+    scene_ = scene;
+}
+
 void SyntheticFrameSource::setSceneOffset(SceneOffset offset)
 {
     if (workerThread_.joinable()) throw std::logic_error("set the scene offset while the source is stopped");
@@ -154,7 +160,10 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
     }
 
     const auto [offsetX, offsetY] = sceneOffset_ ? sceneOffset_() : std::pair{0.0, 0.0};
-    paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0, offsetX, offsetY);
+    if (scene_ == SyntheticScene::Sky)
+        paintSyntheticSkyFrame(frame, width_, height_, index, framesLeft > 0);
+    else
+        paintSyntheticFrame(frame, width_, height_, index, framesLeft > 0, offsetX, offsetY);
     frame.testSource = true;
     frame.sourceDroppedFrames.reset();
     if (format_ == PixelFormat::Mono16)
@@ -171,9 +180,12 @@ void SyntheticFrameSource::generateFrame(Frame& frame, uint64_t index)
             const int x = static_cast<int>(i % width_), y = static_cast<int>(i / width_);
             const int original = frame.data[i];
             int value = original * maximum / 255;
-            if (original < 250 && !disk.contains(x, y)) value = 1 + original % 7;
-            if (original < 250 && disk.contains(x, y) && x > disk.centerX)
-                value = 4 + original % 20 + (x + y * 3) % 32;
+            if (scene_ == SyntheticScene::Moon)
+            {
+                if (original < 250 && !disk.contains(x, y)) value = 1 + original % 7;
+                if (original < 250 && disk.contains(x, y) && x > disk.centerX)
+                    value = 4 + original % 20 + (x + y * 3) % 32;
+            }
             if (bayer_ != BayerPattern::None && original < 250)
             {
                 if ((x & 1) != (y & 1)) value = value * 7 / 10;

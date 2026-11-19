@@ -71,6 +71,12 @@ public:
     void showNight(const QString& text);
     void showFollow(const QString& text);
 
+    // Named detection profiles (saved per target; Sky horizon mask is optional).
+    void reloadProfiles();
+    bool saveCurrentProfile(const QString& name, bool includeMask = false);
+    bool applyProfile(const QString& name);
+    bool deleteProfile(const QString& name);
+
 signals:
     void skyExtrasChanged();
     void settingsChanged();
@@ -83,6 +89,9 @@ private:
     void controlsChanged(bool maximumChanged = false);
     void updateDecision();
     void showMask();
+    void onSaveProfileClicked();
+    void onDeleteProfileClicked();
+    void onProfileComboChanged(int index);
 
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
@@ -99,6 +108,9 @@ private:
     QCheckBox* oneFrame_;
     QComboBox* overlay_;
     QComboBox* target_;
+    QComboBox* profileCombo_;
+    QToolButton* saveProfile_;
+    QToolButton* deleteProfile_;
     Target current_{Target::Moon};
     QWidget* sky_;
     QDoubleSpinBox* brightening_;

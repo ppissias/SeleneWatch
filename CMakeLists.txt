@@ -61,7 +61,7 @@ add_library(selenewatch_core STATIC
     recording/metadata_text.cpp recording/output_paths.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
     timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
     timelapse/video_exporter.cpp timelapse/timelapse_session.cpp
-    detection_mask.cpp sky_schedule.cpp sky_exposure.cpp
+    detection_mask.cpp detection_profiles.cpp sky_schedule.cpp sky_exposure.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
@@ -192,7 +192,7 @@ if(SELENEWATCH_TOUPTEK_SDK_DIR)
         SELENEWATCH_TOUPTEK_HEADER="${touptek_header}")
 endif()
 
-add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp
+add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp wheel_guard.h
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
     manual_dialog.h manual_dialog.cpp startup_tips.h startup_tips.cpp tips_dialog.h tips_dialog.cpp

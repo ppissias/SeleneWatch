@@ -3,6 +3,7 @@
 #include "frame.h"
 #include "frame_pool.h"
 #include "sources/frame_source.h"
+#include "sources/synthetic_scene.h"
 
 #include <atomic>
 #include <functional>
@@ -33,6 +34,8 @@ public:
     // While stopped. Mono16 includes a deliberately faint half-disk for stretch QA.
     void setPixelLayout(PixelFormat format, int bits, BitAlignment alignment = BitAlignment::Low,
         BayerPattern bayer = BayerPattern::None);
+    // While stopped. Moon paints a lunar disk; Sky paints stars and a horizon.
+    void setScene(SyntheticScene scene);
 
     // Where the Moon sits in the field, in frame pixels, asked once per
     // frame on the source thread. A simulated mount supplies it. While stopped.
@@ -54,6 +57,7 @@ private:
     int bits_{8};
     BitAlignment alignment_{BitAlignment::Low};
     BayerPattern bayer_{BayerPattern::None};
+    SyntheticScene scene_{SyntheticScene::Moon};
     SceneOffset sceneOffset_;
     std::atomic<double> targetFps_;
     std::atomic<int> flashFramesRemaining_{0};

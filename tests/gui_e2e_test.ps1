@@ -7,8 +7,12 @@
     so the observer's real settings and output folder are never touched.
 
     Exercises:
-      1. Synthetic stream -> Time-lapse capture -> Stop & MP4 build -> Re-sharpen -> Rebuild video only.
-      2. Real lunar recording (test_data\Moon_221449.avi, if present) -> Fast playback -> Time-lapse -> MP4 build.
+      1. Synthetic Moon -> Preview zoom (100%, 200%, Fit) -> Preview blip (0 clips written)
+         -> Save named Detection profile -> Monitoring bright flash + dark transit recorded on disk.
+      2. Synthetic Sky -> Switch target to Sky -> Monitoring moving meteor streak + lightning recorded on disk.
+      3. Synthetic Moon -> Time-lapse capture -> Stop & MP4 build -> Re-sharpen -> Rebuild video only.
+      4. Real lunar recording (test_data\Moon_221449.avi, if present) -> Preview + blip -> Monitoring clip on disk
+         -> Fast playback Time-lapse -> MP4 build.
 
     Saves screenshots of each stage into out\gui-e2e\ for visual verification.
 #>
@@ -287,6 +291,10 @@ try {
     Set-QSetting "output" "legacyNoticeShown" "true"
     Set-QSetting "tips" "showAtStartup" "false"
     Set-QSetting "testing" "tools" "true"
+    Set-QSetting "capture" "history" "0.5"
+    Set-QSetting "capture" "post" "0.4"
+    Set-QSetting "sky\capture" "history" "0.5"
+    Set-QSetting "sky\capture" "post" "0.4"
     Set-QSetting "timelapse" "preset" "0"
     Set-QSetting "timelapse" "interval" "0.5"
     Set-QSetting "timelapse" "window" "0.3"
@@ -296,6 +304,26 @@ try {
     Set-QSetting "timelapse" "writeMp4" "true"
     Set-QSetting "timelapse" "writeGif" "false"
     Set-QSetting "timelapse" "videoFps" "5"
+
+    function Click-ElementAtFraction([System.Windows.Automation.AutomationElement]$El, [double]$XFrac, [double]$YFrac) {
+        $hwnd = Get-NearestHwnd $El
+        $r = $El.Current.BoundingRectangle
+        $sx = [int][Math]::Round($r.X + $r.Width * $XFrac)
+        $sy = [int][Math]::Round($r.Y + $r.Height * $YFrac)
+        [Win32Msg]::ClickScreenPoint($hwnd, $sx, $sy)
+    }
+
+    function Select-DockTab([System.Windows.Automation.AutomationElement]$Win, [string]$TabName) {
+        $tab = Find-UiaElement -Root $Win -Name $TabName -ControlType ([System.Windows.Automation.ControlType]::TabItem)
+        $tabHwnd = Get-NearestHwnd $tab
+        $tabRect = $tab.Current.BoundingRectangle
+        if ($tabHwnd -ne [IntPtr]::Zero -and $tabRect.Width -gt 0 -and $tabRect.Height -gt 0) {
+            [Win32Msg]::ClickScreenPoint($tabHwnd, [int][Math]::Round($tabRect.X + $tabRect.Width / 2.0), [int][Math]::Round($tabRect.Y + $tabRect.Height / 2.0))
+        } else {
+            Invoke-UiaClick $tab "$TabName tab"
+        }
+        Start-Sleep -Milliseconds 300
+    }
 
     Write-Host "=== Launching SeleneWatch GUI E2E test ==="
     Write-Host "  Exe:     $ExePath"
@@ -312,28 +340,161 @@ try {
     Write-Host "  Main window ready: $($mainWin.Current.Name)"
     Start-Sleep -Milliseconds 500
 
-    # --- Scenario 1: Synthetic Time-lapse + Re-sharpen + Non-destructive Rebuild ---
-    Write-Host "`n[1/2] Synthetic Time-lapse + Re-sharpen + Rebuild..."
     $sourceCombo = Find-UiaElement -Root $mainWin -IdSuffix "sourceComboBox"
-    Select-UiaComboItem -Combo $sourceCombo -ItemText "Synthetic" -ProcessId $proc.Id
-
     $startBtn = Find-UiaElement -Root $mainWin -IdSuffix "startButton"
+    $monitorBtn = Find-UiaElement -Root $mainWin -IdSuffix "monitoringButton"
+    $stopBtn = Find-UiaElement -Root $mainWin -IdSuffix "stopButton"
+    $injectBtn = Find-UiaElement -Root $mainWin -IdSuffix "injectBlipButton"
+    $blipKindCombo = Find-UiaElement -Root $mainWin -IdSuffix "blipKindComboBox"
+    $previewEl = Find-UiaElement -Root $mainWin -IdSuffix "previewWidget"
+
+    # --- Scenario 1: Moon Preview, Zoom (100%/200%/Fit), Detection Profile, Bright + Darkening Clips ---
+    Write-Host "`n[1/4] Synthetic Moon: Preview Zoom + Detection Profile + Bright & Darkening Clips..."
+    Select-DockTab $mainWin "Detection"
+    Select-UiaComboItem -Combo $sourceCombo -ItemText "Synthetic" -ProcessId $proc.Id
+    Wait-Until { $startBtn.Current.IsEnabled } "Start button enabled"
+    Invoke-UiaClick $startBtn "Start synthetic Moon preview"
+    Wait-Until { $stopBtn.Current.IsEnabled } "Moon preview running"
+    Start-Sleep -Milliseconds 700
+
+    # Test Preview Zoom buttons: 100%, 200%, Fit.
+    $zoom100 = Find-UiaElement -Root $mainWin -IdSuffix "previewZoom100"
+    $zoom200 = Find-UiaElement -Root $mainWin -IdSuffix "previewZoom200"
+    $zoomFit = Find-UiaElement -Root $mainWin -IdSuffix "previewZoomFit"
+    $zoomLbl = Find-UiaElement -Root $mainWin -IdSuffix "previewZoomLabel"
+    Invoke-UiaClick $zoom100 "Zoom 100%"
+    Wait-Until { $zoomLbl.Current.Name -eq "100%" } "Zoom readout 100%"
+    Invoke-UiaClick $zoom200 "Zoom 200%"
+    Wait-Until { $zoomLbl.Current.Name -eq "200%" } "Zoom readout 200%"
+    Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "01_moon_zoom200.png")
+    Invoke-UiaClick $zoomFit "Zoom Fit"
+    Wait-Until { $zoomLbl.Current.Name -like "Fit*" } "Zoom readout Fit"
+
+    # Click lunar disk center and inject bright blip in Preview (must NOT write any clips).
+    Click-ElementAtFraction $previewEl 0.5 0.5
+    Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip enabled after clicking preview"
+    Invoke-UiaClick $injectBtn "Inject Moon preview blip"
+    Start-Sleep -Milliseconds 600
+    $moonEventsDir = Join-Path $TempOut "events\moon"
+    $moonBeforeMon = if (Test-Path $moonEventsDir) { @(Get-ChildItem -Path $moonEventsDir -Directory).Count } else { 0 }
+    Assert-True ($moonBeforeMon -eq 0) "Preview must not write clips, found $moonBeforeMon"
+
+    # Save a named Moon detection profile via the Save... dialog (async PostMessage click so modal exec doesn't block UIA Invoke).
+    $saveProfBtn = Find-UiaElement -Root $mainWin -IdSuffix "detectionSaveProfile"
+    Click-ElementAtFraction $saveProfBtn 0.5 0.5
+    $profDlg = Find-TopWindow -ProcessId $proc.Id -TitleContains "Save detection profile" -OwnerWindow $mainWin -TimeoutMs 8000
+    $profEdit = Find-UiaElement -Root $profDlg -IdSuffix "detectionProfileNameEdit" -ControlType ([System.Windows.Automation.ControlType]::Edit)
+    $valPat = $null
+    if ($profEdit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valPat)) {
+        $valPat.SetValue("Moon E2E Profile")
+    }
+    $saveDlgBtn = Find-UiaElement -Root $profDlg -Name "Save" -ControlType ([System.Windows.Automation.ControlType]::Button)
+    Invoke-UiaClick $saveDlgBtn "Confirm Save detection profile"
+    Start-Sleep -Milliseconds 300
+    $profCombo = Find-UiaElement -Root $mainWin -IdSuffix "detectionProfileCombo"
+    Write-Host "  Saved profile active in combo: $($profCombo.Current.Name)"
+
+    # Start Monitoring and inject a bright flash -> verify clip on disk.
+    Invoke-UiaClick $monitorBtn "Start Moon monitoring"
+    Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Moon monitoring active"
+    Start-Sleep -Milliseconds 700
+    Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Moon bright flash"
+    Invoke-UiaClick $injectBtn "Inject Moon bright flash"
+    Wait-Until {
+        (Test-Path $moonEventsDir) -and (@(Get-ChildItem -Path $moonEventsDir -Directory).Count -ge 1)
+    } "Moon bright flash clip written on disk" -TimeoutMs 15000
+
+    # Enable darkening and inject a Dark transit across the sunlit Moon -> verify second clip on disk.
+    $darkChk = Find-UiaElement -Root $mainWin -IdSuffix "darkeningTrigger"
+    Set-UiaCheckBox $darkChk $true
+    Click-ElementAtFraction $previewEl 0.42 0.5
+    Select-UiaComboItem -Combo $blipKindCombo -ItemText "Dark transit" -ProcessId $proc.Id
+    Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Dark transit"
+    $moonCountBeforeDark = @(Get-ChildItem -Path $moonEventsDir -Directory).Count
+    Invoke-UiaClick $injectBtn "Inject Moon dark transit"
+    Wait-Until {
+        @(Get-ChildItem -Path $moonEventsDir -Directory).Count -gt $moonCountBeforeDark
+    } "Moon dark transit clip written on disk" -TimeoutMs 15000
+    Start-Sleep -Milliseconds 600
+
+    Invoke-UiaClick $stopBtn "Stop Moon stream"
+    Wait-Until { $startBtn.Current.IsEnabled } "Moon stream stopped"
+
+    $moonDirs = @(Get-ChildItem -Path $moonEventsDir -Directory)
+    Assert-True ($moonDirs.Count -ge 2) "Expected >= 2 Moon event clips, found $($moonDirs.Count)"
+    $sawMoonDark = $false
+    foreach ($d in $moonDirs) {
+        Wait-Until { Test-Path (Join-Path $d.FullName "04_event_preview.gif") } "Moon preview GIF written" -TimeoutMs 10000
+        $evTxt = Get-Content (Join-Path $d.FullName "event.txt") -Raw
+        Assert-True ($evTxt -match "contains_test_signal: yes") "Moon clip missing contains_test_signal: yes"
+        if ($evTxt -match "kind=darkening") { $sawMoonDark = $true }
+    }
+    Assert-True $sawMoonDark "Expected Moon darkening clip in events\moon"
+    Write-Host "  Moon clips verified on disk: $($moonDirs.Count) (bright + darkening)"
+
+    # --- Scenario 2: Synthetic Sky Watch (Meteor streak + Lightning on disk) ---
+    Write-Host "`n[2/4] Synthetic Sky Watch: Meteor streak + Lightning recorded on disk..."
+    $targetCombo = Find-UiaElement -Root $mainWin -IdSuffix "targetChoice"
+    Select-UiaComboItem -Combo $targetCombo -ItemText "The sky" -ProcessId $proc.Id
+    Start-Sleep -Milliseconds 300
+
+    Invoke-UiaClick $startBtn "Start synthetic Sky preview"
+    Wait-Until { $stopBtn.Current.IsEnabled } "Sky preview running"
+    Start-Sleep -Milliseconds 700
+    Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "02_synthetic_sky.png")
+
+    Invoke-UiaClick $monitorBtn "Start Sky monitoring"
+    Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Sky monitoring active"
+    Start-Sleep -Milliseconds 800
+
+    $skyEventsDir = Join-Path $TempOut "events\sky"
+    Click-ElementAtFraction $previewEl 0.25 0.25
+    Select-UiaComboItem -Combo $blipKindCombo -ItemText "Moving streak" -ProcessId $proc.Id
+    Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Sky meteor streak"
+    Invoke-UiaClick $injectBtn "Inject Sky meteor streak"
+    Wait-Until {
+        (Test-Path $skyEventsDir) -and (@(Get-ChildItem -Path $skyEventsDir -Directory).Count -ge 1)
+    } "Sky meteor clip written on disk" -TimeoutMs 15000
+
+    Select-UiaComboItem -Combo $blipKindCombo -ItemText "Lightning" -ProcessId $proc.Id
+    Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Sky lightning"
+    $skyCountBeforeLightning = @(Get-ChildItem -Path $skyEventsDir -Directory).Count
+    Invoke-UiaClick $injectBtn "Inject Sky lightning"
+    Wait-Until {
+        @(Get-ChildItem -Path $skyEventsDir -Directory).Count -gt $skyCountBeforeLightning
+    } "Sky lightning clip written on disk" -TimeoutMs 15000
+    Start-Sleep -Milliseconds 600
+
+    Invoke-UiaClick $stopBtn "Stop Sky stream"
+    Wait-Until { $startBtn.Current.IsEnabled } "Sky stream stopped"
+
+    $skyDirs = @(Get-ChildItem -Path $skyEventsDir -Directory)
+    Assert-True ($skyDirs.Count -ge 2) "Expected >= 2 Sky event clips, found $($skyDirs.Count)"
+    $sawSkyMeteor = $false
+    $sawSkyLightning = $false
+    foreach ($d in $skyDirs) {
+        Wait-Until { Test-Path (Join-Path $d.FullName "04_event_preview.gif") } "Sky preview GIF written" -TimeoutMs 10000
+        $evTxt = Get-Content (Join-Path $d.FullName "event.txt") -Raw
+        Assert-True ($evTxt -match "mode: sky") "Sky clip missing mode: sky"
+        if ($evTxt -match "moving_streak|suggested_kind: meteor") { $sawSkyMeteor = $true }
+        if ($evTxt -match "kind=brightening|suggested_kind: lightning") { $sawSkyLightning = $true }
+    }
+    Assert-True $sawSkyMeteor "Expected Sky meteor clip in events\sky"
+    Assert-True $sawSkyLightning "Expected Sky lightning clip in events\sky"
+    Write-Host "  Sky clips verified on disk: $($skyDirs.Count) (meteor + lightning)"
+
+    # Switch back to Moon for Time-lapse scenarios.
+    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon" -ProcessId $proc.Id
+    Select-UiaComboItem -Combo $blipKindCombo -ItemText "Bright flash" -ProcessId $proc.Id
+    Start-Sleep -Milliseconds 300
+
+    # --- Scenario 3: Synthetic Time-lapse + Re-sharpen + Non-destructive Rebuild ---
+    Write-Host "`n[3/4] Synthetic Time-lapse + Re-sharpen + Rebuild..."
     Wait-Until { $startBtn.Current.IsEnabled } "Start button enabled"
     Invoke-UiaClick $startBtn "Start"
-
-    $stopBtn = Find-UiaElement -Root $mainWin -IdSuffix "stopButton"
     Wait-Until { $stopBtn.Current.IsEnabled } "Stream started (Stop enabled)"
 
-    # Switch right dock to Time-lapse tab (click center via PostMessage so Qt QTabBar switches cleanly).
-    $tlTab = Find-UiaElement -Root $mainWin -Name "Time-lapse" -ControlType ([System.Windows.Automation.ControlType]::TabItem)
-    $tabHwnd = Get-NearestHwnd $tlTab
-    $tabRect = $tlTab.Current.BoundingRectangle
-    if ($tabHwnd -ne [IntPtr]::Zero -and $tabRect.Width -gt 0 -and $tabRect.Height -gt 0) {
-        [Win32Msg]::ClickScreenPoint($tabHwnd, [int][Math]::Round($tabRect.X + $tabRect.Width / 2.0), [int][Math]::Round($tabRect.Y + $tabRect.Height / 2.0))
-    } else {
-        Invoke-UiaClick $tlTab "Time-lapse tab"
-    }
-    Start-Sleep -Milliseconds 300
+    Select-DockTab $mainWin "Time-lapse"
 
     $tlStartBtn = Find-UiaElement -Root $mainWin -IdSuffix "timelapseStartButton"
     Wait-Until { $tlStartBtn.Current.IsEnabled } "Start time-lapse button enabled"
@@ -349,7 +510,7 @@ try {
         throw
     }
     Write-Host "  Live telemetry: $($tlStats.Current.Name)"
-    Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "01_timelapse_running.png")
+    Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "03_timelapse_running.png")
 
     Invoke-UiaClick $tlStartBtn "Stop time-lapse"
     Wait-Until {
@@ -378,7 +539,7 @@ try {
 
     $dlg = Find-TopWindow -ProcessId $proc.Id -TitleContains "Re-sharpen" -OwnerWindow $mainWin -TimeoutMs 10000
     Start-Sleep -Milliseconds 400
-    Save-WindowScreenshot $dlg (Join-Path $ScreenshotDir "02_resharpen_dialog.png")
+    Save-WindowScreenshot $dlg (Join-Path $ScreenshotDir "04_resharpen_dialog.png")
 
     $applyBtn = Find-UiaElement -Root $dlg -IdSuffix "resharpenApply"
     $statusLbl = Find-UiaElement -Root $dlg -IdSuffix "resharpenStatus"
@@ -410,10 +571,10 @@ try {
     Invoke-UiaClick $stopBtn "Stop synthetic stream"
     Wait-Until { $startBtn.Current.IsEnabled } "Synthetic stream stopped"
 
-    # --- Scenario 2: Real Lunar Recording Time-lapse (when local test_data/ is present) ---
+    # --- Scenario 4: Real Lunar Recording (Blip Detection + Time-lapse when local test_data/ is present) ---
     $realMoon = Join-Path $RepoRoot "test_data\Moon_221449.avi"
     if ((-not $SkipRealData) -and (Test-Path $realMoon)) {
-        Write-Host "`n[2/2] Real Lunar Recording Time-lapse ($realMoon)..."
+        Write-Host "`n[4/4] Real Lunar Recording: Blip Injection + Time-lapse ($realMoon)..."
         Select-UiaComboItem -Combo $sourceCombo -ItemText "Recording" -ProcessId $proc.Id
 
         $openFileBtn = Find-UiaElement -Root $mainWin -IdSuffix "openFileButton"
@@ -449,7 +610,26 @@ try {
         } "Recording index loaded" -TimeoutMs 15000
         Write-Host "  Loaded recording: $($fileLabel.Current.Name)"
 
+        # First run Monitoring on the real lunar AVI with an injected bright flash and verify it records on disk.
         $speedCombo = Find-UiaElement -Root $mainWin -IdSuffix "speedComboBox"
+        Select-UiaComboItem -Combo $speedCombo -ItemText "Real time" -ProcessId $proc.Id
+        Invoke-UiaClick $startBtn "Start real lunar AVI preview"
+        Wait-Until { $stopBtn.Current.IsEnabled } "Real lunar AVI running"
+        Start-Sleep -Milliseconds 800
+        Invoke-UiaClick $monitorBtn "Start real lunar AVI monitoring"
+        Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Real lunar AVI monitoring active"
+        Start-Sleep -Milliseconds 700
+        Click-ElementAtFraction $previewEl 0.5 0.5
+        Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready on real lunar AVI"
+        $moonCountBeforeReal = @(Get-ChildItem -Path $moonEventsDir -Directory).Count
+        Invoke-UiaClick $injectBtn "Inject blip on real lunar AVI"
+        Wait-Until {
+            @(Get-ChildItem -Path $moonEventsDir -Directory).Count -gt $moonCountBeforeReal
+        } "Real lunar AVI blip clip written on disk" -TimeoutMs 15000
+        Write-Host "  Real lunar AVI blip clip recorded on disk."
+        Invoke-UiaClick $stopBtn "Stop real lunar AVI monitoring"
+        Wait-Until { $startBtn.Current.IsEnabled } "Real lunar AVI stopped"
+
         Select-UiaComboItem -Combo $speedCombo -ItemText "Fast" -ProcessId $proc.Id
 
         # Start Time-lapse directly from Stopped (verifies auto-start from frame 0 on real Moon AVI!).
@@ -462,7 +642,7 @@ try {
             ($tlTiming.Current.Name -like "Finished (*") -or ($tlStats.Current.Name -match "Stacks:\s*[2-9]")
         } "Real lunar time-lapse produced stacks" -TimeoutMs 45000
         Write-Host "  Real lunar telemetry: $($tlStats.Current.Name)"
-        Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "03_real_moon_timelapse.png")
+        Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "05_real_moon_timelapse.png")
 
         if ($tlStartBtn.Current.IsEnabled -and ($tlStartBtn.Current.Name -like "*Stop*")) {
             Invoke-UiaClick $tlStartBtn "Stop real lunar time-lapse"

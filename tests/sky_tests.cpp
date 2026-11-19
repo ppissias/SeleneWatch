@@ -1,7 +1,9 @@
+#include "blip_injector.h"
 #include "event_capture.h"
 #include "recording/clip_overview.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
+#include "sources/synthetic_scene.h"
 #include "target_defaults.h"
 
 #include <QtCore/QDir>
@@ -91,6 +93,7 @@ private slots:
     void aMaskedFlashDoesNotFireAndItsPixelsAreSaved();
     void aClipBelowTheDiskReserveIsLoggedButNotWritten();
     void linkedSkyClipsDoNotRepeatTheirHistory();
+    void syntheticSkySceneAndExtendedBlips();
 };
 
 // Done-when 2 and 8: a 3-pixel-wide streak at 45 degrees, 20 pixels a frame.
@@ -379,6 +382,78 @@ void SkyTest::linkedSkyClipsDoNotRepeatTheirHistory()
                 QVERIFY(clip.frames.front()->frameIndex <= previous.frames.back()->frameIndex);
         }
     }
+}
+
+void SkyTest::syntheticSkySceneAndExtendedBlips()
+{
+    // Verify synthetic Sky scene has stars, dark horizon, and does not false-trigger on its own.
+    Frame sample;
+    paintSyntheticSkyFrame(sample, 320, 240, 0, false);
+    QCOMPARE(sample.width, 320);
+    QCOMPARE(sample.height, 240);
+    int maxUpper = 0;
+    double horizonSum = 0;
+    int horizonCount = 0;
+    for (int y = 0; y < 160; ++y)
+        for (int x = 0; x < 320; ++x)
+            maxUpper = std::max(maxUpper, static_cast<int>(sample.data[static_cast<size_t>(y) * 320 + x]));
+    for (int y = 220; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) { horizonSum += sample.data[static_cast<size_t>(y) * 320 + x]; ++horizonCount; }
+    QVERIFY2(maxUpper >= 100, qPrintable(QString("Expected stars in synthetic sky, max=%1").arg(maxUpper)));
+    QVERIFY2(horizonSum / horizonCount < 14.0, qPrintable(QString("Expected dark horizon, mean=%1").arg(horizonSum / horizonCount)));
+
+    // Moving streak (meteor) and lightning on synthetic sky fire cleanly and classify as expected.
+    Watch watch(defaultCaptureSettings(Target::Sky), defaultDetectionSettings(Target::Sky));
+    BlipInjector injector;
+    for (uint64_t i = 0; i < 360; ++i)
+    {
+        auto frame = std::make_shared<Frame>();
+        paintSyntheticSkyFrame(*frame, 320, 240, i, false);
+        frame->timestamp = timeOf(i, 30);
+        frame->testSource = true;
+        if (i == 45)
+        {
+            QVERIFY(injector.request({40, 40, 2.5, 130.0, 6, BlipKind::MovingStreak, 14.0, 8.0}));
+        }
+        if (i == 230)
+        {
+            QVERIFY(injector.request({160, 120, 3.0, 50.0, 2, BlipKind::Lightning, 0.0, 0.0}));
+        }
+        injector.apply(*frame);
+        watch.capture.onFrame(std::move(frame));
+    }
+    watch.capture.finishPartial();
+    QVERIFY2(watch.clips.size() >= 2, qPrintable(QString("Expected >= 2 clips (meteor + lightning), got %1").arg(watch.clips.size())));
+
+    bool sawMeteor = false;
+    bool sawLightning = false;
+    for (const EventClip& clip : watch.clips)
+    {
+        OverviewRequest req;
+        req.onsetFrameIndex = clip.triggers.front().onsetFrameIndex;
+        req.largeBrightening = std::any_of(clip.triggers.begin(), clip.triggers.end(),
+            [](const ClipTrigger& t) { return t.change == ChangeKind::LargeRise; });
+        const ClipOverview ov = makeClipOverview(clip.frames, req);
+        if (ov.suggestedKind == "meteor") sawMeteor = true;
+        if (ov.suggestedKind == "lightning") sawLightning = true;
+    }
+    QVERIFY2(sawMeteor, "Expected synthetic MovingStreak to classify as meteor");
+    QVERIFY2(sawLightning, "Expected synthetic Lightning to classify as lightning");
+
+    // DarkTransit subtracts pixels and clamps at 0.
+    BlipInjector darkInj;
+    QVERIFY(darkInj.request({50, 50, 4.0, 100.0, 2, BlipKind::DarkTransit, 12.0, 0.0}));
+    Frame bright;
+    bright.width = 100; bright.height = 100; bright.format = PixelFormat::Mono8;
+    bright.data.assign(10000, 180);
+    bright.frameIndex = 0;
+    darkInj.apply(bright);
+    QCOMPARE(bright.data[50 * 100 + 50], uint8_t{80});
+    QCOMPARE(bright.data[50 * 100 + 62], uint8_t{180});
+    bright.data.assign(10000, 180);
+    bright.frameIndex = 1;
+    darkInj.apply(bright);
+    QCOMPARE(bright.data[50 * 100 + 62], uint8_t{80});
 }
 
 int main(int argc, char** argv)

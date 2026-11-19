@@ -31,6 +31,7 @@
 #include <QtGui/QAction>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QHelpEvent>
+#include <QtGui/QWheelEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -38,6 +39,7 @@
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QGroupBox>
+#include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
@@ -116,6 +118,10 @@ private slots:
     void outputFolderSafetyAndMigration();
     void timelapsePanelAndResharpenWorkflow();
     void userManualAndStartupTipsWorkflow();
+    void recreateFolderWhilePreviewRunningAndWheelGuard();
+    void detectionProfilesSaveLoadAndOptionalMask();
+    void previewZoomControlsSyncWithWidget();
+    void moonAndSkyEndToEndInjectionsRecordOnDisk();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -1829,6 +1835,351 @@ void UiTest::userManualAndStartupTipsWorkflow()
     QVERIFY(tipsDlg->isVisible());
     tipsDlg->hide();
     manualDlg->hide();
+}
+
+void UiTest::recreateFolderWhilePreviewRunningAndWheelGuard()
+{
+    QTemporaryDir base;
+    QVERIFY(base.isValid());
+    const QString outDir = QDir(base.path()).filePath("session_output");
+    QVERIFY(QDir().mkpath(outDir));
+
+    MainWindow window(nullptr, outDir);
+    window.show();
+    useSynthetic(window);
+
+    // WheelGuard: wheel events on focused spinbox, inner lineEdit, slider, and combobox must NOT mutate them.
+    auto* sigmaSpin = window.findChild<QDoubleSpinBox*>("detectionSigma");
+    auto* sigmaSlider = window.findChild<QSlider*>("sigmaSlider");
+    auto* overlayCombo = window.findChild<QComboBox*>("detectionOverlay");
+    QVERIFY(sigmaSpin && sigmaSlider && overlayCombo);
+
+    sigmaSpin->setFocus();
+    const double initialSigma = sigmaSpin->value();
+    const int initialSlider = sigmaSlider->value();
+    const int initialOverlay = overlayCombo->currentIndex();
+
+    const auto sendWheel = [](QWidget* target) {
+        const QPointF center(target->width() * 0.5, target->height() * 0.5);
+        QWheelEvent ev(center, target->mapToGlobal(center), QPoint(), QPoint(0, 120),
+            Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(target, &ev);
+    };
+
+    sendWheel(sigmaSpin);
+    if (auto* innerEdit = sigmaSpin->findChild<QLineEdit*>())
+    {
+        innerEdit->setFocus();
+        sendWheel(innerEdit);
+    }
+    sigmaSlider->setFocus();
+    sendWheel(sigmaSlider);
+    overlayCombo->setFocus();
+    sendWheel(overlayCombo);
+
+    QCOMPARE(sigmaSpin->value(), initialSigma);
+    QCOMPARE(sigmaSlider->value(), initialSlider);
+    QCOMPARE(overlayCombo->currentIndex(), initialOverlay);
+
+    // Finding 11: start Preview, delete output folder while running, verify recreateOutputFolder succeeds in place.
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* stopBtn = window.findChild<QPushButton*>("stopButton");
+    QTRY_VERIFY_WITH_TIMEOUT(stopBtn->isEnabled(), 5000);
+
+    QVERIFY(QDir(outDir).removeRecursively());
+    QVERIFY(!QDir(outDir).exists());
+
+    // applyOutputFolder still refuses while running, whereas recreateOutputFolder succeeds in place.
+    QString err;
+    QVERIFY(!window.applyOutputFolder(outDir, err));
+    QVERIFY(err.contains("Stop the stream"));
+
+    err.clear();
+    QVERIFY2(window.recreateOutputFolder(err), qPrintable(err));
+    QVERIFY(QDir(outDir).exists());
+
+    // Monitoring can now start cleanly without having stopped Preview.
+    auto* monitorBtn = window.findChild<QPushButton*>("monitoringButton");
+    monitorBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monitorBtn->text().contains("Stop monitoring"), 5000);
+    stopBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
+}
+
+void UiTest::detectionProfilesSaveLoadAndOptionalMask()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    auto* panel = window.findChild<DetectionPanel*>("detectionPanel");
+    auto* combo = window.findChild<QComboBox*>("detectionProfileCombo");
+    auto* deleteBtn = window.findChild<QToolButton*>("detectionDeleteProfile");
+    auto* targetCombo = window.findChild<QComboBox*>("targetChoice");
+    QVERIFY(panel && combo && deleteBtn && targetCombo);
+
+    // Moon mode: save and reload a named profile.
+    DetectionSettings moonCustom = panel->settings();
+    moonCustom.sigma = 9.5;
+    moonCustom.minPixels = 12;
+    moonCustom.darkening = true;
+    panel->setSettings(moonCustom);
+    QVERIFY(panel->saveCurrentProfile("Moon Transit", false));
+    QCOMPARE(combo->currentData().toString(), QString("Moon Transit"));
+    QVERIFY(deleteBtn->isEnabled());
+
+    // Mutate settings -> combo resets to "Custom / current".
+    auto* sigmaSpin = window.findChild<QDoubleSpinBox*>("detectionSigma");
+    sigmaSpin->setValue(5.0);
+    QCOMPARE(combo->currentIndex(), 0);
+    QVERIFY(!deleteBtn->isEnabled());
+
+    // Selecting saved profile restores exact values.
+    const int moonIdx = combo->findData("Moon Transit");
+    QVERIFY(moonIdx > 0);
+    combo->setCurrentIndex(moonIdx);
+    QCOMPARE(panel->settings().sigma, 9.5);
+    QCOMPARE(panel->settings().minPixels, 12);
+    QVERIFY(panel->settings().darkening);
+
+    // Switch to Sky mode: Moon profiles do not pollute Sky profiles.
+    targetCombo->setCurrentIndex(1);
+    QCOMPARE(panel->target(), Target::Sky);
+    QCOMPARE(combo->findData("Moon Transit"), -1);
+
+    // Draw horizon mask A, save profile WITHOUT mask (default).
+    QVERIFY(panel->addMaskRect(QRect(0, 400, 640, 80)));
+    const DetectionMask maskA = panel->settings().mask;
+    QCOMPARE(maskA.count(), 1);
+    sigmaSpin->setValue(7.5);
+    QVERIFY(panel->saveCurrentProfile("Backyard No Mask", false));
+    QVERIFY(!combo->currentText().contains("+mask"));
+
+    // Change mask to mask B and change sigma, then load "Backyard No Mask" -> mask B stays untouched!
+    window.findChild<QToolButton*>("clearMask")->click();
+    QVERIFY(panel->addMaskRect(QRect(0, 350, 640, 130)));
+    const DetectionMask maskB = panel->settings().mask;
+    QVERIFY(maskB != maskA);
+    sigmaSpin->setValue(11.0);
+
+    QVERIFY(panel->applyProfile("Backyard No Mask"));
+    QCOMPARE(panel->settings().sigma, 7.5);
+    QCOMPARE(panel->settings().mask, maskB);
+
+    // Now save profile WITH mask B, clear mask, and reload -> mask B is restored!
+    QVERIFY(panel->saveCurrentProfile("Backyard With Mask", true));
+    QVERIFY(combo->currentText().contains("+mask"));
+    window.findChild<QToolButton*>("clearMask")->click();
+    QVERIFY(panel->settings().mask.empty());
+
+    QVERIFY(panel->applyProfile("Backyard With Mask"));
+    QCOMPARE(panel->settings().mask, maskB);
+
+    // Delete profile removes it cleanly.
+    deleteBtn->click();
+    QCOMPARE(combo->findData("Backyard With Mask"), -1);
+}
+
+void UiTest::previewZoomControlsSyncWithWidget()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.resize(1200, 800);
+    window.show();
+    QCoreApplication::processEvents();
+
+    auto* preview = window.findChild<PreviewWidget*>("previewWidget");
+    auto* fitBtn = window.findChild<QToolButton*>("previewZoomFit");
+    auto* btn100 = window.findChild<QToolButton*>("previewZoom100");
+    auto* btn200 = window.findChild<QToolButton*>("previewZoom200");
+    auto* label = window.findChild<QLabel*>("previewZoomLabel");
+    QVERIFY(preview && fitBtn && btn100 && btn200 && label);
+
+    preview->setImage(QImage(640, 480, QImage::Format_Grayscale8));
+    QVERIFY(fitBtn->isChecked());
+    QVERIFY(!btn100->isChecked());
+    QVERIFY(!btn200->isChecked());
+    QVERIFY(label->text().startsWith("Fit"));
+
+    btn100->click();
+    QVERIFY(!fitBtn->isChecked());
+    QVERIFY(btn100->isChecked());
+    QVERIFY(!btn200->isChecked());
+    QCOMPARE(label->text(), QString("100%"));
+    QCOMPARE(preview->imageRect().size(), QSize(640, 480));
+
+    btn200->click();
+    QVERIFY(btn200->isChecked());
+    QCOMPARE(label->text(), QString("200%"));
+    QCOMPARE(preview->imageRect().size(), QSize(1280, 960));
+
+    // Wheel zoom on preview still works (not blocked by WheelGuard) and updates the zoom label.
+    const QPointF center(preview->width() * 0.5, preview->height() * 0.5);
+    QWheelEvent wheel(center, preview->mapToGlobal(center), QPoint(), QPoint(0, 120),
+        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(preview, &wheel);
+    QVERIFY(preview->zoom() > 2.2);
+    QVERIFY(!btn200->isChecked());
+    QVERIFY(!fitBtn->isChecked());
+
+    fitBtn->click();
+    QVERIFY(fitBtn->isChecked());
+    QVERIFY(preview->isFitToWindow());
+}
+
+void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window(nullptr, dir.path());
+    window.resize(1280, 820);
+    window.show();
+    useSynthetic(window);
+
+    // Keep clip history/post short so clips finalize promptly on disk.
+    auto* historySpin = window.findChild<QDoubleSpinBox*>("historySeconds");
+    auto* postSpin = window.findChild<QDoubleSpinBox*>("postSeconds");
+    auto* fpsSpin = window.findChild<QSpinBox*>("targetFpsSpinBox");
+    auto* startBtn = window.findChild<QPushButton*>("startButton");
+    auto* monitorBtn = window.findChild<QPushButton*>("monitoringButton");
+    auto* stopBtn = window.findChild<QPushButton*>("stopButton");
+    auto* injectBtn = window.findChild<QPushButton*>("injectBlipButton");
+    auto* kindCombo = window.findChild<QComboBox*>("blipKindComboBox");
+    auto* preview = window.findChild<PreviewWidget*>("previewWidget");
+    auto* panel = window.findChild<DetectionPanel*>("detectionPanel");
+    auto* stateLbl = window.findChild<QLabel*>("detectionState");
+    QVERIFY(historySpin && postSpin && fpsSpin && startBtn && monitorBtn && stopBtn && injectBtn && kindCombo && preview && panel && stateLbl);
+
+    fpsSpin->setValue(30);
+    historySpin->setValue(0.5);
+    postSpin->setValue(0.4);
+
+    // Helper: click a frame pixel on the preview widget.
+    auto clickFramePixel = [&](int fx, int fy) {
+        const QRect r = preview->imageRect();
+        QVERIFY(!r.isEmpty());
+        const QPoint pt(r.x() + static_cast<int>((fx + 0.5) * r.width() / 640.0),
+            r.y() + static_cast<int>((fy + 0.5) * r.height() / 480.0));
+        QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, pt);
+    };
+
+    // --- 1. Moon: Preview (no clip written) -> Monitoring Bright flash + Dark transit ---
+    startBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
+
+    // Click on lunar disk centre (320, 240) and inject a bright flash in Preview.
+    clickFramePixel(320, 240);
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 2000);
+    injectBtn->click();
+    QTest::qWait(400);
+    // Evidence rule: Preview MUST NOT write any event clip folders.
+    const QDir moonEventsDir(QDir(dir.path()).filePath("events/moon"));
+    QCOMPARE(moonEventsDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
+
+    // Now start Monitoring and inject a bright flash -> clip written on disk.
+    monitorBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monitorBtn->text().contains("Stop monitoring"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
+    injectBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
+        12000);
+
+    // Enable darkening and inject a Dark transit across the sunlit Moon.
+    auto* darkChk = window.findChild<QCheckBox*>("darkeningTrigger");
+    QVERIFY(darkChk);
+    darkChk->setChecked(true);
+    clickFramePixel(260, 240);
+    kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::DarkTransit)));
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
+    const int moonDirsBeforeDark = QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
+    injectBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > moonDirsBeforeDark,
+        12000);
+    stopBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
+
+    // Verify both Moon bright and dark clips exist on disk with valid evidence & overview/GIF.
+    const QStringList moonClips = QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QVERIFY(moonClips.size() >= 2);
+    bool sawMoonRise = false, sawMoonDark = false;
+    for (const QString& sub : moonClips)
+    {
+        const QDir clipDir(QDir(QDir(dir.path()).filePath("events/moon")).filePath(sub));
+        // EventWriter writes event.txt/ser/PNGs and finally 04_event_preview.gif asynchronously.
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
+        const QString ev = text(clipDir.filePath("event.txt"));
+        QVERIFY(ev.contains("contains_test_signal: yes"));
+        QVERIFY(QFileInfo::exists(clipDir.filePath("event.ser")));
+        QVERIFY(QFileInfo::exists(clipDir.filePath("00_overview.png")));
+        if (ev.contains("kind=automatic")) sawMoonRise = true;
+        if (ev.contains("kind=darkening")) sawMoonDark = true;
+    }
+    QVERIFY2(sawMoonRise, "Expected Moon bright flash clip on disk");
+    QVERIFY2(sawMoonDark, "Expected Moon dark transit clip on disk");
+
+    // --- 2. Sky Watch: Synthetic Sky + Horizon mask + Meteor streak + Lightning ---
+    auto* targetCombo = window.findChild<QComboBox*>("targetChoice");
+    targetCombo->setCurrentIndex(1); // The sky
+    QCOMPARE(panel->target(), Target::Sky);
+    historySpin->setValue(0.5);
+    postSpin->setValue(0.4);
+    QVERIFY(panel->addMaskRect(QRect(0, 360, 640, 120)));
+
+    startBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
+    monitorBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monitorBtn->text().contains("Stop monitoring"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
+
+    // Flash inside the masked horizon (y = 420) must be ignored.
+    kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::BrightFlash)));
+    clickFramePixel(320, 420);
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
+    injectBtn->click();
+    QTest::qWait(500);
+    QCOMPARE(QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
+
+    // Moving streak (meteor) in the upper sky -> recorded on disk.
+    clickFramePixel(140, 120);
+    kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::MovingStreak)));
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
+    injectBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
+        12000);
+
+    // Lightning (no pixel selection needed) -> recorded on disk.
+    kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::Lightning)));
+    QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
+    const int skyDirsBeforeLightning = QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
+    injectBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > skyDirsBeforeLightning,
+        12000);
+
+    stopBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
+
+    const QStringList skyClips = QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QVERIFY(skyClips.size() >= 2);
+    bool sawMeteor = false, sawLightning = false;
+    for (const QString& sub : skyClips)
+    {
+        const QDir clipDir(QDir(QDir(dir.path()).filePath("events/sky")).filePath(sub));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
+        const QString ev = text(clipDir.filePath("event.txt"));
+        QVERIFY(ev.contains("mode: sky"));
+        QVERIFY(ev.contains("contains_test_signal: yes"));
+        QVERIFY(QFileInfo::exists(clipDir.filePath("00_overview.png")));
+        if (ev.contains("kind=moving_streak") || ev.contains("suggested_kind: meteor")) sawMeteor = true;
+        if (ev.contains("kind=brightening") || ev.contains("suggested_kind: lightning")) sawLightning = true;
+    }
+    QVERIFY2(sawMeteor, "Expected Sky meteor streak clip on disk");
+    QVERIFY2(sawLightning, "Expected Sky lightning clip on disk");
+    QVERIFY(text(QDir(dir.path()).filePath("events/sky/candidates.txt")).contains("mode=sky"));
 }
 
 int main(int argc, char** argv)

@@ -22,11 +22,18 @@ class PreviewWidget : public QWidget
 public:
     // A press that moves farther than this, in screen pixels, is a drag.
     static constexpr int kDragThreshold = 5;
+    static constexpr double kMinZoom = 0.25;
+    static constexpr double kMaxZoom = 8.0;
 
     explicit PreviewWidget(QWidget* parent = nullptr);
 
     void setImage(QImage image);
     void clear();
+    void setFitToWindow();
+    void setZoom(double factor);
+    [[nodiscard]] bool isFitToWindow() const { return fitMode_; }
+    [[nodiscard]] double zoom() const;
+    [[nodiscard]] QPointF panOffset() const { return pan_; }
     void setDetectionOverlay(QImage image, QRect frameBox);
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
@@ -45,9 +52,12 @@ signals:
     void regionSelected(QRect frameRegion);
     // A double-click on the image, which closes a mask shape being drawn.
     void shapeClosed();
+    void zoomChanged(double effectiveZoom, bool fitToWindow);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -57,6 +67,7 @@ private:
     [[nodiscard]] QRectF toWidget(const QRectF& frameRect) const;
     // The frame pixels a drag between two widget points covers, clamped to the image.
     [[nodiscard]] QRect dragRegion(QPointF from, QPointF to) const;
+    [[nodiscard]] QPointF clampedPanOffset(const QRect& area, int scaledW, int scaledH, QPointF desired) const;
 
     QImage image_;
     QImage overlay_;
@@ -72,4 +83,10 @@ private:
     std::optional<QPointF> pressPosition_;
     QPointF dragPosition_;
     bool dragging_{false};
+    // Zoom and pan state. Fit mode scales to the widget; manual zoom uses zoom_ and pan_.
+    bool fitMode_{true};
+    double zoom_{1.0};
+    QPointF pan_{0.0, 0.0};
+    bool panning_{false};
+    QPointF panLastPos_;
 };

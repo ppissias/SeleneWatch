@@ -234,14 +234,18 @@
      <widget class="QGroupBox" name="blipGroupBox">
       <property name="title"><string>Test flash</string></property>
       <layout class="QGridLayout" name="blipLayout">
-       <item row="0" column="0"><widget class="QLabel" name="blipPositionLabel">
-        <property name="text"><string>Click the preview to place a flash</string></property>
+       <item row="0" column="0"><widget class="QLabel" name="blipKindLabel">
+        <property name="text"><string>Kind:</string></property>
+        <property name="buddy"><cstring>blipKindComboBox</cstring></property>
        </widget></item>
-       <item row="0" column="1"><widget class="QLabel" name="blipFwhmLabel">
+       <item row="0" column="1"><widget class="QComboBox" name="blipKindComboBox">
+        <property name="toolTip"><string>Shape and motion of the injected test signal.</string></property>
+       </widget></item>
+       <item row="0" column="2"><widget class="QLabel" name="blipFwhmLabel">
         <property name="text"><string>FWHM:</string></property>
         <property name="buddy"><cstring>blipFwhmSpinBox</cstring></property>
        </widget></item>
-       <item row="0" column="2"><widget class="QDoubleSpinBox" name="blipFwhmSpinBox">
+       <item row="0" column="3"><widget class="QDoubleSpinBox" name="blipFwhmSpinBox">
         <property name="toolTip"><string>Full width at half maximum of the Gaussian, in original frame pixels</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>0.5</double></property>
@@ -249,35 +253,38 @@
         <property name="value"><double>3.0</double></property>
         <property name="suffix"><string> px</string></property>
        </widget></item>
-       <item row="0" column="3"><widget class="QLabel" name="blipAmplitudeLabel">
+       <item row="0" column="4"><widget class="QLabel" name="blipAmplitudeLabel">
         <property name="text"><string>Peak:</string></property>
         <property name="buddy"><cstring>blipAmplitudeSpinBox</cstring></property>
        </widget></item>
-       <item row="0" column="4"><widget class="QDoubleSpinBox" name="blipAmplitudeSpinBox">
-        <property name="toolTip"><string>Addition in native sample units (ADU): 12-bit units for a 12-bit frame. Values saturate at the stream's maximum.</string></property>
+       <item row="0" column="5"><widget class="QDoubleSpinBox" name="blipAmplitudeSpinBox">
+        <property name="toolTip"><string>Change in native sample units (ADU): 12-bit units for a 12-bit frame. Values clamp at the stream's limits.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>0.1</double></property>
         <property name="maximum"><double>65535.0</double></property>
         <property name="value"><double>100.0</double></property>
         <property name="suffix"><string> ADU</string></property>
        </widget></item>
-       <item row="0" column="5"><widget class="QLabel" name="blipFramesLabel">
+       <item row="0" column="6"><widget class="QLabel" name="blipFramesLabel">
         <property name="text"><string>Duration:</string></property>
         <property name="buddy"><cstring>blipFramesSpinBox</cstring></property>
        </widget></item>
-       <item row="0" column="6"><widget class="QSpinBox" name="blipFramesSpinBox">
+       <item row="0" column="7"><widget class="QSpinBox" name="blipFramesSpinBox">
         <property name="toolTip"><string>Number of delivered frames to change. Later edits do not change an injection already requested.</string></property>
         <property name="minimum"><number>1</number></property>
         <property name="maximum"><number>10000</number></property>
         <property name="value"><number>2</number></property>
         <property name="suffix"><string> frames</string></property>
        </widget></item>
-       <item row="0" column="7"><widget class="QPushButton" name="injectBlipButton">
+       <item row="0" column="8"><widget class="QPushButton" name="injectBlipButton">
         <property name="enabled"><bool>false</bool></property>
-        <property name="toolTip"><string>Adds the test flash to the next frames. Small or faint flashes may be visible without triggering a saved clip.</string></property>
+        <property name="toolTip"><string>Injects the test signal into the next frames. Small or faint signals may be visible without triggering a saved clip.</string></property>
         <property name="text"><string>Inject blip</string></property>
        </widget></item>
-       <item row="1" column="0" colspan="8"><widget class="QLabel" name="blipStatusLabel">
+       <item row="1" column="0" colspan="3"><widget class="QLabel" name="blipPositionLabel">
+        <property name="text"><string>Click the preview to place a flash</string></property>
+       </widget></item>
+       <item row="1" column="3" colspan="6"><widget class="QLabel" name="blipStatusLabel">
         <property name="wordWrap"><bool>true</bool></property>
         <property name="text"><string>Injected frames are marked as test data.</string></property>
        </widget></item>

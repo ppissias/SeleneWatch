@@ -38,6 +38,12 @@ inline constexpr int kFlashGray = 255;
 inline constexpr int kFlashFrames = 3;
 inline constexpr float kFlashCenterYOffset = 0.45f;
 
+enum class SyntheticScene
+{
+    Moon,
+    Sky
+};
+
 // Fills one synthetic lunar image, including the moving marker.
 // flash paints the injected spot. Timestamps are left to the caller.
 //
@@ -48,3 +54,9 @@ inline constexpr float kFlashCenterYOffset = 0.45f;
 // unique place to find.
 void paintSyntheticFrame(Frame& frame, int width, int height, uint64_t index, bool flash,
     double offsetX = 0, double offsetY = 0);
+
+// Fills one synthetic night-sky image: dark sky with subtle horizon glow,
+// uncorrelated sensor noise, steady stars, and a dark tree/roofline horizon
+// silhouette along the bottom. When flash is true, paints a brief bright
+// meteor-like streak across the upper sky.
+void paintSyntheticSkyFrame(Frame& frame, int width, int height, uint64_t index, bool flash);

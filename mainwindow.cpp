@@ -9,6 +9,7 @@
 #include "resharpen_dialog.h"
 #include "manual_dialog.h"
 #include "tips_dialog.h"
+#include "wheel_guard.h"
 #include "camera_panel.h"
 #include "camera_support_dialog.h"
 #include "playerone_camera_panel.h"
@@ -55,6 +56,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStatusBar>
 #include <QtWidgets/QTextBrowser>
+#include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 
 #include <filesystem>
@@ -100,6 +102,11 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
 {
     ui_->setupUi(this);
     setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
+
+    // Prevent accidental mouse-wheel changes on spin boxes, sliders, and closed combo boxes.
+    wheelGuard_ = new WheelGuard(this);
+    if (QCoreApplication* app = QCoreApplication::instance())
+        app->installEventFilter(wheelGuard_);
 
     // Remembered output root across restarts and upgrades, or isolated root in tests.
     customOutputRoot_ = !outputRoot.isEmpty();
@@ -152,6 +159,8 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     session_ = std::make_unique<Session>(this, outputRoot, std::move(notifications));
 
     setupStatusBar();
+    setupPreviewZoomBar();
+    setupBlipControls();
     setupDetectionPanel();
     setupDisplayPanel();
     setupHistogramPanel();
@@ -320,6 +329,11 @@ void MainWindow::rebuildSourceList()
 
 MainWindow::~MainWindow()
 {
+    if (wheelGuard_)
+    {
+        if (QCoreApplication* app = QCoreApplication::instance())
+            app->removeEventFilter(wheelGuard_);
+    }
     // QMainWindow may hide its docks while its base destructor runs, after
     // this derived window and its members have ceased to exist.
     if (detectionDock_) disconnect(detectionDock_, nullptr, this, nullptr);
@@ -1234,6 +1248,31 @@ bool MainWindow::applyOutputFolder(const QString& folder, QString& error)
     return true;
 }
 
+bool MainWindow::recreateOutputFolder(QString& error)
+{
+    const uint64_t reserve = displayPanel_ ? displayPanel_->captureSettings().diskReserveBytes : 0;
+    const QString root = session_->outputRoot();
+    const OutputFolderCheck recreated = checkOutputFolder(root, reserve, true);
+    if (!recreated.ok)
+    {
+        error = recreated.error;
+        showMessage(error, 8000);
+        return false;
+    }
+    if (recreated.belowReserve && recreated.freeBytes)
+    {
+        showMessage(QString("Recreated %1. Warning: %2 GiB free, below the disk reserve of %3 GiB.")
+            .arg(QDir::toNativeSeparators(root))
+            .arg(static_cast<double>(*recreated.freeBytes) / kGiB, 0, 'f', 1)
+            .arg(static_cast<double>(reserve) / kGiB, 0, 'f', 0), 8000);
+    }
+    else
+    {
+        showMessage(QString("Recreated output folder %1.").arg(QDir::toNativeSeparators(root)), 6000);
+    }
+    return true;
+}
+
 bool MainWindow::ensureOutputFolderReady(const QString& actionName)
 {
     const uint64_t reserve = displayPanel_ ? displayPanel_->captureSettings().diskReserveBytes : 0;
@@ -1258,16 +1297,28 @@ bool MainWindow::ensureOutputFolderReady(const QString& actionName)
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle("Output folder unavailable");
     box.setText(QString("Cannot start %1: %2").arg(actionName, check.error));
+    if (session_->isRunning())
+        box.setInformativeText("You can recreate the current folder in place, or stop the stream first to choose a different folder.");
     QPushButton* recreateBtn = nullptr;
     if (check.folderMissing && !check.mountMissing)
         recreateBtn = box.addButton("Recreate folder", QMessageBox::AcceptRole);
     QPushButton* chooseBtn = box.addButton("Choose folder…", QMessageBox::ActionRole);
+    if (session_->isRunning())
+    {
+        chooseBtn->setEnabled(false);
+        chooseBtn->setToolTip("Stop the stream first to choose a different output folder.");
+    }
     box.addButton(QMessageBox::Cancel);
     box.exec();
     if (recreateBtn && box.clickedButton() == recreateBtn)
     {
         QString error;
-        return applyOutputFolder(session_->outputRoot(), error);
+        if (!recreateOutputFolder(error))
+        {
+            QMessageBox::warning(this, "Output folder", error);
+            return false;
+        }
+        return true;
     }
     if (box.clickedButton() == chooseBtn)
     {
@@ -1527,6 +1578,122 @@ void MainWindow::setupStatusBar()
     updateCandidateReadout();
 }
 
+void MainWindow::setupPreviewZoomBar()
+{
+    auto* zoomBar = new QWidget(ui_->centralWidget);
+    zoomBar->setObjectName("previewZoomBar");
+    auto* row = new QHBoxLayout(zoomBar);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(4);
+    row->addWidget(new QLabel("View:", zoomBar));
+
+    zoomFitButton_ = new QToolButton(zoomBar);
+    zoomFitButton_->setObjectName("previewZoomFit");
+    zoomFitButton_->setText("Fit");
+    zoomFitButton_->setCheckable(true);
+    zoomFitButton_->setChecked(true);
+    zoomFitButton_->setToolTip("Fit the live frame to the preview window.");
+
+    zoom100Button_ = new QToolButton(zoomBar);
+    zoom100Button_->setObjectName("previewZoom100");
+    zoom100Button_->setText("100%");
+    zoom100Button_->setCheckable(true);
+    zoom100Button_->setToolTip("Show actual sensor pixels (1:1).");
+
+    zoom200Button_ = new QToolButton(zoomBar);
+    zoom200Button_->setObjectName("previewZoom200");
+    zoom200Button_->setText("200%");
+    zoom200Button_->setCheckable(true);
+    zoom200Button_->setToolTip("Zoom to 200% of actual pixels.");
+
+    zoomReadoutLabel_ = new QLabel("Fit", zoomBar);
+    zoomReadoutLabel_->setObjectName("previewZoomLabel");
+
+    auto* hint = new QLabel("Mouse wheel: zoom · Right/middle-drag: pan", zoomBar);
+    hint->setStyleSheet("color: #888888;");
+
+    row->addWidget(zoomFitButton_);
+    row->addWidget(zoom100Button_);
+    row->addWidget(zoom200Button_);
+    row->addSpacing(6);
+    row->addWidget(zoomReadoutLabel_);
+    row->addStretch(1);
+    row->addWidget(hint);
+
+    const int previewIndex = ui_->verticalLayout->indexOf(ui_->previewWidget);
+    ui_->verticalLayout->insertWidget(std::max(0, previewIndex), zoomBar);
+
+    connect(zoomFitButton_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setFitToWindow(); });
+    connect(zoom100Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(1.0); });
+    connect(zoom200Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(2.0); });
+    connect(ui_->previewWidget, &PreviewWidget::zoomChanged, this, &MainWindow::updateZoomControls);
+}
+
+void MainWindow::updateZoomControls(double effectiveZoom, bool fitToWindow)
+{
+    if (!zoomFitButton_ || !zoom100Button_ || !zoom200Button_ || !zoomReadoutLabel_) return;
+    const QSignalBlocker bFit(zoomFitButton_);
+    const QSignalBlocker b100(zoom100Button_);
+    const QSignalBlocker b200(zoom200Button_);
+    zoomFitButton_->setChecked(fitToWindow);
+    zoom100Button_->setChecked(!fitToWindow && std::abs(effectiveZoom - 1.0) < 0.01);
+    zoom200Button_->setChecked(!fitToWindow && std::abs(effectiveZoom - 2.0) < 0.01);
+    const int pct = std::max(1, static_cast<int>(std::lround(effectiveZoom * 100.0)));
+    zoomReadoutLabel_->setText(fitToWindow ? QString("Fit (%1%)").arg(pct) : QString("%1%").arg(pct));
+}
+
+void MainWindow::setupBlipControls()
+{
+    const QSignalBlocker blocked(ui_->blipKindComboBox);
+    ui_->blipKindComboBox->clear();
+    ui_->blipKindComboBox->addItem("Bright flash", static_cast<int>(BlipKind::BrightFlash));
+    ui_->blipKindComboBox->addItem("Dark transit", static_cast<int>(BlipKind::DarkTransit));
+    ui_->blipKindComboBox->addItem("Moving streak (meteor)", static_cast<int>(BlipKind::MovingStreak));
+    ui_->blipKindComboBox->addItem("Blinking mover (aircraft)", static_cast<int>(BlipKind::BlinkingMover));
+    ui_->blipKindComboBox->addItem("Lightning", static_cast<int>(BlipKind::Lightning));
+    connect(ui_->blipKindComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onBlipKindChanged);
+}
+
+BlipKind MainWindow::selectedBlipKind() const
+{
+    const QVariant kindData = ui_->blipKindComboBox->currentData();
+    return kindData.isValid() ? static_cast<BlipKind>(kindData.toInt()) : BlipKind::BrightFlash;
+}
+
+void MainWindow::onBlipKindChanged()
+{
+    const BlipKind kind = selectedBlipKind();
+    ui_->blipFwhmSpinBox->setEnabled(kind != BlipKind::Lightning);
+    switch (kind)
+    {
+    case BlipKind::BrightFlash:
+        ui_->blipFwhmSpinBox->setValue(3.0);
+        ui_->blipAmplitudeSpinBox->setValue(std::min(100.0, ui_->blipAmplitudeSpinBox->maximum()));
+        ui_->blipFramesSpinBox->setValue(2);
+        break;
+    case BlipKind::DarkTransit:
+        ui_->blipFwhmSpinBox->setValue(10.0);
+        ui_->blipAmplitudeSpinBox->setValue(std::min(120.0, ui_->blipAmplitudeSpinBox->maximum()));
+        ui_->blipFramesSpinBox->setValue(6);
+        break;
+    case BlipKind::MovingStreak:
+        ui_->blipFwhmSpinBox->setValue(2.5);
+        ui_->blipAmplitudeSpinBox->setValue(std::min(120.0, ui_->blipAmplitudeSpinBox->maximum()));
+        ui_->blipFramesSpinBox->setValue(6);
+        break;
+    case BlipKind::BlinkingMover:
+        ui_->blipFwhmSpinBox->setValue(3.0);
+        ui_->blipAmplitudeSpinBox->setValue(std::min(140.0, ui_->blipAmplitudeSpinBox->maximum()));
+        ui_->blipFramesSpinBox->setValue(55);
+        break;
+    case BlipKind::Lightning:
+        ui_->blipAmplitudeSpinBox->setValue(std::min(50.0, ui_->blipAmplitudeSpinBox->maximum()));
+        ui_->blipFramesSpinBox->setValue(2);
+        break;
+    }
+    updateBlipReadout();
+}
+
 void MainWindow::showMessage(const QString& text, int timeoutMs)
 {
     messageLabel_->setText(text);
@@ -1755,17 +1922,27 @@ void MainWindow::updateFrameLabel(const Frame& frame)
 
 void MainWindow::updateBlipReadout()
 {
+    const BlipKind kind = selectedBlipKind();
+    const bool wholeFrame = (kind == BlipKind::Lightning);
     const auto centre = ui_->previewWidget->selectedPosition();
     const bool busy = session_->blipBusy();
-    ui_->injectBlipButton->setEnabled(session_->isRunning() && !session_->sourceFinished() && centre && !busy);
-    ui_->blipPositionLabel->setText(centre
-        ? QString("Centre: (%1, %2)").arg(centre->x()).arg(centre->y())
-        : QString("Click the preview to place a flash"));
+    const bool ready = wholeFrame || centre.has_value();
+    ui_->injectBlipButton->setEnabled(session_->isRunning() && !session_->sourceFinished() && ready && !busy);
+    if (wholeFrame)
+    {
+        ui_->blipPositionLabel->setText("Whole frame (no pixel selection needed)");
+    }
+    else
+    {
+        ui_->blipPositionLabel->setText(centre
+            ? QString("Centre: (%1, %2)").arg(centre->x()).arg(centre->y())
+            : QString("Click the preview to place a flash"));
+    }
     ui_->blipStatusLabel->setText(QString("Next peak: %1 ADU. %2")
         .arg(ui_->blipAmplitudeSpinBox->value(), 0, 'f', 1)
         .arg(busy ? "Injecting test frames; edits apply to the next flash."
                   : "Injected frames are marked as test data."));
-    if (centre && latestDetection_.probeX == centre->x() && latestDetection_.probeY == centre->y()
+    if (!wholeFrame && centre && latestDetection_.probeX == centre->x() && latestDetection_.probeY == centre->y()
         && latestDetection_.probeNoise > 0)
     {
         ui_->blipStatusLabel->setText(ui_->blipStatusLabel->text()
@@ -1800,6 +1977,7 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     if (kind == "synthetic")
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
+        source->setScene(target_ == Target::Sky ? SyntheticScene::Sky : SyntheticScene::Moon);
         // The simulated mount moves the painted Moon; it stays put while that mount is not connected.
         source->setSceneOffset([pointing = simulatedPointing_] {
             const auto offset = pointing->imageOffset(SimulatedPointing::Clock::now());
@@ -2117,13 +2295,20 @@ void MainWindow::onInjectFlashClicked()
 void MainWindow::onInjectBlipClicked()
 {
     if (!testingTools_) return; // the test flash is a testing tool
+    const BlipKind kind = selectedBlipKind();
     const auto centre = ui_->previewWidget->selectedPosition();
-    if (!centre)
+    if (kind != BlipKind::Lightning && !centre)
     {
         return;
     }
-    const BlipSettings settings{centre->x(), centre->y(), ui_->blipFwhmSpinBox->value(),
-        ui_->blipAmplitudeSpinBox->value(), ui_->blipFramesSpinBox->value()};
+    const int cx = centre ? centre->x() : std::max(0, lastFrameWidth_ / 2);
+    const int cy = centre ? centre->y() : std::max(0, lastFrameHeight_ / 2);
+    double vx = 0.0, vy = 0.0;
+    if (kind == BlipKind::DarkTransit) { vx = 8.0; vy = 2.0; }
+    else if (kind == BlipKind::MovingStreak) { vx = 18.0; vy = 10.0; }
+    else if (kind == BlipKind::BlinkingMover) { vx = 2.5; vy = 0.5; }
+    const BlipSettings settings{cx, cy, ui_->blipFwhmSpinBox->value(),
+        ui_->blipAmplitudeSpinBox->value(), ui_->blipFramesSpinBox->value(), kind, vx, vy};
     if (session_->requestBlip(settings))
     {
         showMessage("Test flash requested");
