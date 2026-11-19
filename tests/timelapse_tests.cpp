@@ -4,11 +4,13 @@
 #include "timelapse/timelapse_settings.h"
 #include "timelapse/video_exporter.h"
 
+#include "cameras/zwo_source.h"
 #include "memory_budget.h"
 #include "recording/ser_writer.h"
 #include "session.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
+#include "tests/fake_zwo_api.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -240,6 +242,12 @@ private slots:
     void rawSerRetainsOnlyKeptFramesAndWorkerDebayers();
     void rotatedMoonInscribedOverlapHasNoBlackCorners();
     void guidingRecoveryCloudBaselineAndMissedWindows();
+    void fitsBitpixStrictValidationAndConsistentScaling();
+    void bayerGrbgGbrgAnd12BitHighAlignedStacking();
+    void multiStackMoonRotationAndPlanetDriftEndToEnd();
+    void fakeZwoCameraTimeLapseAndNonBlockingStop();
+    void resharpenPreviewMatchesExportedFrame();
+    void realArchiveRecordingsIfPresent();
 };
 
 void TimelapseTests::fitsRoundTripMonoAndRgbAndExternal16Bit()
@@ -1347,6 +1355,546 @@ void TimelapseTests::guidingRecoveryCloudBaselineAndMissedWindows()
 
     const QString logText = readTextFile(QDir(mid.sessionDir).filePath("timelapse.txt"));
     QVERIFY2(logText.contains("skip period=1") && logText.contains("window missed"), qPrintable(logText));
+}
+
+void TimelapseTests::fitsBitpixStrictValidationAndConsistentScaling()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QString err;
+
+    auto writeRaw16Fits = [&](const QString& path, uint16_t fillVal) {
+        int status = 0;
+        fitsfile* fptr = nullptr;
+        const QByteArray enc = QFile::encodeName(path);
+        QCOMPARE(fits_create_diskfile(&fptr, enc.constData(), &status), 0);
+        long naxes[2]{16, 16};
+        QCOMPARE(fits_create_img(fptr, USHORT_IMG, 2, naxes, &status), 0);
+        std::vector<uint16_t> vals(256, fillVal);
+        QCOMPARE(fits_write_img(fptr, TUSHORT, 1, 256, vals.data(), &status), 0);
+        QCOMPARE(fits_close_file(fptr, &status), 0);
+    };
+
+    // 16-bit FITS below and above 4095 ADU must use the exact same /65535 scale (no 16x jump!).
+    const QString low16 = tmp.filePath("low16.fits");
+    const QString high16 = tmp.filePath("high16.fits");
+    writeRaw16Fits(low16, 3000);
+    writeRaw16Fits(high16, 5000);
+
+    FitsImage lowImg, highImg;
+    QVERIFY2(readFitsFloat(low16, lowImg, err), qPrintable(err));
+    QVERIFY2(readFitsFloat(high16, highImg, err), qPrintable(err));
+    QVERIFY2(std::abs(lowImg.pixels[0] - (3000.0f / 65535.0f)) < 1e-4f,
+        qPrintable(QString("low=%1").arg(lowImg.pixels[0])));
+    QVERIFY2(std::abs(highImg.pixels[0] - (5000.0f / 65535.0f)) < 1e-4f,
+        qPrintable(QString("high=%1").arg(highImg.pixels[0])));
+    QVERIFY(highImg.pixels[0] > lowImg.pixels[0]);
+
+    // Unsupported BITPIX (-64 double and 32 int) must be strictly rejected.
+    for (int badBitpix : {DOUBLE_IMG, LONG_IMG})
+    {
+        const QString badPath = tmp.filePath(QString("bad_%1.fits").arg(badBitpix));
+        int status = 0;
+        fitsfile* fptr = nullptr;
+        const QByteArray enc = QFile::encodeName(badPath);
+        QCOMPARE(fits_create_diskfile(&fptr, enc.constData(), &status), 0);
+        long naxes[2]{8, 8};
+        QCOMPARE(fits_create_img(fptr, badBitpix, 2, naxes, &status), 0);
+        std::vector<double> vals(64, 0.5);
+        QCOMPARE(fits_write_img(fptr, TDOUBLE, 1, 64, vals.data(), &status), 0);
+        QCOMPARE(fits_close_file(fptr, &status), 0);
+
+        FitsImage badOut;
+        QString badErr;
+        QVERIFY(!readFitsFloat(badPath, badOut, badErr));
+        QVERIFY2(badErr.contains("unsupported FITS BITPIX"), qPrintable(badErr));
+
+        FitsMetadata meta;
+        int w = 0, h = 0, ch = 0;
+        QVERIFY(!readFitsMetadata(badPath, meta, w, h, ch, badErr));
+        QVERIFY2(badErr.contains("unsupported FITS BITPIX"), qPrintable(badErr));
+    }
+
+    // 32-bit float with out-of-range (<0, >1) or NaN pixels clamps safely into [0, 1].
+    const QString oorPath = tmp.filePath("oor_float.fits");
+    {
+        int status = 0;
+        fitsfile* fptr = nullptr;
+        const QByteArray enc = QFile::encodeName(oorPath);
+        QCOMPARE(fits_create_diskfile(&fptr, enc.constData(), &status), 0);
+        long naxes[2]{8, 8};
+        QCOMPARE(fits_create_img(fptr, FLOAT_IMG, 2, naxes, &status), 0);
+        std::vector<float> vals(64, 0.5f);
+        vals[0] = -0.25f;
+        vals[1] = 1.75f;
+        vals[2] = std::numeric_limits<float>::quiet_NaN();
+        QCOMPARE(fits_write_img(fptr, TFLOAT, 1, 64, vals.data(), &status), 0);
+        QCOMPARE(fits_close_file(fptr, &status), 0);
+    }
+    FitsImage oorImg;
+    QVERIFY2(readFitsFloat(oorPath, oorImg, err), qPrintable(err));
+    QCOMPARE(oorImg.pixels[0], 0.0f);
+    QCOMPARE(oorImg.pixels[1], 1.0f);
+    QCOMPARE(oorImg.pixels[2], 0.0f);
+    QVERIFY(std::abs(oorImg.pixels[10] - 0.5f) < 1e-5f);
+}
+
+void TimelapseTests::bayerGrbgGbrgAnd12BitHighAlignedStacking()
+{
+    auto makeBayer = [](BayerPattern pat, uint8_t r, uint8_t g, uint8_t b) {
+        auto f = std::make_shared<Frame>();
+        f->width = 40;
+        f->height = 40;
+        f->format = PixelFormat::Mono8;
+        f->bayer = pat;
+        f->significantBits = 8;
+        f->testSource = true;
+        f->data.resize(40 * 40, g);
+        for (int y = 0; y < 40; ++y)
+        {
+            for (int x = 0; x < 40; ++x)
+            {
+                const bool evenY = (y % 2) == 0;
+                const bool evenX = (x % 2) == 0;
+                uint8_t val = g;
+                if (pat == BayerPattern::GRBG)
+                    val = (evenY && !evenX) ? r : ((!evenY && evenX) ? b : g);
+                else if (pat == BayerPattern::GBRG)
+                    val = (evenY && !evenX) ? b : ((!evenY && evenX) ? r : g);
+                f->data[static_cast<size_t>(y) * 40 + x] = val;
+            }
+        }
+        return f;
+    };
+
+    const size_t plane = 40 * 40;
+    const size_t mid = 20 * 40 + 20;
+
+    // Verify GRBG through captureRawBurstFrame -> stackBurst (worker debayer path).
+    {
+        std::vector<RawBurstFrame> burst;
+        for (int i = 0; i < 4; ++i)
+            burst.push_back(captureRawBurstFrame(*makeBayer(BayerPattern::GRBG, 230, 30, 50)));
+        const BurstStackResult st = stackBurst(burst);
+        QVERIFY2(st.ok, qPrintable(st.error));
+        QCOMPARE(st.stack.channels, 3);
+        QVERIFY2(st.stack.pixels[mid] > 0.75f, qPrintable(QString("GRBG R=%1").arg(st.stack.pixels[mid])));
+        QVERIFY2(st.stack.pixels[plane + mid] < 0.25f, qPrintable(QString("GRBG G=%1").arg(st.stack.pixels[plane + mid])));
+        QVERIFY2(st.stack.pixels[2 * plane + mid] < 0.30f, qPrintable(QString("GRBG B=%1").arg(st.stack.pixels[2 * plane + mid])));
+    }
+
+    // Verify GBRG through captureRawBurstFrame -> stackBurst (worker debayer path).
+    {
+        std::vector<RawBurstFrame> burst;
+        for (int i = 0; i < 4; ++i)
+            burst.push_back(captureRawBurstFrame(*makeBayer(BayerPattern::GBRG, 40, 30, 230)));
+        const BurstStackResult st = stackBurst(burst);
+        QVERIFY2(st.ok, qPrintable(st.error));
+        QCOMPARE(st.stack.channels, 3);
+        QVERIFY2(st.stack.pixels[mid] < 0.30f, qPrintable(QString("GBRG R=%1").arg(st.stack.pixels[mid])));
+        QVERIFY2(st.stack.pixels[plane + mid] < 0.25f, qPrintable(QString("GBRG G=%1").arg(st.stack.pixels[plane + mid])));
+        QVERIFY2(st.stack.pixels[2 * plane + mid] > 0.75f, qPrintable(QString("GBRG B=%1").arg(st.stack.pixels[2 * plane + mid])));
+    }
+
+    // Verify 12-bit high-aligned Mono16 (values shifted left by 4 bits) through captureRawBurstFrame -> stackBurst.
+    {
+        std::vector<RawBurstFrame> burst;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto f = std::make_shared<Frame>();
+            f->width = 32;
+            f->height = 32;
+            f->format = PixelFormat::Mono16;
+            f->significantBits = 12;
+            f->alignment = BitAlignment::High;
+            f->testSource = true;
+            f->data.resize(frameBytes(32, 32, PixelFormat::Mono16));
+            auto* dst = reinterpret_cast<uint16_t*>(f->data.data());
+            // 2048 out of 4095 (~0.5001), placed in the upper 12 bits (2048 << 4 = 32768).
+            const uint16_t highWord = static_cast<uint16_t>(2048u << 4);
+            std::fill(dst, dst + 32 * 32, highWord);
+            burst.push_back(captureRawBurstFrame(*f));
+        }
+        const BurstStackResult st = stackBurst(burst);
+        QVERIFY2(st.ok, qPrintable(st.error));
+        QCOMPARE(st.stack.channels, 1);
+        QCOMPARE(st.stack.meta.rawMaxAdu, 4095.0);
+        const float expected = 2048.0f / 4095.0f;
+        QVERIFY2(std::abs(st.stack.pixels[16 * 32 + 16] - expected) < 1e-3f,
+            qPrintable(QString("got=%1 expected=%2").arg(st.stack.pixels[16 * 32 + 16]).arg(expected)));
+    }
+}
+
+void TimelapseTests::multiStackMoonRotationAndPlanetDriftEndToEnd()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    // 1. Multi-stack Moon session: progressive Alt-Az rotation (0, 3.5, 7 deg) + drift
+    //    + evolving shadow outside sunlit lunarAnchor + cropToLock.
+    {
+        const int w = 256, h = 256;
+        const auto baseField = makeLunarCraterField(w, h);
+
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+        s.intervalSeconds = 1.0;
+        s.captureWindowSeconds = 0.4;
+        s.keepPercent = 100.0;
+        s.maxFramesPerPeriod = 20;
+        s.cropToLock = true;
+        s.lunarAnchor = QRect(128, 48, 80, 80);
+        s.video.cropToOverlap = true;
+        s.video.writeMp4 = true;
+        s.video.writeGif = false;
+        s.video.fps = 5;
+
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("moon_rot");
+        cfg.settings = s;
+        cfg.stream.playback = "moon_rot.ser";
+        cfg.lockRegion = LockRegion{64, 64, 128, 128}; // -> effectiveCropRoi = (0,0,256,256)
+
+        TimelapseSession session(&ctx, cfg);
+        const std::vector<std::tuple<double, double, double, float>> periods{
+            {0.0, 0.0, 0.0, 1.0f},
+            {4.0, -3.0, 3.5, 0.55f},
+            {8.0, -6.0, 7.0, 0.25f},
+        };
+        uint64_t idx = 0;
+        for (int p = 0; p < static_cast<int>(periods.size()); ++p)
+        {
+            auto [dx, dy, rot, shadow] = periods[static_cast<size_t>(p)];
+            auto field = warpFloatField(baseField, w, h, dx, dy, rot);
+            for (int y = 150; y < h; ++y)
+                for (int x = 0; x < 110; ++x)
+                    field[static_cast<size_t>(y) * w + x] *= shadow;
+            for (int f = 0; f < 4; ++f)
+                session.onFrame(makeMono8Frame(w, h, field, idx++, utcPoint(p, f * 70)));
+            session.onFrame(makeMono8Frame(w, h, field, idx++, utcPoint(p, 450)));
+            QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= p + 1, 10000);
+        }
+        session.stop("moon multi-stack done");
+        session.waitFinished();
+
+        const TimelapseStatus st = session.status();
+        QCOMPARE(st.stacksCompleted, 3);
+        const QString mp4 = QDir(st.sessionDir).filePath("timelapse.mp4");
+        QVERIFY(QFileInfo::exists(mp4) && decodeWithFfmpeg(mp4));
+
+        SharpeningSettings loadedS;
+        VideoToneSettings loadedV;
+        std::optional<QRect> overlap;
+        QString pErr;
+        QVERIFY2(loadProfileJson(QDir(st.sessionDir).filePath("sharpening_profile.json"),
+            loadedS, loadedV, pErr, &overlap), qPrintable(pErr));
+        QVERIFY(overlap.has_value() && overlap->isValid());
+        // Overlap must have cropped inward to exclude rotated borders.
+        QVERIFY(overlap->width() < w - 16 && overlap->height() < h - 16);
+
+        // Verify exported MP4 dimensions match the even-rounded persisted commonOverlap.
+        const int expW = std::max(2, overlap->width() & ~1);
+        const int expH = std::max(2, overlap->height() & ~1);
+        QProcess probe;
+        probe.setProgram(findFfmpegExecutable());
+        probe.setArguments({"-hide_banner", "-i", mp4});
+        probe.start();
+        QVERIFY(probe.waitForFinished(10000));
+        const QString probeOut = QString::fromUtf8(probe.readAllStandardError());
+        QVERIFY2(probeOut.contains(QString("%1x%2").arg(expW).arg(expH)), qPrintable(probeOut));
+    }
+
+    // 2. Multi-stack Planet session: drifting disc with rotating surface spot.
+    {
+        const int w = 160, h = 160;
+        auto makePlanetField = [&](double cx, double cy, double phaseDeg) {
+            std::vector<float> pix(static_cast<size_t>(w) * h, 0.0f);
+            const double rad = phaseDeg * 3.14159265358979323846 / 180.0;
+            for (int y = 0; y < h; ++y)
+            {
+                for (int x = 0; x < w; ++x)
+                {
+                    const double dx = x - cx;
+                    const double dy = y - cy;
+                    const double r = std::hypot(dx, dy);
+                    const double disc = 1.0 / (1.0 + std::exp((r - 22.0) / 1.8));
+                    const double rx = dx * std::cos(rad) - dy * std::sin(rad);
+                    const double spot = 0.25 * std::exp(-((rx - 8.0) * (rx - 8.0) + dy * dy) / 28.0);
+                    const double bands = 0.72 + 0.14 * std::sin(dy * 0.32) - spot;
+                    pix[static_cast<size_t>(y) * w + x] = static_cast<float>(std::clamp(disc * bands, 0.0, 1.0));
+                }
+            }
+            return pix;
+        };
+
+        TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Planet);
+        s.intervalSeconds = 1.0;
+        s.captureWindowSeconds = 0.4;
+        s.keepPercent = 100.0;
+        s.maxFramesPerPeriod = 20;
+        s.video.writeMp4 = true;
+        s.video.writeGif = false;
+        s.video.fps = 5;
+
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("planet_drift");
+        cfg.settings = s;
+        cfg.stream.playback = "planet.ser";
+
+        TimelapseSession session(&ctx, cfg);
+        const std::vector<std::tuple<double, double, double>> states{
+            {80.0, 80.0, 0.0},
+            {92.0, 73.0, 25.0},
+            {69.0, 89.0, 50.0},
+        };
+        uint64_t idx = 0;
+        for (int p = 0; p < static_cast<int>(states.size()); ++p)
+        {
+            auto [cx, cy, phase] = states[static_cast<size_t>(p)];
+            const auto field = makePlanetField(cx, cy, phase);
+            for (int f = 0; f < 4; ++f)
+                session.onFrame(makeMono8Frame(w, h, field, idx++, utcPoint(p, f * 70)));
+            session.onFrame(makeMono8Frame(w, h, field, idx++, utcPoint(p, 450)));
+            QTRY_VERIFY_WITH_TIMEOUT(session.status().stacksCompleted >= p + 1, 10000);
+        }
+        session.stop("planet done");
+        session.waitFinished();
+
+        const TimelapseStatus st = session.status();
+        QCOMPARE(st.stacksCompleted, 3);
+        QVERIFY(decodeWithFfmpeg(QDir(st.sessionDir).filePath("timelapse.mp4")));
+
+        // Verify the third aligned stack moved the drifted planet back near (80, 80).
+        const QDir stacksDir(QDir(st.sessionDir).filePath("stacks"));
+        const QStringList files = stacksDir.entryList({"*.fits"}, QDir::Files, QDir::Name);
+        QCOMPARE(files.size(), 3);
+        FitsImage lastStack;
+        QString err;
+        QVERIFY2(readFitsFloat(stacksDir.filePath(files.last()), lastStack, err), qPrintable(err));
+        QVERIFY2(std::abs(lastStack.meta.shiftX - 11.0) < 1.5 && std::abs(lastStack.meta.shiftY - (-9.0)) < 1.5,
+            qPrintable(QString("planet3 shift=(%1,%2)").arg(lastStack.meta.shiftX).arg(lastStack.meta.shiftY)));
+    }
+}
+
+void TimelapseTests::fakeZwoCameraTimeLapseAndNonBlockingStop()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    auto api = std::make_shared<FakeZwoApi>();
+    for (auto& c : api->caps)
+        if (c.kind == ZwoControl::Exposure) c.value = 10000; // 10,000 us = 10 ms -> EXPTIME must be 0.010 s!
+    const auto profile = ZwoSource::inspect(api, 0);
+
+    QObject ctx;
+    bool finishedCalled = false;
+    TimelapseFinishResult finishRes;
+    Session::Notifications notices;
+    notices.timeLapseFinished = [&](const TimelapseFinishResult& r) {
+        finishedCalled = true;
+        finishRes = r;
+    };
+
+    Session session(&ctx, tmp.filePath("zwo_out"), std::move(notices));
+    session.setSource(std::make_unique<ZwoSource>(api, profile, profile.current));
+
+    QString err;
+    QVERIFY2(session.start(err, Session::Mode::Preview), qPrintable(err));
+    QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames() >= 4, 3000);
+
+    TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+    s.intervalSeconds = 0.4;
+    s.captureWindowSeconds = 0.2;
+    s.keepPercent = 100.0;
+    s.maxFramesPerPeriod = 30;
+    s.video.writeMp4 = true;
+    s.video.writeGif = false;
+    s.video.fps = 5;
+
+    // Inject a 600 ms worker delay so we can prove Session::stop() returns promptly
+    // instead of freezing the GUI thread while stacking/FFmpeg finishes!
+    QVERIFY2(session.startTimeLapse(s, err, {}, std::chrono::milliseconds{600}), qPrintable(err));
+    QTRY_VERIFY_WITH_TIMEOUT(session.timeLapseStatus().stacksCompleted >= 1, 5000);
+    // Let a second window open so stopping triggers another 600 ms delayed stack + MP4 encode.
+    QThread::msleep(250);
+
+    const auto stopStart = std::chrono::steady_clock::now();
+    session.stop("user stopped stream");
+    const double stopMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - stopStart).count();
+    QVERIFY2(stopMs < 400.0, qPrintable(QString("Session::stop blocked for %1 ms").arg(stopMs)));
+
+    session.waitTimeLapseFinished();
+    QTRY_VERIFY_WITH_TIMEOUT(finishedCalled, 5000);
+    QVERIFY(finishRes.ok);
+    QVERIFY(finishRes.stacksCompleted >= 1);
+    QCOMPARE(session.droppedFrames().value_or(99), uint64_t{0});
+
+    // Verify FITS EXPTIME came from ZwoSource's "10000 us" as 0.010 s (not 10.0 s!).
+    const QDir stacksDir(QDir(finishRes.sessionDir).filePath("stacks"));
+    const QStringList files = stacksDir.entryList({"*.fits"}, QDir::Files, QDir::Name);
+    QVERIFY(!files.isEmpty());
+    FitsMetadata meta;
+    int w = 0, h = 0, ch = 0;
+    QVERIFY2(readFitsMetadata(stacksDir.filePath(files.first()), meta, w, h, ch, err), qPrintable(err));
+    QVERIFY2(std::abs(meta.exptimeSeconds - 0.010) < 1e-6,
+        qPrintable(QString("ZWO EXPTIME=%1 (expected 0.010)").arg(meta.exptimeSeconds)));
+}
+
+void TimelapseTests::resharpenPreviewMatchesExportedFrame()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const int w = 96, h = 96;
+    const auto field = makeLunarCraterField(w, h);
+    const QString sessionDir = tmp.filePath("parity_session");
+    const QString stacksDir = QDir(sessionDir).filePath("stacks");
+    QVERIFY(QDir().mkpath(stacksDir));
+
+    // Create two stacks with different brightnesses (stack 1 = bright/high-Q, stack 2 = dimmer/lower-Q).
+    FitsImage s1;
+    s1.width = w; s1.height = h; s1.channels = 1;
+    s1.pixels = field;
+    s1.meta.qualityScore = 0.80;
+
+    FitsImage s2 = s1;
+    for (float& px : s2.pixels) px *= 0.65f;
+    s2.meta.qualityScore = 0.50;
+
+    QString err;
+    QVERIFY2(writeFitsFloat(QDir(stacksDir).filePath("0001_a.fits"), s1, err), qPrintable(err));
+    QVERIFY2(writeFitsFloat(QDir(stacksDir).filePath("0002_b.fits"), s2, err), qPrintable(err));
+
+    const SharpeningSettings sharp = sharpeningForPreset(SharpeningPreset::Medium);
+    VideoToneSettings tone;
+    tone.autoStretch = true;
+    tone.gamma = 1.15;
+    tone.brightnessLevelling = true;
+    tone.cropToOverlap = true;
+    tone.writeMp4 = true;
+    tone.writeGif = false;
+    tone.fps = 5;
+    const QRect overlap(8, 8, 80, 80);
+    QVERIFY2(saveProfileJson(QDir(sessionDir).filePath("sharpening_profile.json"), sharp, tone, err, overlap),
+        qPrintable(err));
+
+    // Run full re-sharpen + video export.
+    QString outDir;
+    const TimelapseExportResult res = resharpenTimelapseSession(sessionDir, {}, sharp, tone, false, outDir);
+    QVERIFY2(res.ok, qPrintable(res.error));
+
+    // Compute what ResharpenDialog's preview pipeline produces for stack 2 (non-best stack, levelled to best).
+    const FitsImage sharp1 = applyLinearSharpening(s1, sharp);
+    const FitsImage sharp2 = applyLinearSharpening(s2, sharp);
+    double black = 0, white = 1;
+    computeAutoStretchLevels(sharp1, black, white);
+    const double refB = std::max(1e-5, measureTargetBrightness(sharp1));
+    const double curB = measureTargetBrightness(sharp2);
+    const double scale = std::clamp(refB / curB, 0.4, 2.5);
+    const QImage previewFrame2 = toneMapFitsToImage(sharp2, black, white, tone.gamma, scale, overlap, 0);
+    QCOMPARE(previewFrame2.width(), 80);
+    QCOMPARE(previewFrame2.height(), 80);
+
+    // Decode the actual MP4 frames back to raw rgb24 and compare frame 2 against previewFrame2.
+    QProcess dec;
+    dec.setProgram(findFfmpegExecutable());
+    dec.setArguments({
+        "-v", "error",
+        "-i", QDir(outDir).filePath("timelapse.mp4"),
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
+    });
+    dec.start();
+    QVERIFY(dec.waitForFinished(10000));
+    QCOMPARE(dec.exitCode(), 0);
+    const QByteArray raw = dec.readAllStandardOutput();
+    const int frameSize = 80 * 80 * 3;
+    QCOMPARE(raw.size(), frameSize * 2);
+
+    const QImage previewRgb = previewFrame2.convertToFormat(QImage::Format_RGB888);
+    const auto* mp4Frame2 = reinterpret_cast<const uint8_t*>(raw.constData() + frameSize);
+    double sumAbsDiff = 0.0;
+    for (int y = 0; y < 80; ++y)
+    {
+        const uint8_t* pRow = previewRgb.constScanLine(y);
+        const uint8_t* mRow = mp4Frame2 + y * 80 * 3;
+        for (int x = 0; x < 80 * 3; ++x)
+            sumAbsDiff += std::abs(static_cast<int>(pRow[x]) - static_cast<int>(mRow[x]));
+    }
+    const double mae = sumAbsDiff / static_cast<double>(frameSize);
+    QVERIFY2(mae < 8.0, qPrintable(QString("Preview vs MP4 frame 2 MAE=%1 (expected < 8)").arg(mae)));
+}
+
+void TimelapseTests::realArchiveRecordingsIfPresent()
+{
+    const QDir testDataDir(QStringLiteral(SELENEWATCH_SOURCE_DIR) + "/test_data");
+    if (!testDataDir.exists())
+        QSKIP("Local gitignored test_data/ folder not present; skipping real-recording integration test.");
+
+    auto runClip = [&](const QString& fileName, TimelapsePreset preset, double intervalSec, double windowSec) {
+        const QString clipPath = testDataDir.filePath(fileName);
+        if (!QFileInfo::exists(clipPath)) return;
+
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        QObject ctx;
+        bool finished = false;
+        TimelapseFinishResult finishRes;
+        Session::Notifications notices;
+        notices.timeLapseFinished = [&](const TimelapseFinishResult& r) {
+            finished = true;
+            finishRes = r;
+        };
+        Session session(&ctx, tmp.filePath("out"), std::move(notices));
+
+        auto src = std::make_unique<RecordingSource>(std::filesystem::path(clipPath.toStdWString()));
+        src->setSpeed(RecordingSource::Speed::Fast);
+        src->setNominalFps(30.0);
+        session.setSource(std::move(src));
+
+        QString err;
+        QVERIFY2(session.start(err, Session::Mode::Preview), qPrintable(fileName + ": " + err));
+
+        TimelapseSettings s = defaultTimelapseSettings(preset);
+        s.intervalSeconds = intervalSec;
+        s.captureWindowSeconds = windowSec;
+        s.keepPercent = 50.0;
+        s.maxFramesPerPeriod = 25;
+        s.stopKind = StopConditionKind::StackCount;
+        s.targetStacks = 2;
+        s.video.writeMp4 = true;
+        s.video.writeGif = false;
+        s.video.fps = 5;
+
+        QVERIFY2(session.startTimeLapse(s, err), qPrintable(fileName + ": " + err));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 45000);
+        QVERIFY2(finishRes.ok, qPrintable(fileName + ": " + finishRes.exportResult.error));
+        QVERIFY2(finishRes.stacksCompleted >= 1, qPrintable(fileName));
+
+        const QDir stacksDir(QDir(finishRes.sessionDir).filePath("stacks"));
+        const QStringList fitsFiles = stacksDir.entryList({"*.fits"}, QDir::Files, QDir::Name);
+        QVERIFY2(!fitsFiles.isEmpty(), qPrintable(fileName));
+        FitsMetadata meta;
+        int w = 0, h = 0, ch = 0;
+        QVERIFY2(readFitsMetadata(stacksDir.filePath(fitsFiles.first()), meta, w, h, ch, err), qPrintable(err));
+        QVERIFY(w > 0 && h > 0);
+        // FireCapture .txt companion logs supply exposure in ms -> EXPTIME must be positive & < 1 s.
+        if (QFileInfo::exists(QFileInfo(clipPath).absolutePath() + "/" + QFileInfo(clipPath).completeBaseName() + ".txt"))
+        {
+            QVERIFY2(meta.exptimeSeconds > 0.0 && meta.exptimeSeconds < 1.0,
+                qPrintable(QString("%1 EXPTIME=%2").arg(fileName).arg(meta.exptimeSeconds)));
+        }
+
+        const QString mp4 = QDir(finishRes.sessionDir).filePath("timelapse.mp4");
+        QVERIFY2(QFileInfo::exists(mp4) && decodeWithFfmpeg(mp4), qPrintable(fileName));
+        session.stop();
+        session.waitTimeLapseFinished();
+    };
+
+    runClip("Moon_221449.avi", TimelapsePreset::Moon, 1.5, 0.6);
+    runClip("Mars_222831.avi", TimelapsePreset::Planet, 1.5, 0.6);
+    runClip("Moon_171311.ser", TimelapsePreset::Moon, 2.0, 0.6);
 }
 
 QTEST_MAIN(TimelapseTests)

@@ -373,6 +373,7 @@ set_tests_properties(camera_probe PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscr
 
 add_executable(SeleneWatchTimelapseTests tests/timelapse_tests.cpp)
 target_include_directories(SeleneWatchTimelapseTests SYSTEM PRIVATE "${_cfitsio_root}/include")
+target_compile_definitions(SeleneWatchTimelapseTests PRIVATE SELENEWATCH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(SeleneWatchTimelapseTests PRIVATE selenewatch_core CFITSIO::cfitsio Qt6::Test)
 selenewatch_compile_options(SeleneWatchTimelapseTests)
 add_test(NAME timelapse COMMAND SeleneWatchTimelapseTests -o -,tap)

@@ -27,3 +27,6 @@ CMakeLists.txt.user*
 # OS-generated files
 Thumbs.db
 .DS_Store
+
+# Local real-recording test fixtures (copied from archive; never committed)
+test_data/

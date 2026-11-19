@@ -18,6 +18,7 @@
 #include <QtCore/QTimeZone>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -321,6 +322,11 @@ bool readFitsMetadata(const QString& path, FitsMetadata& meta,
             : QString("unsupported FITS image dimensions (NAXIS=%1)").arg(naxis);
         return false;
     }
+    if (bitpix != FLOAT_IMG && bitpix != SHORT_IMG && bitpix != BYTE_IMG)
+    {
+        error = QString("unsupported FITS BITPIX=%1 (expected 32-bit float, 16-bit, or 8-bit image)").arg(bitpix);
+        return false;
+    }
 
     width = static_cast<int>(naxes[0]);
     height = static_cast<int>(naxes[1]);
@@ -348,6 +354,11 @@ bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
             : QString("unsupported FITS image dimensions (NAXIS=%1)").arg(naxis);
         return false;
     }
+    if (bitpix != FLOAT_IMG && bitpix != SHORT_IMG && bitpix != BYTE_IMG)
+    {
+        error = QString("unsupported FITS BITPIX=%1 (expected 32-bit float, 16-bit, or 8-bit image)").arg(bitpix);
+        return false;
+    }
 
     FitsImage result;
     result.width = static_cast<int>(naxes[0]);
@@ -360,14 +371,16 @@ bool readFitsFloat(const QString& path, FitsImage& image, QString& error)
     int anynul = 0;
     fits_read_img(reader.fptr, TFLOAT, 1, static_cast<LONGLONG>(total), &nulval, result.pixels.data(), &anynul, &status);
 
-    // Normalize external integer FITS (e.g., 8-bit or 16-bit Siril/SharpCap files) into [0, 1].
-    if (status == 0 && bitpix > 0)
+    // Consistent per-BITPIX normalization into [0, 1] with sanity clamping for
+    // out-of-range or non-finite samples (no per-frame 4095 ADU threshold jump).
+    if (status == 0)
     {
-        const float maxPx = *std::max_element(result.pixels.begin(), result.pixels.end());
-        if (maxPx > 1.0f)
+        const float invScale = bitpix == BYTE_IMG ? (1.0f / 255.0f)
+            : (bitpix == SHORT_IMG ? (1.0f / 65535.0f) : 1.0f);
+        for (float& p : result.pixels)
         {
-            const float denom = bitpix == 8 ? 255.0f : (maxPx > 4095.0f ? 65535.0f : 4095.0f);
-            for (float& p : result.pixels) p /= denom;
+            const float scaled = p * invScale;
+            p = std::isfinite(scaled) ? std::clamp(scaled, 0.0f, 1.0f) : 0.0f;
         }
     }
 

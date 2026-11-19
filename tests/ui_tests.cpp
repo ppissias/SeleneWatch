@@ -1710,6 +1710,44 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(QFileInfo::exists(QDir(reOut).filePath("timelapse.mp4")));
     QVERIFY(QDir(QDir(reOut).filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size() >= 2);
 
+    // Verify Crop-to-valid-overlap checkbox updates preview and Rebuild-video-only writes
+    // into a non-destructive video_* folder without overwriting the original timelapse.mp4.
+    {
+        auto* cropCheck = dlg.findChild<QCheckBox*>("resharpenCropOverlap");
+        auto* brightCheck = dlg.findChild<QCheckBox*>("resharpenBrightnessLevel");
+        QVERIFY(cropCheck && brightCheck);
+
+        // Save a distinct cropped overlap in session profile and reopen in dialog.
+        SharpeningSettings ls;
+        VideoToneSettings lv;
+        QString perr;
+        const QString profPath = QDir(sessionDir).filePath("sharpening_profile.json");
+        QVERIFY(loadProfileJson(profPath, ls, lv, perr));
+        QVERIFY(saveProfileJson(profPath, ls, lv, perr, QRect(40, 40, 200, 140)));
+        dlg.openSession(sessionDir);
+        QCoreApplication::processEvents();
+
+        cropCheck->setChecked(true);
+        QCoreApplication::processEvents();
+        const QImage croppedImg = afterLbl->pixmap().toImage();
+        cropCheck->setChecked(false);
+        QCoreApplication::processEvents();
+        const QImage fullImg = afterLbl->pixmap().toImage();
+        QVERIFY(croppedImg != fullImg);
+        cropCheck->setChecked(true);
+
+        const QString origMp4 = QDir(sessionDir).filePath("timelapse.mp4");
+        const QDateTime origMtime = QFileInfo(origMp4).lastModified();
+        QThread::msleep(20);
+        rebuildOnly->setChecked(true);
+        applyBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(statusLbl->text().startsWith("Done:"), 15000);
+        const QStringList vidDirs = QDir(sessionDir).entryList({"video_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
+        QCOMPARE(vidDirs.size(), 1);
+        QVERIFY(QFileInfo::exists(QDir(QDir(sessionDir).filePath(vidDirs.first())).filePath("timelapse.mp4")));
+        QCOMPARE(QFileInfo(origMp4).lastModified(), origMtime);
+    }
+
     window.findChild<QPushButton*>("stopButton")->click();
 }
 

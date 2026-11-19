@@ -179,6 +179,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     gamma_->setSingleStep(0.05);
     gamma_->setValue(1.0);
     brightnessLevel_ = new QCheckBox("Brightness levelling across stacks", videoBox);
+    brightnessLevel_->setObjectName("resharpenBrightnessLevel");
     brightnessLevel_->setChecked(true);
     minQualityPct_ = new QDoubleSpinBox(videoBox);
     minQualityPct_->setRange(0.0, 95.0);
@@ -186,6 +187,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     minQualityPct_->setSuffix(" % of median");
     minQualityPct_->setSpecialValueText("Keep all stacks");
     cropOverlap_ = new QCheckBox("Crop to valid overlap", videoBox);
+    cropOverlap_->setObjectName("resharpenCropOverlap");
     cropOverlap_->setChecked(true);
     fps_ = new QSpinBox(videoBox);
     fps_->setObjectName("resharpenFps");
