@@ -225,6 +225,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     profileRow->addWidget(new QLabel("Profile", content));
     profileCombo_ = new QComboBox(content);
     profileCombo_->setObjectName("detectionProfileCombo");
+    profileCombo_->setAccessibleName("Profile");
     profileCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     profileCombo_->setMinimumContentsLength(10);
     profileCombo_->setToolTip("Saved detection profiles for the selected target. In Sky mode, the horizon mask is only changed by profiles saved with a mask.");
