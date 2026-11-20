@@ -39,6 +39,7 @@
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
 #include <QtGui/QAction>
+#include <QtGui/QCloseEvent>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QDateTimeEdit>
@@ -54,6 +55,7 @@
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QStatusBar>
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QToolButton>
@@ -152,6 +154,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     notifications.recordingChanged = [this] { onRecordingChanged(); };
     notifications.timeLapseChanged = [this](const TimelapseStatus& status) {
         if (timelapsePanel_) timelapsePanel_->updateStatus(status);
+        updateClosingProgress(status);
     };
     notifications.timeLapseFinished = [this](const TimelapseFinishResult& result) {
         onTimeLapseFinished(result);
@@ -874,9 +877,97 @@ void MainWindow::onStopTimeLapse()
     updateStatusLabel();
 }
 
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    const bool finalizing = session_->timeLapseFinalizing();
+    const bool timeLapsing = session_->mode() == Session::Mode::TimeLapse && !finalizing;
+    if (!finalizing && !timeLapsing)
+    {
+        QMainWindow::closeEvent(event);
+        return;
+    }
+    event->ignore();
+    if (closeAfterTimeLapse_)
+    {
+        showClosingProgress(); // Already waiting: bring the dialog back
+        return;
+    }
+    if (timeLapsing && qEnvironmentVariable("QT_QPA_PLATFORM") != "offscreen")
+    {
+        QMessageBox box(this);
+        box.setObjectName("closeDuringTimelapse");
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle("Time-lapse running");
+        box.setText("A time-lapse is running.");
+        box.setInformativeText("SeleneWatch will stop it, build its video from the stacks so far, "
+            "and then close.");
+        QPushButton* stopAndClose = box.addButton("Stop, build video and close", QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != stopAndClose) return;
+    }
+    if (timeLapsing) session_->stopTimeLapse("the program closed");
+    closeAfterTimeLapse_ = true;
+    showClosingProgress();
+    updateControls();
+    updateStatusLabel();
+}
+
+void MainWindow::showClosingProgress()
+{
+    if (!closingProgress_)
+    {
+        closingProgress_ = new QProgressDialog(this);
+        closingProgress_->setObjectName("closingTimelapseProgress");
+        closingProgress_->setWindowTitle("Finishing time-lapse");
+        closingProgress_->setWindowModality(Qt::WindowModal);
+        closingProgress_->setAutoClose(false);
+        closingProgress_->setAutoReset(false);
+        closingProgress_->setMinimumDuration(0);
+        closingProgress_->setCancelButtonText("Close without video");
+        connect(closingProgress_, &QProgressDialog::canceled, this, [this] {
+            // FITS stacks stay on disk; Re-sharpen → Rebuild video only makes the video later.
+            session_->cancelTimeLapseExport();
+            showMessage("Video abandoned; SeleneWatch closes when the time-lapse has stopped.");
+        });
+    }
+    updateClosingProgress(session_->timeLapseStatus());
+    closingProgress_->show();
+    closingProgress_->raise();
+}
+
+void MainWindow::updateClosingProgress(const TimelapseStatus& status)
+{
+    if (!closingProgress_ || !closeAfterTimeLapse_ || closingProgress_->wasCanceled()) return;
+    QString text = "Building the time-lapse video before SeleneWatch closes…";
+    if (status.exportTotal > 0)
+    {
+        closingProgress_->setRange(0, status.exportTotal);
+        closingProgress_->setValue(std::min(status.exportDone, status.exportTotal));
+        text += QString("\n%1 / %2 frames encoded.").arg(status.exportDone).arg(status.exportTotal);
+    }
+    else
+    {
+        closingProgress_->setRange(0, 0); // Busy: the last stack is still being made
+    }
+    closingProgress_->setLabelText(text);
+}
+
 void MainWindow::onTimeLapseFinished(const TimelapseFinishResult& result)
 {
     if (timelapsePanel_) timelapsePanel_->onSessionFinished(result);
+    if (closeAfterTimeLapse_)
+    {
+        if (closingProgress_) closingProgress_->hide();
+        // Close after this notification has been handled; closeEvent then finds
+        // no time-lapse and lets the window go.
+        QTimer::singleShot(0, this, [this] {
+            closeAfterTimeLapse_ = false;
+            close();
+        });
+        return;
+    }
     if (result.ok)
     {
         showMessage(QString("Time-lapse complete: %1 stacks (%2 skipped) saved to %3.")

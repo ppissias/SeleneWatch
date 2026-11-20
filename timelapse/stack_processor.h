@@ -32,7 +32,10 @@ struct RawBurstFrame
     std::vector<uint8_t> data;
     double sharpness{0};
     double targetBrightness{0};
-    FramePtr rawFullFrame; // Held only when saveRawSer is enabled; evicted with heap entry
+    // saveRawSer only: a full-frame copy owned by the time-lapse and charged to
+    // the session RAM budget (never the camera's pooled frame); evicted with the
+    // heap entry and released once its burst SER is written.
+    FramePtr rawFullFrame;
 };
 
 // Single frame extracted, optionally debayered/cropped, and scored for burst stacking.

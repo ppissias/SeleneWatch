@@ -8,6 +8,14 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QTextStream>
 
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
+#include <opencv2/core.hpp>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -146,10 +154,59 @@ void TimelapseSession::setStackDelay(std::chrono::milliseconds delay)
     stackDelay_ = delay;
 }
 
+void TimelapseSession::setBeforeStackForTests(std::function<void(int periodIndex)> hook)
+{
+    std::lock_guard lock(mutex_);
+    beforeStackForTests_ = std::move(hook);
+}
+
+void TimelapseSession::cancelExport()
+{
+    exportCancel_.store(true);
+}
+
+bool TimelapseSession::budgetHasRoomFor(size_t bytes) const
+{
+    const MemoryUsage mem = config_.memory.usage();
+    const size_t allowed = mem.limit / 100 * kBudgetHeadroomPercent;
+    return mem.used <= allowed && bytes <= allowed - mem.used;
+}
+
 bool TimelapseSession::tryReserveBurstMemory(size_t bytes)
 {
     if (bytes == 0) return true;
-    return config_.memory.acquire(bytes);
+    // Check-then-acquire is not atomic, but only this (source) thread adds burst
+    // bytes; a concurrent camera allocation can at most use part of the headroom.
+    return budgetHasRoomFor(bytes) && config_.memory.acquire(bytes);
+}
+
+// A full-frame copy owned by the time-lapse, so the camera's pooled frame goes
+// straight back for reuse. The copy's pixels are charged to the session budget
+// by its allocator; nullptr when the headroom or the ceiling refuses it.
+FramePtr TimelapseSession::copyRawFrame(const Frame& frame) const
+{
+    if (!budgetHasRoomFor(frame.data.size())) return {};
+    try
+    {
+        auto copy = std::make_shared<Frame>(config_.memory);
+        copy->width = frame.width;
+        copy->height = frame.height;
+        copy->format = frame.format;
+        copy->significantBits = frame.significantBits;
+        copy->alignment = frame.alignment;
+        copy->bayer = frame.bayer;
+        copy->frameIndex = frame.frameIndex;
+        copy->timestamp = frame.timestamp;
+        copy->steadyTimestamp = frame.steadyTimestamp;
+        copy->blip = frame.blip;
+        copy->syntheticFlash = frame.syntheticFlash;
+        copy->testSource = frame.testSource;
+        copy->sourceDroppedFrames = frame.sourceDroppedFrames;
+        copy->data.assign(frame.data.begin(), frame.data.end());
+        return copy;
+    }
+    catch (const MemoryLimitError&) { return {}; }
+    catch (const std::bad_alloc&) { return {}; }
 }
 
 void TimelapseSession::releaseBurstMemory(size_t bytes)
@@ -164,6 +221,7 @@ void TimelapseSession::discardCurrentBurstLocked()
     currentBurstBytes_ = 0;
     collecting_ = false;
     currentCaptured_ = 0;
+    currentRamRefused_ = 0;
 }
 
 void TimelapseSession::onFrame(const FramePtr& frame)
@@ -251,12 +309,28 @@ void TimelapseSession::onFrame(const FramePtr& frame)
                     const size_t cap = static_cast<size_t>(
                         std::clamp(config_.settings.maxFramesPerPeriod, 1, TimelapseSettings::kMaxFramesCap));
                     const size_t frameMem = captured.data.size();
-                    if (config_.settings.saveRawSer) captured.rawFullFrame = frame;
 
                     auto minCmp = [](const RawBurstFrame& a, const RawBurstFrame& b) {
                         return a.sharpness > b.sharpness; // std::push_heap puts smallest sharpness at front
                     };
-                    if (currentHeap_.size() < cap)
+                    const bool heapHasRoom = currentHeap_.size() < cap;
+                    const bool beatsWorst = !heapHasRoom && !currentHeap_.empty()
+                        && captured.sharpness > currentHeap_.front().sharpness;
+                    // Copy the full raw frame only for a frame that will enter the burst.
+                    // Without the copy the frame is not admitted, so the SER always holds
+                    // exactly the frames that were stacked.
+                    bool admissible = heapHasRoom || beatsWorst;
+                    if (admissible && config_.settings.saveRawSer)
+                    {
+                        captured.rawFullFrame = copyRawFrame(*frame);
+                        if (!captured.rawFullFrame)
+                        {
+                            admissible = false;
+                            ++currentRamRefused_;
+                        }
+                    }
+
+                    if (admissible && heapHasRoom)
                     {
                         if (tryReserveBurstMemory(frameMem))
                         {
@@ -264,8 +338,12 @@ void TimelapseSession::onFrame(const FramePtr& frame)
                             currentHeap_.push_back(std::move(captured));
                             std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
                         }
+                        else
+                        {
+                            ++currentRamRefused_;
+                        }
                     }
-                    else if (!currentHeap_.empty() && captured.sharpness > currentHeap_.front().sharpness)
+                    else if (admissible)
                     {
                         std::pop_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
                         const size_t oldBytes = currentHeap_.back().data.size();
@@ -284,6 +362,7 @@ void TimelapseSession::onFrame(const FramePtr& frame)
                         }
                         else
                         {
+                            ++currentRamRefused_;
                             std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
                         }
                     }
@@ -396,6 +475,7 @@ void TimelapseSession::startNextWindowIfDueLocked(double tSec, std::chrono::syst
     windowStartUtc_ = utcNow;
     windowEndUtc_ = utcNow;
     currentCaptured_ = 0;
+    currentRamRefused_ = 0;
     currentHeap_.clear();
     currentBurstBytes_ = 0;
 }
@@ -436,6 +516,7 @@ void TimelapseSession::finishCurrentWindowLocked(bool allowAfterStop)
     job.windowStartUtc = windowStartUtc_;
     job.windowEndUtc = windowEndUtc_;
     job.framesCaptured = currentCaptured_;
+    job.ramRefused = currentRamRefused_;
     job.frames = std::move(currentHeap_);
     job.chargedBytes = keptBytes;
     currentHeap_.clear();
@@ -556,22 +637,40 @@ void TimelapseSession::postStatusSnapshot(TimelapseStatus snap) const
         Qt::QueuedConnection);
 }
 
+void TimelapseSession::requestStopLocked(const std::string& reason, bool discardPending)
+{
+    if (!stopRequested_)
+    {
+        stopRequested_ = true;
+        stopReason_ = reason;
+    }
+    if (discardPending) discardPending_ = true;
+}
+
 void TimelapseSession::workerLoop(std::stop_token stopToken)
 {
     std::string finalReason = "stopped by the observer";
+    std::optional<BurstJob> discarded;
     for (;;)
     {
         std::optional<BurstJob> job;
         {
             std::unique_lock lock(mutex_);
             cv_.wait(lock, stopToken, [this] { return pendingJob_.has_value() || stopRequested_; });
-            if (pendingJob_)
+            if (pendingJob_ && !discardPending_)
             {
                 job = std::move(pendingJob_);
                 pendingJob_.reset();
             }
             else if (stopRequested_ || stopToken.stop_requested())
             {
+                // A burst queued behind the one that ended the session (target
+                // reached, disk reserve, write failure, internal error) is not stacked.
+                if (pendingJob_)
+                {
+                    discarded = std::move(pendingJob_);
+                    pendingJob_.reset();
+                }
                 finalReason = stopReason_.empty() ? "stopped" : stopReason_;
                 break;
             }
@@ -579,31 +678,104 @@ void TimelapseSession::workerLoop(std::stop_token stopToken)
 
         if (job)
         {
-            processBurst(*job);
+            processBurstGuarded(*job);
+            job->frames.clear(); // Frees any raw copies before the bytes are released
             releaseBurstMemory(job->chargedBytes);
 
             if (config_.settings.stopKind == StopConditionKind::StackCount)
             {
-                int done = 0;
-                {
-                    std::lock_guard lock(mutex_);
-                    done = status_.stacksCompleted;
-                }
-                if (done >= config_.settings.targetStacks)
+                std::lock_guard lock(mutex_);
+                if (status_.stacksCompleted >= config_.settings.targetStacks)
                 {
                     accepting_.store(false);
-                    std::lock_guard lock(mutex_);
-                    if (!stopRequested_)
-                    {
-                        stopRequested_ = true;
-                        stopReason_ = "target stack count reached";
-                    }
+                    requestStopLocked("target stack count reached", /*discardPending=*/true);
                 }
             }
         }
     }
 
+    if (discarded)
+    {
+        problemLogs_.push_back(QString("discarded period=%1 utc=%2 reason=\"%3\"")
+            .arg(discarded->periodIndex).arg(utcText(discarded->windowStartUtc), QString::fromStdString(finalReason)));
+        discarded->frames.clear();
+        releaseBurstMemory(discarded->chargedBytes);
+    }
+
     finalizeSession(finalReason);
+}
+
+// The worker thread's exception boundary. A RAM refusal costs one period; any
+// other exception is unexpected, so the session stops rather than stacking on
+// in an unknown state. The program itself always keeps running.
+void TimelapseSession::processBurstGuarded(BurstJob& job)
+{
+    try
+    {
+        processBurst(job);
+    }
+    catch (const MemoryLimitError&)
+    {
+        skipBurstAfterError(job, "RAM limit while stacking");
+    }
+    catch (const std::bad_alloc&)
+    {
+        skipBurstAfterError(job, "out of memory while stacking");
+    }
+    catch (const cv::Exception& ex)
+    {
+        if (ex.code == cv::Error::StsNoMem)
+            skipBurstAfterError(job, "out of memory while stacking");
+        else
+            stopAfterInternalError(&job, QString::fromStdString(ex.what()).trimmed());
+    }
+    catch (const std::exception& ex)
+    {
+        stopAfterInternalError(&job, QString::fromUtf8(ex.what()).trimmed());
+    }
+    catch (...)
+    {
+        stopAfterInternalError(&job, "unknown exception");
+    }
+}
+
+void TimelapseSession::skipBurstAfterError(const BurstJob& job, const QString& reason)
+{
+    TimelapseStatus snap;
+    {
+        std::lock_guard lock(mutex_);
+        ++status_.periodsSkipped;
+        status_.overloadWarning = true;
+        overloadWarningText_ = QString("Stack skipped: %1 (%2 skipped).").arg(reason).arg(status_.periodsSkipped);
+        skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"%3\"")
+            .arg(job.periodIndex).arg(utcText(job.windowStartUtc), reason));
+        refreshWarningTextLocked();
+        snap = status_;
+    }
+    postStatusSnapshot(std::move(snap));
+}
+
+void TimelapseSession::stopAfterInternalError(const BurstJob* job, const QString& what)
+{
+    accepting_.store(false);
+    problemLogs_.push_back(QString("error period=%1 utc=%2 what=\"%3\"")
+        .arg(job ? job->periodIndex : -1)
+        .arg(job ? utcText(job->windowStartUtc) : utcText(std::chrono::system_clock::now()), what));
+    TimelapseStatus snap;
+    {
+        std::lock_guard lock(mutex_);
+        if (job)
+        {
+            ++status_.periodsSkipped;
+            skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"internal error\"")
+                .arg(job->periodIndex).arg(utcText(job->windowStartUtc)));
+        }
+        fatalWarningText_ = QString("Internal error while stacking (%1) — time-lapse stopped.").arg(what);
+        refreshWarningTextLocked();
+        requestStopLocked("internal error: " + what.toStdString(), /*discardPending=*/true);
+        snap = status_;
+    }
+    postStatusSnapshot(std::move(snap));
 }
 
 void TimelapseSession::processBurst(BurstJob& job)
@@ -611,11 +783,14 @@ void TimelapseSession::processBurst(BurstJob& job)
     const auto tStart = std::chrono::steady_clock::now();
 
     std::chrono::milliseconds delay{0};
+    std::function<void(int)> beforeStack;
     {
         std::lock_guard lock(mutex_);
         delay = stackDelay_;
+        beforeStack = beforeStackForTests_;
     }
     if (delay.count() > 0) std::this_thread::sleep_for(delay);
+    if (beforeStack) beforeStack(job.periodIndex);
 
     // Free-space safety check before writing anything to disk.
     const uint64_t reserve = config_.diskReserveBytes;
@@ -633,8 +808,7 @@ void TimelapseSession::processBurst(BurstJob& job)
                     .arg(static_cast<double>(*free) / kGiB, 0, 'f', 1)
                     .arg(static_cast<double>(reserve) / kGiB, 0, 'f', 0);
                 refreshWarningTextLocked();
-                stopRequested_ = true;
-                stopReason_ = "disk reserve";
+                requestStopLocked("disk reserve", /*discardPending=*/true);
                 snap = status_;
             }
             postStatusSnapshot(std::move(snap));
@@ -643,44 +817,18 @@ void TimelapseSession::processBurst(BurstJob& job)
     }
 
     // Write optional raw SER strictly from the kept frames in chronological order,
-    // releasing FramePtr handles immediately afterwards.
+    // releasing the raw copies immediately afterwards. A failure costs only the
+    // SER; it is recorded and the stack is still made.
     if (config_.settings.saveRawSer && !sessionDir_.isEmpty())
     {
-        std::vector<FramePtr> rawKept;
-        rawKept.reserve(job.frames.size());
-        for (auto& f : job.frames)
+        QString serError;
+        if (!writeRawSer(job, serError))
         {
-            if (f.rawFullFrame)
-            {
-                rawKept.push_back(std::move(f.rawFullFrame));
-                f.rawFullFrame.reset();
-            }
-        }
-        if (!rawKept.empty())
-        {
-            std::sort(rawKept.begin(), rawKept.end(), [](const FramePtr& a, const FramePtr& b) {
-                return a->frameIndex < b->frameIndex;
-            });
-            const QString serName = QString("%1_%2.ser").arg(job.periodIndex + 1, 4, 10, QChar('0'))
-                .arg(utcStamp(job.windowStartUtc));
-            QFile serFile(QDir(sessionDir_).filePath("raw/" + serName));
-            if (serFile.open(QIODevice::WriteOnly))
-            {
-                SerWriter sw(serFile);
-                QString err;
-                if (sw.start(*rawKept.front(), config_.stream.camera, err, false, config_.site.telescope))
-                {
-                    for (const auto& rf : rawKept)
-                        if (!sw.append(*rf, err)) break;
-                    (void)sw.finish(err);
-                }
-            }
+            problemLogs_.push_back(QString("raw_ser_error period=%1 utc=%2 error=\"%3\"")
+                .arg(job.periodIndex).arg(utcText(job.windowStartUtc), serError));
         }
     }
-    else
-    {
-        for (auto& f : job.frames) f.rawFullFrame.reset();
-    }
+    for (auto& f : job.frames) f.rawFullFrame.reset();
 
     std::optional<QRect> alignRoi;
     if (!effectiveCropRoi_ && config_.settings.lunarAnchor && config_.settings.lunarAnchor->isValid())
@@ -690,7 +838,11 @@ void TimelapseSession::processBurst(BurstJob& job)
             config_.lockRegion->width, config_.lockRegion->height);
 
     BurstStackResult stacked = stackBurst(job.frames, alignRoi);
-    if (!stacked.ok) return;
+    if (!stacked.ok)
+    {
+        skipBurstAfterError(job, QString("stacking failed: %1").arg(stacked.error));
+        return;
+    }
 
     double avgSharp = 0;
     for (const auto& f : job.frames) avgSharp += f.sharpness;
@@ -785,25 +937,30 @@ void TimelapseSession::processBurst(BurstJob& job)
             std::lock_guard lock(mutex_);
             fatalWarningText_ = QString("FITS write failed (%1) — stopping capture.").arg(writeErr);
             refreshWarningTextLocked();
-            if (!stopRequested_)
-            {
-                stopRequested_ = true;
-                stopReason_ = "FITS write failed: " + writeErr.toStdString();
-            }
+            requestStopLocked("FITS write failed: " + writeErr.toStdString(), /*discardPending=*/true);
             snap = status_;
         }
         postStatusSnapshot(std::move(snap));
         return;
     }
 
-    double b = 0, w = 1;
-    computeAutoStretchLevels(sharpened, b, w);
-    const QImage thumb = toneMapFitsToImage(sharpened, b, w, config_.settings.video.gamma, 1.0, {}, 512);
+    // The stack is on disk; from here a failure must not lose its log entry.
+    QImage thumb;
+    try
+    {
+        double b = 0, w = 1;
+        computeAutoStretchLevels(sharpened, b, w);
+        thumb = toneMapFitsToImage(sharpened, b, w, config_.settings.video.gamma, 1.0, {}, 512);
+    }
+    catch (...)
+    {
+        thumb = {}; // Display only
+    }
     const double procSec = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count();
     const bool cloudDrop = baselineQuality_ > 0 && avgSharp < 0.35 * baselineQuality_;
 
     stackLogs_.push_back({stackIdx, fitsName, meta.dateObs, meta.dateEnd, meta.framesCaptured, meta.framesKept,
-        avgSharp, aligned.shiftX, aligned.shiftY, aligned.rotationDeg, procSec});
+        avgSharp, aligned.shiftX, aligned.shiftY, aligned.rotationDeg, procSec, job.ramRefused});
 
     TimelapseStatus snap;
     {
@@ -833,6 +990,42 @@ void TimelapseSession::processBurst(BurstJob& job)
         snap = status_;
     }
     postStatusSnapshot(std::move(snap));
+}
+
+bool TimelapseSession::writeRawSer(BurstJob& job, QString& error)
+{
+    std::vector<FramePtr> rawKept;
+    rawKept.reserve(job.frames.size());
+    for (auto& f : job.frames)
+        if (f.rawFullFrame) rawKept.push_back(std::move(f.rawFullFrame));
+    if (rawKept.empty())
+    {
+        error = "no raw frames kept";
+        return false;
+    }
+    std::sort(rawKept.begin(), rawKept.end(), [](const FramePtr& a, const FramePtr& b) {
+        return a->frameIndex < b->frameIndex;
+    });
+    const QString serName = QString("%1_%2.ser").arg(job.periodIndex + 1, 4, 10, QChar('0'))
+        .arg(utcStamp(job.windowStartUtc));
+    QFile serFile(QDir(sessionDir_).filePath("raw/" + serName));
+    if (!serFile.open(QIODevice::WriteOnly))
+    {
+        error = QString("raw/%1: %2").arg(serName, serFile.errorString());
+        return false;
+    }
+    SerWriter sw(serFile);
+    QString err;
+    bool ok = sw.start(*rawKept.front(), config_.stream.camera, err, false, config_.site.telescope);
+    for (size_t i = 0; ok && i < rawKept.size(); ++i)
+        ok = sw.append(*rawKept[i], err);
+    if (ok) ok = sw.finish(err);
+    if (!ok)
+    {
+        error = QString("raw/%1 (%2 of %3 frames): %4").arg(serName).arg(sw.frames()).arg(rawKept.size()).arg(err);
+        return false;
+    }
+    return true;
 }
 
 void TimelapseSession::finalizeSession(const std::string& reason)
@@ -869,8 +1062,33 @@ void TimelapseSession::finalizeSession(const std::string& reason)
     TimelapseExportResult exportRes;
     if (!sessionDir_.isEmpty() && !stackLogs_.empty())
     {
-        exportRes = exportTimelapseFromFits(QDir(sessionDir_).filePath("sharpened"),
-            sessionDir_, config_.settings.video, commonOverlap_);
+        const auto progress = [this](int done, int total) {
+            TimelapseStatus progressSnap;
+            {
+                std::lock_guard lock(mutex_);
+                status_.exportDone = done;
+                status_.exportTotal = total;
+                progressSnap = status_;
+            }
+            postStatusSnapshot(std::move(progressSnap));
+        };
+        try
+        {
+            exportRes = exportTimelapseFromFits(QDir(sessionDir_).filePath("sharpened"),
+                sessionDir_, config_.settings.video, commonOverlap_, progress, &exportCancel_);
+        }
+        catch (const std::exception& ex)
+        {
+            exportRes = {};
+            exportRes.error = QString("internal error while building the video: %1").arg(QString::fromUtf8(ex.what()));
+        }
+        catch (...)
+        {
+            exportRes = {};
+            exportRes.error = "internal error while building the video";
+        }
+        if (!exportRes.ok && exportCancel_.load())
+            exportRes.error = "video not built (cancelled when the program closed); rebuild it with Re-sharpen";
     }
     else
     {
@@ -883,7 +1101,16 @@ void TimelapseSession::finalizeSession(const std::string& reason)
         skippedCopy = skippedLogs_;
     }
     if (!sessionDir_.isEmpty())
-        writeMetadataLog(QString::fromStdString(reason), exportRes, skippedCopy);
+    {
+        try
+        {
+            writeMetadataLog(QString::fromStdString(reason), exportRes, skippedCopy);
+        }
+        catch (...)
+        {
+            // The session must still finish and report; the stacks are on disk.
+        }
+    }
 
     TimelapseFinishResult finished;
     TimelapseStatus finalSnap;
@@ -939,6 +1166,7 @@ void TimelapseSession::writeMetadataLog(const QString& reason, const TimelapseEx
     writeSiteLines(out, config_.site);
     writeStreamLines(out, config_.stream, nullptr);
     for (const QString& s : skippedLogs) out << s << "\n";
+    for (const QString& s : problemLogs_) out << s << "\n";
     for (const StackLogEntry& e : stackLogs_)
     {
         out << "stack: index=" << e.index
@@ -951,7 +1179,9 @@ void TimelapseSession::writeMetadataLog(const QString& reason, const TimelapseEx
             << " dx=" << QString::number(e.shiftX, 'f', 2)
             << " dy=" << QString::number(e.shiftY, 'f', 2)
             << " rot_deg=" << QString::number(e.rotationDeg, 'f', 3)
-            << " proc_s=" << QString::number(e.processSeconds, 'f', 3) << "\n";
+            << " proc_s=" << QString::number(e.processSeconds, 'f', 3);
+        if (e.ramRefused > 0) out << " ram_refused=" << e.ramRefused;
+        out << "\n";
     }
     out.flush();
 }

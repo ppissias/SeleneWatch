@@ -646,16 +646,32 @@ void ResharpenDialog::onApplyAll()
 
     worker_ = std::jthread([this, dir, sharp, tone, rebuildOnly] {
         QString outDir;
-        const TimelapseExportResult res = resharpenTimelapseSession(
-            dir, {}, sharp, tone, rebuildOnly, outDir,
-            [this](int done, int total, const QString& stage) {
-                QMetaObject::invokeMethod(this, [this, done, total, stage] {
-                    progressBar_->setRange(0, std::max(1, total));
-                    progressBar_->setValue(done);
-                    statusLabel_->setText(QString("%1 (%2/%3)").arg(stage).arg(done).arg(total));
-                }, Qt::QueuedConnection);
-            },
-            &cancelFlag_);
+        TimelapseExportResult res;
+        // This thread's exception boundary: a failure ends this run with a
+        // message instead of terminating the program.
+        try
+        {
+            res = resharpenTimelapseSession(
+                dir, {}, sharp, tone, rebuildOnly, outDir,
+                [this](int done, int total, const QString& stage) {
+                    QMetaObject::invokeMethod(this, [this, done, total, stage] {
+                        progressBar_->setRange(0, std::max(1, total));
+                        progressBar_->setValue(done);
+                        statusLabel_->setText(QString("%1 (%2/%3)").arg(stage).arg(done).arg(total));
+                    }, Qt::QueuedConnection);
+                },
+                &cancelFlag_);
+        }
+        catch (const std::exception& ex)
+        {
+            res = {};
+            res.error = QString("internal error: %1").arg(QString::fromUtf8(ex.what()).trimmed());
+        }
+        catch (...)
+        {
+            res = {};
+            res.error = "internal error";
+        }
 
         QMetaObject::invokeMethod(this, [this, res, outDir] {
             setBusy(false);

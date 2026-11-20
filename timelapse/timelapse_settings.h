@@ -56,7 +56,7 @@ struct VideoToneSettings
     double whiteLevel{1.0};
     double gamma{1.0};
     bool brightnessLevelling{true};
-    double minQualityRatio{0.0}; // 0 keeps all stacks; >0 drops stacks below ratio * reference quality
+    double minQualityRatio{0.0}; // 0 keeps all stacks; >0 drops stacks below ratio * median stack quality
     bool cropToOverlap{true};
     int fps{12};
     bool writeMp4{true};

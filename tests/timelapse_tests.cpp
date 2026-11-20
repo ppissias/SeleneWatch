@@ -31,6 +31,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QThread>
 #include <QtCore/QTimeZone>
+#include <QtGui/QColor>
 #include <QtTest/QTest>
 
 #include <algorithm>
@@ -248,6 +249,11 @@ private slots:
     void fakeZwoCameraTimeLapseAndNonBlockingStop();
     void resharpenPreviewMatchesExportedFrame();
     void realArchiveRecordingsIfPresent();
+    void rawSerCopiesFramesWithinRamHeadroom();
+    void stackCountTargetDiscardsQueuedBurst();
+    void stackingErrorsSkipOrStopTheSessionOnly();
+    void cancelledExportKeepsStacksAndSaysHowToRebuild();
+    void eventPreviewGifStopsFfmpegAtTimeLimit();
 };
 
 void TimelapseTests::fitsRoundTripMonoAndRgbAndExternal16Bit()
@@ -1895,6 +1901,252 @@ void TimelapseTests::realArchiveRecordingsIfPresent()
     runClip("Moon_221449.avi", TimelapsePreset::Moon, 1.5, 0.6);
     runClip("Mars_222831.avi", TimelapsePreset::Planet, 1.5, 0.6);
     runClip("Moon_171311.ser", TimelapsePreset::Moon, 2.0, 0.6);
+}
+
+namespace {
+
+TimelapseSettings quickSettings()
+{
+    TimelapseSettings s = defaultTimelapseSettings(TimelapsePreset::Moon);
+    s.intervalSeconds = 2.0;
+    s.captureWindowSeconds = 1.0;
+    s.keepPercent = 100.0;
+    s.maxFramesPerPeriod = 200;
+    s.video.writeMp4 = false;
+    s.video.writeGif = false;
+    return s;
+}
+
+} // namespace
+
+// Issue 1: raw SER keeps its own budgeted copies (the camera's frame goes back
+// at once), and a burst stops admitting frames at the RAM headroom instead of
+// using the last of the ceiling. The SER holds exactly the stacked frames.
+void TimelapseTests::rawSerCopiesFramesWithinRamHeadroom()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const int w = 48, h = 48;
+    const auto field = makeLunarCraterField(w, h);
+
+    TimelapseSettings s = quickSettings();
+    s.saveRawSer = true;
+
+    QObject ctx;
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = tmp.filePath("headroom");
+    cfg.settings = s;
+    cfg.stream.playback = "headroom.ser";
+    // Each admitted frame costs a 2304-byte raw copy plus a 2304-byte cropped
+    // copy. 90 % of 25000 bytes admits four frames; the fifth's cropped copy
+    // would pass the headroom, so it and every later frame are refused.
+    cfg.memory = MemoryBudget(25000);
+
+    TimelapseSession session(&ctx, cfg);
+    std::vector<FramePtr> fed;
+    for (int i = 0; i < 8; ++i)
+    {
+        fed.push_back(makeMono8Frame(w, h, field, static_cast<uint64_t>(i), utcPoint(0, i * 100)));
+        session.onFrame(fed.back());
+        QCOMPARE(fed.back().use_count(), 1L); // Never holds the source's frame
+    }
+    QVERIFY(cfg.memory.usage().used <= 22500);
+    session.stop("done");
+    session.waitFinished();
+
+    const TimelapseStatus st = session.status();
+    QCOMPARE(st.stacksCompleted, 1);
+    QCOMPARE(cfg.memory.usage().used, size_t{0});
+
+    const QDir stacksDir(QDir(st.sessionDir).filePath("stacks"));
+    const QStringList fitsFiles = stacksDir.entryList({"*.fits"}, QDir::Files);
+    QCOMPARE(fitsFiles.size(), 1);
+    FitsMetadata meta;
+    int mw = 0, mh = 0, mc = 0;
+    QString err;
+    QVERIFY2(readFitsMetadata(stacksDir.filePath(fitsFiles.first()), meta, mw, mh, mc, err), qPrintable(err));
+    QCOMPARE(meta.framesKept, uint64_t{4});
+    QCOMPARE(meta.framesCaptured, uint64_t{8});
+
+    const QDir rawDir(QDir(st.sessionDir).filePath("raw"));
+    const QStringList serFiles = rawDir.entryList({"*.ser"}, QDir::Files);
+    QCOMPARE(serFiles.size(), 1);
+    std::string serErr;
+    auto reader = openRecordingReader(std::filesystem::path(rawDir.filePath(serFiles.first()).toStdWString()), 10.0, serErr);
+    QVERIFY2(reader != nullptr, serErr.c_str());
+    QCOMPARE(reader->frameCount(), 4);
+
+    const QString logText = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+    QVERIFY2(logText.contains("ram_refused=4"), qPrintable(logText));
+}
+
+// Issue 4: a burst queued behind the stack that reaches the target is not stacked.
+void TimelapseTests::stackCountTargetDiscardsQueuedBurst()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const auto field = makeLunarCraterField(48, 48);
+
+    TimelapseSettings s = quickSettings();
+    s.stopKind = StopConditionKind::StackCount;
+    s.targetStacks = 1;
+
+    QObject ctx;
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = tmp.filePath("target");
+    cfg.settings = s;
+    cfg.stream.playback = "target.ser";
+    cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+
+    TimelapseSession session(&ctx, cfg);
+    session.setStackDelay(std::chrono::milliseconds(1500));
+    uint64_t index = 0;
+    for (int i = 0; i < 5; ++i)
+        session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(0, i * 100)));
+    // After the window, before period 1: hands period 0 to the (slow) worker.
+    session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(1, 500)));
+    QTest::qWait(200); // The worker takes it, so period 1 is not skipped for overload
+    for (int i = 0; i < 5; ++i)
+        session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(2, i * 100)));
+    // Closes period 1 while period 0 is still being stacked: it waits in the queue.
+    session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(3, 500)));
+    session.waitFinished();
+
+    const TimelapseStatus st = session.status();
+    QCOMPARE(st.stacksCompleted, 1);
+    QCOMPARE(st.periodsSkipped, 0);
+    QCOMPARE(st.stopReason, QString("target stack count reached"));
+    QCOMPARE(QDir(QDir(st.sessionDir).filePath("stacks")).entryList({"*.fits"}, QDir::Files).size(), 1);
+    QCOMPARE(cfg.memory.usage().used, size_t{0});
+    const QString logText = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+    QVERIFY2(logText.contains("discarded period=1"), qPrintable(logText));
+}
+
+// Issue 2: the worker thread's exception boundary. A RAM refusal costs one
+// period; anything else stops the time-lapse (not the program) with a record.
+void TimelapseTests::stackingErrorsSkipOrStopTheSessionOnly()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const auto field = makeLunarCraterField(48, 48);
+
+    // A: RAM refused while stacking period 0 -> skipped; period 1 is stacked.
+    {
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("memory");
+        cfg.settings = quickSettings();
+        cfg.stream.playback = "memory.ser";
+        cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+        TimelapseSession session(&ctx, cfg);
+        session.setBeforeStackForTests([](int period) {
+            if (period == 0) throw MemoryLimitError();
+        });
+        uint64_t index = 0;
+        for (int i = 0; i < 5; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(0, i * 100)));
+        session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(1, 500)));
+        QTRY_COMPARE_WITH_TIMEOUT(session.status().periodsSkipped, 1, 5000);
+        for (int i = 0; i < 5; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(2, i * 100)));
+        session.stop("done");
+        session.waitFinished();
+
+        const TimelapseStatus st = session.status();
+        QCOMPARE(st.stacksCompleted, 1);
+        QCOMPARE(st.periodsSkipped, 1);
+        QCOMPARE(st.stopReason, QString("done"));
+        QCOMPARE(cfg.memory.usage().used, size_t{0});
+        const QString logText = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+        QVERIFY2(logText.contains("skip period=0") && logText.contains("RAM limit while stacking"), qPrintable(logText));
+    }
+
+    // B: an unexpected exception stops the session, records it, and still finishes.
+    {
+        QObject ctx;
+        TimelapseSession::Config cfg;
+        cfg.timelapsesRoot = tmp.filePath("fault");
+        cfg.settings = quickSettings();
+        cfg.stream.playback = "fault.ser";
+        cfg.memory = MemoryBudget(64ULL * 1024 * 1024);
+        TimelapseSession session(&ctx, cfg);
+        session.setBeforeStackForTests([](int) { throw std::runtime_error("injected fault"); });
+        uint64_t index = 0;
+        for (int i = 0; i < 5; ++i)
+            session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(0, i * 100)));
+        session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(1, 500)));
+        session.waitFinished(); // Ends on its own: no stop() from the test
+
+        const TimelapseStatus st = session.status();
+        QVERIFY(!session.active());
+        QCOMPARE(st.stacksCompleted, 0);
+        QVERIFY2(st.stopReason.contains("internal error: injected fault"), qPrintable(st.stopReason));
+        QVERIFY2(st.warningText.contains("Internal error"), qPrintable(st.warningText));
+        QCOMPARE(cfg.memory.usage().used, size_t{0});
+        const QString logText = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+        QVERIFY2(logText.contains("error period=0") && logText.contains("what=\"injected fault\""), qPrintable(logText));
+        QVERIFY2(logText.contains("stop_reason: internal error: injected fault"), qPrintable(logText));
+    }
+}
+
+// Issue 5: closing the program can abandon the video; the stacks stay and the
+// log says how to make the video later.
+void TimelapseTests::cancelledExportKeepsStacksAndSaysHowToRebuild()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const auto field = makeLunarCraterField(48, 48);
+
+    TimelapseSettings s = quickSettings();
+    s.video.writeMp4 = true;
+
+    QObject ctx;
+    TimelapseSession::Config cfg;
+    cfg.timelapsesRoot = tmp.filePath("cancel");
+    cfg.settings = s;
+    cfg.stream.playback = "cancel.ser";
+    TimelapseSession session(&ctx, cfg);
+    for (int i = 0; i < 5; ++i)
+        session.onFrame(makeMono8Frame(48, 48, field, static_cast<uint64_t>(i), utcPoint(0, i * 100)));
+    session.cancelExport();
+    session.stop("the program closed");
+    session.waitFinished();
+
+    const TimelapseStatus st = session.status();
+    QCOMPARE(st.stacksCompleted, 1);
+    QVERIFY(!QFileInfo::exists(QDir(st.sessionDir).filePath("timelapse.mp4")));
+    QCOMPARE(QDir(QDir(st.sessionDir).filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size(), 1);
+    const QString logText = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+    QVERIFY2(logText.contains("export_error: video not built (cancelled when the program closed)"), qPrintable(logText));
+}
+
+// Issue 3: the event preview GIF runs on the evidence writer's thread, so
+// FFmpeg is stopped once its time is up.
+void TimelapseTests::eventPreviewGifStopsFfmpegAtTimeLimit()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    std::vector<QImage> frames;
+    for (int i = 0; i < 10; ++i)
+    {
+        QImage img(256, 256, QImage::Format_RGB888);
+        img.fill(QColor(20 * i, 40, 200 - 10 * i));
+        frames.push_back(img);
+    }
+    const QString gifPath = tmp.filePath("clip/04_event_preview.gif");
+
+    EventPreviewGifOptions options;
+    options.timeoutMs = 1; // Already over by the time FFmpeg has started
+    QString error;
+    QVERIFY(!encodeEventPreviewGif(frames, gifPath, options, error));
+    QVERIFY2(error.contains("FFmpeg did not finish within"), qPrintable(error));
+    QVERIFY(!QFileInfo::exists(gifPath));
+    QVERIFY(QDir(tmp.filePath("clip")).entryList({"*.tmp.gif"}, QDir::Files | QDir::Hidden).isEmpty());
+
+    // The normal limit leaves room for the real encode.
+    options.timeoutMs = 30000;
+    QVERIFY2(encodeEventPreviewGif(frames, gifPath, options, error), qPrintable(error));
+    QVERIFY(checkFileHasGifSignature(gifPath));
 }
 
 QTEST_MAIN(TimelapseTests)

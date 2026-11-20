@@ -56,6 +56,10 @@ signals:
 private:
     void applyPresetDefaults(TimelapsePreset preset);
     void updateEstimates();
+    [[nodiscard]] int estimatedKeptFrames() const;
+    [[nodiscard]] double rawSerGiBPerHour() const;
+    // Asks the observer to confirm turning raw SER bursts on; true when confirmed.
+    bool confirmRawSer();
     void updateFilmstripFrame();
     void loadFromQSettings();
     void saveToQSettings() const;

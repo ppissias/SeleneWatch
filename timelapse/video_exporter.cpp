@@ -3,6 +3,7 @@
 #include "timelapse/stack_processor.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDeadlineTimer>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -17,6 +18,7 @@
 namespace {
 
 constexpr qsizetype kMaxStderrBytes = 32 * 1024;
+const QString kFfmpegTimedOut = QStringLiteral("FFmpeg did not finish within the time limit");
 
 void drainStderr(QProcess& proc, QByteArray& buf)
 {
@@ -31,9 +33,12 @@ void drainStderr(QProcess& proc, QByteArray& buf)
 
 using FrameProducer = std::function<QImage(int index, QString& err)>;
 
+// Runs FFmpeg with raw RGB24 frames on stdin. Stops it when cancel is set or
+// the deadline passes (QDeadlineTimer::Forever for no time limit).
 bool runFfmpegPipeStream(const QString& ffmpegExe, const QStringList& args,
     int frameCount, const FrameProducer& produceFrame, int w, int h,
-    QString& error, std::atomic<bool>* cancel)
+    QString& error, std::atomic<bool>* cancel,
+    const QDeadlineTimer& deadline = QDeadlineTimer(QDeadlineTimer::Forever))
 {
     QProcess proc;
     proc.setProgram(ffmpegExe);
@@ -45,18 +50,25 @@ bool runFfmpegPipeStream(const QString& ffmpegExe, const QStringList& args,
         return false;
     }
 
+    // True (after killing FFmpeg and setting error) when the run must end now.
+    const auto mustAbort = [&] {
+        if (cancel && cancel->load())
+            error = "cancelled";
+        else if (deadline.hasExpired())
+            error = kFfmpegTimedOut;
+        else
+            return false;
+        proc.kill();
+        proc.waitForFinished(2000);
+        return true;
+    };
+
     QByteArray stderrBuf;
     const int rowBytes = w * 3;
     for (int i = 0; i < frameCount; ++i)
     {
         drainStderr(proc, stderrBuf);
-        if (cancel && cancel->load())
-        {
-            proc.kill();
-            proc.waitForFinished(2000);
-            error = "cancelled";
-            return false;
-        }
+        if (mustAbort()) return false;
         QString frameErr;
         const QImage img = produceFrame(i, frameErr);
         if (img.isNull())
@@ -90,13 +102,7 @@ bool runFfmpegPipeStream(const QString& ffmpegExe, const QStringList& args,
         while (proc.bytesToWrite() > 4 * 1024 * 1024)
         {
             drainStderr(proc, stderrBuf);
-            if (cancel && cancel->load())
-            {
-                proc.kill();
-                proc.waitForFinished(2000);
-                error = "cancelled";
-                return false;
-            }
+            if (mustAbort()) return false;
             if (!proc.waitForBytesWritten(2000) && proc.state() != QProcess::Running)
                 break;
         }
@@ -106,13 +112,7 @@ bool runFfmpegPipeStream(const QString& ffmpegExe, const QStringList& args,
     while (!proc.waitForFinished(500))
     {
         drainStderr(proc, stderrBuf);
-        if (cancel && cancel->load())
-        {
-            proc.kill();
-            proc.waitForFinished(2000);
-            error = "cancelled";
-            return false;
-        }
+        if (mustAbort()) return false;
     }
     drainStderr(proc, stderrBuf);
 
@@ -336,6 +336,7 @@ bool encodeEventPreviewGif(const std::vector<QImage>& frames,
     const int startEdge = std::max(32, std::min(options.maxLongEdge > 0 ? options.maxLongEdge : 512,
         std::max(srcW, srcH)));
     const int safeFps = std::clamp(options.fps, 1, 30);
+    const QDeadlineTimer deadline(options.timeoutMs > 0 ? options.timeoutMs : 30000);
 
     struct GifTier
     {
@@ -389,8 +390,10 @@ bool encodeEventPreviewGif(const std::vector<QImage>& frames,
         QFile::remove(tmp);
         if (!runFfmpegPipeStream(ffmpegExe, args, static_cast<int>(scaled.size()),
                 [&scaled](int i, QString&) -> QImage { return scaled[static_cast<size_t>(i)]; },
-                sz.width(), sz.height(), error, cancel))
+                sz.width(), sz.height(), error, cancel, deadline))
         {
+            if (error == kFfmpegTimedOut)
+                error = QString("FFmpeg did not finish within %1 s").arg(options.timeoutMs / 1000.0, 0, 'g', 3);
             QFile::remove(tmp);
             return false;
         }

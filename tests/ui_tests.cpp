@@ -27,6 +27,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtGui/QAction>
 #include <QtGui/QFontDatabase>
@@ -40,6 +41,8 @@
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
@@ -66,6 +69,28 @@ void chooseSource(MainWindow& window, const QString& key)
     QVERIFY2(index > 0, qPrintable(key));
     source->setCurrentIndex(index);
 }
+// Answers the next modal message box with this object name: its accept-role
+// button, or Cancel. Retries until the box is up (it opens inside exec()).
+void answerMessageBox(const QString& objectName, bool accept, int attempts = 200)
+{
+    QTimer::singleShot(10, [objectName, accept, attempts] {
+        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if (!box || box->objectName() != objectName)
+        {
+            if (attempts > 0) answerMessageBox(objectName, accept, attempts - 1);
+            return;
+        }
+        const auto role = accept ? QMessageBox::AcceptRole : QMessageBox::RejectRole;
+        for (QAbstractButton* button : box->buttons())
+        {
+            if (box->buttonRole(button) == role)
+            {
+                button->click();
+                return;
+            }
+        }
+    });
+}
 // Most window tests run on the synthetic source, which the testing tools offer.
 void useSynthetic(MainWindow& window)
 {
@@ -89,6 +114,7 @@ private slots:
     void detectionPanelExplainsPatchRejections();
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
+    void diskReserveStartsAtTenGiBAndIsRemembered();
     void siteAndRecordingControls();
     void nightScheduleAndExposureFollower();
     void theReleaseIsShown();
@@ -117,6 +143,8 @@ private slots:
     void testingToolsAndConnectAtStartup();
     void outputFolderSafetyAndMigration();
     void timelapsePanelAndResharpenWorkflow();
+    void rawSerNeedsConfirmationAndIsNotRemembered();
+    void closingDuringTimelapseWaitsForTheVideo();
     void userManualAndStartupTipsWorkflow();
     void recreateFolderWhilePreviewRunningAndWheelGuard();
     void detectionProfilesSaveLoadAndOptionalMask();
@@ -900,6 +928,37 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().sigma, 9.0);
     QCOMPARE(panel->settings().mask.count(), 1);
     QVERIFY(panel->settings().mask.shapes()[0] == DetectionMask::rectangle(0, 400, 640, 80));
+}
+
+// The disk reserve stops clips, recordings and time-lapses before the drive
+// fills. It starts at 10 GiB for each target, and a changed value is kept for
+// that target the next time the program opens.
+void UiTest::diskReserveStartsAtTenGiBAndIsRemembered()
+{
+    QTemporaryDir directory;
+    constexpr uint64_t kGiB = uint64_t{1024} * 1024 * 1024;
+    {
+        MainWindow window(nullptr, directory.path());
+        auto* display = window.findChild<DisplayPanel*>();
+        auto* reserve = display->findChild<QDoubleSpinBox*>("diskReserveGiB");
+        auto* choice = window.findChild<DetectionPanel*>()->findChild<QComboBox*>("targetChoice");
+        QCOMPARE(reserve->value(), 10.0);
+        reserve->setValue(25);
+        QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
+
+        choice->setCurrentIndex(1);
+        QCOMPARE(reserve->value(), 10.0);
+        reserve->setValue(0);
+        QCOMPARE(reserve->text(), QString("None"));
+        QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
+    }
+    MainWindow window(nullptr, directory.path());
+    auto* display = window.findChild<DisplayPanel*>();
+    auto* choice = window.findChild<DetectionPanel*>()->findChild<QComboBox*>("targetChoice");
+    QCOMPARE(display->captureSettings().target, Target::Sky);
+    QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
+    choice->setCurrentIndex(0);
+    QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
 }
 
 // Feature-14: the site dialog keeps what is entered, the window saves it,
@@ -2180,6 +2239,73 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     QVERIFY2(sawMeteor, "Expected Sky meteor streak clip on disk");
     QVERIFY2(sawLightning, "Expected Sky lightning clip on disk");
     QVERIFY(text(QDir(dir.path()).filePath("events/sky/candidates.txt")).contains("mode=sky"));
+}
+
+void UiTest::rawSerNeedsConfirmationAndIsNotRemembered()
+{
+    {
+        TimelapsePanel panel;
+        auto* raw = panel.findChild<QCheckBox*>("timelapseSaveSer");
+        QVERIFY(raw);
+        QVERIFY(!raw->isChecked());
+
+        answerMessageBox("timelapseRawSerConfirm", false);
+        raw->click();
+        QVERIFY(!raw->isChecked());
+        QVERIFY(!panel.settings().saveRawSer);
+
+        answerMessageBox("timelapseRawSerConfirm", true);
+        raw->click();
+        QVERIFY(raw->isChecked());
+        QVERIFY(panel.settings().saveRawSer);
+        QVERIFY(panel.findChild<QLabel*>("timelapseEstimate")->text().contains("Raw SER bursts are ON"));
+
+        // Turning it off needs no confirmation.
+        raw->click();
+        QVERIFY(!raw->isChecked());
+        answerMessageBox("timelapseRawSerConfirm", true);
+        raw->click();
+        QVERIFY(raw->isChecked());
+    }
+    // A new run starts with it off again, even though it was left on.
+    TimelapsePanel again;
+    QVERIFY(!again.findChild<QCheckBox*>("timelapseSaveSer")->isChecked());
+}
+
+void UiTest::closingDuringTimelapseWaitsForTheVideo()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window(nullptr, dir.path());
+    useSynthetic(window);
+    window.show();
+
+    auto* tl = window.findChild<TimelapsePanel*>("timelapsePanel");
+    QVERIFY(tl);
+    tl->findChild<QDoubleSpinBox*>("timelapseInterval")->setValue(0.45);
+    tl->findChild<QDoubleSpinBox*>("timelapseWindow")->setValue(0.25);
+    tl->findChild<QComboBox*>("timelapseStopKind")->setCurrentIndex(0); // Manual stop
+    tl->findChild<QCheckBox*>("timelapseMp4")->setChecked(true);
+    tl->findChild<QCheckBox*>("timelapseGif")->setChecked(false);
+    auto* startTl = tl->findChild<QPushButton*>("timelapseStartButton");
+    auto* statsLabel = tl->findChild<QLabel*>("timelapseStats");
+    startTl->click();
+    QTRY_VERIFY_WITH_TIMEOUT(statsLabel->text().contains("Stacks: 1"), 15000);
+
+    // Closing stops the time-lapse but keeps the window, with progress, until the video exists.
+    window.close();
+    QVERIFY(window.isVisible());
+    auto* progress = window.findChild<QProgressDialog*>("closingTimelapseProgress");
+    QVERIFY(progress);
+    QVERIFY(progress->isVisible());
+    QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 20000);
+
+    const QString tlRoot = timelapsesFolder(dir.path());
+    const QStringList sessions = QDir(tlRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    QCOMPARE(sessions.size(), 1);
+    const QString sessionDir = QDir(tlRoot).filePath(sessions.first());
+    QVERIFY(QFileInfo::exists(QDir(sessionDir).filePath("timelapse.mp4")));
+    QVERIFY(text(QDir(sessionDir).filePath("timelapse.txt")).contains("stop_reason: the program closed"));
 }
 
 int main(int argc, char** argv)

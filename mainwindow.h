@@ -19,6 +19,8 @@
 
 class QAction;
 class QCheckBox;
+class QCloseEvent;
+class QProgressDialog;
 class QMenu;
 class QPushButton;
 class QSpinBox;
@@ -164,6 +166,12 @@ private:
     void onStartTimeLapse();
     void onStopTimeLapse();
     void onTimeLapseFinished(const TimelapseFinishResult& result);
+    // Closing while a time-lapse runs or builds its video: the window stays
+    // open with a progress dialog until the video is built (or abandoned),
+    // then closes itself.
+    void closeEvent(QCloseEvent* event) override;
+    void showClosingProgress();
+    void updateClosingProgress(const TimelapseStatus& status);
     void onOpenResharpen(const QString& sessionDir = {});
     void onLockChanged();
     void onLockAtSelection();
@@ -248,6 +256,8 @@ private:
     QDockWidget* guidingDock_{nullptr};
     TimelapsePanel* timelapsePanel_{nullptr};
     QDockWidget* timelapseDock_{nullptr};
+    QProgressDialog* closingProgress_{nullptr};
+    bool closeAfterTimeLapse_{false};
     double measuredFps_{30.0};
     int lastFrameWidth_{640};
     int lastFrameHeight_{480};

@@ -14,6 +14,7 @@
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressBar>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
@@ -146,8 +147,10 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     outRow->addWidget(videoFps_, 1);
     form->addRow("Animation", outRow);
 
-    saveRawSer_ = new QCheckBox("Also save raw SER bursts (large)", body);
+    saveRawSer_ = new QCheckBox("Also save raw SER bursts (uses a lot of disk space)", body);
     saveRawSer_->setObjectName("timelapseSaveSer");
+    saveRawSer_->setToolTip("Writes every stacked frame of every burst to raw/*.ser. This can fill a drive in "
+        "one night. Turning it on asks for confirmation, and it is off again each time SeleneWatch starts.");
     form->addRow(saveRawSer_);
 
     estimateLabel_ = new QLabel(body);
@@ -281,6 +284,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         else if (auto* dt = qobject_cast<QDateTimeEdit*>(w))
             connect(dt, &QDateTimeEdit::dateTimeChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
     }
+
+    // Only the observer's click asks; setSettings() applies a value without asking.
+    connect(saveRawSer_, &QCheckBox::clicked, this, [this](bool checked) {
+        if (checked && !confirmRawSer()) saveRawSer_->setChecked(false);
+    });
 
     connect(selectAnchor_, &QToolButton::toggled, this, &TimelapsePanel::anchorSelectionChanged);
     connect(clearAnchor_, &QPushButton::clicked, this, [this] {
@@ -472,20 +480,17 @@ void TimelapsePanel::updateEstimates()
     form_->setRowVisible(targetStacks_, stop == StopConditionKind::StackCount);
 
     const double estCaptured = std::max(1.0, window_->value() * estimatedFps_);
-    const int estKept = std::clamp(static_cast<int>(std::ceil(estCaptured * keepPercent_->value() / 100.0)),
-        1, maxFrames_->value());
+    const int estKept = estimatedKeptFrames();
     const double stacksPerHour = 3600.0 / std::max(0.5, interval_->value());
     const double fitsBytesPerStack = static_cast<double>(frameWidth_) * frameHeight_ * 4.0 * 2.0; // unsharpened + sharpened
     double gbPerHour = (stacksPerHour * fitsBytesPerStack) / (1024.0 * 1024.0 * 1024.0);
-    if (saveRawSer_->isChecked())
-    {
-        const double serBytes = estCaptured * frameWidth_ * frameHeight_ * std::max(1, bytesPerPixel_);
-        gbPerHour += (stacksPerHour * serBytes) / (1024.0 * 1024.0 * 1024.0);
-    }
+    if (saveRawSer_->isChecked()) gbPerHour += rawSerGiBPerHour();
 
     QString note = QString("~%1 frames/window at %2 fps → stacking up to %3 best. Est. disk: %4 GB/hr.")
         .arg(static_cast<int>(std::round(estCaptured))).arg(estimatedFps_, 0, 'f', 0)
         .arg(estKept).arg(gbPerHour, 0, 'f', 2);
+    if (saveRawSer_->isChecked())
+        note += QString("\nRaw SER bursts are ON: about %1 GB/hr of that.").arg(rawSerGiBPerHour(), 0, 'f', 1);
 
     const auto preset = static_cast<TimelapsePreset>(preset_->currentData().toInt());
     if (preset == TimelapsePreset::Planet && window_->value() > 90.0)
@@ -495,14 +500,63 @@ void TimelapsePanel::updateEstimates()
     estimateLabel_->setText(note);
 }
 
+int TimelapsePanel::estimatedKeptFrames() const
+{
+    const double estCaptured = std::max(1.0, window_->value() * estimatedFps_);
+    return std::clamp(static_cast<int>(std::ceil(estCaptured * keepPercent_->value() / 100.0)),
+        1, maxFrames_->value());
+}
+
+// Only the kept (stacked) frames of each burst are written to raw SER.
+double TimelapsePanel::rawSerGiBPerHour() const
+{
+    const double stacksPerHour = 3600.0 / std::max(0.5, interval_->value());
+    const double burstBytes = static_cast<double>(estimatedKeptFrames()) * frameWidth_ * frameHeight_
+        * std::max(1, bytesPerPixel_);
+    return stacksPerHour * burstBytes / (1024.0 * 1024.0 * 1024.0);
+}
+
+bool TimelapsePanel::confirmRawSer()
+{
+    const double burstMiB = static_cast<double>(estimatedKeptFrames()) * frameWidth_ * frameHeight_
+        * std::max(1, bytesPerPixel_) / (1024.0 * 1024.0);
+    QMessageBox box(this);
+    box.setObjectName("timelapseRawSerConfirm");
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle("Save raw SER bursts?");
+    box.setText("Raw SER bursts use a lot of disk space and can fill a drive in one night.");
+    box.setInformativeText(QString(
+        "With the current settings each burst keeps about %1 frames of %2 × %3 (%4 MB), "
+        "about %5 GB per hour.\n\n"
+        "The time-lapse stops only when free space falls below the disk reserve in the Display panel. "
+        "With the reserve set to None it continues until the drive is full.\n\n"
+        "This option is off again each time SeleneWatch starts.")
+        .arg(estimatedKeptFrames()).arg(frameWidth_).arg(frameHeight_)
+        .arg(burstMiB, 0, 'f', 0).arg(rawSerGiBPerHour(), 0, 'f', 1));
+    QPushButton* enable = box.addButton("Save raw SER bursts", QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    return box.clickedButton() == enable;
+}
+
 void TimelapsePanel::updateStatus(const TimelapseStatus& s)
 {
     if (!s.sessionDir.isEmpty()) lastSessionDir_ = s.sessionDir;
 
     if (s.finalizing)
     {
-        progressBar_->setRange(0, 0);
-        timingLabel_->setText("Finalizing MP4/GIF video…");
+        if (s.exportTotal > 0)
+        {
+            progressBar_->setRange(0, s.exportTotal);
+            progressBar_->setValue(std::min(s.exportDone, s.exportTotal));
+            timingLabel_->setText(QString("Building the video: %1 / %2 frames…").arg(s.exportDone).arg(s.exportTotal));
+        }
+        else
+        {
+            progressBar_->setRange(0, 0);
+            timingLabel_->setText("Finalizing MP4/GIF video…");
+        }
     }
     else if (s.active)
     {
@@ -643,7 +697,10 @@ void TimelapsePanel::loadFromQSettings()
     writeMp4_->setChecked(saved.value("writeMp4", true).toBool());
     writeGif_->setChecked(saved.value("writeGif", false).toBool());
     videoFps_->setValue(std::clamp(saved.value("videoFps", 12).toInt(), 1, 60));
-    saveRawSer_->setChecked(saved.value("saveRawSer", false).toBool());
+    // Raw SER bursts are never remembered: each run asks again (and an older
+    // saved choice is dropped).
+    saveRawSer_->setChecked(false);
+    saved.remove("saveRawSer");
     saved.endGroup();
     updating_ = false;
 }
@@ -665,6 +722,5 @@ void TimelapsePanel::saveToQSettings() const
     saved.setValue("writeMp4", writeMp4_->isChecked());
     saved.setValue("writeGif", writeGif_->isChecked());
     saved.setValue("videoFps", videoFps_->value());
-    saved.setValue("saveRawSer", saveRawSer_->isChecked());
     saved.endGroup();
 }

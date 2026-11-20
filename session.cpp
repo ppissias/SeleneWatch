@@ -639,6 +639,18 @@ void Session::waitTimeLapseFinished()
     for (const auto& tl : pending) tl->waitFinished();
 }
 
+void Session::cancelTimeLapseExport()
+{
+    std::vector<std::shared_ptr<TimelapseSession>> all;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        if (timelapse_) all.push_back(timelapse_);
+        for (const auto& entry : finishingTimelapses_)
+            if (entry.second) all.push_back(entry.second);
+    }
+    for (const auto& tl : all) tl->cancelExport();
+}
+
 bool Session::timeLapseFinalizing() const
 {
     std::lock_guard lock(timelapseMutex_);

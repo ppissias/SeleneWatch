@@ -164,6 +164,9 @@ public:
         FreeSpaceQuery freeSpace = {}, std::chrono::milliseconds stackDelay = {});
     void stopTimeLapse(const std::string& reason = "stopped by the observer");
     void waitTimeLapseFinished();
+    // Abandons MP4/GIF assembly of every finalizing time-lapse (closing the
+    // program); their FITS stacks stay on disk.
+    void cancelTimeLapseExport();
     [[nodiscard]] bool timeLapseFinalizing() const;
     [[nodiscard]] TimelapseStatus timeLapseStatus() const;
 

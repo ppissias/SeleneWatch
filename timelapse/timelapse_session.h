@@ -41,6 +41,10 @@ struct TimelapseStatus
     double nextBurstInSeconds{0};
     double lastProcessingSeconds{0};
 
+    // Video assembly progress while finalizing (0/0 until encoding starts).
+    int exportDone{0};
+    int exportTotal{0};
+
     // Latest completed stack telemetry and thumbnail.
     uint64_t lastCapturedFrames{0};
     uint64_t lastKeptFrames{0};
@@ -71,11 +75,17 @@ struct TimelapseFinishResult
 
 // Runs a lucky-imaging time-lapse session:
 // - Source thread collects up to 100-200 best frames per fixed-cadence period,
-//   never holding FramePool slots or blocking acquisition.
+//   never holding camera FramePool frames or blocking acquisition. Every byte it
+//   keeps (cropped copies and, with saveRawSer, full raw copies) is charged to the
+//   session RAM budget and admitted only below kBudgetHeadroomPercent of the
+//   ceiling, so a full burst refuses frames instead of starving the camera.
 // - Worker thread aligns, stacks, sharpens, writes 32-bit float FITS immediately,
 //   and exports MP4/GIF when the session stops (or hits diskReserveBytes).
 // - Depth-1 pending burst queue + pre-capture overload skip gate prevent RAM
 //   blowup if processing falls behind the interval.
+// - Errors: a RAM refusal while stacking skips that period; any other exception
+//   stops the session (never the program), is written to timelapse.txt, and the
+//   video is still assembled from the stacks already on disk.
 class TimelapseSession
 {
 public:
@@ -114,8 +124,18 @@ public:
     [[nodiscard]] bool valid() const { return initError_.isEmpty(); }
     [[nodiscard]] QString initError() const { return initError_; }
 
-    // Tests: inject processing delay or replace disk-space query.
+    // Any thread. Abandons MP4/GIF assembly during finalization (for closing the
+    // program); FITS stacks stay on disk and Re-sharpen can rebuild the video.
+    void cancelExport();
+
+    // Tests: inject processing delay, or run code (which may throw) at the start
+    // of each stack on the worker thread.
     void setStackDelay(std::chrono::milliseconds delay);
+    void setBeforeStackForTests(std::function<void(int periodIndex)> hook);
+
+    // New burst bytes are admitted only while the RAM budget stays below this
+    // share of its ceiling, keeping room for the camera's own frames.
+    static constexpr size_t kBudgetHeadroomPercent = 90;
 
 private:
     struct BurstJob
@@ -126,6 +146,7 @@ private:
         uint64_t framesCaptured{0};
         std::vector<RawBurstFrame> frames;
         size_t chargedBytes{0};
+        uint64_t ramRefused{0}; // Frames not admitted because of the RAM budget
     };
 
     struct StackLogEntry
@@ -141,17 +162,25 @@ private:
         double shiftY{0};
         double rotationDeg{0};
         double processSeconds{0};
+        uint64_t ramRefused{0};
     };
 
     void workerLoop(std::stop_token stopToken);
     void processBurst(BurstJob& job);
+    void processBurstGuarded(BurstJob& job);
+    void skipBurstAfterError(const BurstJob& job, const QString& reason);
+    void stopAfterInternalError(const BurstJob* job, const QString& what);
+    void requestStopLocked(const std::string& reason, bool discardPending);
+    bool writeRawSer(BurstJob& job, QString& error);
     void finalizeSession(const std::string& reason);
     void writeMetadataLog(const QString& reason, const TimelapseExportResult& exportRes,
         const std::vector<QString>& skippedLogs) const;
     void postStatus();
     void postStatusSnapshot(TimelapseStatus snap) const;
     void refreshWarningTextLocked();
+    [[nodiscard]] bool budgetHasRoomFor(size_t bytes) const;
     bool tryReserveBurstMemory(size_t bytes);
+    [[nodiscard]] FramePtr copyRawFrame(const Frame& frame) const;
     void releaseBurstMemory(size_t bytes);
     void startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow);
     void finishCurrentWindowLocked(bool allowAfterStop);
@@ -177,6 +206,7 @@ private:
     std::chrono::system_clock::time_point windowStartUtc_{};
     std::chrono::system_clock::time_point windowEndUtc_{};
     uint64_t currentCaptured_{0};
+    uint64_t currentRamRefused_{0};
     std::vector<RawBurstFrame> currentHeap_; // Min-heap by sharpness
     size_t currentBurstBytes_{0};
 
@@ -188,8 +218,13 @@ private:
     std::atomic<bool> accepting_{true};
     bool workerFinished_{false};
     bool stopRequested_{false};
+    // Set with stopRequested_ when a queued burst must not be stacked (target
+    // reached, disk reserve, write failure, internal error).
+    bool discardPending_{false};
     std::string stopReason_;
     std::chrono::milliseconds stackDelay_{0};
+    std::function<void(int)> beforeStackForTests_;
+    std::atomic<bool> exportCancel_{false};
 
     // Worker-only session state.
     QString sessionDir_;
@@ -200,7 +235,8 @@ private:
     std::vector<double> qualityHistory_;
     int consecutiveSkips_{0};
     std::vector<StackLogEntry> stackLogs_;
-    std::vector<QString> skippedLogs_;
+    std::vector<QString> skippedLogs_;  // Protected by mutex_ (collector also appends)
+    std::vector<QString> problemLogs_;  // Worker-only: raw SER failures, discarded bursts, errors
 
     // Warning detail messages protected by mutex_.
     QString fatalWarningText_;

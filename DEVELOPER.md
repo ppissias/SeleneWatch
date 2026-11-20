@@ -130,6 +130,23 @@ ctest --test-dir out/build/debug --output-on-failure
 - **Optional real archive data (`test_data/`, gitignored):** Placing real `.avi` / `.ser` recordings and matching FireCapture `.txt` logs (`Moon_221449.avi`, `Mars_222831.avi`, `Moon_171311.ser`) into `test_data/` at the repository root enables `TimelapseTest::realArchiveRecordingsIfPresent()`; when `test_data/` is absent, the test skips cleanly via `QSKIP`.
 - **Real Windows GUI end-to-end test (`tests/gui_e2e_test.ps1`):** Launches the real built `out\build\release\SeleneWatch.exe` visibly on Windows using Windows UI Automation with isolated settings (`SELENEWATCH_SETTINGS_NAME=SeleneWatchGuiE2ETest`) and a temporary output folder, exercising Moon Preview zoom + profile save + bright/darkening clips on disk, Sky Watch meteor/lightning clips on disk, Time-lapse + Re-sharpen + non-destructive video rebuild, and real lunar AVI playback, saving verification screenshots to `out\gui-e2e\`.
 
+### Which tests to run, and when
+
+There are two levels of GUI testing:
+
+| Level | What it is | Runs | When |
+| --- | --- | --- | --- |
+| **Offscreen UI suite** (`ui`, `preview` in CTest) | Qt Test drives the real `MainWindow`, docks and dialogs without showing them (`QT_QPA_PLATFORM=offscreen`): saved settings, confirmations (raw SER), closing during a time-lapse, Re-sharpen, profiles, zoom, Moon/Sky clips written on disk | Every `ctest` run, and `packaging\make_release.ps1` | After every change |
+| **Real Windows GUI E2E** (`tests/gui_e2e_test.ps1`) | The built Release `SeleneWatch.exe` on the real desktop, driven through Windows UI Automation | By hand; takes a few minutes and opens a visible window (do not use the mouse or keyboard while it runs) | After changes to the window, docks, dialogs, threads, time-lapse or packaging, and **before every release** |
+
+```powershell
+cmake --build --preset Release-x64
+# Add -SkipRealData when test_data\Moon_221449.avi is not present.
+powershell -ExecutionPolicy Bypass -File tests\gui_e2e_test.ps1
+```
+
+The E2E script prints `GUI E2E TEST PASSED` and leaves screenshots in `out\gui-e2e\`; look at them, because a screenshot can show a layout problem that no assertion checks. Its settings and output folder are temporary, so your own settings are not touched.
+
 ### Manual CLI probes
 
 These targets are built alongside the application and are never executed by CTest:
@@ -234,9 +251,10 @@ packaging\make_release.ps1
 ### Release checklist
 
 1. Update `SELENEWATCH_RELEASE` in [CMakeLists.txt](CMakeLists.txt), verify feature status in [README.md](README.md) / [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) / [MANUAL.md](MANUAL.md), and commit.
-2. Run `packaging\make_release.ps1`.
-3. Install the generated `.msi` once on a machine, launch SeleneWatch from the Start menu, and verify **Help → About SeleneWatch** and **Help → Acknowledgements**.
-4. Tag the release commit (`git tag vYYYY.MM-NN`) and publish both packages with their SHA-256 checksums.
+2. Run `packaging\make_release.ps1` (it runs the full CTest suite, including the offscreen UI tests).
+3. Run the real Windows GUI E2E test, `tests\gui_e2e_test.ps1`, on the Release build with `test_data\` present, and check its screenshots (see [Which tests to run, and when](#which-tests-to-run-and-when)).
+4. Install the generated `.msi` once on a machine, launch SeleneWatch from the Start menu, and verify **Help → About SeleneWatch** and **Help → Acknowledgements**.
+5. Tag the release commit (`git tag vYYYY.MM-NN`) and publish both packages with their SHA-256 checksums.
 
 When upgrading Qt, regenerate the shipped Qt third-party notices from the new Qt documentation directory and commit the updated [packaging/licenses/Qt-third-party-notices.txt](packaging/licenses/Qt-third-party-notices.txt):
 

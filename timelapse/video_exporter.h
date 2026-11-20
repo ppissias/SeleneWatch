@@ -38,11 +38,15 @@ struct EventPreviewGifOptions
     int fps{4};
     int maxLongEdge{512};
     qint64 maxBytes{512 * 1024};
+    // Total time allowed for all FFmpeg runs. The GIF is written on the event
+    // writer's thread, so a hung FFmpeg must not hold back the clips behind it.
+    int timeoutMs{30000};
 };
 
 // Encodes up to 10 preview frames into a compact looping animated GIF via FFmpeg,
 // downscaling large frames and stepping down resolution/palette tiers if needed so
-// the output file stays within options.maxBytes. Returns encoded image dimensions
+// the output file stays within options.maxBytes, and killing FFmpeg once
+// options.timeoutMs has passed. Returns encoded image dimensions
 // and byte count via optional outputs when provided.
 bool encodeEventPreviewGif(const std::vector<QImage>& frames,
     const QString& gifPath,
