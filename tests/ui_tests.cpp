@@ -1830,6 +1830,10 @@ void UiTest::userManualAndStartupTipsWorkflow()
     QVERIFY(checkBrowser && checkBrowser->document()->toPlainText().contains("SeleneWatch User Manual"));
     for (size_t i = 0; i < tips.size(); ++i)
     {
+        QVERIFY2(!tips[i].title.trimmed().isEmpty(),
+            qPrintable(QString("Tip %1 missing title").arg(i + 1)));
+        QVERIFY2(!tips[i].html.trimmed().isEmpty(),
+            qPrintable(QString("Tip %1 missing html").arg(i + 1)));
         QVERIFY2(checkManual.hasAnchor(tips[i].manualSection),
             qPrintable(QString("Tip %1 missing MANUAL.md anchor: %2").arg(i + 1).arg(tips[i].manualSection)));
         QVERIFY(checkManual.scrollToSection(tips[i].manualSection));
@@ -1855,6 +1859,7 @@ void UiTest::userManualAndStartupTipsWorkflow()
     auto* tipsDlg = window.findChild<TipsDialog*>("tipsDialog");
     QVERIFY(tipsDlg && tipsDlg->isVisible());
 
+    auto* headingLbl = tipsDlg->findChild<QLabel*>("tipsHeading");
     auto* posLbl = tipsDlg->findChild<QLabel*>("tipsPositionLabel");
     auto* bodyLbl = tipsDlg->findChild<QLabel*>("tipsBodyLabel");
     auto* prevBtn = tipsDlg->findChild<QPushButton*>("tipsPreviousButton");
@@ -1862,16 +1867,20 @@ void UiTest::userManualAndStartupTipsWorkflow()
     auto* linkBtn = tipsDlg->findChild<QPushButton*>("tipsManualLink");
     auto* startupChk = tipsDlg->findChild<QCheckBox*>("showTipsAtStartupCheckBox");
     auto* closeBtn = tipsDlg->findChild<QPushButton*>("tipsCloseButton");
-    QVERIFY(posLbl && bodyLbl && prevBtn && nextBtn && linkBtn && startupChk && closeBtn);
+    QVERIFY(headingLbl && posLbl && bodyLbl && prevBtn && nextBtn && linkBtn && startupChk && closeBtn);
+    QCOMPARE(headingLbl->text(), tips[0].title);
     QCOMPARE(posLbl->text(), QString("1 of %1").arg(tips.size()));
     QCOMPARE(QSettings().value(TipsDialog::kNextTipKey).toInt(), 1);
 
     nextBtn->click();
+    QCOMPARE(headingLbl->text(), tips[1].title);
     QCOMPARE(posLbl->text(), QString("2 of %1").arg(tips.size()));
     QCOMPARE(QSettings().value(TipsDialog::kNextTipKey).toInt(), 2);
     prevBtn->click();
+    QCOMPARE(headingLbl->text(), tips[0].title);
     QCOMPARE(posLbl->text(), QString("1 of %1").arg(tips.size()));
     prevBtn->click();
+    QCOMPARE(headingLbl->text(), tips.back().title);
     QCOMPARE(posLbl->text(), QString("%1 of %1").arg(tips.size()));
 
     // Clicking "Read more in the manual" opens the manual scrolled to that tip's section.

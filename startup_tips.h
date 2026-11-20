@@ -5,9 +5,11 @@
 #include <vector>
 
 // One tip shown in the non-modal "Did you know?" startup dialog, paired with
-// the GitHub-style heading anchor of the matching section in MANUAL.md.
+// a short topic title and the GitHub-style heading anchor of the matching
+// section in MANUAL.md.
 struct StartupTip
 {
+    QString title;
     QString html;
     QString manualSection;
 };

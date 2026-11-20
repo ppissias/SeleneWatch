@@ -24,15 +24,30 @@ TipsDialog::TipsDialog(QWidget* parent, OpenManualCallback openManualSection)
     root->setContentsMargins(18, 16, 18, 14);
     root->setSpacing(10);
 
-    heading_ = new QLabel("Did you know?", this);
+    const bool darkBg = palette().color(QPalette::Window).lightness() < 128;
+
+    auto* headerGroup = new QVBoxLayout;
+    headerGroup->setContentsMargins(0, 0, 0, 0);
+    headerGroup->setSpacing(2);
+
+    auto* kicker = new QLabel("Did you know?", this);
+    kicker->setObjectName("tipsKicker");
+    QFont kickerFont = kicker->font();
+    kickerFont.setBold(true);
+    if (kickerFont.pointSizeF() > 0) kickerFont.setPointSizeF(kickerFont.pointSizeF() * 0.85);
+    kicker->setFont(kickerFont);
+    kicker->setStyleSheet(QString("color: %1;").arg(darkBg ? "#9aa7b0" : "#5b6770"));
+    headerGroup->addWidget(kicker);
+
+    heading_ = new QLabel(this);
     heading_->setObjectName("tipsHeading");
     QFont headingFont = heading_->font();
     headingFont.setBold(true);
-    if (headingFont.pointSizeF() > 0) headingFont.setPointSizeF(headingFont.pointSizeF() * 1.25);
+    if (headingFont.pointSizeF() > 0) headingFont.setPointSizeF(headingFont.pointSizeF() * 1.2);
     heading_->setFont(headingFont);
-    const bool darkBg = palette().color(QPalette::Window).lightness() < 128;
     heading_->setStyleSheet(QString("color: %1;").arg(darkBg ? "#65d5bd" : "#00756e"));
-    root->addWidget(heading_);
+    headerGroup->addWidget(heading_);
+    root->addLayout(headerGroup);
 
     body_ = new QLabel(this);
     body_->setObjectName("tipsBodyLabel");
@@ -131,6 +146,7 @@ void TipsDialog::showTip(int requestedIndex)
     const int count = static_cast<int>(tips_.size());
     if (count == 0) return;
     index_ = wrapTipIndex(requestedIndex, count);
+    heading_->setText(tips_[index_].title);
     body_->setText(tips_[index_].html);
     position_->setText(QString("%1 of %2").arg(index_ + 1).arg(count));
     QSettings saved;
