@@ -129,6 +129,7 @@ SeleneWatch is written in **C++20** with **Qt 6 Widgets** (dynamically linked un
 | Document | Audience | Contents |
 | --- | --- | --- |
 | [MANUAL.md](MANUAL.md) | Observers | Installation, cameras, controls, detection, guiding, outputs, troubleshooting *(included in releases)* |
+| [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) | Observers | Recommended exposure, gain, offset, and histogram levels for lunar earthshine flashes (3–10 % rule), sunlit transits, lucky-imaging time-lapses, and sky patrols *(included in releases)* |
 | [DEVELOPER.md](DEVELOPER.md) | Contributors & maintainers | Building with Visual Studio/CMake/Qt 6, camera SDK options, CTest, probes, release packaging *(source repository)* |
 | [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) | Architects & reviewers | Project vision, evidence rules, time model, threading/ownership, SER contract, development stages *(source repository)* |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Users & packagers | Dependency versions, licenses, and binary redistribution obligations *(included in releases)* |

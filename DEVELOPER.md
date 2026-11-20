@@ -219,7 +219,7 @@ Both packages contain:
 - Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`; Universal CRT comes from Windows 10/11)
 - `ASICamera2.dll` (when configured with `SELENEWATCH_ZWO_SDK_DIR`)
 - `opencv_world4140.dll`, `cfitsio.dll`, and external LGPLv3 `ffmpeg.exe` + FFmpeg shared DLLs (`avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`)
-- `LICENSE.txt`, `README.md`, `MANUAL.md`, `THIRD_PARTY_LICENSES.md`, `ACKNOWLEDGEMENTS.md`
+- `LICENSE.txt`, `README.md`, `MANUAL.md`, `CAMERA_SETTINGS_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `ACKNOWLEDGEMENTS.md`
 - `icons/selenewatch-256.png` and `docs/images/` (logo and documentation screenshots referenced by `README.md` and `MANUAL.md`)
 - `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), `ZWO-ASI-SDK.txt` (when built with ZWO), `OpenCV-LICENSE.txt`, `CFITSIO-LICENSE.txt`, and `FFmpeg-LICENSE.txt`
 

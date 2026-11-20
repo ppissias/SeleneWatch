@@ -7,8 +7,8 @@
 # The installed tree, flat beside SeleneWatch.exe:
 #   SeleneWatch.exe, the Qt DLLs and plugins (windeployqt), the Visual C++
 #   runtime DLLs, ASICamera2.dll when built with the ZWO SDK, LICENSE.txt,
-#   README.md, MANUAL.md, THIRD_PARTY_LICENSES.md, ACKNOWLEDGEMENTS.md,
-#   icons/selenewatch-256.png, docs/images/, and licenses/.
+#   README.md, MANUAL.md, CAMERA_SETTINGS_GUIDE.md, THIRD_PARTY_LICENSES.md,
+#   ACKNOWLEDGEMENTS.md, icons/selenewatch-256.png, docs/images/, and licenses/.
 # Tests, probes and QHY files are not installed: the observer installs QHY's
 # own runtime (THIRD_PARTY_LICENSES.md).
 
@@ -17,6 +17,7 @@ install(TARGETS SeleneWatch RUNTIME DESTINATION .)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt" COPYONLY)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${CMAKE_CURRENT_SOURCE_DIR}/MANUAL.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/CAMERA_SETTINGS_GUIDE.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" "${CMAKE_CURRENT_SOURCE_DIR}/ACKNOWLEDGEMENTS.md"
     DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/icons/selenewatch-256.png" DESTINATION icons)
