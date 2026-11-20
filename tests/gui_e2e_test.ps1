@@ -385,14 +385,18 @@ try {
     $profDlg = Find-TopWindow -ProcessId $proc.Id -TitleContains "Save detection profile" -OwnerWindow $mainWin -TimeoutMs 8000
     $profEdit = Find-UiaElement -Root $profDlg -IdSuffix "detectionProfileNameEdit" -ControlType ([System.Windows.Automation.ControlType]::Edit)
     $valPat = $null
-    if ($profEdit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valPat)) {
-        $valPat.SetValue("Moon E2E Profile")
-    }
+    Assert-True ($profEdit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valPat)) "Profile name field cannot be typed into through UI Automation"
+    $valPat.SetValue("Moon E2E Profile")
     $saveDlgBtn = Find-UiaElement -Root $profDlg -Name "Save" -ControlType ([System.Windows.Automation.ControlType]::Button)
     Invoke-UiaClick $saveDlgBtn "Confirm Save detection profile"
-    Start-Sleep -Milliseconds 300
+    # A combo box's UI Automation Name is its accessible name, which is empty;
+    # the item shown is its Value.
     $profCombo = Find-UiaElement -Root $mainWin -IdSuffix "detectionProfileCombo"
-    Write-Host "  Saved profile active in combo: $($profCombo.Current.Name)"
+    $comboValue = $null
+    Assert-True ($profCombo.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$comboValue)) "Profile combo has no UI Automation Value"
+    Wait-Until { $comboValue.Current.Value -eq "Moon E2E Profile" } "Saved profile selected in the Profile combo" -TimeoutMs 5000
+    Assert-True (Test-Path "$RegBase\detection\profiles\moon\Moon_E2E_Profile") "Saved profile missing from settings"
+    Write-Host "  Saved profile active in combo: $($comboValue.Current.Value)"
 
     # Start Monitoring and inject a bright flash -> verify clip on disk.
     Invoke-UiaClick $monitorBtn "Start Moon monitoring"
