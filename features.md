@@ -2,6 +2,10 @@
 
 Open proposals. What is already in the program is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
+[Feature-20 — GitHub release notification](implemented%20features.md#feature-20--github-release-notification) is implemented: a quiet startup check and a clickable notice at the top right of the window.
+
+[Feature-21 — Lunar and planetary time-lapse wording](implemented%20features.md#feature-21--lunar-and-planetary-time-lapse-wording) is implemented: consistent terminology and descriptions of planetary rotation and changing lunar shadows.
+
 ## Contents
 
 | Feature | Focus | Status |
@@ -15,7 +19,7 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-14 — The full session record](#feature-14--the-full-session-record) | Continuous & scheduled SER recording, clock checks, site & instrument | Built; scheduled transit recording pending |
 | [Feature-16 — A third camera family](#feature-16--a-third-camera-family) | Player One and ToupTek adapters & vendor DLL discovery | Built & tested with deterministic fakes and DLL probes; physical cameras pending |
 | [Feature-17 — One remembered output folder and Preview manual recording](#feature-17--one-remembered-output-folder-and-preview-manual-recording) | Single output root outside install folder, upgrade persistence, manual SER recording in Preview with optional frame limit | Implemented; automated core, session & UI tests passing |
-| [Feature-18 — Time-lapse mode](#feature-18--time-lapse-mode) | Lucky-imaging lunar/planetary time-lapse, parallel overload protection, rotation alignment, linear float FITS, MP4/GIF & Re-sharpen | Implemented; automated unit & UI tests passing; overnight field run pending |
+| [Feature-18 — Time-lapse mode](#feature-18--time-lapse-mode) | Lunar/planetary time-lapse, parallel overload protection, rotation alignment, linear float FITS, MP4/GIF & Re-sharpen | Implemented; automated unit & UI tests passing; overnight field run pending |
 
 ## Feature-9 — A measured trigger
 
@@ -1239,12 +1243,12 @@ Feature-17 comes before Feature-18 so Time-lapse builds directly on the unified 
 
 *Proposed on 18 November 2026, from a discussion with the observer.*
 
-Observers want to record multi-minute to multi-hour sessions of the Moon (e.g., crater shadows advancing along the terminator) or a planet (e.g., Jupiter rotating) and turn them into smooth, sharp animations. Impact-flash monitoring cannot serve this well: flash monitoring uses long exposures and high gain for faint earthshine, whereas bright lunar/planetary lucky imaging requires short exposures, lower gain, high frame rates, and multi-frame registration/stacking.
+Observers want to record multi-minute to multi-hour sessions of the Moon (e.g., crater shadows advancing along the terminator) or a planet (e.g., Jupiter rotating) and turn them into smooth, sharp animations. Impact-flash monitoring cannot serve this well: flash monitoring uses long exposures and high gain for faint earthshine, whereas bright lunar/planetary time-lapse capture uses short exposures, lower gain, high frame rates, and multi-frame registration/stacking.
 
 ### What shapes the design
 
 1. **A separate mode, not part of Monitoring.** Time-lapse runs as a third `Session::Mode` alongside `Preview` and `Monitoring`. Impact-flash detection is off while it runs, keeping Monitoring's "never go blind" rule untouched.
-2. **Bounded per-period lucky imaging (100–200 frames max per period).** Each period collects up to 100–200 frames max (selecting the sharpest `N%` from the period's capture window), keeping RAM usage, alignment latency, and `MemoryBudget` impact predictable for both lunar and planetary targets.
+2. **Bounded per-period frame selection and stacking (100–200 frames max per period).** Each period collects up to 100–200 frames max (selecting the sharpest `N%` from the period's capture window), keeping RAM usage, alignment latency, and `MemoryBudget` impact predictable for both lunar and planetary targets.
 3. **Fixed-cadence parallel pipeline with overload protection.** Waiting sequentially *after* processing causes cadence drift (`interval + window + T_proc`), making planetary rotation or shadow movement stutter. Instead, acquisition/collection runs on fixed period timestamps while heavy alignment/stacking/FITS writing runs in parallel on a worker thread behind a **depth-1 pending queue** with a **pre-capture overload skip gate**.
 4. **Scientific preservation and non-destructive re-sharpening.** Every finished stack is saved immediately as **linear 32-bit float FITS** (both unsharpened `stacks/` and sharpened `sharpened/`), so a crash or early stop never loses data and the entire sequence can be re-sharpened and re-encoded later without touching the unsharpened data.
 5. **Respect existing SeleneWatch protections and compatible third-party packaging.** Honors `CaptureSettings::diskReserveBytes` (`freeBytesAt()`), integrates with `MemoryBudget` and `FeatureLock` / ASCOM guiding, and uses compatible permissive/LGPL libraries (**OpenCV**, **CFITSIO**, and **LGPL FFmpeg**) dynamically linked and shipped with their license texts alongside `SeleneWatch.exe` (just like ZWO's DLL).

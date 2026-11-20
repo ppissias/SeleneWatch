@@ -950,3 +950,87 @@ Every event clip in both **The Moon** (`events/moon/<UTC>/`) and **The sky** (`e
 
 - **Files:** [preview_image.h](preview_image.h), [preview_image.cpp](preview_image.cpp), [recording/clip_overview.h](recording/clip_overview.h), [recording/clip_overview.cpp](recording/clip_overview.cpp), [timelapse/video_exporter.h](timelapse/video_exporter.h), [timelapse/video_exporter.cpp](timelapse/video_exporter.cpp), [recording/event_writer.h](recording/event_writer.h), [recording/event_writer.cpp](recording/event_writer.cpp).
 - **Tests:** `overview` (`gifFrameSelectionRespectsPaddingAndCapsAtTen`, `theWriterSavesTheOverviewBesideTheEvidence`, `largeEventClipProducesDownscaledBoundedAnimatedGif`, `aRefusedOverviewLeavesACompleteClip`), `sky` (`lightningIsOneClipOfLargeBrighteningsOnlyInSkyMode`), and `darkening` (`theCrossingSavesAsDarkening`).
+
+## Feature-20 — GitHub release notification
+
+**Status:** Implemented and verified on 20 November 2026.
+
+### Request and reference behavior
+
+The maintainer requested the same release notification used by SpacePixels: when a new GitHub release is published, an older application shows a notice at the top right of its GUI. The SpacePixels implementation was read in `ApplicationWindow.java`: it checks the public latest-release API once at startup, compares the release tag with the running version, and displays a clickable notice opening GitHub. Its check runs in the background and errors remain quiet.
+
+### Specification
+
+- Check `https://api.github.com/repos/ppissias/SeleneWatch/releases/latest` once per normal application launch, starting one second after the window is shown.
+- Make the request asynchronously. It must not block startup, the GUI event loop, acquisition, detection, recording, guiding, or time-lapse processing.
+- Compare the published tag with the compiled `SELENEWATCH_RELEASE` from CMake. Accept `vYYYY.MM-NN`, `VYYYY.MM-NN`, and `YYYY.MM-NN`, comparing the numeric year, month, and monthly release number. Leading-zero spelling differences do not make a version newer.
+- Ignore equal/older versions, invalid tags or local versions, suffixes such as beta/dirty, draft/prerelease responses, and missing/malformed metadata. Month must be 1–12 and the release number must be positive.
+- Hide the notice until a newer stable release is found. Then display **New version <tag> available** in a clickable button at the right corner of the menu bar.
+- Clicking opens the fixed `https://github.com/ppissias/SeleneWatch/releases` page in the user's browser. It does not install software or download an asset automatically.
+- Stay silent on offline/DNS/TLS failures, HTTP failures including GitHub rate limits, and a repository without a published release. There are no modal dialogs or retries during that launch.
+- Bound the entire request with a four-second deadline and the buffered response with a 1 MiB limit. Keep HTTPS certificate verification enabled and redirects restricted to the API origin.
+- Use the public API without credentials or observing/session data. The request identifies the application and release in its User-Agent.
+- Skip the startup request for isolated package/GUI launches using `SELENEWATCH_SETTINGS_NAME`.
+- Preserve the BSD-2-Clause application license and document/deploy the Qt dependency required for HTTPS.
+
+### Design and rationale
+
+- `ReleaseChecker` owns the request behavior and version comparison. It belongs to the UI library and has no Session or frame-path dependency. The processing core does not acquire a Qt Network dependency.
+- Qt Network supplies asynchronous HTTP and normal certificate handling. This avoids a custom HTTP stack or an application-owned worker thread with shutdown/timeout coordination.
+- The checker creates its own QObject-owned network manager by default. Tests can supply a `QNetworkAccessManager` subclass with deterministic replies; this is an actively used test seam, not a new generic transport interface.
+- `MainWindow` owns the checker and the existing menu bar owns the notice widget. The checker's newer-release signal changes only the notice. The button uses the current Qt highlight/text palette so it follows the system theme.
+- The comparison follows SeleneWatch's established date-based release identity rather than lexicographic string order or arbitrary digit extraction. Unknown formats are ignored rather than guessed. The fixed releases-page destination avoids depending on an API-provided browser URL.
+- The behavior intentionally matches SpacePixels' startup check. It does not poll throughout a long observing session or implement a self-updater.
+- Release publishers must increment `SELENEWATCH_RELEASE`, tag the release commit with `vYYYY.MM-NN`, and publish a stable GitHub Release marked latest. Pushing a tag without publishing a release does not create an announcement.
+
+### Packaging and licensing
+
+- Qt 6.12.0 Network is dynamically linked under LGPLv3. The Windows package includes `Qt6Network.dll` and `tls/qschannelbackend.dll` alongside the existing Qt libraries.
+- Windows Schannel provides TLS without adding OpenSSL binaries. Unused Qt Svg, OpenSSL/certificate-only TLS backends, and network-information plugins remain excluded.
+- The package checker requires the new network DLL and Schannel plugin and rejects unused backends, checks imported DLLs, and launches the packaged program with only its own files and Windows on PATH.
+- Qt Network's libpsl (BSD-3-Clause) and Public Suffix List (MPL-2.0) attributions/license texts are included by the extended Qt notice generator. THIRD_PARTY_LICENSES.md records the versions, sources, and obligations. The project LICENSE is unchanged.
+- README.md, MANUAL.md, and DEVELOPER.md document the notice, release publishing rules, tests, and package changes.
+
+### Acceptance and validation
+
+- [x] Release build succeeds with the new UI-only dependency.
+- [x] All 22 CTest suites pass, including `release_check`.
+- [x] Deterministic release tests cover newer/equal/older releases, numeric ordering and year/month rollovers, optional v/V, padding equality, malformed tags/JSON/flags, drafts/prereleases, no-release/forbidden/rate-limit/server/DNS/TLS failures, a silent pending request, oversized responses, and one-request-only behavior. No test contacts GitHub.
+- [x] The timeout test confirms the Qt event loop remains responsive while a request is pending, then the overall deadline aborts it without a notice.
+- [x] The offscreen UI test verifies that the button starts hidden, occupies the top-right menu corner, displays the supplied tag, opens the correct releases page through an intercepted URL handler, and leaves a running synthetic Preview acquiring frames. The UI suite was rerun after adding the live-frame assertion and passed.
+- [x] Notice screenshots are saved in `out/qa-update/new-release.png` and `new-release-narrow.png` for inspection. Resizing respects the application's existing minimum width; the notice stays within the menu bar.
+- [x] `Release-packages` produces ZIP and MSI packages. The ZIP file/content/DLL-dependency/isolated-launch checks pass with Qt Network and Schannel included.
+- [x] The existing real Windows GUI E2E passes all four workflows: synthetic Moon bright/dark clips, synthetic Sky meteor/lightning clips, time-lapse with Re-sharpen/video rebuild, and real lunar AVI capture/time-lapse. Screenshots are in `out/gui-e2e/`.
+
+### Verification limits and review notes
+
+The newer-release branch is exercised with controlled API replies and a supplied version signal, without creating or publishing a GitHub release. A future public release is not fabricated to test the notice. The production path uses the documented public GitHub latest-release endpoint and Qt's HTTPS implementation. Isolated package and GUI E2E runs intentionally skip the live startup request.
+
+No acquisition, detector, evidence format, raw-pixel handling, or observing configuration is changed. Generated packages are local validation artifacts; source changes remain available for maintainer review and a later commit/release.
+
+## Feature-21 — Lunar and planetary time-lapse wording
+
+**Date:** 20 November 2026. **Status:** Implemented.
+
+### Request
+
+Use **lunar and planetary time-lapses** throughout the application and website, replacing the former processing jargon everywhere. Allow a more evocative description of time-lapses, centered on planetary motion, animations, and shadows moving across the lunar surface.
+
+### Specification and decisions
+
+- Keep **Time-lapse** as the short control name and **lunar and planetary time-lapses** as the full feature name.
+- Use **Watch planets turn and lunar shadows unfold** in the introductory time-lapse copy, without claiming unique observing capabilities or changing the scientific scope.
+- Update the application startup tip, README, manual, camera settings guide, Feature-18 specification, developer terminology guidance, and the time-lapse session's header comment.
+- Describe frame selection and stacking directly in technical instructions. Preserve exposure guidance, frame limits, evidence rules, operating states, and validation details.
+- Apply the corresponding terminology, animation description, and factual homepage introduction to the separate SeleneWatchWeb project (Feature-Web-2).
+- Preserve existing completed feature sections without rewriting their history. No occurrence of the retired term was present in those sections.
+
+### Validation
+
+- Release build and all 22 CTest suites pass, including the existing UI and time-lapse suites.
+- ZIP/MSI packages rebuilt with the revised application tip and packaged documentation; package file, DLL dependency, and isolated launch checks pass.
+- Repository-wide searches find no retired terminology in maintained application sources, documentation, or feature specifications.
+- Website TypeScript/production build and rendered-page, navigation/ARIA, asset integrity, and production HTTP checks pass.
+- Browser review of the revised website wording was stopped because the computer-use tool could not identify Chrome's current URL confidently. No new visual verification is claimed for this copy revision.
+
+This is a wording change. Capture, frame selection, stacking, scientific evidence, and saved observing results are unaffected.

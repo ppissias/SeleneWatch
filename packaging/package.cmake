@@ -79,14 +79,14 @@ include(InstallRequiredSystemLibraries)
 # The Qt DLLs and plugins the executable needs, found by windeployqt in the
 # installed tree. No translations, software OpenGL or shader compilers: the
 # window draws with Qt's raster engine. No touch input over the network, SVG
-# icons or images, TLS or network status plugins: SeleneWatch uses none, and
-# they would bring Qt Network and Qt Svg with them.
+# icons or images, or network status plugins. Qt Network and the Windows
+# Schannel TLS backend provide the startup release check without OpenSSL.
 find_program(SELENEWATCH_WINDEPLOYQT windeployqt HINTS "${QT6_INSTALL_PREFIX}/bin" REQUIRED)
 install(CODE "
     set(prefix \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
     execute_process(COMMAND \"${SELENEWATCH_WINDEPLOYQT}\" --release
             --no-compiler-runtime --no-translations --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler
-            --skip-plugin-types generic,iconengines,networkinformation,tls --exclude-plugins qsvg
+            --skip-plugin-types generic,iconengines,networkinformation --exclude-plugins qsvg,qopensslbackend,qcertonlybackend
             --dir \"\${prefix}\" \"\${prefix}/SeleneWatch.exe\"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE output)
     if(NOT result EQUAL 0)

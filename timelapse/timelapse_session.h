@@ -73,7 +73,7 @@ struct TimelapseFinishResult
     TimelapseExportResult exportResult;
 };
 
-// Runs a lucky-imaging time-lapse session:
+// Runs a lunar or planetary time-lapse session:
 // - Source thread collects up to 100-200 best frames per fixed-cadence period,
 //   never holding camera FramePool frames or blocking acquisition. Every byte it
 //   keeps (cropped copies and, with saveRawSer, full raw copies) is charged to the

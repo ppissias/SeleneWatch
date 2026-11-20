@@ -43,5 +43,7 @@ int main(int argc, char *argv[])
     MainWindow window;
     window.show();
     QTimer::singleShot(0, &window, &MainWindow::maybeShowStartupTips);
+    // Package/GUI checks use an isolated settings name and do not contact GitHub.
+    if (settingsName.isEmpty()) QTimer::singleShot(1000, &window, &MainWindow::checkForUpdates);
     return app.exec();
 }

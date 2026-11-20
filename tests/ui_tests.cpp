@@ -18,6 +18,7 @@
 #include "site_dialog.h"
 #include "startup_tips.h"
 #include "tips_dialog.h"
+#include "release_checker.h"
 #include "recording/output_paths.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
@@ -30,6 +31,7 @@
 #include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtGui/QAction>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QHelpEvent>
 #include <QtGui/QWheelEvent>
@@ -42,6 +44,7 @@
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QMenuBar>
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
@@ -104,6 +107,15 @@ void useSynthetic(MainWindow& window)
 #include "timelapse/timelapse_settings.h"
 #include "timelapse_panel.h"
 
+class ReleaseUrlReceiver : public QObject
+{
+    Q_OBJECT
+public:
+    QUrl opened;
+public slots:
+    void open(const QUrl& url) { opened = url; }
+};
+
 // Drives the offscreen window to check controls, saved preferences and capture workflows.
 class UiTest : public QObject
 {
@@ -118,6 +130,7 @@ private slots:
     void siteAndRecordingControls();
     void nightScheduleAndExposureFollower();
     void theReleaseIsShown();
+    void aNewReleaseAppearsAtTheTopRight();
     void aMaskShapeIsDrawnOnThePreview();
     void statusMessagesHaveTheirOwnLine();
     void captureLabelChangesWithoutWaitingForANewExposure()
@@ -1067,6 +1080,48 @@ void UiTest::theReleaseIsShown()
     QFile source(QString(SELENEWATCH_SOURCE_DIR) + "/ACKNOWLEDGEMENTS.md");
     QVERIFY(source.open(QIODevice::ReadOnly));
     QCOMPARE(acknowledgements, QString::fromUtf8(source.readAll()));
+}
+
+void UiTest::aNewReleaseAppearsAtTheTopRight()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
+    window.resize(1280, 900);
+    window.show();
+    auto* notice = window.findChild<QToolButton*>("updateNoticeButton");
+    auto* checker = window.findChild<ReleaseChecker*>();
+    QVERIFY(notice && checker);
+    QVERIFY(notice->isHidden());
+    QCOMPARE(window.menuBar()->cornerWidget(Qt::TopRightCorner), notice);
+
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* frames = window.findChild<QLabel*>("framesReadout");
+    QTRY_VERIFY(frames->text() != "Frames: 0");
+    const QString beforeNotice = frames->text();
+
+    checker->newerReleaseAvailable("v2026.11-02");
+    QTRY_VERIFY(notice->isVisible());
+    QCOMPARE(notice->text(), QString("New version v2026.11-02 available"));
+    QVERIFY(notice->isEnabled());
+    QVERIFY(!QApplication::activeModalWidget());
+    QTRY_VERIFY(frames->text() != beforeNotice);
+    QVERIFY(window.findChild<QPushButton*>("stopButton")->isEnabled());
+
+    ReleaseUrlReceiver receiver;
+    struct ResetUrlHandler { ~ResetUrlHandler() { QDesktopServices::unsetUrlHandler("https"); } } reset;
+    QDesktopServices::setUrlHandler("https", &receiver, "open");
+    notice->click();
+    QCOMPARE(receiver.opened, ReleaseChecker::releasesUrl());
+
+    const QString screenshots = QString(SELENEWATCH_SOURCE_DIR) + "/out/qa-update";
+    QVERIFY(QDir().mkpath(screenshots));
+    QVERIFY(window.grab().save(screenshots + "/new-release.png"));
+    window.resize(800, 600);
+    QTest::qWait(10);
+    QVERIFY(window.menuBar()->rect().contains(notice->geometry()));
+    QVERIFY(window.grab().save(screenshots + "/new-release-narrow.png"));
+    window.findChild<QPushButton*>("stopButton")->click();
 }
 
 // Feature-15, Done-when 1 and 2 in the window. The site is put where it is

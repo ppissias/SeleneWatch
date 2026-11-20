@@ -212,9 +212,10 @@ const std::vector<StartupTip>& allStartupTips()
 
         // ── Phase 5: Time-lapses & testing safety reminder ───────────────────
         {
-            "Lucky-imaging time-lapses",
-            "Open <b>View &rarr; Time-lapse</b> for periodic lucky-imaging bursts into 32-bit FITS stacks and "
-            "MP4/GIF movies. Under <b>Stop condition</b>, you can finish automatically at a <b>UTC end time</b>, "
+            "Lunar and planetary time-lapses",
+            "Watch planets turn and lunar shadows unfold. Open <b>View &rarr; Time-lapse</b> to capture "
+            "regular bursts, stack the sharpest frames, and build MP4/GIF animations alongside 32-bit FITS stacks. "
+            "Under <b>Stop condition</b>, you can finish automatically at a <b>UTC end time</b>, "
             "after a <b>Fixed duration</b>, or after a chosen <b>Number of stacks</b>.",
             kSectionTimelapse
         },

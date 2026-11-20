@@ -109,9 +109,9 @@ Before pressing **Start monitoring**:
 - **Exposure & Gain:** Use **low gain** and fast shutter speeds (**`1 – 10 ms`**, `60 – 200+ fps`) so fast transits (`0.5 s` ISS pass) remain sharp across many frames.
 - **Detection:** Under **Watching: The Moon**, enable **Also trigger on darkening** and raise **Sensitivity K** to **`12.0 – 16.0 sigma`** to suppress normal sunlit crater-rim seeing while reliably catching transits.
 
-### 2.2 Lunar & Planetary Time-Lapses (Lucky Imaging)
+### 2.2 Lunar & Planetary Time-Lapses
 
-- **Goal:** Freeze atmospheric seeing per frame (`1 – 15 ms`) with high dynamic range so lucky-imaging stacks (`stacks/*.fits`) align cleanly and tolerate aggressive **Re-sharpen time-lapse…** deconvolution/USM without noise explosion or blown highlights.
+- **Goal:** Freeze atmospheric seeing per frame (`1 – 15 ms`) with high dynamic range so stacks of the sharpest frames (`stacks/*.fits`) align cleanly and tolerate aggressive **Re-sharpen time-lapse…** deconvolution/USM without noise explosion or blown highlights.
 - **Histogram target:** **65 % – 85 %** on the brightest sunlit lunar highland/crater rim or Jupiter/Saturn cloud band, keeping **`At max code`** at **`0.00%`** (`0` clipped white pixels—clipped pixels cannot be recovered by sharpening).
 - **Exposure & Burst Window:**
   - **Moon:** `2 – 12 ms` exposure, **Interval** e.g. `60 s`, **Capture window** `10 – 20 s`, **Keep best** `25 %` (cap `100–150` frames). Set **Lunar anchor** on a crater that stays sunlit for the whole run.
@@ -133,5 +133,5 @@ Before pressing **Start monitoring**:
 | --- | --- | --- | --- | --- |
 | **1. Lunar Impact Flashes** *(Earthshine)* | **3 % – 10 %** on earthshine (`At 0` = `0.00%`; sunlit side allowed to saturate) | **`16 – 33 ms`** (`30 – 60 fps`) | HCG / unity gain; **`RAW16`** preferred (or `RAW8` at 5–10 %) | **Watching:** `The Moon` · **K:** `6.0 – 10.0 σ` · **Patch:** `8 – 400 px` · **1-frame trigger:** `On` · **Display:** `Auto-stretch` |
 | **2. Lunar Transits & Shadows** *(Sunlit Moon)* | **60 % – 80 %** on brightest sunlit crater rims (`At max code` = `0.00%`) | **`1 – 10 ms`** (`60 – 200+ fps`) | Low gain (maximize dynamic range); `RAW8` or `RAW16` | **Watching:** `The Moon` · **Also trigger on darkening:** `On` · **K:** **`12.0 – 16.0 σ`** · **Max dark patch:** `20000 px` (or **Record** / **Schedule…**) |
-| **3. Lunar & Planetary Time-Lapses** *(Lucky Imaging)* | **65 % – 85 %** on brightest sunlit terrain or cloud belts (`At max code` = `0.00%`) | **`2 – 15 ms`** (`60 – 150+ fps`) | Low-to-moderate gain; `RAW8` or `RAW16` (mono or Bayer colour) | **Time-lapse:** `Moon` (`25 %` best, `150` cap) or `Planet` (`15 %` best, `200` cap, window `≤ 60–90 s`) |
+| **3. Lunar & Planetary Time-Lapses** | **65 % – 85 %** on brightest sunlit terrain or cloud belts (`At max code` = `0.00%`) | **`2 – 15 ms`** (`60 – 150+ fps`) | Low-to-moderate gain; `RAW8` or `RAW16` (mono or Bayer colour) | **Time-lapse:** `Moon` (`25 %` best, `150` cap) or `Planet` (`15 %` best, `200` cap, window `≤ 60–90 s`) |
 | **4. Wide-Field Sky Watch** *(Fixed Camera)* | **8 % – 30 %** unmasked sky median (`At 0` = `0.00%`) | **`33 – 250 ms`** (`4 – 30 fps` for meteors/aircraft) | Moderate-to-high gain; **Follow the sky's brightness** optional | **Watching:** `The sky` · **K:** `6.0 – 14.0 σ` · **Max patch:** `3000 px` · **Box/patch:** `30 ×` · **Large brightening:** `2 %` · **Learn after:** `20 s` · **Draw mask** on horizon |

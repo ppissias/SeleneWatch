@@ -9,6 +9,7 @@
 #include "resharpen_dialog.h"
 #include "manual_dialog.h"
 #include "tips_dialog.h"
+#include "release_checker.h"
 #include "wheel_guard.h"
 #include "camera_panel.h"
 #include "camera_support_dialog.h"
@@ -1050,6 +1051,23 @@ void MainWindow::setupSessionMenu()
 
 void MainWindow::setupHelpMenu()
 {
+    releaseChecker_ = new ReleaseChecker(SELENEWATCH_RELEASE, this);
+    auto* updateNotice = new QToolButton(menuBar());
+    updateNotice->setObjectName("updateNoticeButton");
+    updateNotice->setCursor(Qt::PointingHandCursor);
+    updateNotice->setToolTip("A newer SeleneWatch release is available. Open GitHub releases to download it.");
+    updateNotice->setStyleSheet("QToolButton { background: palette(highlight); color: palette(highlighted-text); "
+        "border: none; border-radius: 7px; padding: 4px 10px; font-weight: bold; }");
+    menuBar()->setCornerWidget(updateNotice, Qt::TopRightCorner);
+    updateNotice->hide();
+    connect(releaseChecker_, &ReleaseChecker::newerReleaseAvailable, this, [updateNotice](const QString& tag) {
+        updateNotice->setText(QString("New version %1 available").arg(tag));
+        updateNotice->show();
+    });
+    connect(updateNotice, &QToolButton::clicked, this, [] {
+        QDesktopServices::openUrl(ReleaseChecker::releasesUrl());
+    });
+
     auto* menu = menuBar()->addMenu("Help");
     auto* manual = menu->addAction("User Manual");
     manual->setObjectName("userManualAction");
@@ -1097,6 +1115,11 @@ void MainWindow::showTips()
 void MainWindow::maybeShowStartupTips()
 {
     if (TipsDialog::wantedAtStartup()) showTips();
+}
+
+void MainWindow::checkForUpdates()
+{
+    releaseChecker_->check();
 }
 
 QString MainWindow::acknowledgementsMarkdown()

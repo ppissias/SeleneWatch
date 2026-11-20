@@ -14,8 +14,12 @@ param(
     [Parameter(Mandatory)][string]$QtPrefix
 )
 $ErrorActionPreference = 'Stop'
-$check = Join-Path (Split-Path $Zip -Parent) 'check'
-if (Test-Path $check) { Remove-Item -Recurse -Force $check }
+$packageDirectory = [System.IO.Path]::GetFullPath((Split-Path $Zip -Parent))
+$check = [System.IO.Path]::GetFullPath((Join-Path $packageDirectory 'check'))
+if ((Split-Path $check -Parent) -ne $packageDirectory -or (Split-Path $check -Leaf) -ne 'check') {
+    throw "The package check directory must be the check subdirectory of $packageDirectory"
+}
+if (Test-Path -LiteralPath $check) { Remove-Item -LiteralPath $check -Recurse -Force }
 # .NET directly: Expand-Archive breaks in Windows PowerShell 5.1 started from
 # PowerShell 7, which hands it the newer shell's module path.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -23,7 +27,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
     $app = (Get-ChildItem $check -Directory | Select-Object -First 1).FullName
 
-    $expected = 'SeleneWatch.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms\qwindows.dll',
+    $expected = 'SeleneWatch.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll',
+        'platforms\qwindows.dll', 'tls\qschannelbackend.dll',
         'msvcp140.dll', 'vcruntime140.dll', 'opencv_world4140.dll', 'cfitsio.dll', 'ffmpeg.exe',
         'avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll',
         'swresample-7.dll', 'swscale-10.dll', 'LICENSE.txt', 'README.md', 'MANUAL.md',
@@ -40,7 +45,7 @@ try {
     foreach ($file in $expected) {
         if (-not (Test-Path (Join-Path $app $file))) { throw "The package lacks $file" }
     }
-    foreach ($file in 'Qt6Network.dll', 'Qt6Svg.dll') {
+    foreach ($file in 'Qt6Svg.dll', 'tls\qopensslbackend.dll', 'tls\qcertonlybackend.dll') {
         if (Test-Path (Join-Path $app $file)) { throw "The package holds $file, which SeleneWatch does not use" }
     }
     if ((Test-Path (Join-Path $app 'ASICamera2.dll')) -ne (Test-Path (Join-Path $app 'licenses\ZWO-ASI-SDK.txt'))) {
@@ -72,7 +77,7 @@ try {
         $env:QT_QPA_PLATFORM = 'offscreen'
         $env:QT_PLUGIN_PATH = $null
         $env:SELENEWATCH_SETTINGS_NAME = $settingsName
-        $started = Start-Process (Join-Path $app 'SeleneWatch.exe') -PassThru -WorkingDirectory $app
+        $started = Start-Process (Join-Path $app 'SeleneWatch.exe') -PassThru -WorkingDirectory $app -WindowStyle Hidden
     } finally {
         $env:PATH = $saved.PATH
         $env:QT_QPA_PLATFORM = $saved.QT_QPA_PLATFORM
@@ -86,5 +91,5 @@ try {
     Remove-Item "HKCU:\Software\SeleneWatch\$settingsName" -Recurse -ErrorAction SilentlyContinue
     "Package checked: files, DLL dependencies, and a start with its own files: $(Split-Path $Zip -Leaf)"
 } finally {
-    Remove-Item -Recurse -Force $check -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $check -Recurse -Force -ErrorAction SilentlyContinue
 }

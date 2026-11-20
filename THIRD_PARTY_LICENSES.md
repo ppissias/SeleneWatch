@@ -8,7 +8,7 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ## Active Dependencies
 
-### 1. Qt 6 (Core, Gui, Widgets)
+### 1. Qt 6 (Core, Gui, Widgets, Network)
 
 - **Website / Source:** [https://www.qt.io](https://www.qt.io) / [https://code.qt.io](https://code.qt.io)
 - **Copyright:** (c) The Qt Company Ltd. and other contributors
@@ -18,8 +18,9 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
   - `Qt6Core`
   - `Qt6Gui`
   - `Qt6Widgets`
+  - `Qt6Network` — the asynchronous public GitHub release check in the UI library; HTTPS uses Qt's Windows Schannel TLS plugin and Windows certificate verification.
   - `Qt6Test` — linked only by the test executables. The application does not link it, and a release of the app does not need `Qt6Test.dll`.
-- **Linkage / Integration:** **Dynamic linking** via shared libraries (`Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`). The test target also links `Qt6Test.dll`. SeleneWatch does not statically link Qt.
+- **Linkage / Integration:** **Dynamic linking** via shared libraries (`Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, `Qt6Network.dll`). The test target also links `Qt6Test.dll`. SeleneWatch does not statically link Qt.
 - **Compliance Obligations:**
   - Provide attribution to the Qt Project and copyright holders.
   - Distribute license texts for LGPLv3 and GPLv3 with binary distributions.
@@ -99,12 +100,13 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 Made by the Release build's `package` target, from the command line or Visual Studio (see [DEVELOPER.md](DEVELOPER.md) in the source repository, *Building a release*):
 
 - **SeleneWatch:** `SeleneWatch.exe`, under BSD-2-Clause (`LICENSE.txt`).
-- **Qt 6.12.0, LGPLv3:** `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, and the plugins `platforms/qwindows.dll`, `styles/qmodernwindowsstyle.dll`, `imageformats/qgif.dll`, `qico.dll`, `qjpeg.dll`, unmodified from the Qt installation and dynamically linked, so a user can replace them with compatible builds.
+- **Qt 6.12.0, LGPLv3:** `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, `Qt6Network.dll`, and the plugins `platforms/qwindows.dll`, `styles/qmodernwindowsstyle.dll`, `imageformats/qgif.dll`, `qico.dll`, `qjpeg.dll`, `tls/qschannelbackend.dll`, unmodified from the Qt installation and dynamically linked, so a user can replace them with compatible builds.
   - License texts: `licenses/Qt-LICENSE.txt`, Qt's statement with the LGPLv3 and the GPLv3 it supplements.
   - The third-party code inside those DLLs (zlib, PCRE2, HarfBuzz, FreeType, libpng, libjpeg-turbo, double-conversion and others): `licenses/Qt-third-party-notices.txt`, generated from the Qt documentation by `packaging/make_qt_notices.ps1`.
   - Source: Qt 6.12.0's source code is published by The Qt Company at [download.qt.io](https://download.qt.io/official_releases/qt/6.12/6.12.0/) (moved to `download.qt.io/archive/qt/6.12/6.12.0/` once superseded) and in Git at [code.qt.io](https://code.qt.io/) (tag `v6.12.0`). SeleneWatch uses Qt unmodified; its own source is public at [github.com/ppissias/SeleneWatch](https://github.com/ppissias/SeleneWatch).
   - The About box (Help → About SeleneWatch, Help → About Qt) states that Qt is used under the LGPLv3.
-  - Qt Network and Qt Svg are deliberately not shipped (the package check refuses a package holding them), so their notices are not needed.
+  - Qt Network's additional third-party components are **libpsl**, revision `664f3dc85259ec65e30248a61fa1c45b7b0e4c3f` (BSD-3-Clause, https://github.com/rockdaboot/libpsl), and the **Public Suffix List**, `2026-05-14_08-35-31_UTC` (MPL-2.0, https://publicsuffix.org/). Their complete attribution/license texts are generated from the installed Qt documentation into the same notices file. Preserve the MPL notice and corresponding source availability when redistributing the unmodified list as part of Qt; the Qt source archive above includes it. No original SeleneWatch source is placed under MPL.
+  - Qt Svg and the OpenSSL/certificate-only TLS backends are not shipped. The Windows Schannel backend uses Windows system libraries; no OpenSSL binaries are added.
 - **ZWO ASI SDK:** `ASICamera2.dll` with `licenses/ZWO-ASI-SDK.txt` (section 2 above), only when the build has the SDK.
 - **Microsoft Visual C++ runtime:** as above.
 - **Not shipped:** QHY, Player One and ToupTek files, ASCOM, camera drivers, test and probe programs.

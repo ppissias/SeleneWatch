@@ -38,6 +38,7 @@ class TimelapsePanel;
 class ResharpenDialog;
 class ManualDialog;
 class TipsDialog;
+class ReleaseChecker;
 class SimulatedPointing;
 class CameraFamilyPanel;
 class ZwoApi;
@@ -129,6 +130,8 @@ public:
     void showManual(const QString& section = {});
     void showTips();
     void maybeShowStartupTips();
+    // Once at normal startup; asynchronous and independent of acquisition.
+    void checkForUpdates();
     // View → Testing tools: the synthetic source and the test flash. Off by
     // default and remembered; changes only while stopped. The menu, and the
     // window tests.
@@ -230,6 +233,7 @@ private:
 
     std::unique_ptr<Ui::MainWindowClass> ui_;
     std::unique_ptr<Session> session_;
+    ReleaseChecker* releaseChecker_{nullptr};
     DetectionPanel* detectionPanel_{nullptr};
     QDockWidget* detectionDock_{nullptr};
     // What is watched. The detection and display panels hold its settings.

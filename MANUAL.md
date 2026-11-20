@@ -40,6 +40,7 @@ From top to bottom, the main screen contains:
   - **View** — show/hide **Detection**, **Display and capture**, **Time-lapse**, **Guiding**, **Histogram**, camera docks, and toggle **View → Testing tools**.
   - **Session** — configure **Output folder…**, **Site and instrument…**, **Camera support…**, **Schedule a recording…**, **Re-sharpen time-lapse…**, or **Open the output folder**.
   - **Help** — **User Manual** (`F1`), **Tips**, **Acknowledgements**, **About SeleneWatch**, **About Qt**.
+  - **New version … available** — appears at the top right only when the startup GitHub check finds a newer stable release. Click it to open [SeleneWatch releases](https://github.com/ppissias/SeleneWatch/releases) in your browser and choose a package. The check runs once per launch, has a four-second deadline, and stays silent when offline, when there are no releases, or when GitHub cannot be reached. It does not interrupt observing or install updates. Draft and prerelease builds are ignored.
 - **Top bar:**
   - **Source** selector (`Choose a source…`, **Recording file**, camera families, and **Synthetic** when Testing tools are on), **Connect at startup**, **Open…**, and the amber **TESTING TOOLS ON** indicator when enabled.
   - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count), and (testing tools only) **Fixed flash**.
@@ -50,7 +51,7 @@ From top to bottom, the main screen contains:
 | --- | --- | --- | --- |
 | **Preview** *(blue)* | Live analysis & ring buffer run; capture is OFF | Editable live | None unless **Record** is pressed (writes `recordings/<UTC>/` only) |
 | **Monitoring** *(green)* | Automatic event detection & **Save now** active; optional **Record** / scheduled SER allowed | Locked for evidence integrity | `events/moon/` or `events/sky/`, `candidates.txt`, `guiding.txt`, plus optional `recordings/` |
-| **Time-lapse** *(purple)* | Fixed-cadence lucky-imaging bursts stacked into 32-bit float FITS and MP4/GIF *(flash detection OFF)* | Locked | `timelapses/<UTC>/` (`stacks/`, `sharpened/`, `timelapse.mp4`/`.gif`, `timelapse.txt`, optional `raw/*.ser`) |
+| **Time-lapse** *(purple)* | Regular bursts of the sharpest frames stacked into 32-bit float FITS and MP4/GIF animations *(flash detection OFF)* | Locked | `timelapses/<UTC>/` (`stacks/`, `sharpened/`, `timelapse.mp4`/`.gif`, `timelapse.txt`, optional `raw/*.ser`) |
 
 - **View bar & Preview canvas:**
   - **View bar (`Fit` | `100%` | `200%`):** immediately above the preview canvas. Switch between **Fit** (scales the full frame to the window), **100%** (actual sensor pixels `1:1`), and **200%** (`2×` actual pixels), or roll the **mouse wheel** over the image to zoom smoothly (`25%`–`800%`) around the cursor pixel. While zoomed in, **right-drag** or **middle-drag** pans across the frame.
@@ -95,7 +96,7 @@ Open **Session → Output folder…** (while stopped) to set the single remember
         moon/<UTC>/      Lunar flash & darkening clips, candidates.txt, guiding.txt
         sky/<UTC>/       Sky watch clips, candidates.txt
     recordings/<UTC>/    Manual (Preview or Monitoring) and scheduled continuous SER files
-    timelapses/<UTC>/    Lucky-imaging FITS stacks, sharpened FITS, MP4/GIF, timelapse.txt
+    timelapses/<UTC>/    Lunar/planetary FITS stacks, sharpened FITS, MP4/GIF, timelapse.txt
 ```
 
 ![Session -> Output folder dialog showing single root layout and free disk space](docs/images/manual-output-folder.png)
@@ -293,9 +294,11 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 ### Functionality
 
-Unlike impact-flash monitoring (which captures long, high-gain earthshine exposures), lucky-imaging time-lapses demand short exposures at high frame rates. SeleneWatch provides **Time-lapse mode** as an independent running state (**flash detection OFF**):
+Watch planets turn and lunar shadows unfold. Time-lapse animations bring the slow changes of an observing session into view, from Jupiter's rotation to shadows moving across lunar craters.
 
-- **Fixed-cadence parallel lucky imaging:** Every **Interval** (e.g. `60 s`), SeleneWatch collects incoming frames over your **Capture window** (e.g. `15 s`), scores sharpness on the target ROI in real time, and retains only the sharpest **Keep best %** capped at **Max frames/period (`100–200` frames max, hard cap 200)** so burst RAM stays bounded.
+Lunar and planetary time-lapses use short exposures at high frame rates, with the sharpest frames selected and stacked for each point in the sequence. SeleneWatch provides **Time-lapse mode** as an independent running state (**flash detection OFF**):
+
+- **Fixed-cadence frame selection and stacking:** Every **Interval** (e.g. `60 s`), SeleneWatch collects incoming frames over your **Capture window** (e.g. `15 s`), scores sharpness on the target ROI in real time, and retains only the sharpest **Keep best %** capped at **Max frames/period (`100–200` frames max, hard cap 200)** so burst RAM stays bounded.
 - **Overload skip protection:** Heavy two-pass subpixel phase correlation, Lanczos/bicubic resampling, sigma-clipped stacking, session alignment (**Moon** rigid translation + Alt-Az field rotation with optional **Lunar anchor**, or **Planet** limb-centroid centering), linear sharpening, and 32-bit FITS I/O run asynchronously on a dedicated worker thread. If processing ever falls behind the cadence or `MemoryBudget`, the pre-capture gate skips that period cleanly without dropping or queueing unbounded frames in RAM and logs it in `timelapse.txt`.
 - **Linear FITS archive & Re-sharpen & Rebuild:** Every completed period writes unsharpened `stacks/*.fits` (`BITPIX = -32`) and linearly unsharp-masked `sharpened/*.fits` immediately so crashes never lose finished stacks. At stop (or stop condition / `Disk reserve`), FFmpeg builds `timelapse.mp4` (`libopenh264`, target-masked brightness levelling, valid-overlap cropping, stretch/gamma) and optional `timelapse.gif`. Afterwards, **Re-sharpen time-lapse…** lets you tune USM sharpening sliders and tone-mapping live on any session without overwriting `stacks/`.
 
@@ -305,7 +308,7 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
 
 ### Step-by-Step Workflow
 
-1. In **Preview**, frame the Moon or planet cleanly, tune short lucky-imaging exposure/gain (use **Histogram** so sunlit crater rims or bright cloud belts stay unclipped), and optionally lock & start **Guiding** on a Moon crater ([Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
+1. In **Preview**, frame the Moon or planet cleanly, tune exposure/gain for short, sharp frames (use **Histogram** so sunlit crater rims or bright cloud belts stay unclipped), and optionally lock & start **Guiding** on a Moon crater ([Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
 2. Open **View → Time-lapse**:
    - Select **Target preset**: **Moon** (default `25 %` best, `150` max frames/period, rigid translation + rotation alignment) or **Planet** (`15 %` best, `200` max frames/period, limb-centroid centering tolerant of surface rotation).
    - Set **Interval** (`≥ Capture window`), **Capture window** (for planets keep ≤ 60–90 s to avoid planetary rotation blur during one burst), **Keep best %**, and **Max frames/period** (`100–200`).
@@ -490,7 +493,7 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
 | **Feature lock, calibration & ASCOM guiding** | Automated unit/simulation tests, archive drift tracking (`Moon_180548.avi`, `Moon_165104.ser`), `0.25 px/frame` pulse-detector study, and ASCOM OmniSim check; **live equatorial mount under the Moon pending** |
 | **Workflow 1 — Lunar flashes** | Automated core/detection/window suites; archive sunlit-terrain measurements & test-injection brackets; **calibrated earthshine field run pending** |
 | **Workflow 2 — Objects passing in front of the Moon & Continuous recording** | Automated `darkening` & `session_record` suites; archive darkening probe across 5 Moon recordings (`K ≥ 12`); **unplanned real lunar transit & scheduled ephemeris run pending** |
-| **Workflow 3 — Lucky-imaging Time-lapse & Re-sharpen** | Automated 26-test `timelapse` suite (CFITSIO 2D/3D linear float FITS with strict `BITPIX` validation, OpenCV stacking/rotation/centroid, off-acquisition Bayer `RGGB`/`GRBG`/`GBRG` demosaicing, 12-bit high-aligned Mono16, parallel overload skip gate, `diskReserveBytes`, streaming FFmpeg MP4/GIF, preview-vs-MP4 parity, raw SER within the RAM ceiling, stacking errors that skip a period or stop only the time-lapse, cancelled video build, and `FakeZwoApi` camera time-lapse) & `ui` slider/rebuild, raw SER confirmation and close-while-finishing tests; checked on real lunar & planetary archive recordings |
+| **Workflow 3 — Lunar/planetary Time-lapse & Re-sharpen** | Automated 26-test `timelapse` suite (CFITSIO 2D/3D linear float FITS with strict `BITPIX` validation, OpenCV stacking/rotation/centroid, off-acquisition Bayer `RGGB`/`GRBG`/`GBRG` demosaicing, 12-bit high-aligned Mono16, parallel overload skip gate, `diskReserveBytes`, streaming FFmpeg MP4/GIF, preview-vs-MP4 parity, raw SER within the RAM ceiling, stacking errors that skip a period or stop only the time-lapse, cancelled video build, and `FakeZwoApi` camera time-lapse) & `ui` slider/rebuild, raw SER confirmation and close-while-finishing tests; checked on real lunar & planetary archive recordings |
 | **Workflow 4 — Watching the sky (fixed camera)** | Automated `sky` & `sky_extras` suites (including synthetic Sky scene and meteor/lightning/dark-transit injections) **plus all-night outdoor fixed-camera runs on a ZWO ASI120MM Mini** (`K 13.9`, `patch 20–30761 px`, polygon horizon mask), capturing meteors/streaks, planes, cosmic rays, and brief flashes cleanly |
 | **Unified Output folder, Profiles, Zoom & Windows GUI E2E** | Automated `core`, `session_record`, `display_capture`, `manual_capture`, `zwo`, `preview` (zoom/pan pixel accuracy), and 31-test `ui` suite (named detection profiles with optional Sky mask, `WheelGuard`, in-place output folder recreation during Preview), plus real Windows UI Automation E2E verification (`tests/gui_e2e_test.ps1`) |
 

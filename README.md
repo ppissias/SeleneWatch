@@ -10,7 +10,7 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 
 > **Candidates, not discoveries.** Automatic detections are candidates for human review, not confirmed lunar events. Scientific confirmation of an impact flash normally requires an independent observation from another telescope or site. SeleneWatch preserves the frames, UTC timing, camera settings, and session records needed for that comparison.
 
-**Using SeleneWatch:** See the [User Manual](MANUAL.md) for main screen orientation, camera and output setup, shared guiding, and step-by-step guides for the four observing workflows (lunar flashes, lunar transits/occultations, lucky-imaging time-lapses, and fixed-camera sky watching).
+**Using SeleneWatch:** See the [User Manual](MANUAL.md) for main screen orientation, camera and output setup, shared guiding, and step-by-step guides for the four observing workflows (lunar flashes, lunar transits/occultations, lunar and planetary time-lapses, and fixed-camera sky watching).
 
 ![SeleneWatch monitoring a lunar terminator recording with live detection and native-ADU histogram](docs/images/readme-main-window.png)
 
@@ -26,7 +26,7 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 4. **Capture:**
    - Click **Start monitoring** for automatic flash, darkening/transit, or sky-event capture (plus on-demand **Save now**).
    - Click **Record** (unlimited or for a fixed frame count, or arm **Session → Schedule a recording…**) for continuous lossless SER video.
-   - Or open **Time-lapse** and click **Start time-lapse** for fixed-cadence lucky-imaging FITS stacks and MP4/GIF movies.
+   - Or open **Time-lapse** and click **Start time-lapse** to stack the sharpest frames at a fixed cadence and build MP4/GIF animations of planetary rotation and changing lunar shadows.
 
 ---
 
@@ -38,10 +38,11 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 - **Detect flashes, transits, and sky events with named profiles** — analyse every frame per pixel against its own learned background and noise, with independent target modes and named **Detection profiles** for **The Moon** (impact flashes plus optional **darkening** triggers for silhouettes) and **The sky** (large brightenings, polygon horizon masks optionally saved with profiles, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
 - **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), annotated visual summaries (`00_overview.png`) with suggested classifications, and compact animated GIF previews (`04_event_preview.gif`, `≤ 10` frames, `≤ 512 KiB`) for both lunar and sky clips.
 - **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, record continuously to SER in **Preview** or **Monitoring** with **Record** (unlimited or for a chosen frame count), or schedule predicted events by UTC start and duration without silently dropping frames.
-- **Build lunar & planetary time-lapses** — run **Time-lapse** lucky-imaging bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), write linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assemble `timelapse.mp4` / `timelapse.gif`, and non-destructively **Re-sharpen time-lapse…** with saved profiles and fast **Rebuild video only**.
+- **Build lunar & planetary time-lapses** — watch planets turn and lunar shadows unfold in animations from your observing sessions. **Time-lapse** captures bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), writes linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assembles `timelapse.mp4` / `timelapse.gif`, and offers non-destructive **Re-sharpen time-lapse…** with saved profiles and fast **Rebuild video only**.
 - **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks and one-click in-place folder recreation if a directory was removed during Preview.
 - **Measure sensitivity directly across event kinds** — inject calibrated **Test flash** signals (**Bright flash**, **Dark transit**, **Moving streak (meteor)**, **Blinking mover (aircraft)**, or **Lightning**) onto live or recorded streams to verify recovery limits; every affected frame and clip is explicitly marked as test data.
 - **Hold the field gently** — lock onto a lunar feature to track drift, and optionally guide an **ASCOM** mount with small, bounded, logged guide pulses so monitoring stays on target without slewing or syncing the telescope.
+- **Notice new releases** — once at startup, check GitHub for a newer stable release. A **New version … available** button appears at the top right; click it to open the [releases page](https://github.com/ppissias/SeleneWatch/releases). Offline and failed checks stay quiet.
 
 ---
 
@@ -107,13 +108,13 @@ Install your camera vendor's Windows driver before connecting a camera. ZWO's SD
 
 ## Scope and current status
 
-**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and manual/scheduled continuous recording, lucky-imaging time-lapses (FITS stacking, linear sharpening, MP4/GIF assembly, and re-sharpening), visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
+**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and manual/scheduled continuous recording, lunar and planetary time-lapses (FITS stacking, linear sharpening, MP4/GIF assembly, and re-sharpening), visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
 
 **Not in scope:** pointing the telescope. SeleneWatch does not slew, sync, park, or turn mount tracking on or off; the observer centres the target, and guiding only holds it there.
 
 **Current maturity:**
 
-- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), single output folder management, lucky-imaging Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, `04_event_preview.gif` event previews, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
+- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, dusk-to-dawn, auto exposure), single output folder management, lunar and planetary Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, `04_event_preview.gif` event previews, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
 - **Verified on bench & all-night fixed-camera field use:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, two 30-minute unattended soak runs, and all-night fixed-camera **Sky** patrols capturing meteors/streaks, aircraft, cosmic rays, and flashes), plus ASCOM simulator guiding checks.
 - **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; and real earthshine/transit calibration.
 - **Planned next:** additional camera families, frame registration, transit tracking, and an in-app event browser/exporter.
@@ -129,7 +130,7 @@ SeleneWatch is written in **C++20** with **Qt 6 Widgets** (dynamically linked un
 | Document | Audience | Contents |
 | --- | --- | --- |
 | [MANUAL.md](MANUAL.md) | Observers | Installation, cameras, controls, detection, guiding, outputs, troubleshooting *(included in releases)* |
-| [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) | Observers | Recommended exposure, gain, offset, and histogram levels for lunar earthshine flashes (3–10 % rule), sunlit transits, lucky-imaging time-lapses, and sky patrols *(included in releases)* |
+| [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) | Observers | Recommended exposure, gain, offset, and histogram levels for lunar earthshine flashes (3–10 % rule), sunlit transits, lunar and planetary time-lapses, and sky patrols *(included in releases)* |
 | [DEVELOPER.md](DEVELOPER.md) | Contributors & maintainers | Building with Visual Studio/CMake/Qt 6, camera SDK options, CTest, probes, release packaging *(source repository)* |
 | [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) | Architects & reviewers | Project vision, evidence rules, time model, threading/ownership, SER contract, development stages *(source repository)* |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Users & packagers | Dependency versions, licenses, and binary redistribution obligations *(included in releases)* |

@@ -10,7 +10,7 @@ project(SeleneWatch VERSION ${selenewatch_numeric_version} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_NO_SYSTEM_FROM_IMPORTED TRUE)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 qt_standard_project_setup()
 
 add_custom_target(selenewatch_version
@@ -196,6 +196,7 @@ add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp whee
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
     manual_dialog.h manual_dialog.cpp startup_tips.h startup_tips.cpp tips_dialog.h tips_dialog.cpp
+    release_checker.h release_checker.cpp
     elided_label.h elided_label.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
     camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
     camera_family_panel.h runtime_chooser.h runtime_chooser.cpp camera_support_dialog.h camera_support_dialog.cpp
@@ -205,6 +206,7 @@ target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 # Help → Acknowledgements shows the same file that the repository holds.
 qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES ACKNOWLEDGEMENTS.md)
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
+target_link_libraries(selenewatch_ui PRIVATE Qt6::Network)
 add_dependencies(selenewatch_ui selenewatch_version)
 selenewatch_compile_options(selenewatch_ui)
 qt_add_executable(SeleneWatch main.cpp)
@@ -260,6 +262,12 @@ target_compile_definitions(SeleneWatchUiTests PRIVATE SELENEWATCH_SOURCE_DIR="${
 selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchReleaseTests tests/release_checker_tests.cpp release_checker.h release_checker.cpp)
+target_include_directories(SeleneWatchReleaseTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(SeleneWatchReleaseTests PRIVATE Qt6::Network Qt6::Test)
+selenewatch_compile_options(SeleneWatchReleaseTests)
+add_test(NAME release_check COMMAND SeleneWatchReleaseTests -o -,tap)
 
 add_executable(SeleneWatchDisplayTests tests/display_capture_tests.cpp)
 target_link_libraries(SeleneWatchDisplayTests PRIVATE selenewatch_core Qt6::Test)

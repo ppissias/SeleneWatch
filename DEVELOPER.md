@@ -2,6 +2,8 @@
 
 This guide covers building SeleneWatch from source, running automated tests and manual hardware probes, understanding the code layout, and packaging a release.
 
+The user-facing feature name is **Time-lapse** or **lunar and planetary time-lapses**. Introductions may describe planetary rotation and changing lunar shadows; technical instructions describe frame selection, alignment, and stacking directly.
+
 - For what the application does, see [README.md](README.md).
 - For operating instructions at the telescope, see [MANUAL.md](MANUAL.md).
 - For architectural rules, the time model, thread ownership, and scientific evidence constraints, read [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) and [AGENTS.md](AGENTS.md) before changing the codebase.
@@ -24,7 +26,7 @@ This guide covers building SeleneWatch from source, running automated tests and 
 | Area | Choice |
 | --- | --- |
 | Language | C++20 (`/W4 /permissive- /utf-8` on MSVC) |
-| User interface | Qt 6 Widgets (`Core`, `Gui`, `Widgets`; dynamically linked under LGPLv3) |
+| User interface | Qt 6 Widgets (`Core`, `Gui`, `Widgets`; dynamically linked under LGPLv3); UI-only Qt `Network` for release checks |
 | Platform | Windows x64 |
 | IDE / compiler | Visual Studio (2026 / MSVC v14.51 toolset) |
 | Build system | CMake + Ninja (`CMakePresets.json` + `CMakeUserPresets.json`) |
@@ -203,6 +205,10 @@ Releases are named `YYYY.MM-NN`: the year, the month, and the release number wit
 
 Tag the release commit `vYYYY.MM-NN` (e.g. `v2026.11-01`).
 
+Publish a **stable GitHub Release**, marked as the latest release, for that tag; pushing a tag alone does not publish a release. Feature-20 checks `https://api.github.com/repos/ppissias/SeleneWatch/releases/latest` once after normal startup. It compares the year, month, and monthly release number with the compiled `SELENEWATCH_RELEASE`; both `vYYYY.MM-NN` and `YYYY.MM-NN` tags are accepted. Drafts, prereleases, malformed versions, equal/older versions, and failed checks produce no notice. A newer version shows a button at the top-right corner of the menu bar, opening the fixed SeleneWatch releases page.
+
+`release_checker.h/.cpp` owns this asynchronous check, its four-second overall deadline, and a bounded response. It belongs to the UI library, with no network dependency added to the processing core. Qt handles HTTPS certificate verification; release packages use the Windows Schannel TLS backend. No GitHub credentials or observing data are sent. Isolated package/GUI test launches (`SELENEWATCH_SETTINGS_NAME`) skip the startup request. The `release_check` CTest suite supplies fake Qt network replies for version, HTTP, malformed-data, response-size, and timeout checks; the `ui` suite checks the top-right button and browser destination without opening a browser.
+
 ### What a release contains
 
 The Release build's `package` target invokes CPack using [packaging/package.cmake](packaging/package.cmake) to produce two packages in `out\build\release\package`:
@@ -215,7 +221,7 @@ The Release build's `package` target invokes CPack using [packaging/package.cmak
 Both packages contain:
 
 - `SeleneWatch.exe`
-- Required Qt DLLs and plugins collected by `windeployqt` (explicitly excluding Qt Network, Qt Svg, translations, and software OpenGL)
+- Required Qt DLLs and plugins collected by `windeployqt`, including `Qt6Network.dll` and `tls/qschannelbackend.dll` for HTTPS release checks (excluding Qt Svg, OpenSSL/certificate-only TLS backends, translations, and software OpenGL)
 - Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`; Universal CRT comes from Windows 10/11)
 - `ASICamera2.dll` (when configured with `SELENEWATCH_ZWO_SDK_DIR`)
 - `opencv_world4140.dll`, `cfitsio.dll`, and external LGPLv3 `ffmpeg.exe` + FFmpeg shared DLLs (`avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`)
@@ -229,7 +235,7 @@ Tests, probes, and QHY / Player One / ToupTek vendor files are never shipped. De
 
 Building the `Release-packages` preset creates both packages and immediately runs [packaging/check_package.cmake](packaging/check_package.cmake) / [packaging/check_package.ps1](packaging/check_package.ps1), failing the build if any check fails:
 
-- expected binaries, licenses, and docs are present in the `.zip`, and `Qt6Network.dll` / `Qt6Svg.dll` are absent;
+- expected binaries, licenses, docs, `Qt6Network.dll`, and `tls/qschannelbackend.dll` are present in the `.zip`; unused Qt Svg and OpenSSL/certificate-only TLS backends are absent;
 - every DLL imported by any shipped `.exe`/`.dll` (`dumpbin /dependents`) is in the package or Windows `System32`;
 - the packaged `SeleneWatch.exe` launches cleanly on Qt's offscreen platform with only its own folder and Windows directories on `PATH`.
 
