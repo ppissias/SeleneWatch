@@ -24,7 +24,7 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-23 — A window that fits a small laptop screen](#feature-23--a-window-that-fits-a-small-laptop-screen) | Controls above the preview wrap instead of squeezing; a test that no text is cut off | Implemented; UI test passing; laptop check pending |
 | [Feature-24 — Help on every control](#feature-24--help-on-every-control) | One help text per control, as tooltip and as a clickable ⓘ on the label | Implemented; UI test passing |
 | [Feature-25 — Sliders for camera settings](#feature-25--sliders-for-camera-settings) | Slider beside the exact value for gain, offset, exposure (logarithmic) and other ranged controls | Implemented; UI test passing; real camera check pending |
-| [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | A short or longer watch in Preview suggests exposure, gain and K for the Moon (flashes or transits) or the sky, and fills in the exposure follower's limits | Designed; awaiting approval |
+| [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | A short or longer watch in Preview suggests exposure, gain and K for the Moon (flashes or transits) or the sky, and fills in the exposure follower's limits | Designed and revised after review; awaiting approval |
 
 ## Feature-9 — A measured trigger
 
@@ -1472,132 +1472,175 @@ Gain, offset and exposure are adjusted by eye while watching the preview and the
 
 ## Feature-26 — Auto-tune and suggested camera settings
 
-*Proposed on 21 November 2026; designed on 21 November 2026. Awaiting the observer's approval; not implemented.*
+*Proposed on 21 November 2026. Designed and revised the same day, after the observer's decisions and a design review (both below). Awaiting the observer's approval; not implemented.*
 
 Tonight's settings are found by hand: the observer reads the histogram, compares it with [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md), clicks pixels to read their noise, injects test flashes and adjusts K until Preview stops saying "Would trigger" on nothing. Auto-tune does that measurement for them. It watches the Preview for a short or a longer time and proposes camera and detection settings, separately for the Moon and the sky. The observer accepts the suggestions, or some of them, or none.
 
 ### What the observer does
 
-1. Start Preview with a camera (or a recording, see below) and choose the target, the Moon or the sky.
-2. **Detection → Auto-tune…** opens a small panel beside the preview (not a modal dialog: the preview stays live).
-3. Choose how long to watch: **Quick (15 s)** or **Thorough (60 s)**.
-   - **Moon:** drag a box on the earthshine, the part of the Moon where flashes are searched. The box is remembered for the next run, and the panel shows it on the preview.
+Auto-tune has two steps, because a K measured with one exposure and gain is no longer valid after either changes: **first the camera, then K**.
+
+1. Start Preview with a camera (or a recording: K only, see design point 10) and choose the target, the Moon or the sky.
+2. Press **Auto-tune…**. It is a prominent full-width button at the top of the Detection dock, above Profile, visible without scrolling. A panel opens beside the preview; it is not a modal dialog, so the preview stays live.
+3. **Where to measure:**
+   - **Moon, impact flashes:** drag a box on the earthshine. Auto-tune then finds the whole earthshine area that the box belongs to and outlines it on the preview, so the observer can see what it will measure (design point 3). The box is remembered for the next run.
+   - **Moon, transits (darkening on):** the brightest sunlit areas of the whole frame are measured, so no box is needed.
    - **Sky:** the sky outside the mask is measured, so there is nothing to draw.
-4. Press **Watch**. A progress bar counts down. If a camera setting or a detection setting is changed during the watch, the watch starts again, because its frames no longer belong together.
-5. The panel shows what it measured and, row by row, what it suggests:
+4. **Step 1, camera.** Press **Measure camera** (a few seconds is enough for brightness). The panel shows the measured level and its aim, then the suggested exposure, gain, and the follower's limits (Sky), each with a tick box, plus any warnings. **Apply** sends the ticked rows to the camera together. The panel then waits until the camera reports the new values back and the detector has settled, and measures again to check: the brightness should now be in the aim. When it is, or when the camera cannot reach it (the panel says why), step 2 is offered.
+5. **Step 2, K.** Choose **Quick (15 s)** or **Thorough (60 s)** and press **Watch**. Several real detectors run on the same frames at different K values (design point 4). The panel then shows a table of what each K would have done:
 
-   | Setting | Now | Suggested | Why |
-   | --- | --- | --- | --- |
-   | Exposure | 50 ms | 50 ms | Kept: flashes last 15–100 ms |
-   | Gain | 200 | 260 | Earthshine at 2.1 %, aim 3–10 % |
-   | Sensitivity K | 6.0 | 7.5 | Would have triggered 4 times in 60 s, the strongest at K 6.4 |
+   | K | Events in 60 s | Per-pixel threshold in the earthshine |
+   | --- | --- | --- |
+   | 6.0 (now) | 4 | 31 ADU |
+   | 7.0 | 1 | 36 ADU |
+   | **8.0 (suggested)** | **0** | **41 ADU** |
+   | 10.0 | 0 | 52 ADU |
 
-   Each row has a tick box, ticked when the suggestion differs from the current value. A row with no change is shown and left unticked.
-6. **Apply selected** changes the ticked settings, exactly as if the observer had typed them: the camera gets them through the live Preview path, and K goes into the Detection panel. **Measure again** runs the same watch with the new settings. A change of gain usually needs one more round, because cameras do not say how much brighter a gain step makes the image (see *Measured, not modelled*). **Close** changes nothing.
+   The table also lists the events found, each with its time, position, size and the K values that found it. An event that was real (a meteor, a plane, a satellite) can be unticked; it is then not counted, and one plane lasting many frames counts once. **Apply K** sets the ticked K in the Detection panel.
+6. **Close** changes nothing that was not applied.
 
 ### What shapes the design
 
-1. **Suggest, never impose.** Nothing changes until the observer presses **Apply selected**, and only the ticked rows change. Auto-tune runs only in Preview; its button is disabled while Monitoring, like the camera settings. During Monitoring the only thing that changes camera settings is the exposure follower (Feature-15), under its own fixed rules.
+1. **Suggest, never impose.**
+   - Nothing changes until the observer applies it, and only the ticked rows change.
+   - Auto-tune runs only in Preview. Its button and Apply are disabled while Monitoring, like the camera settings, including when Watch from dusk to dawn starts Monitoring while the panel is open: that cancels a watch in progress.
+   - During Monitoring the only thing that changes camera settings is the exposure follower (Feature-15), under its own fixed rules.
 
 2. **Different aims for each target and workflow.** The aims are the ones [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) already gives, kept in one place in the code so the guide, the help and the suggestions agree:
 
-   | Watching | What is measured | Aim | Order of correction |
+   | Watching | What is measured | Aim | How brightness is corrected |
    | --- | --- | --- | --- |
-   | **The Moon**, impact flashes (darkening off) | Median of the earthshine box | **3–10 %** of full scale, aiming at 6 %; nothing in the box at 0 | Gain first. The exposure stays between 10 and 40 ms, because a longer exposure adds background but no flash light. |
-   | **The Moon**, transits and shadows (darkening on) | Brightest sunlit pixels (99.9th percentile) in the whole frame | **60–80 %**, aiming at 70 %; nothing at the maximum code | Exposure first, at most 10 ms so a 0.5 s ISS pass stays sharp; gain as low as that allows. |
-   | **The sky** | Median outside the mask, the same measure as the exposure follower | **8–30 %**, aiming at 15 %, the follower's own band | Exposure first, up to the longest exposure for meteors (250 ms, editable in the panel), then gain. This is the follower's order. |
+   | **The Moon**, impact flashes (darkening off) | Median of the earthshine area (design point 3) | **3–10 %** of full scale, aiming at 6 %; nothing in the area at 0 | Gain. The exposure stays between 10 and 40 ms, because a flash lasts 15–100 ms and a longer exposure adds background but no flash light. An exposure outside that range is brought into it first. |
+   | **The Moon**, transits and shadows (darkening on) | Brightest sunlit pixels (99.9th percentile) in the whole frame | **60–80 %**, aiming at 70 %; nothing at the maximum code | The exposure, at most 10 ms so a 0.5 s ISS pass stays sharp; gain as low as that allows. |
+   | **The sky** | Median outside the mask, the follower's own measure | **8–30 %**, aiming at 15 %, the follower's own band | The follower's order. A darker sky lengthens the exposure first, up to the longest exposure for meteors (250 ms, editable in the panel), then raises gain. A brighter sky lowers gain first, then shortens the exposure. |
 
-3. **Measured, not modelled.**
-   - **Exposure:** the image's brightness is proportional to it, so the suggested exposure is computed: current exposure × aim ÷ measured level, within the camera's range and the limits above.
-   - **Gain:** its units differ between camera families and models (tenths of a decibel on some, arbitrary steps on others), so auto-tune does not pretend to know how much brighter the next gain value is. A gain suggestion moves in the needed direction:
-     - by the follower's gain step when one is set, otherwise by one twentieth of the camera's gain range;
-     - by several steps when the level is far from the aim.
+3. **The Moon's earthshine area, shown to the observer.** The observer's box says where the earthshine is. Auto-tune then grows it to the whole earthshine area:
+   - **Working image:** the frame is binned 8 × 8, so single-pixel noise and stars do not matter.
+   - **Off-limb sky level:** the darkest 2 % of the frame (or the camera's black level if no sky is in view).
+   - **Area:** the cells connected to the box whose level is closer to the box's earthshine than to the off-limb sky, no more than three times as far above the sky as the box's median, and with no saturated pixel. This keeps the maria and highlands, which differ by about a factor of two, and leaves out the off-limb sky, the glare near the terminator and the sunlit side.
+   - **Shown on the preview:** an outline in its own colour, with the share of the frame it covers.
+   - **When it fails:** if the area cannot be separated (it is smaller than the box, or it covers nearly the whole frame), the panel says so and measures the box alone.
 
-     **Measure again** checks the result. The panel says so: "Gain changes are checked by measuring again".
+   Brightness and noise are measured over the whole area, which is more representative than one box; the box only says where to start. The observer sees at a glance whether auto-tune understood the Moon, and redraws the box if not.
 
-4. **K from what would have triggered, not from a formula.** During the watch, a measuring copy of the detector runs on the same frames, with the current patch limits but with K lowered to 3. For each frame it records the highest K at which that frame would still have triggered: the K at which its strongest patch still meets the minimum patch size, the maximum patch size and the box limit.
-   - The suggested K is the highest such value seen, plus a margin:
-     - 1.0 for a thorough watch;
-     - 1.5 for a quick one, which sees fewer of the rare large noise values.
-   - It is rounded up to 0.5, and is never below 5.0.
-   - If nothing would have triggered, K can go **down**, to the margin above the strongest value seen, which makes the detector more sensitive.
-   - **A real event during the watch** (a meteor, a plane, a satellite) would push K up. The panel lists the five strongest would-triggers with their time, position, size and K, and the observer can untick any that was real. Clicking one shows its box on the preview.
+4. **K from real detectors, not from a model.** Which K would have triggered cannot be read from one detector run at a low K:
+   - At a lower K, two bright cores joined by a faint bridge can make one patch too large to pass, which at a higher K would be two patches that pass.
+   - A dense frame can exceed the bounded patch search.
+   - K also changes which pixels learn the background, and which patches reach confirmation.
 
-5. **Sensitivity in units the observer can judge.** Next to K the panel shows the weakest flash that K catches in the measured area, computed as K × the measured noise. It is given in ADU and as a share of full scale, and compared with the test flash (for example: "The weakest flash caught: 38 ADU, 0.06 % of full scale; a test flash of 100 ADU is caught"). This replaces injecting hidden test flashes during the watch: it measures the same thing with far less machinery.
+   The archive validation already shows a flash missed at K = 6 and found at a higher K ([reference-and-manual-validation.md](docs/reference-and-manual-validation.md)).
 
-6. **Warnings, not silent changes.** Some findings have no single right setting. They are shown as warnings:
-   - **Pixels at 0 in the measured area:** raise the Offset. A dark pixel at 0 cannot get darker, so its noise is under-estimated. When the camera has an Offset control, a value is suggested.
+   So during a K watch, the session runs **several complete detectors** on the same frames, one per K value:
+   - **The K values:** the current K and up to three others (for example the current K − 1, + 1 and + 2, never below 5.0). Each detector has the current patch limits and the triggers that are switched on (large brightening, darkening), and learns exactly as Monitoring would.
+   - **What is counted:** each detector counts what Monitoring would count, new candidates (events), not frames.
+   - **When the computer cannot keep up:** the number of extra detectors depends on the measured processing time per frame. If not even one extra fits, the watch measures the current K only, and the panel offers **Try K …** for a second watch at another value.
+   - **The suggestion:** the lowest tested K with no unticked event during the watch. If even the highest tested K had events, the panel says so and offers a watch at higher values.
+
+5. **A threshold is not a detection.**
+   - **What the table shows:** K × the measured noise is shown as the **per-pixel threshold** in ADU, never as "caught". A flash can exceed it at its centre and still be too small for the minimum patch size, clip on bright terrain, or vanish before confirmation.
+   - **What counts as caught:** only a flash actually recovered. With the testing tools on, the panel offers **Check with a test flash**. It injects a marked flash of a chosen size into the measured area, through the existing test-flash path (marked as test data, as now), and reports whether a detector at the suggested K found it at that place and time.
+
+6. **One settled configuration at a time.**
+   - **Results that go stale:** a K watch belongs to the camera settings it was measured with. Changing exposure, gain or offset, the target, the mask, the earthshine box or the source discards pending results and says so; a stale result can never be applied. A change made after a watch ends but before Apply discards it too.
+   - **Applying camera rows:** they go to the camera together through the editor's existing debounced live request. The next measurement starts only after the camera has reported the new values back and the detector has settled.
+   - **The exposure follower:** it adjusts the camera in Preview too, so it is paused while auto-tune measures, and its one-minute hold starts afresh when it resumes.
+
+7. **Measured on the source thread, every frame.**
+   - **Why there:** the window sees only the latest frame, about every 50 ms, so a one-frame flash can reach the detector and never reach the window. Measurements are therefore taken in the session, on every frame, with bounded statistics. The session sends progress and results to the panel.
+   - **What the panel reports:** how many frames were measured and how much source time they span.
+   - **Recordings:** a watch ends at the end of the file or at a loop boundary, and the panel shows the time actually covered. A 10 s clip played six times does not count as a 60 s watch.
+
+8. **Measure, apply, check.** Neither exposure nor gain is trusted to scale the image exactly:
+   - **Exposure:** the camera's black level (the pedestal set by Offset) means doubling the exposure does not double the raw median. The suggested exposure is computed above that pedestal, and step 1's check measures the result.
+   - **Gain:** its units differ between camera families and models (tenths of a decibel on some, arbitrary steps on others). A gain suggestion is one bounded step in the needed direction:
+     - the follower's gain step when one is set, otherwise one twentieth of the camera's gain range;
+     - at most a quarter of the range in one apply.
+
+     The check then measures it.
+   - **When the aim is out of reach** (the exposure is at its cap and the gain at its limit, or the camera's own range), the panel shows how far the camera can get, instead of suggesting the impossible.
+
+9. **Warnings, not silent changes.** Findings with no single right setting are shown as warnings:
+   - **No unmasked samples:** the mask covers the whole frame. No brightness suggestion is made. The exposure follower is fixed the same way: today it would read a fully masked sky as black and keep lengthening the exposure.
+   - **Pixels at 0 in the measured area:** raise the Offset. A dark pixel at 0 cannot get darker, and its noise is under-estimated. When the camera has an Offset control, a value is suggested.
    - **8-bit stream with noise below 1 ADU in the area:** each ADU is a coarse step for faint flashes; raise the gain or use RAW16.
-   - **Moon: the earthshine box touches the sunlit side** (more than 1 % of it at the maximum code): draw it again.
    - **Moon: much of the guiding lock box is saturated** (more than 5 %, when a lock box is set): guiding cannot follow a flat white area.
-   - **Sky: the Sun is above −18°:** the sky is still in twilight and will get darker. With **Follow the sky's brightness** on, the follower lengthens the exposure as it does. Without it, auto-tune should be run again when the sky is dark.
+   - **Twilight.** When the site's position is known, the Sun's altitude is shown:
+     - **Sky, Sun above −18°:** "The sky will get darker. Auto-tune is best run in full darkness. With Follow the sky's brightness on, the follower will lengthen the exposure as it darkens; otherwise run auto-tune again later."
+     - **Moon, Sun above −12°:** "The sky around the Moon will get darker. Run auto-tune again once it is dark." A thin earthshine crescent is often watched in twilight, so this is a reminder, not a block.
 
-7. **Only what tonight's noise decides.** Auto-tune proposes exposure, gain, an Offset warning and K. It leaves the shape settings unchanged:
-   - minimum and maximum patch size;
-   - the box limit;
-   - large brightening;
-   - learn-after time;
-   - the dark-patch limits;
-   - the mask.
+10. **Only what tonight's noise decides.** Auto-tune proposes exposure, gain, an Offset warning, K, and (Sky) the follower's limits. It leaves the shape settings unchanged:
+    - minimum and maximum patch size;
+    - the box limit;
+    - large brightening;
+    - learn-after time;
+    - the dark-patch limits;
+    - the mask.
 
-   Those settings describe what an event looks like, not how noisy tonight is.
+    Those settings describe what an event looks like, not how noisy tonight is. With a SER or AVI recording, only step 2 is offered, and the camera rows read "Not a camera". This makes the K suggestion testable on recorded nights.
 
-8. **With the exposure follower (Sky).** When **Follow the sky's brightness** is on, auto-tune and the follower do one job between them. Auto-tune chooses the starting point, and the follower keeps the sky there through the night. Accepting the exposure and gain rows therefore also fills in the follower's limits from the measurement:
-   - **Exposure from:** the camera's shortest exposure, but at least 0.1 ms, so a bright dusk can be followed down;
-   - **to:** the longest exposure for meteors (250 ms unless the observer changes it in the panel);
-   - **Gain up to** and **in steps of:** see decision 2 below.
+11. **With the exposure follower (Sky).** Auto-tune chooses the starting point, and the follower keeps the sky there through the night. Step 1 offers the follower's limits as **their own rows**, separate from the exposure and gain:
+    - **Exposure from … to …:** from the camera's shortest exposure (at least 0.1 ms, so a bright dusk can be followed down) to the longest exposure for meteors (250 ms unless changed in the panel).
+    - **Gain up to … in steps of …:** the gain applied in step 1 plus a quarter of the camera's gain range (never above the camera's maximum), in steps of one twentieth of the range. The follower raises gain only once the exposure is at its longest, one step at a time, at least 120 s apart. The quarter-range ceiling bounds how far it can go.
 
-   The panel shows these as their own rows, so the observer can untick them and keep their own limits.
+    These rows are ticked when the follower is on (the observer's decision 2). The observer can untick them to keep their own limits.
 
-9. **Recordings too, for detection only.** With a SER or AVI recording, auto-tune proposes K (and shows noise and the weakest flash), but no camera settings: the camera rows read "Not a camera". This makes the K suggestion testable on recorded nights.
-
-10. **Evidence stays intact.**
-    - The watch saves nothing.
-    - Accepted values become ordinary settings, recorded as now: exposure, gain and offset on session_start, and K and the patch limits on every candidate.
-    - The next session_start also gets one `autotune` field with what the accepted values were based on: the time, the target, the watch length, the measured level, noise and strongest would-trigger, and which rows were applied. A night's results can then be traced back to how its settings were chosen.
+12. **Evidence stays intact.**
+    - The watches save nothing.
+    - Applied values become ordinary settings, recorded as now: exposure, gain and offset on session_start, and K and the patch limits on every candidate.
+    - The next session_start also gets one `autotune` field. It records the time, the target, the watch length and frames measured, the measured level and noise, the K values tested with their event counts, and which rows were applied with the values the camera reported back.
 
 ### Considered and left out
 
 - **Re-tuning K during Monitoring.** K is measured in noise units, and the detector re-learns the noise continuously. A brighter or darker sky therefore does not make K wrong, and changing the evidence threshold in the middle of a night without the observer would make the night's candidates harder to compare. Brightness during Monitoring is the follower's job.
-- **Running auto-tune automatically at dusk** (with Watch from dusk to dawn). It would change K and camera settings while nobody looks at the result, which goes against design point 1. Left for later, if nights show it is needed.
-- **Hidden test flashes during the watch.** Replaced by the computed weakest flash (design point 5).
+- **Running auto-tune automatically at dusk** (with Watch from dusk to dawn). It would change K and camera settings while nobody looks at the result, which goes against design point 1.
 - **A model of each camera's gain curve.** It would need per-model data that the SDKs do not give. Measuring again is simpler and always right.
+- **Estimating every K from one low-K run.** This is wrong for the reasons in design point 4.
 
 ### Technical outline
 
-- **`auto_tune.h/.cpp`** (no widgets). These are plain functions, unit-testable on synthetic and recorded frames.
-  - `AutoTuneWatch` accumulates per frame: the measured level, the shares at 0 and at the maximum code, the noise in the area, and the frame's would-trigger K.
-  - `suggestAutoTune(watch, aims, current settings, camera ranges)` returns the suggestions with their reasons and warnings.
-  - The aims table lives here. The follower's band comes from `SkyExposureRule`, so the two cannot disagree.
-- **Would-trigger K.** The detector gains a measuring mode that reports, for each frame, the highest K at which its strongest patch passes the patch limits. The measuring copy runs only during a watch, on the source thread. At high frame rates on large frames, Preview may show fewer frames during the watch; the panel reports how many frames were measured.
-- **`AutoTunePanel`** (widget, in the Detection dock, opened by **Auto-tune…** beside **Profile**): the watch length, the measure box, the progress, the suggestion rows and the warnings. `MainWindow` feeds it frames during a watch, applies accepted camera rows through `CameraSettingsEditor::setControlValue` and the live Preview path, which is shared by all four camera families, and sets K through the Detection panel.
-- **Help.** Every control in the panel has a tooltip and ⓘ (Feature-24), including the aims and the margin.
+- **`auto_tune.h/.cpp`** (no widgets). These are plain functions and small types, unit-testable on synthetic and recorded frames:
+  - the aims table, with the Sky band from `SkyExposureRule`, so the two cannot disagree;
+  - `earthshineArea(frame, box)` returns the area and the reason when it fails;
+  - the brightness measurement, which returns no value when there are no samples;
+  - the camera suggestion;
+  - the choice of K from the per-K event counts.
+- **Session.** A watch is a bounded measurement the session runs on the source thread. It runs the extra detectors (copies of `FlashDetector` with only K changed), accumulates brightness and noise statistics on every frame, and counts new candidates per K. It stops on a configuration change, at the end of a recording, at a loop boundary, or when Monitoring starts. Progress and results are sent to the panel, as the detection view is now.
+- **`skyLevel`** returns no value for a fully masked frame. The follower then does nothing and says why.
+- **`AutoTunePanel`** (widget) holds the two steps, the rows, the K table, the events list and the warnings. It is opened by the **Auto-tune…** button at the top of the Detection dock. `MainWindow` applies camera rows through `CameraSettingsEditor::setControlValue` and the live Preview path, which is shared by all four camera families, and pauses the follower during a measurement.
+- **Preview overlay:** the earthshine outline, drawn like the mask but in its own colour.
+- **Help:** every control in the panel has a tooltip and ⓘ (Feature-24), including the aims, the K values tested, and the twilight advice.
 
 ### Done when
 
-1. In core tests on synthetic frames of known brightness and noise:
+1. In core tests on synthetic frames of known brightness, black level and noise:
    - the suggested exposure brings the level into the aim for each of the three workflows;
    - the Moon keeps its exposure within 10–40 ms and corrects with gain;
-   - the suggested K is above every would-trigger of a pure-noise watch and is never below 5.0;
-   - an unticked real event does not raise K.
-2. On a recorded night from `test_data`, the suggested K, applied to the same recording, leaves no false triggers in the watched span, and an injected test flash of the shown "weakest flash" size is caught.
-3. A UI test with a fake camera:
-   - Preview → Auto-tune (Quick) → Apply selected changes exposure and gain once through the live path, and K in the Detection panel;
-   - the button is disabled during Monitoring;
-   - Close changes nothing;
+   - a fully masked sky gives no level and no follower change;
+   - the earthshine area of a synthetic crescent (sunlit limb, earthshine, off-limb sky) covers the earthshine and none of the other two.
+2. A replay test with two bright cores joined by a faint bridge:
+   - each K's count equals that of a detector run alone at that K;
+   - the suggested K is never one that had an event;
+   - an unticked event lasting many frames counts once.
+3. On a recorded night from `test_data`, a separate check after the watched span:
+   - the suggested K, applied to the same recording, gives no false triggers over a known quiet span;
+   - a set of marked test flashes of stated widths, durations and positions is reported with how many were recovered.
+4. UI tests with a fake camera:
+   - Measure camera → Apply sends exposure and gain together, once, through the live path;
+   - the K watch waits for the readback;
+   - a setting changed after a watch but before Apply discards the result;
+   - Apply and the button are disabled during Monitoring, including when the night schedule starts it;
+   - the follower is paused during a watch;
    - with Follow on, the follower's limits are filled in;
    - the next session_start has the `autotune` field.
-4. The real-window test (`tests\gui_e2e_test.ps1`) runs a quick auto-tune on the synthetic source.
-5. MANUAL, README and the camera settings guide describe Auto-tune, its aims and its limits.
+5. The real-window test (`tests\gui_e2e_test.ps1`) runs a quick auto-tune on the synthetic source.
+6. MANUAL, README and the camera settings guide describe Auto-tune, its aims, its two steps, the twilight advice and its limits.
 
-### Decisions for the observer
+### The observer's decisions (21 November 2026)
 
-1. **The Moon's measured area:** a box the observer drags on the earthshine (recommended: always right, takes two seconds), or automatic, by guessing the earthshine from the histogram (no drawing, but it can be fooled at some phases and by glare).
-2. **The follower's gain limits after accepting:**
-   - **(a)** Gain up to = the suggested gain + a quarter of the camera's gain range, in steps of one twentieth of the range (recommended: room for a dark sky after dusk, with the exposure capped at 250 ms for meteors); or
-   - **(b)** keep the gain fixed, so the follower changes only the exposure (simplest, but the sky may end up under-exposed once the exposure reaches its longest).
-3. **Watch lengths:** 15 s and 60 s, or other values.
-4. **Where the button lives:** in the Detection dock beside Profile (recommended: suggestions cover both detection and camera), or in the camera dock.
+1. **The Moon's measured area:** the observer draws a box on the earthshine. Auto-tune then finds the whole earthshine area and shows it on the preview as a visual confirmation (design point 3).
+2. **The follower's gain after accepting:** auto-tune may raise it, within a bounded ceiling (design point 11). The observer's concern is that a lot of gain changes could cause problems. Hence the ceiling, gain only after the exposure is at its longest, the twilight advice to run auto-tune in full darkness (design point 9), and a separate row that can be unticked.
+3. **Watch lengths:** 15 s and 60 s.
+4. **The button:** in the Detection settings, prominent and visible at once, at the top of the dock.
 
 ### Feature-26 design review — 21 November 2026
 
@@ -1614,3 +1657,24 @@ I recommend keeping the Preview workflow and making two changes before approval.
 5. **Handle missing measurements and camera limits explicitly.** A fully masked sky currently gives the same numeric level as a black sky. Report “no unmasked samples” and withhold the brightness suggestion in that case. A black-level pedestal also means doubling the exposure need not double the raw median. Use a bounded trial step and remeasure, especially near clipping. Show when the camera cannot reach the aim within the exposure cap. Correct the example that keeps 50 ms despite the 40 ms flash limit. On a brightening sky the existing follower reduces gain first when it can, so align the proposed correction order with that behavior. [Sky measurement and exposure rule](sky_exposure.cpp)
 
 For the open decisions, I would use the drawn box for earthshine only and skip it for sunlit transits. Keep 15 s and 60 s as convenient watch lengths and put the button beside Profile. Preserve the observer's follower limits by default and offer the expanded gain range as a separately selectable change. A fake-camera test that changes settings after Watch completes but before Apply, plus a replay test with the joined patches described above, would exercise the two easiest mistakes to miss.
+
+### Response to the design review — 21 November 2026
+
+All five points were checked against the code and accepted; the design above is revised accordingly.
+
+1. **Low-K run:** accepted. The archive validation confirms it (a flash missed at K = 6, found higher). Instead of one detector at a low K, several complete detectors run at the K values tested, each exactly as Monitoring would (design point 4). A sequential **Try K …** is the fallback when the computer cannot run them together. Enabled large-change and dark triggers are included, and events are counted as new candidates, so one plane counts once.
+2. **"Caught":** accepted. The table shows a per-pixel threshold. "Caught" is reserved for a marked test flash recovered at its place and time (design point 5).
+3. **One settled configuration:** accepted. Camera first, then K. A watch waits for the readback and settling. Any change discards pending results. The follower is paused during measurement. The night schedule cancels a watch. The readbacks go into the `autotune` provenance (design points 6 and 12).
+4. **Source thread:** accepted. The window's latest-frame path would miss one-frame flashes (design point 7).
+5. **Missing samples and camera limits:**
+   - **Fully masked sky:** accepted. `skyLevel` returns 0 then, which also affects today's follower, so that is fixed with this feature (design point 9).
+   - **Pedestal:** the pedestal and the bounded step are covered by measure, apply, check (design point 8).
+   - **Out of reach:** an unreachable aim is reported.
+   - **My earlier mistakes:** the 50 ms example and the Sky correction order are corrected; the order is now the follower's in both directions.
+
+On the open decisions the review and the observer agree:
+- a box for earthshine only;
+- 15 s and 60 s;
+- the button in the Detection dock.
+
+For the follower's limits, the review suggested keeping the observer's limits by default. The observer chose to let auto-tune raise the gain. The design does both: the limits are a separate row, ticked by default when the follower is on, and the gain ceiling is bounded.
