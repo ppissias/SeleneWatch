@@ -48,9 +48,9 @@ FramePtr skyFrame(int width, int height, uint64_t index, double fps, std::mt1993
 }
 
 // A capture with the clips and candidates it produces.
-struct Watch
+struct CaptureWatch
 {
-    Watch(CaptureSettings capture, DetectionSettings detection)
+    CaptureWatch(CaptureSettings capture, DetectionSettings detection)
         : capture(capture, [this] { ++candidates; }, [this](EventClip clip) { clips.push_back(std::move(clip)); }, detection) {}
     int candidates{0};
     std::vector<EventClip> clips;
@@ -102,7 +102,7 @@ void SkyTest::aDiagonalStreakFiresOnlyInSkyMode()
     for (const Target target : {Target::Moon, Target::Sky})
     {
         std::mt19937 random(21);
-        Watch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
+        CaptureWatch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
         for (uint64_t i = 0; i < 260; ++i)
         {
             const int start = i >= 30 && i < 39 ? 10 + 20 * static_cast<int>(i - 30) : -1000;
@@ -148,7 +148,7 @@ void SkyTest::lightningIsOneClipOfLargeBrighteningsOnlyInSkyMode()
     for (const Target target : {Target::Moon, Target::Sky})
     {
         std::mt19937 random(22);
-        Watch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
+        CaptureWatch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
         double before = 0, after = 0;
         int afterFirstStroke = 0;
         for (uint64_t i = 0; i < 320; ++i)
@@ -208,7 +208,7 @@ void SkyTest::aSlowRampFiresNothing()
     for (const Target target : {Target::Moon, Target::Sky})
     {
         std::mt19937 random(23);
-        Watch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
+        CaptureWatch watch(defaultCaptureSettings(target), defaultDetectionSettings(target));
         for (uint64_t i = 0; i < 1200; ++i)
             watch.capture.onFrame(skyFrame(64, 64, i, 2, random, {}, 10 + 190.0 * static_cast<double>(i) / 1199));
         watch.capture.finishPartial();
@@ -223,7 +223,7 @@ void SkyTest::aDriftingStarIsReleasedAndItsClipEnds()
     std::mt19937 random(24);
     DetectionSettings detection = defaultDetectionSettings(Target::Sky);
     detection.releaseSeconds = 3;
-    Watch watch(defaultCaptureSettings(Target::Sky), detection);
+    CaptureWatch watch(defaultCaptureSettings(Target::Sky), detection);
     constexpr double fps = 10;
     for (uint64_t i = 0; i < 260; ++i)
     {
@@ -256,7 +256,7 @@ void SkyTest::aMovingPointKeepsFiringPastTheReleaseLimit()
     std::mt19937 random(25);
     DetectionSettings detection = defaultDetectionSettings(Target::Sky);
     detection.releaseSeconds = 3;
-    Watch watch(defaultCaptureSettings(Target::Sky), detection);
+    CaptureWatch watch(defaultCaptureSettings(Target::Sky), detection);
     constexpr double fps = 10;
     for (uint64_t i = 0; i < 110; ++i)
     {
@@ -280,7 +280,7 @@ void SkyTest::aMaskedFlashDoesNotFireAndItsPixelsAreSaved()
     std::mt19937 random(26);
     DetectionSettings detection = defaultDetectionSettings(Target::Sky);
     detection.mask = DetectionMask({DetectionMask::rectangle(0, 40, 100, 20)});
-    Watch watch(defaultCaptureSettings(Target::Sky), detection);
+    CaptureWatch watch(defaultCaptureSettings(Target::Sky), detection);
     std::vector<FramePtr> sent;
     for (uint64_t i = 0; i < 260; ++i)
     {
@@ -360,7 +360,7 @@ void SkyTest::linkedSkyClipsDoNotRepeatTheirHistory()
         capture.historySeconds = 1; capture.postSeconds = 1; capture.maxPostSeconds = 2;
         DetectionSettings detection = defaultDetectionSettings(target);
         detection.releaseSeconds = 0;
-        Watch watch(capture, detection);
+        CaptureWatch watch(capture, detection);
         for (uint64_t i = 0; i < 300; ++i)
         {
             const bool lit = i >= 30 && i < 180;
@@ -403,7 +403,7 @@ void SkyTest::syntheticSkySceneAndExtendedBlips()
     QVERIFY2(horizonSum / horizonCount < 14.0, qPrintable(QString("Expected dark horizon, mean=%1").arg(horizonSum / horizonCount)));
 
     // Moving streak (meteor) and lightning on synthetic sky fire cleanly and classify as expected.
-    Watch watch(defaultCaptureSettings(Target::Sky), defaultDetectionSettings(Target::Sky));
+    CaptureWatch watch(defaultCaptureSettings(Target::Sky), defaultDetectionSettings(Target::Sky));
     BlipInjector injector;
     for (uint64_t i = 0; i < 360; ++i)
     {

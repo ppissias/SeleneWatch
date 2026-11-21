@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -146,8 +147,14 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
             unmaskedPixels_ = pixels - static_cast<size_t>(std::count(masked_.begin(), masked_.end(), uint8_t{1}));
             maskBuiltFor_ = settings_.mask; maskWidth_ = width_; maskHeight_ = height_;
         }
+        // Feature-31: with a ceiling, a pixel whose learned brightness is above
+        // it (the sunlit side) is left out like a masked one. The reference
+        // follows the Moon's drift, so the left-out area moves with it.
         const bool masking = !masked_.empty();
-        const auto isMasked = [&](size_t i) { return masking && masked_[i]; };
+        const float ceiling = settings_.ignoreAboveShare > 0
+            ? static_cast<float>(settings_.ignoreAboveShare * (format_ == PixelFormat::Mono16 ? (1 << bits_) - 1 : 255))
+            : std::numeric_limits<float>::infinity();
+        const auto isMasked = [&](size_t i) { return (masking && masked_[i]) || mean_[i] > ceiling; };
 
         // Median absolute deviation on a bounded grid. Removing the median
         // difference keeps a uniform brightness step out of the noise floor.

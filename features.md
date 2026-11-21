@@ -29,6 +29,7 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-28 — Auto-tune's own window and explicit preview drawing](#feature-28--auto-tunes-own-window-and-explicit-preview-drawing) | Auto-tune opens in a window of its own; a drag on the preview draws only the chosen box (lock, earthshine, anchor, mask), each labelled in its own colour; dusk to dawn needs the site's position | Implemented; UI tests passing; real-window and laptop checks pending |
 | [Feature-29 — Site and instrument presets](#feature-29--site-and-instrument-presets) | Save, load and delete named sets of observer, site, position and instrument | Implemented; UI test passing |
 | [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune) | Measure the footprint of a just-detectable flash and the noise at smaller minimum patches, and suggest the minimum patch | Under discussion |
+| [Feature-31 — The Moon's flashes and shadows watched apart](#feature-31--the-moons-flashes-and-shadows-watched-apart) | Watching: Moon flashes (earthlit side), Moon shadows (sunlit side) or the sky, each with its own detection settings; flashes leave out the sunlit side | Implemented; tests passing |
 
 ## Feature-9 — A measured trigger
 
@@ -1847,3 +1848,27 @@ So the minimum patch is not a property of the night's noise alone, as K is: it d
 1. Should the minimum patch be suggested at all, or only measured and shown (footprint and noise at each size), leaving the choice to the observer?
 2. Is the Test flash's FWHM the right seeing for the Moon, or should auto-tune measure the sharpness of the earthshine (for example the edge of a crater rim) instead?
 3. Is a longer thorough watch acceptable when pairs of K and minimum patch are compared (the copies share the same frame-time budget, so fewer pairs fit at a high frame rate)?
+
+---
+
+## Feature-31 — The Moon's flashes and shadows watched apart
+
+*Proposed and implemented on 21 November 2026, at the observer's request.*
+
+Flashes on the earthlit side need a sensitive detector and the earthshine at 3–10 %, which saturates the sunlit side. Shadows on the sunlit side need it unsaturated, and a detector insensitive to seeing on bright terrain. One set of settings cannot serve both.
+
+**Watching** now offers three choices:
+- **The Moon: flashes on the earthlit side.** It keeps the Moon's settings and profiles from before, with darkening always off. **Ignore brighter than** (30 % of full scale by default) leaves out pixels whose learned brightness is above it: the sunlit side and the glare by the terminator, where no flash can be seen. It follows the Moon's drift. The test-flash readout says when a chosen pixel is above it.
+- **The Moon: shadows on the sunlit side.** It has its own settings and profiles, with darkening always on. Its defaults favour no false triggers: K 12, shadows of at least 20 pixels confirmed over two frames, dark patches up to 20000 px and 10 ×, and large darkening off.
+- **The sky**, as before.
+
+The **Also trigger on darkening** checkbox is gone. Both Moon watches save under `events/moon/`, share the Moon's capture settings and guiding, and run one at a time. Auto-tune follows the watch: earthshine aims for the flashes, sunlit aims for the shadows.
+
+**Two cameras, two copies of SeleneWatch** (checked in the code, not with hardware):
+- **Files:** no conflict. Session, clip and recording folders are created atomically, with a `-2` suffix on a clash.
+- **Settings:** shared unless each copy is started with its own `SELENEWATCH_SETTINGS_NAME`.
+- **Hardware:** each copy must open a different camera. Only one may guide the mount. CPU, RAM ceiling, USB and disk add up.
+
+**Tests:**
+- `theSunlitSideIsLeftOutForFlashes` (detector).
+- `eachTargetKeepsItsOwnSettings` and `darkeningIsForTheMoonOnly` (window), plus the end-to-end window and real-window tests, which now flash in one watch and shadow in another.

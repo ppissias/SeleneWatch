@@ -13,6 +13,22 @@ enum class Target { Moon, Sky };
     return target == Target::Sky ? "sky" : "moon";
 }
 
+// Feature-31: what is watched. On the Moon, flashes on the earthlit side and
+// shadows on the sunlit side need opposite settings, so they are watched one
+// at a time, each with its own detection settings and profiles. Both are the
+// Moon's target: its folder, capture settings, guiding and time-lapse.
+enum class Watch { MoonFlashes, MoonShadows, Sky };
+
+[[nodiscard]] constexpr Target watchTarget(Watch watch)
+{
+    return watch == Watch::Sky ? Target::Sky : Target::Moon;
+}
+
+[[nodiscard]] constexpr const char* watchName(Watch watch)
+{
+    return watch == Watch::Sky ? "sky" : watch == Watch::MoonShadows ? "moon_shadows" : "moon_flashes";
+}
+
 // Capture durations use source time, not playback speed or frame counts.
 // The byte ceiling includes shared pixels, detector arrays, and previews.
 struct CaptureSettings

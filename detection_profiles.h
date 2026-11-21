@@ -8,18 +8,19 @@
 
 #include <vector>
 
-// A named detection profile stored in QSettings (under detection/profiles/<target>/).
+// A named detection profile stored in QSettings (under detection/profiles/<watch>/;
+// Feature-31: the Moon's flashes keep "moon", its shadows have "moonShadows").
 // In Sky mode, the horizon mask is optional and excluded by default unless the
 // observer explicitly opts in when saving the profile.
 struct SavedDetectionProfile
 {
     QString name;
-    Target target{Target::Moon};
+    Watch watch{Watch::MoonFlashes};
     DetectionSettings settings;
     bool hasMask{false};
     DetectionMask mask;
 };
 
-[[nodiscard]] std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Target target);
+[[nodiscard]] std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Watch watch);
 void saveNamedDetectionProfile(const SavedDetectionProfile& profile);
-void removeNamedDetectionProfile(Target target, const QString& name);
+void removeNamedDetectionProfile(Watch watch, const QString& name);

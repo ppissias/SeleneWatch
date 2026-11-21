@@ -3,6 +3,7 @@
 #include "preview_image.h"
 #include "readout_label.h"
 #include "sky_exposure.h"
+#include "target_defaults.h"
 
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
@@ -230,8 +231,14 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     targetRow->addWidget(new QLabel("Watching", content));
     target_ = new QComboBox(content);
     target_->setObjectName("targetChoice");
-    target_->addItems({"The Moon", "The sky"});
-    target_->setToolTip("Each target keeps its own detection and capture settings. Changes only while stopped.");
+    // Feature-31: the Moon's flashes and its shadows are watched apart.
+    target_->addItem("The Moon: flashes on the earthlit side", static_cast<int>(Watch::MoonFlashes));
+    target_->addItem("The Moon: shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
+    target_->addItem("The sky", static_cast<int>(Watch::Sky));
+    target_->setToolTip("What is watched. Each keeps its own detection settings and profiles; both Moon watches share "
+        "the Moon's capture settings, folder and guiding. Flashes: sensitive, on the earthlit side, the sunlit side "
+        "left out. Shadows: planes, the ISS or birds against the sunlit side, insensitive to seeing. Changes only "
+        "while stopped.");
     targetRow->addWidget(target_, 1);
     column->addLayout(targetRow);
 
@@ -471,13 +478,19 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     model->addRow(noiseSlider_);
     layout->addWidget(background, 16, 0, 1, 2);
 
-    // Feature-13: darkening, for a plane, the ISS or a bird in front of the
-    // sunlit Moon. Off until it is measured on recordings.
-    darkening_ = new QCheckBox("Also trigger on darkening", content);
-    darkening_->setObjectName("darkeningTrigger");
-    darkening_->setToolTip("A plane, the ISS or a bird in front of the sunlit Moon darkens the pixels it covers. "
-        "Dark patches have their own size limits; minimum patch, K and persistence are shared.");
-    layout->addWidget(darkening_, 17, 0, 1, 2);
+    // Feature-31: the flashes' ceiling. The sunlit side cannot show a flash.
+    flashControls_ = new QWidget(content);
+    auto* flashForm = new QFormLayout(flashControls_);
+    flashForm->setContentsMargins(0, 0, 0, 0);
+    ignoreAbove_ = new QDoubleSpinBox(flashControls_);
+    ignoreAbove_->setObjectName("detectionIgnoreAbove");
+    ignoreAbove_->setRange(0, 100); ignoreAbove_->setDecimals(0); ignoreAbove_->setSingleStep(5);
+    ignoreAbove_->setSuffix(" % of full scale"); ignoreAbove_->setSpecialValueText("Off");
+    ignoreAbove_->setToolTip("Pixels whose learned brightness is above this are not tested: the sunlit side and the "
+        "glare by the terminator, where no flash can be seen and seeing only makes false triggers. It follows the "
+        "Moon's drift. Off tests every pixel.");
+    flashForm->addRow("Ignore brighter than", ignoreAbove_);
+    layout->addWidget(flashControls_, 17, 0, 1, 2);
     auto* dark = new QWidget(content);
     darkControls_ = dark;
     auto* darkForm = new QFormLayout(dark);
@@ -525,12 +538,11 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(noiseSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimumNoise_->setValue(noiseSlider_->number(p)); });
     connect(overlay_, &QComboBox::currentIndexChanged, this, [this] { emit displayChanged(); });
     connect(target_, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (!updating_) emit targetRequested(index == 1 ? Target::Sky : Target::Moon);
+        if (!updating_) emit watchRequested(static_cast<Watch>(target_->itemData(index).toInt()));
     });
-    for (auto* spin : {brightening_, release_, darkBox_, darkShare_})
+    for (auto* spin : {brightening_, release_, darkBox_, darkShare_, ignoreAbove_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(maxDark_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
-    connect(darkening_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
     for (auto* box : {night_, follow_})
         connect(box, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
@@ -554,39 +566,36 @@ DetectionSettings DetectionPanel::settings() const
         compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
     values.maxDarkPixels = maxDark_->value();
     values.maxDarkBoxRatio = darkBox_->value();
-    // Feature-22: darkening is for silhouettes against the sunlit Moon. Its
-    // controls are hidden in Sky mode, and it is off there whatever an older
-    // version saved.
-    if (target() == Target::Moon)
-    {
-        values.darkening = darkening_->isChecked();
-        values.darkeningShare = darkShare_->value() / 100;
-    }
-    if (target() == Target::Sky)
-    {
-        values.brighteningShare = brightening_->value() / 100;
-        values.releaseSeconds = release_->value();
-        values.mask = mask_;
-    }
-    return values;
+    // Feature-31: darkening is the shadows' watch, the ceiling the flashes'.
+    values.darkeningShare = darkShare_->value() / 100;
+    values.ignoreAboveShare = ignoreAbove_->value() / 100;
+    values.brighteningShare = brightening_->value() / 100;
+    values.releaseSeconds = release_->value();
+    values.mask = mask_;
+    return settingsForWatch(values, watch_);
 }
 
 Target DetectionPanel::target() const
 {
-    return current_;
+    return watchTarget(watch_);
 }
 
-void DetectionPanel::setTarget(Target target)
+Watch DetectionPanel::watch() const
 {
-    current_ = target;
+    return watch_;
+}
+
+void DetectionPanel::setWatch(Watch watch)
+{
+    watch_ = watch;
     const bool updating = updating_;
     updating_ = true;
-    target_->setCurrentIndex(target == Target::Sky ? 1 : 0);
+    target_->setCurrentIndex(std::max(0, target_->findData(static_cast<int>(watch))));
     updating_ = updating;
-    sky_->setVisible(target == Target::Sky);
-    darkening_->setVisible(target == Target::Moon);
-    darkControls_->setVisible(target == Target::Moon);
-    if (target != Target::Sky) drawMask_->setChecked(false);
+    sky_->setVisible(watch == Watch::Sky);
+    flashControls_->setVisible(watch == Watch::MoonFlashes);
+    darkControls_->setVisible(watch == Watch::MoonShadows);
+    if (watch != Watch::Sky) drawMask_->setChecked(false);
     reloadProfiles();
 }
 
@@ -680,12 +689,10 @@ void DetectionPanel::setSettings(const DetectionSettings& settings)
     release_->setValue(settings.releaseSeconds);
     mask_ = settings.mask;
     showMask();
-    darkening_->setChecked(settings.darkening);
+    ignoreAbove_->setValue(100 * settings.ignoreAboveShare);
     maxDark_->setValue(settings.maxDarkPixels);
     darkBox_->setValue(settings.maxDarkBoxRatio);
     darkShare_->setValue(100 * settings.darkeningShare);
-    maxDark_->setEnabled(settings.darkening);
-    darkBox_->setEnabled(settings.darkening);
     sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.maxPixels);
     oneFrame_->setChecked(settings.oneFrame);
     compactness_->setValue(settings.maxPatchBoxRatio);
@@ -725,7 +732,7 @@ void DetectionPanel::reloadProfiles()
     const QSignalBlocker blocked(profileCombo_);
     profileCombo_->clear();
     profileCombo_->addItem("Custom / current", QString());
-    const auto profiles = loadSavedDetectionProfiles(current_);
+    const auto profiles = loadSavedDetectionProfiles(watch_);
     for (const SavedDetectionProfile& p : profiles)
     {
         const QString label = p.hasMask ? QString("%1 (+mask)").arg(p.name) : p.name;
@@ -742,9 +749,9 @@ bool DetectionPanel::saveCurrentProfile(const QString& name, bool includeMask)
     if (trimmed.isEmpty()) return false;
     SavedDetectionProfile profile;
     profile.name = trimmed;
-    profile.target = current_;
+    profile.watch = watch_;
     profile.settings = settings();
-    profile.hasMask = (current_ == Target::Sky) && includeMask;
+    profile.hasMask = (watch_ == Watch::Sky) && includeMask;
     if (profile.hasMask)
         profile.mask = mask_;
     else
@@ -765,12 +772,12 @@ bool DetectionPanel::applyProfile(const QString& name)
 {
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty()) return false;
-    const auto profiles = loadSavedDetectionProfiles(current_);
+    const auto profiles = loadSavedDetectionProfiles(watch_);
     for (const SavedDetectionProfile& p : profiles)
     {
         if (p.name.compare(trimmed, Qt::CaseInsensitive) != 0) continue;
         DetectionSettings next = p.settings;
-        if (current_ == Target::Sky)
+        if (watch_ == Watch::Sky)
             next.mask = p.hasMask ? p.mask : mask_;
         else
             next.mask = {};
@@ -792,7 +799,7 @@ bool DetectionPanel::deleteProfile(const QString& name)
 {
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty()) return false;
-    removeNamedDetectionProfile(current_, trimmed);
+    removeNamedDetectionProfile(watch_, trimmed);
     reloadProfiles();
     return true;
 }
@@ -813,7 +820,7 @@ void DetectionPanel::onSaveProfileClicked()
     auto* form = new QFormLayout;
     auto* nameEdit = new QLineEdit(&dialog);
     nameEdit->setObjectName("detectionProfileNameEdit");
-    nameEdit->setPlaceholderText(current_ == Target::Sky
+    nameEdit->setPlaceholderText(watch_ == Watch::Sky
         ? "e.g. Backyard meteors, Dark site sky"
         : "e.g. Moon dark side, Lunar transit");
     if (profileCombo_->currentIndex() > 0)
@@ -822,7 +829,7 @@ void DetectionPanel::onSaveProfileClicked()
     layout->addLayout(form);
 
     QCheckBox* includeMaskBox = nullptr;
-    if (current_ == Target::Sky)
+    if (watch_ == Watch::Sky)
     {
         includeMaskBox = new QCheckBox(
             mask_.empty()

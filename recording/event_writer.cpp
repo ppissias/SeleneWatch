@@ -115,6 +115,8 @@ QString detectorModelFields(const DetectionSettings& settings)
         text += QString(" darkening=yes max_dark_pixels=%1 max_dark_box_ratio=%2")
             .arg(settings.maxDarkPixels).arg(settings.maxDarkBoxRatio, 0, 'g', 17);
     if (settings.darkeningShare > 0) text += QString(" darkening_share=%1").arg(settings.darkeningShare, 0, 'g', 17);
+    // Feature-31: flashes on the earthlit side leave out the sunlit side.
+    if (settings.ignoreAboveShare > 0) text += QString(" ignore_above_share=%1").arg(settings.ignoreAboveShare, 0, 'g', 17);
     return text;
 }
 

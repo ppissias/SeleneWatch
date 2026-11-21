@@ -23,6 +23,47 @@
     return settings;
 }
 
+// Feature-31: the starting settings of each watch.
+// - Flashes on the earthlit side: the Moon's settings, sensitive, with the
+//   sunlit side and its glare (above 30 % of full scale) left out.
+// - Shadows on the sunlit side: the reverse aim, no false triggers from
+//   seeing on bright terrain. K 12 (12-16 in CAMERA_SETTINGS_GUIDE.md), a
+//   shadow must cover 20 pixels and last two frames, and darkening is on with
+//   room for a plane's whole silhouette. A large darkening (clouds) is off.
+[[nodiscard]] inline DetectionSettings defaultDetectionSettings(Watch watch)
+{
+    DetectionSettings settings = defaultDetectionSettings(watchTarget(watch));
+    if (watch == Watch::MoonFlashes) settings.ignoreAboveShare = 0.30;
+    if (watch == Watch::MoonShadows)
+    {
+        settings.sigma = 12;
+        settings.minPixels = 20;
+        settings.oneFrame = false;
+        settings.darkening = true;
+        settings.maxDarkPixels = 20000;
+        settings.maxDarkBoxRatio = 10;
+    }
+    return settings;
+}
+
+// Feature-31: the settings as a watch uses them, whatever was saved before:
+// darkening is the shadows' watch and only theirs; the ceiling is the
+// flashes' only; the large brightening, release and mask are the sky's.
+[[nodiscard]] inline DetectionSettings settingsForWatch(DetectionSettings settings, Watch watch)
+{
+    const bool shadows = watch == Watch::MoonShadows;
+    settings.darkening = shadows;
+    if (!shadows) settings.darkeningShare = 0;
+    if (watch != Watch::MoonFlashes) settings.ignoreAboveShare = 0;
+    if (watch != Watch::Sky)
+    {
+        settings.brighteningShare = 0;
+        settings.releaseSeconds = 0;
+        settings.mask = {};
+    }
+    return settings;
+}
+
 [[nodiscard]] inline CaptureSettings defaultCaptureSettings(Target target)
 {
     CaptureSettings settings;

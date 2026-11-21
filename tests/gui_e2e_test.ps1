@@ -291,6 +291,9 @@ try {
     Set-QSetting "output" "legacyNoticeShown" "true"
     Set-QSetting "tips" "showAtStartup" "false"
     Set-QSetting "testing" "tools" "true"
+    # Feature-31: the synthetic Moon is all sunlit, so the flashes' brightness
+    # ceiling is off here and the test flash on its disc is tested.
+    Set-QSetting "detection" "ignoreAboveShare" "0"
     Set-QSetting "capture" "history" "0.5"
     Set-QSetting "capture" "post" "0.4"
     Set-QSetting "sky\capture" "history" "0.5"
@@ -409,27 +412,42 @@ try {
         (Test-Path $moonEventsDir) -and (@(Get-ChildItem -Path $moonEventsDir -Directory).Count -ge 1)
     } "Moon bright flash clip written on disk" -TimeoutMs 15000
 
-    # Enable darkening and inject a Dark transit across the sunlit Moon -> verify second clip on disk.
-    $darkChk = Find-UiaElement -Root $mainWin -IdSuffix "darkeningTrigger"
-    Set-UiaCheckBox $darkChk $true
+    Invoke-UiaClick $stopBtn "Stop Moon flashes stream"
+    Wait-Until { $startBtn.Current.IsEnabled } "Moon flashes stream stopped"
+    $moonWatch = Split-Path -Parent $moonEventsDir
+    Wait-Until { Test-Path -LiteralPath (Join-Path $moonWatch 'report.html') } "Moon flashes report finalized"
+    $reportLater = Find-UiaElement -Root $mainWin -IdSuffix "deferNightlyReport"
+    Invoke-UiaClick $reportLater "Dismiss finished Moon flashes report"
+
+    # Feature-31: shadows on the sunlit side are their own watch. Switch to it,
+    # monitor again and inject a Dark transit -> a darkening clip in a new session.
+    $targetCombo = Find-UiaElement -Root $mainWin -IdSuffix "targetChoice"
+    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon: shadows on the sunlit side" -ProcessId $proc.Id
+    Start-Sleep -Milliseconds 300
+    Invoke-UiaClick $startBtn "Start Moon shadows preview"
+    Wait-Until { $stopBtn.Current.IsEnabled } "Moon shadows preview running"
+    Invoke-UiaClick $monitorBtn "Start Moon shadows monitoring"
+    Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Moon shadows monitoring active"
+    Start-Sleep -Milliseconds 700
+    $shadowEventsDir = Join-Path (Get-ChildItem -LiteralPath (Join-Path $TempOut "events\moon") -Filter "session-*" -Directory |
+        Sort-Object Name | Select-Object -Last 1).FullName "clips"
+    Assert-True ($shadowEventsDir -ne $moonEventsDir) "The shadows watch must start its own session"
     Click-ElementAtFraction $previewEl 0.42 0.5
     Select-UiaComboItem -Combo $blipKindCombo -ItemText "Dark transit" -ProcessId $proc.Id
     Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Dark transit"
-    $moonCountBeforeDark = @(Get-ChildItem -Path $moonEventsDir -Directory).Count
     Invoke-UiaClick $injectBtn "Inject Moon dark transit"
     Wait-Until {
-        @(Get-ChildItem -Path $moonEventsDir -Directory).Count -gt $moonCountBeforeDark
-    } "Moon dark transit clip written on disk" -TimeoutMs 15000
+        (Test-Path $shadowEventsDir) -and (@(Get-ChildItem -Path $shadowEventsDir -Directory).Count -ge 1)
+    } "Moon dark transit clip written on disk" -TimeoutMs 20000
     Start-Sleep -Milliseconds 600
 
-    Invoke-UiaClick $stopBtn "Stop Moon stream"
-    Wait-Until { $startBtn.Current.IsEnabled } "Moon stream stopped"
-
-    $moonWatch = Split-Path -Parent $moonEventsDir
-    Wait-Until { Test-Path -LiteralPath (Join-Path $moonWatch 'report.html') } "Moon report finalized"
+    Invoke-UiaClick $stopBtn "Stop Moon shadows stream"
+    Wait-Until { $startBtn.Current.IsEnabled } "Moon shadows stream stopped"
+    $shadowWatch = Split-Path -Parent $shadowEventsDir
+    Wait-Until { Test-Path -LiteralPath (Join-Path $shadowWatch 'report.html') } "Moon shadows report finalized"
     $reportLater = Find-UiaElement -Root $mainWin -IdSuffix "deferNightlyReport"
-    Invoke-UiaClick $reportLater "Dismiss finished Moon report"
-    $moonDirs = @(Get-ChildItem -Path $moonEventsDir -Directory)
+    Invoke-UiaClick $reportLater "Dismiss finished Moon shadows report"
+    $moonDirs = @(Get-ChildItem -Path $moonEventsDir -Directory) + @(Get-ChildItem -Path $shadowEventsDir -Directory)
     Assert-True ($moonDirs.Count -ge 2) "Expected >= 2 Moon event clips, found $($moonDirs.Count)"
     $sawMoonDark = $false
     foreach ($d in $moonDirs) {
@@ -439,7 +457,7 @@ try {
         if ($evTxt -match "kind=darkening") { $sawMoonDark = $true }
     }
     Assert-True $sawMoonDark "Expected Moon darkening clip in events\moon"
-    Write-Host "  Moon clips verified on disk: $($moonDirs.Count) (bright + darkening)"
+    Write-Host "  Moon clips verified on disk: $($moonDirs.Count) (flash, then shadow in its own watch)"
 
     # --- Scenario 2: Synthetic Sky Watch (Meteor streak + Lightning on disk) ---
     Write-Host "`n[2/4] Synthetic Sky Watch: Meteor streak + Lightning recorded on disk..."

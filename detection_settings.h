@@ -37,6 +37,12 @@ struct DetectionSettings
     // at once fires as a large darkening. Zero is off.
     double darkeningShare{0};
 
+    // Feature-31, for flashes on the earthlit side: pixels whose learned
+    // brightness is above this share of full scale (the sunlit side, the
+    // glare by the terminator) are not tested. No flash can be seen there,
+    // and seeing on sunlit terrain only makes false triggers. Zero is off.
+    double ignoreAboveShare{0};
+
     [[nodiscard]] bool valid() const
     {
         return std::isfinite(sigma) && sigma > 0 && minPixels >= 1 && maxPixels >= minPixels
@@ -46,7 +52,8 @@ struct DetectionSettings
             && std::isfinite(brighteningShare) && brighteningShare >= 0 && brighteningShare <= 1
             && std::isfinite(releaseSeconds) && releaseSeconds >= 0 && mask.valid()
             && maxDarkPixels >= 1 && std::isfinite(maxDarkBoxRatio) && maxDarkBoxRatio >= 1.0
-            && std::isfinite(darkeningShare) && darkeningShare >= 0 && darkeningShare <= 1;
+            && std::isfinite(darkeningShare) && darkeningShare >= 0 && darkeningShare <= 1
+            && std::isfinite(ignoreAboveShare) && ignoreAboveShare >= 0 && ignoreAboveShare <= 1;
     }
     bool operator==(const DetectionSettings&) const = default;
 };

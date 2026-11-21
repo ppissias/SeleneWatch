@@ -145,9 +145,10 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 3: Transits, continuous recording & guiding ────────────────
         {
             "Catching dark transits across the Moon",
-            "Tick <b>Also trigger on darkening</b> in <b>Detection</b> to catch aircraft, birds, or the ISS crossing "
-            "the sunlit Moon. On bright lunar terrain, raise <b>Sensitivity K</b> to around <code>12.0 sigma</code> or "
-            "higher so seeing stays quiet while silhouettes trigger blue-tracked <code>dark transit</code> clips.",
+            "Choose <b>Watching: The Moon: shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
+            "or the ISS crossing the sunlit Moon. Its settings are its own and start insensitive to seeing "
+            "(<code>K 12</code>, 20-pixel shadows over two frames), so silhouettes trigger <code>dark transit</code> clips "
+            "while bright terrain stays quiet.",
             kSectionTransits
         },
         {

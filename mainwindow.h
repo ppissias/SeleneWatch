@@ -144,12 +144,12 @@ private:
     void updateDetectionDisplay();
     // Feature-11: each target's detection and capture settings are saved
     // apart. The Moon keeps the keys used before the choice existed.
-    [[nodiscard]] static DetectionSettings savedDetectionSettings(Target target);
+    [[nodiscard]] static DetectionSettings savedDetectionSettings(Watch watch);
     [[nodiscard]] static CaptureSettings savedCaptureSettings(Target target);
     // Save the panels' settings under the target they belong to.
     void saveDetectionSettings();
     void saveCaptureSettings();
-    void onTargetRequested(Target target);
+    void onWatchRequested(Watch watch);
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
     // Feature-28: what the next drag on the preview draws. Only one at a time.
@@ -269,6 +269,8 @@ private:
     QDockWidget* detectionDock_{nullptr};
     // What is watched. The detection and display panels hold its settings.
     Target target_{Target::Moon};
+    // Feature-31: the Moon's flashes, its shadows, or the sky; target_ is its target.
+    Watch watch_{Watch::MoonFlashes};
     // The corners of a mask shape being drawn (Feature-15).
     std::vector<MaskPoint> pendingShape_;
     // Feature-15: the timer of the night schedule and the exposure follower,

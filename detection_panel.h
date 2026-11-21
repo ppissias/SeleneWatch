@@ -37,8 +37,9 @@ struct SkyExtras
 // Feature-11: the target, Moon or Sky, is chosen at the top. In Sky mode the
 // panel also shows the large-brightening share, the release limit and the
 // mask. Its settings carry those only in Sky mode; on the Moon they are off.
-// The window owns which settings belong to which target. Feature-13 adds the
-// darkening controls at the bottom, in both modes.
+// The window owns which settings belong to which target. Feature-31: the
+// watch is the Moon's flashes, the Moon's shadows or the sky; the darkening
+// limits are shown for the shadows, the brightness ceiling for the flashes.
 class DetectionPanel : public QWidget
 {
     Q_OBJECT
@@ -55,8 +56,10 @@ public:
     // The target whose settings the panel holds. The choice box only asks
     // for another one; the window saves these settings, then sets it.
     [[nodiscard]] Target target() const;
-    // Set before the target's settings. Does not announce it.
-    void setTarget(Target target);
+    // Feature-31: what is watched, of which the target is the Moon or the sky.
+    [[nodiscard]] Watch watch() const;
+    // Set before the watch's settings. Does not announce it.
+    void setWatch(Watch watch);
     // The target changes only while the stream is stopped.
     void setTargetEditable(bool editable);
     // Adds a shape, in frame pixels, to the mask. False when the mask is
@@ -86,8 +89,8 @@ signals:
     void skyExtrasChanged();
     void settingsChanged();
     void displayChanged();
-    // The observer chose another target in the choice box.
-    void targetRequested(Target target);
+    // The observer chose another watch in the choice box.
+    void watchRequested(Watch watch);
     void maskDrawingChanged(bool drawing);
     // Feature-26: the prominent Auto-tune button was pressed.
     void autoTuneRequested();
@@ -119,7 +122,7 @@ private:
     QComboBox* profileCombo_;
     QToolButton* saveProfile_;
     QToolButton* deleteProfile_;
-    Target current_{Target::Moon};
+    Watch watch_{Watch::MoonFlashes};
     QWidget* sky_;
     QDoubleSpinBox* brightening_;
     QDoubleSpinBox* release_;
@@ -137,9 +140,10 @@ private:
     QDoubleSpinBox* maxGain_;
     QDoubleSpinBox* gainStep_;
     QLabel* followReading_;
-    // Feature-13: darkening, in both modes.
-    QCheckBox* darkening_;
-    // The darkening limits and readout, shown only for the Moon (Feature-22).
+    // Feature-31: the flashes' ceiling, shown only for the flashes.
+    QWidget* flashControls_;
+    QDoubleSpinBox* ignoreAbove_;
+    // The darkening limits and readout, shown only for the shadows (Feature-31).
     QWidget* darkControls_;
     QSpinBox* maxDark_;
     QDoubleSpinBox* darkBox_;

@@ -81,6 +81,12 @@ void chooseSource(MainWindow& window, const QString& key)
     QVERIFY2(index > 0, qPrintable(key));
     source->setCurrentIndex(index);
 }
+// Feature-31: chooses what is watched, by its value in the Watching list.
+void chooseWatch(QWidget& root, Watch watch)
+{
+    auto* choice = root.findChild<QComboBox*>("targetChoice");
+    choice->setCurrentIndex(choice->findData(static_cast<int>(watch)));
+}
 // Answers the next modal message box with this object name: its accept-role
 // button, or Cancel. Retries until the box is up (it opens inside exec()).
 void answerMessageBox(const QString& objectName, bool accept, int attempts = 200)
@@ -405,6 +411,13 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
         histogram->findChild<QCheckBox*>("histogramLogCounts")->setChecked(false);
         QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
         QTest::mouseClick(preview,Qt::LeftButton,Qt::NoModifier,preview->imageRect().center());
+        // Feature-31: the synthetic Moon is all sunlit, above the flashes' ceiling:
+        // the readout says a flash there is not tested. With the ceiling off it is.
+        auto* blipStatus = window.findChild<QLabel*>("blipStatusLabel");
+        QTRY_VERIFY2_WITH_TIMEOUT(blipStatus->text().contains("does not test it"), qPrintable(blipStatus->text()), 3000);
+        window.findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(0);
+        QTest::mouseClick(preview,Qt::LeftButton,Qt::NoModifier,preview->imageRect().center());
+        QVERIFY(!blipStatus->text().contains("does not test it"));
         window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(100);
         window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(10);
         auto* inject=window.findChild<QPushButton*>("injectBlipButton");
@@ -918,19 +931,35 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     auto* guiding = window.findChild<GuidingPanel*>();
     auto* choice = panel->findChild<QComboBox*>("targetChoice");
     auto* sigma = panel->findChild<QDoubleSpinBox*>("detectionSigma");
-    QCOMPARE(panel->target(), Target::Moon);
+    QCOMPARE(panel->watch(), Watch::MoonFlashes);
+    QCOMPARE(choice->count(), 3);
     QVERIFY(choice->isEnabled());
     QVERIFY(guiding->isEnabled());
     QCOMPARE(panel->settings().brighteningShare, 0.0);
     QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{10} * 1024 * 1024 * 1024);
+    // Feature-31: the flashes leave out the sunlit side and never watch for darkening.
+    QVERIFY(!panel->settings().darkening);
+    QCOMPARE(panel->settings().ignoreAboveShare, 0.3);
     sigma->setValue(7);
-    // Feature-13: darkening is off by default, and saved per target like the rest.
-    auto* darkening = panel->findChild<QCheckBox*>("darkeningTrigger");
-    QVERIFY(!darkening->isChecked());
-    darkening->setChecked(true);
-    QVERIFY(panel->settings().darkening);
+    display->findChild<QDoubleSpinBox*>("postSeconds")->setValue(4);
 
-    choice->setCurrentIndex(1);
+    // The Moon's shadows: their own detection settings, the Moon's capture settings.
+    chooseWatch(window, Watch::MoonShadows);
+    QCOMPARE(panel->watch(), Watch::MoonShadows);
+    QCOMPARE(panel->target(), Target::Moon);
+    QVERIFY(panel->settings().darkening);
+    QCOMPARE(panel->settings().sigma, 12.0);
+    QCOMPARE(panel->settings().minPixels, 20);
+    QVERIFY(!panel->settings().oneFrame);
+    QCOMPARE(panel->settings().ignoreAboveShare, 0.0);
+    QCOMPARE(display->captureSettings().target, Target::Moon);
+    QCOMPARE(display->captureSettings().postSeconds, 4.0);
+    QVERIFY(guiding->isEnabled());
+    QCOMPARE(QSettings().value("detection/sigma").toDouble(), 7.0); // The flashes keep the Moon's keys.
+    QCOMPARE(QSettings().value("moon/watch").toString(), QString("shadows"));
+    sigma->setValue(14);
+
+    chooseWatch(window, Watch::Sky);
     QVERIFY(!panel->settings().darkening);
     QCOMPARE(panel->target(), Target::Sky);
     QVERIFY(panel->findChild<QWidget*>("skySettings")->isVisibleTo(panel));
@@ -943,8 +972,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(display->captureSettings().postSeconds, 5.0);
     QCOMPARE(display->captureSettings().maxPostSeconds, 20.0);
     QVERIFY(!guiding->isEnabled());
-    // The Moon's settings were saved under their old keys on the way out.
-    QCOMPARE(QSettings().value("detection/sigma").toDouble(), 7.0);
+    QCOMPARE(QSettings().value("moonShadows/detection/sigma").toDouble(), 14.0);
     QCOMPARE(QSettings().value("target").toInt(), 1);
 
     // A mask drawn on the sky, and a Sky K.
@@ -953,10 +981,9 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().mask.count(), 1);
     sigma->setValue(9);
 
-    choice->setCurrentIndex(0);
+    chooseWatch(window, Watch::MoonFlashes);
     QCOMPARE(panel->settings().sigma, 7.0);
-    QVERIFY(panel->settings().darkening);
-    QCOMPARE(QSettings().value("detection/darkening").toBool(), true);
+    QVERIFY(!panel->settings().darkening);
     QCOMPARE(panel->settings().maxPixels, 400);
     QCOMPARE(panel->settings().brighteningShare, 0.0);
     QVERIFY(panel->settings().mask.empty());
@@ -966,13 +993,14 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QVERIFY(guiding->isEnabled());
     QCOMPARE(QSettings().value("sky/detection/sigma").toDouble(), 9.0);
     QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,400 640,400 640,480 0,480"));
+    chooseWatch(window, Watch::MoonShadows);
+    QCOMPARE(panel->settings().sigma, 14.0);
 
-    choice->setCurrentIndex(1);
+    chooseWatch(window, Watch::Sky);
     QCOMPARE(panel->settings().sigma, 9.0);
     QCOMPARE(panel->settings().mask.count(), 1);
     QVERIFY(panel->settings().mask.shapes()[0] == DetectionMask::rectangle(0, 400, 640, 80));
 }
-
 // The disk reserve stops clips, recordings and time-lapses before the drive
 // fills. It starts at 10 GiB for each target, and a changed value is kept for
 // that target the next time the program opens.
@@ -984,12 +1012,11 @@ void UiTest::diskReserveStartsAtTenGiBAndIsRemembered()
         MainWindow window(nullptr, directory.path());
         auto* display = window.findChild<DisplayPanel*>();
         auto* reserve = display->findChild<QDoubleSpinBox*>("diskReserveGiB");
-        auto* choice = window.findChild<DetectionPanel*>()->findChild<QComboBox*>("targetChoice");
         QCOMPARE(reserve->value(), 10.0);
         reserve->setValue(25);
         QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
 
-        choice->setCurrentIndex(1);
+        chooseWatch(window, Watch::Sky);
         QCOMPARE(reserve->value(), 10.0);
         reserve->setValue(0);
         QCOMPARE(reserve->text(), QString("None"));
@@ -997,10 +1024,9 @@ void UiTest::diskReserveStartsAtTenGiBAndIsRemembered()
     }
     MainWindow window(nullptr, directory.path());
     auto* display = window.findChild<DisplayPanel*>();
-    auto* choice = window.findChild<DetectionPanel*>()->findChild<QComboBox*>("targetChoice");
     QCOMPARE(display->captureSettings().target, Target::Sky);
     QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
-    choice->setCurrentIndex(0);
+    chooseWatch(window, Watch::MoonFlashes);
     QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
 }
 
@@ -1066,47 +1092,57 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
         }
     }
     // The window itself can be made well narrower than a laptop screen, for
-    // either target: it can be resized in width, not only in height.
-    for (const Target target : {Target::Moon, Target::Sky})
+    // every watch: it can be resized in width, not only in height.
+    for (const Watch watch : {Watch::MoonFlashes, Watch::MoonShadows, Watch::Sky})
     {
-        window.findChild<DetectionPanel*>()->targetRequested(target);
+        emit window.findChild<DetectionPanel*>()->watchRequested(watch);
         window.resize(400, 300);
         QApplication::processEvents();
         if (window.width() > 1150)
-            problems << QString("%1: the window cannot be narrower than %2 px")
-                .arg(target == Target::Sky ? "Sky" : "Moon").arg(window.width());
+            problems << QString("%1: the window cannot be narrower than %2 px").arg(watchName(watch)).arg(window.width());
     }
     problems.removeDuplicates();
     for (const QString& problem : problems) qWarning().noquote() << problem;
     QVERIFY2(problems.isEmpty(), qPrintable(QString("%1 problems").arg(problems.size())));
 }
 
-// Feature-22: darkening is for silhouettes against the sunlit Moon. In Sky
-// mode its controls are hidden and it is off, even when an older version
-// saved it on for the sky.
+// Feature-31 (after Feature-22): darkening is the shadows' watch and only
+// theirs, the brightness ceiling the flashes' only, whatever was saved.
 void UiTest::darkeningIsForTheMoonOnly()
 {
     DetectionPanel panel;
-    auto* darkening = panel.findChild<QCheckBox*>("darkeningTrigger");
     auto* share = panel.findChild<QDoubleSpinBox*>("darkeningShare");
-    panel.setTarget(Target::Moon);
-    QVERIFY(darkening->isVisibleTo(&panel) && share->isVisibleTo(&panel));
-    darkening->setChecked(true);
-    QVERIFY(panel.settings().darkening);
+    auto* ceiling = panel.findChild<QDoubleSpinBox*>("detectionIgnoreAbove");
+    QVERIFY(!panel.findChild<QCheckBox*>("darkeningTrigger")); // No longer a choice of its own.
 
-    panel.setTarget(Target::Sky);
+    panel.setWatch(Watch::MoonShadows);
+    panel.setSettings(defaultDetectionSettings(Watch::MoonShadows));
+    QVERIFY(share->isVisibleTo(&panel) && !ceiling->isVisibleTo(&panel));
+    QVERIFY(panel.settings().darkening);
+    QCOMPARE(panel.settings().sigma, 12.0);
+    QCOMPARE(panel.settings().ignoreAboveShare, 0.0);
+
+    // Flashes: an older Moon setting with darkening on is the flashes' now, without it.
+    panel.setWatch(Watch::MoonFlashes);
+    DetectionSettings old = defaultDetectionSettings(Target::Moon);
+    old.darkening = true;
+    old.darkeningShare = 0.05;
+    panel.setSettings(old);
+    QVERIFY(!share->isVisibleTo(&panel) && ceiling->isVisibleTo(&panel));
+    QVERIFY(!panel.settings().darkening);
+    QCOMPARE(panel.settings().darkeningShare, 0.0);
+    ceiling->setValue(40);
+    QCOMPARE(panel.settings().ignoreAboveShare, 0.4);
+
+    panel.setWatch(Watch::Sky);
     DetectionSettings saved = defaultDetectionSettings(Target::Sky);
     saved.darkening = true;
     saved.darkeningShare = 0.05;
     panel.setSettings(saved);
-    QVERIFY(!darkening->isVisibleTo(&panel) && !share->isVisibleTo(&panel));
+    QVERIFY(!share->isVisibleTo(&panel) && !ceiling->isVisibleTo(&panel));
     QVERIFY(!panel.settings().darkening);
     QCOMPARE(panel.settings().darkeningShare, 0.0);
-
-    panel.setTarget(Target::Moon);
-    QVERIFY(darkening->isVisibleTo(&panel));
-    QVERIFY(panel.settings().darkening);
-    QCOMPARE(panel.settings().darkeningShare, 0.05);
+    QCOMPARE(panel.settings().ignoreAboveShare, 0.0);
 }
 
 // Feature-24: every control in the window and its docks explains itself:
@@ -1120,9 +1156,9 @@ void UiTest::everyControlHasHelp()
     chooseSource(window, "zwo");
     QVERIFY(window.findChild<QAction*>("whatsThisAction"));
     QStringList missing;
-    for (const int target : {0, 1})
+    for (const Watch watch : {Watch::MoonFlashes, Watch::MoonShadows, Watch::Sky})
     {
-        window.findChild<QComboBox*>("targetChoice")->setCurrentIndex(target);
+        chooseWatch(window, watch);
         for (QWidget* widget : window.findChildren<QWidget*>())
         {
             // The auto-tune window is part of the window (Feature-28).
@@ -1187,7 +1223,7 @@ void UiTest::autoTuneMeasuresAppliesAndChecks()
     window.show();
     chooseSource(window, "zwo");
     // The sky: the fake camera's frames are at 41 % of full scale, too bright.
-    window.findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+    chooseWatch(window, Watch::Sky);
     auto* referenceTime = window.findChild<QDoubleSpinBox*>("detectionReferenceTime");
     referenceTime->setValue(0.5); // The detector learns in 1.5 s, so the K watch starts soon.
     auto* toggle = window.findChild<QPushButton*>("autoTuneButton");
@@ -1627,7 +1663,7 @@ void UiTest::nightScheduleAndExposureFollower()
         auto* panel = window.findChild<DetectionPanel*>();
         auto* stop = window.findChild<QPushButton*>("stopButton");
         auto* reading = panel->findChild<QLabel*>("nightReading");
-        panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+        chooseWatch(*panel, Watch::Sky);
         const double utcHour = std::fmod(std::chrono::duration<double>(
             std::chrono::system_clock::now().time_since_epoch()).count() / 3600.0, 24.0);
         const auto wrap = [](double longitude) { return std::fmod(longitude + 540.0, 360.0) - 180.0; };
@@ -1706,7 +1742,7 @@ void UiTest::nightScheduleAndExposureFollower()
         auto* panel = window.findChild<DetectionPanel*>();
         auto* camera = window.findChild<CameraPanel*>();
         auto* mode = window.findChild<QLabel*>("captureModeLabel");
-        panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+        chooseWatch(*panel, Watch::Sky);
         chooseSource(window, "zwo");
         SkyExtras extras;
         extras.follow = true;
@@ -1746,7 +1782,7 @@ void UiTest::aMaskShapeIsDrawnOnThePreview()
     MainWindow window(nullptr, directory.path());
     auto* panel = window.findChild<DetectionPanel*>();
     auto* preview = window.findChild<PreviewWidget*>();
-    panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(1);
+    chooseWatch(*panel, Watch::Sky);
     panel->findChild<QToolButton*>("drawMask")->setChecked(true);
     emit preview->positionSelected(QPoint(0, 479));
     emit preview->positionSelected(QPoint(639, 479));
@@ -1761,7 +1797,7 @@ void UiTest::aMaskShapeIsDrawnOnThePreview()
     window.closeMaskShape();
     QCOMPARE(panel->settings().mask.count(), 1);
     // Switching away saves the sky's mask.
-    panel->findChild<QComboBox*>("targetChoice")->setCurrentIndex(0);
+    chooseWatch(*panel, Watch::MoonFlashes);
     QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,479 639,479 320,300"));
 }
 
@@ -1882,6 +1918,9 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         panel->findChild<QDoubleSpinBox*>("detectionMaxBoxRatio")->setValue(chosen.maxPatchBoxRatio);
         panel->findChild<QDoubleSpinBox*>("detectionReferenceTime")->setValue(chosen.referenceTimeConstantSeconds);
         panel->findChild<QDoubleSpinBox*>("detectionMinNoise")->setValue(chosen.minNoiseAdu);
+        // Feature-31: the flash goes on the all-sunlit synthetic Moon, so the
+        // flashes' ceiling is off (chosen has it at 0).
+        panel->findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(chosen.ignoreAboveShare);
         start->click();
         window.findChild<QPushButton*>("monitoringButton")->click();
         QVERIFY(stop->isEnabled());
@@ -2549,11 +2588,12 @@ void UiTest::detectionProfilesSaveLoadAndOptionalMask()
     auto* targetCombo = window.findChild<QComboBox*>("targetChoice");
     QVERIFY(panel && combo && deleteBtn && targetCombo);
 
-    // Moon mode: save and reload a named profile.
+    // The Moon's shadows: save and reload a named profile (Feature-31: their
+    // profiles are their own, and darkening is always on for them).
+    chooseWatch(window, Watch::MoonShadows);
     DetectionSettings moonCustom = panel->settings();
     moonCustom.sigma = 9.5;
     moonCustom.minPixels = 12;
-    moonCustom.darkening = true;
     panel->setSettings(moonCustom);
     QVERIFY(panel->saveCurrentProfile("Moon Transit", false));
     QCOMPARE(combo->currentData().toString(), QString("Moon Transit"));
@@ -2573,8 +2613,11 @@ void UiTest::detectionProfilesSaveLoadAndOptionalMask()
     QCOMPARE(panel->settings().minPixels, 12);
     QVERIFY(panel->settings().darkening);
 
-    // Switch to Sky mode: Moon profiles do not pollute Sky profiles.
-    targetCombo->setCurrentIndex(1);
+    // The flashes do not list the shadows' profiles, nor the sky.
+    chooseWatch(window, Watch::MoonFlashes);
+    QCOMPARE(combo->findData("Moon Transit"), -1);
+    QVERIFY(!panel->settings().darkening);
+    chooseWatch(window, Watch::Sky);
     QCOMPARE(panel->target(), Target::Sky);
     QCOMPARE(combo->findData("Moon Transit"), -1);
 
@@ -2694,7 +2737,10 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
         QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, pt);
     };
 
-    // --- 1. Moon: Preview (no clip written) -> Monitoring Bright flash + Dark transit ---
+    // --- 1. Moon: Preview (no clip written) -> Monitoring Bright flash, then Dark transit ---
+    // Feature-31: the synthetic Moon is all sunlit; the flashes' ceiling is
+    // turned off so the test flash on its disc is tested.
+    window.findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(0);
     startBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
     QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
@@ -2718,43 +2764,48 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
         QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
         12000);
 
-    // Enable darkening and inject a Dark transit across the sunlit Moon.
-    auto* darkChk = window.findChild<QCheckBox*>("darkeningTrigger");
-    QVERIFY(darkChk);
-    darkChk->setChecked(true);
+    stopBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
+    const QString flashWatch = latestWatch(QDir(dir.path()).filePath("events/moon"));
+
+    // Feature-31: shadows on the sunlit side are their own watch, monitored apart.
+    chooseWatch(window, Watch::MoonShadows);
+    QVERIFY(panel->settings().darkening);
+    startBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
+    monitorBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monitorBtn->text().contains("Stop monitoring"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(stateLbl->text().contains("Noise floor"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(latestWatch(QDir(dir.path()).filePath("events/moon")) != flashWatch, 5000);
+    const QString shadowWatch = latestWatch(QDir(dir.path()).filePath("events/moon"));
     clickFramePixel(260, 240);
     kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::DarkTransit)));
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
-    const int moonDirsBeforeDark = QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
     injectBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(
-        QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > moonDirsBeforeDark,
-        12000);
+        QDir(shadowWatch + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1, 15000);
     stopBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
 
-    // Verify both Moon bright and dark clips exist on disk with valid evidence & overview/GIF.
-    const QStringList moonClips = QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    QVERIFY(moonClips.size() >= 2);
+    // Verify the Moon's bright and dark clips on disk with valid evidence & overview/GIF.
     bool sawMoonRise = false, sawMoonDark = false;
-    for (const QString& sub : moonClips)
-    {
-        const QDir clipDir(QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").filePath(sub));
-        // EventWriter writes event.txt/ser/PNGs and finally 04_event_preview.gif asynchronously.
-        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
-        const QString ev = text(clipDir.filePath("event.txt"));
-        QVERIFY(ev.contains("contains_test_signal: yes"));
-        QVERIFY(QFileInfo::exists(clipDir.filePath("event.ser")));
-        QVERIFY(QFileInfo::exists(clipDir.filePath("00_overview.png")));
-        if (ev.contains("kind=automatic")) sawMoonRise = true;
-        if (ev.contains("kind=darkening")) sawMoonDark = true;
-    }
+    for (const QString& watch : {flashWatch, shadowWatch})
+        for (const QString& sub : QDir(watch + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+        {
+            const QDir clipDir(QDir(watch + "/clips").filePath(sub));
+            // EventWriter writes event.txt/ser/PNGs and finally 04_event_preview.gif asynchronously.
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
+            const QString ev = text(clipDir.filePath("event.txt"));
+            QVERIFY(ev.contains("contains_test_signal: yes"));
+            QVERIFY(QFileInfo::exists(clipDir.filePath("event.ser")));
+            QVERIFY(QFileInfo::exists(clipDir.filePath("00_overview.png")));
+            if (ev.contains("kind=automatic")) sawMoonRise = true;
+            if (ev.contains("kind=darkening")) sawMoonDark = true;
+        }
     QVERIFY2(sawMoonRise, "Expected Moon bright flash clip on disk");
     QVERIFY2(sawMoonDark, "Expected Moon dark transit clip on disk");
-
     // --- 2. Sky Watch: Synthetic Sky + Horizon mask + Meteor streak + Lightning ---
-    auto* targetCombo = window.findChild<QComboBox*>("targetChoice");
-    targetCombo->setCurrentIndex(1); // The sky
+    chooseWatch(window, Watch::Sky);
     QCOMPARE(panel->target(), Target::Sky);
     historySpin->setValue(0.5);
     postSpin->setValue(0.4);

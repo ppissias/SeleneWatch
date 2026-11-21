@@ -160,8 +160,8 @@ The aims follow what you are watching ([CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTING
 
 | Watching | Measured | Aim | Correction |
 | --- | --- | --- | --- |
-| **The Moon**, flashes | The earthshine area | 3–10 % of full scale | Gain; the exposure stays between 10 and 40 ms |
-| **The Moon** with **Also trigger on darkening** | The brightest sunlit areas | 60–80 %, nothing saturated | Exposure up to 10 ms, gain as low as possible |
+| **The Moon: flashes on the earthlit side** | The earthshine area | 3–10 % of full scale | Gain; the exposure stays between 10 and 40 ms |
+| **The Moon: shadows on the sunlit side** | The brightest sunlit areas | 60–80 %, nothing saturated | Exposure up to 10 ms, gain as low as possible |
 | **The sky** | The sky outside the mask | 8–30 %, the exposure follower's band | A longer exposure first (up to **Longest exposure for meteors**, 250 ms), then gain; a brighter sky lowers gain first |
 
 1. **The earthshine (Moon flashes only).** Press **Draw earthshine box** and drag a box on the earthshine. Auto-tune grows it to the whole earthshine area and outlines that on the preview in purple, with the share of the frame it covers. The box is labelled *Earthshine*, so it is never confused with the guiding lock box (cyan, *Guiding lock*). Drawing the earthshine box turns off **Draw lock box**, and the other way round; closing the window ends a box being drawn. Glare near the terminator, the sunlit side and the sky beyond the Moon's edge are left out. If no darker sky is in view (a tight crop), or the outline is wrong, only your box is measured; **Measure only my box** forces that. The box is remembered.
@@ -224,7 +224,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 1. Connect your camera, set **Output folder** and **Site and instrument** ([Section 2](#2-common-setup--connecting-a-source)), and press **Start preview**.
 2. Frame the dark earthshine side (keeping enough sunlit detail nearby if you plan to lock **Guiding** on a crater; [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
 3. Under **View → Display and capture**, switch display to **Auto-stretch** or **Black / white levels** to inspect earthshine terrain while confirming in **Histogram** that the earthshine surface sits around **3–10 % of full scale** (`12–25 ADU` in `RAW8`, `2000–6500 ADU` in `RAW16`, with **`0.00 %` clipped at `0`**) and keeping most of the bright sunlit crescent outside the field to preserve headroom and minimize scattered glare (see [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) for detailed exposure, gain, and histogram recommendations). *(Adjust **Pre-event history** `5.0 s`, **Quiet tail** `3.0 s`, **Maximum after trigger** `10.0 s`, **RAM ceiling**, and **Disk reserve** while stopped if needed.)*
-4. Open **View → Detection** with **Watching** set to **The Moon**.
+4. Open **View → Detection** with **Watching** set to **The Moon: flashes on the earthlit side**. These settings are the flashes' own (the Moon's settings from before the two Moon watches existed). **Ignore brighter than** (`30 %` of full scale by default) leaves out the sunlit side and the glare by the terminator, where no flash can be seen and seeing only makes false triggers; it follows the Moon's drift. The **Test flash** readout says when a chosen pixel is above it (the **Synthetic** Moon is all sunlit: set it to **Off** to rehearse flashes on it).
    - **Saved detection profiles:** Use the **Profile** row right below **Watching** to load a saved lunar threshold configuration, or click **Save…** after tuning to store named presets (for example *"Earthshine quiet seeing"* vs. *"Terminator windy night"*).
    - **Optional sensitivity test:** Enable **View → Testing tools**, click on the earthshine area (zoom in to **100%** or **200%** if helpful), choose **Kind: Bright flash** in **Test flash** (`FWHM`, `Peak ADU`, `Duration frames`), and press **Inject blip** to verify the faintest flash your current **K** catches without false triggers. Remember to turn **View → Testing tools** OFF before a real observing run (`testing_tools="off"`).
    - **Auto-tune:** press **Auto-tune…** at the top of the dock, draw a box on the earthshine, then measure the camera and watch K ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
@@ -247,7 +247,8 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 
 | Panel | Control | Purpose & Default |
 | --- | --- | --- |
-| **Detection** | **Watching** | Set to **The Moon** (editable while stopped; keeps Moon & Sky settings separate) |
+| **Detection** | **Watching** | **The Moon: flashes on the earthlit side** (editable while stopped; each watch keeps its own detection settings and profiles) |
+| | **Ignore brighter than** | Flashes only: pixels whose learned brightness is above this share of full scale are not tested (`30 %`; `Off` tests every pixel) |
 | | **Profile** (`Save…` / `Delete`) | Save, load, or delete named detection profiles for the active target (`The Moon` or `The sky`) |
 | | **Sensitivity K** | Rise threshold in noise units (`sigma`). Sliders show live teal mark (`now`) + amber recent 10 s peak (`6.0 sigma` default) |
 | | **Minimum / Maximum patch** | Allowed connected bright-pixel count (`8 px` / `400 px`) |
@@ -267,12 +268,12 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 
 Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial aircraft, birds, bats) make pixels *darker* rather than brighter, while predicted events (**ISS transits**, **stellar/planetary occultations**, **grazes**) require every single frame captured continuously across a known UTC window. SeleneWatch supports **both**:
 
-1. **Automated Darkening Detection (`Also trigger on darkening`):** Analyzes negative pixel excursions (`fall ≥ K × noise`) through an independent patch pass that **never merges rising and falling pixels**. Dark patches use separate silhouette-sized limits (**Maximum dark patch** `20000 px`, **Maximum dark box / patch** `10.00 ×`) plus an optional **Large darkening** full-field trigger (`Off` by default) for close aircraft or birds filling the frame. Overviews draw darkened trails in **blue** and suggest `dark transit`, while `04_event_preview.gif` loops up to 10 frames showing the crossing motion.
+1. **Automated Darkening Detection (**Watching: The Moon: shadows on the sunlit side**):** Analyzes negative pixel excursions (`fall ≥ K × noise`) through an independent patch pass that **never merges rising and falling pixels**. Dark patches use separate silhouette-sized limits (**Maximum dark patch** `20000 px`, **Maximum dark box / patch** `10.00 ×`) plus an optional **Large darkening** full-field trigger (`Off` by default) for close aircraft or birds filling the frame. Overviews draw darkened trails in **blue** and suggest `dark transit`, while `04_event_preview.gif` loops up to 10 frames showing the crossing motion.
 2. **Continuous & Scheduled Lossless SER Capture (`Record` / `Schedule a recording…`):** Streams every frame straight to `recordings/<UTC>/recording.ser` with per-frame `frames.txt` and `recording.txt` on a dedicated writer thread. Monitoring recordings belong to the active watch. Preview recordings belong to the output root. Works manually in **Preview** or **Monitoring** with an **Unlimited** (`0`) or explicit **frame count limit** (`N frames`), or automatically at a predicted UTC start time and duration during **Monitoring** while flash/darkening detection continues uninterrupted.
 
 ### Main Use Case
 
-- **Unplanned transits:** Leaving the camera watching sunlit or crescent lunar terrain to automatically catch surprise aircraft, bird, or satellite silhouettes crossing the disk (**Also trigger on darkening**).
+- **Unplanned transits:** Leaving the camera watching sunlit or crescent lunar terrain to automatically catch surprise aircraft, bird, or satellite silhouettes crossing the disk (**Watching: The Moon: shadows on the sunlit side**).
 - **Predicted ISS transits & occultations:** Capturing guaranteed, zero-skipped-frame continuous SER files around ephemeris predictions (either manually via **Record** in Preview/Monitoring or unattended via **Schedule a recording…**).
 
 ### Step-by-Step Workflow
@@ -280,7 +281,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 #### Path A — Automated transit / shadow hunting (**Monitoring**)
 
 1. Frame the sunlit Moon or limb in **Preview** (optionally enable **Guiding**, [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
-2. Under **View → Detection**, ensure **Watching** is **The Moon**, then tick **Also trigger on darkening**.
+2. Under **View → Detection**, while stopped, set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on in this watch and off in the flashes watch. Its settings are its own and start insensitive to seeing on bright terrain: `K 12`, a shadow must cover `20 px` and last two frames, dark patches up to `20000 px` / `10 ×`, large darkening off. Both Moon watches save under `events/moon/`, share the Moon's capture settings and guiding, and run one at a time.
 3. Set **Sensitivity K** to **`12.0 sigma` or higher** for sunlit lunar terrain. Archive measurements show `K = 6` triggers heavily on sunlit crater-rim seeing, whereas `K ≥ 12` stays completely quiet on normal seeing while catching ~90%-darkness ISS and plane silhouettes.
 4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds). *(With **View → Testing tools** on, you can rehearse this directly by choosing **Kind: Dark transit** in the **Test flash** bar, clicking the sunlit lunar disk, and pressing **Inject blip**).*
 5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/session-<UTC start>/clips/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
@@ -294,9 +295,9 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 ### Screenshots
 
-![Monitoring with Also trigger on darkening enabled for lunar transits](docs/images/manual-darkening-transit.png)
+![Monitoring with darkening on for lunar transits](docs/images/manual-darkening-transit.png)
 
-*Workflow 2 Detection configuration (`Moon_165506.ser`): **Sensitivity K** at `12.0 sigma` (zero false triggers on sunlit terrain), **Also trigger on darkening** enabled with `20000 px` / `10.00 ×` dark silhouette limits, plus **Record** / `Unlimited` in the top toolbar.*
+*Workflow 2 Detection configuration (`Moon_165506.ser`): **Sensitivity K** at `12.0 sigma` (zero false triggers on sunlit terrain), darkening on (shown as the checkbox of an earlier version; now the shadows watch) with `20000 px` / `10.00 ×` dark silhouette limits, plus **Record** / `Unlimited` in the top toolbar.*
 
 ![00_overview.png of a dark silhouette transit across the Moon](docs/images/manual-transit-overview.png)
 
@@ -306,7 +307,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 | Panel / Bar | Control | Purpose & Starting Value |
 | --- | --- | --- |
-| **Detection** *(Darkening, Moon only)* | **Also trigger on darkening** | Enables negative-excursion patch detection (`Off` by default; `ChangeKind::Fall`). Hidden and off when **Watching** is **The sky**: against a night sky an object has nothing to darken |
+| **Detection** *(Darkening, shadows watch only)* | **Watching: The Moon: shadows on the sunlit side** | Negative-excursion patch detection (`ChangeKind::Fall`) is on in this watch and only in it. Hidden and off when **Watching** is **The sky**: against a night sky an object has nothing to darken |
 | | **Maximum dark patch** | Largest dark silhouette allowed (`20000 px` default) |
 | | **Maximum dark box / patch** | Silhouette bounding-box ratio limit (`10.00 ×` default) |
 | | **Large darkening** | Triggers when this % of unmasked pixels falls by `K` at once (`Off` default) |
@@ -500,7 +501,7 @@ Once queued evidence finishes writing, choose **Open nightly report** or **Later
 | Recording stops: *"disk too slow"* / *"disk reserve"* | Record to a faster local SSD, crop ROI, lower frame rate, or free space above **Disk reserve**. |
 | *"RAM ceiling …"* / *"writer busy"* messages | Lower **Pre-event history**, **Max after trigger**, or ROI, or increase **RAM ceiling**. |
 | Sky watch triggers all night on one star | Confirm **Learn a patch after** is enabled (e.g. `20 s`), or mount on a tracking equatorial mount. |
-| Too many false candidates on Moon | Raise **Sensitivity K** (especially `K ≥ 12` when **Also trigger on darkening** is used on sunlit terrain), adjust **Minimum/Maximum patch**, or disable 1-frame triggers. Use **Sigma map** overlay to diagnose. |
+| Too many false candidates on Moon | Raise **Sensitivity K** (especially `K ≥ 12` in the shadows watch on sunlit terrain; in the flashes watch keep **Ignore brighter than** on), adjust **Minimum/Maximum patch**, or disable 1-frame triggers. Use **Sigma map** overlay to diagnose. |
 | Lock refused: *"one direction only"* | Drag over a 2D crater feature rather than a straight lunar limb or flat mare. |
 | Calibration fails / Guiding stops | Check ASCOM tracking is ON, verify guide pulses move the image, keep guide speed `≤ 0.25 px/frame`, and recalibrate after a meridian flip. |
 | Time-lapse *"Processing fell behind interval"* | Overload gate cleanly skipped a period instead of stalling acquisition/RAM; increase **Interval**, shorten **Capture window**, reduce **Max frames/period**, or tighten ROI. |

@@ -87,6 +87,21 @@ QString settingsPrefix(Target target)
     return target == Target::Sky ? "sky/" : "";
 }
 
+// Feature-31: where a watch's detection settings are saved. The flashes keep
+// the Moon's keys, so the Moon's settings saved before are the flashes'.
+QString detectionKey(Watch watch)
+{
+    return watch == Watch::MoonShadows ? "moonShadows/detection/" : settingsPrefix(watchTarget(watch)) + "detection/";
+}
+
+// The watch that was chosen last.
+Watch savedWatch()
+{
+    const QSettings saved;
+    if (saved.value("target", 0).toInt() == 1) return Watch::Sky;
+    return saved.value("moon/watch").toString() == "shadows" ? Watch::MoonShadows : Watch::MoonFlashes;
+}
+
 // The mask's shapes for the preview.
 std::vector<QPolygon> maskRects(const DetectionMask& mask)
 {
@@ -490,16 +505,17 @@ void MainWindow::setupDetectionPanel()
     addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
     viewMenu_ = menuBar()->addMenu("View");
     viewMenu_->addAction(detectionDock_->toggleViewAction());
-    target_ = QSettings().value("target", 0).toInt() == 1 ? Target::Sky : Target::Moon;
-    detectionPanel_->setTarget(target_);
-    detectionPanel_->setSettings(savedDetectionSettings(target_));
+    watch_ = savedWatch();
+    target_ = watchTarget(watch_);
+    detectionPanel_->setWatch(watch_);
+    detectionPanel_->setSettings(savedDetectionSettings(watch_));
     session_->setDetectionSettings(detectionPanel_->settings());
     connect(detectionPanel_, &DetectionPanel::settingsChanged, this, [this] {
         session_->setDetectionSettings(detectionPanel_->settings());
         ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
         onDetectionSettingsChangedForAutoTune();
     });
-    connect(detectionPanel_, &DetectionPanel::targetRequested, this, &MainWindow::onTargetRequested);
+    connect(detectionPanel_, &DetectionPanel::watchRequested, this, &MainWindow::onWatchRequested);
 
     // Feature-15: the night schedule and the exposure follower.
     {
@@ -541,11 +557,11 @@ void MainWindow::setupDetectionPanel()
     resize(1340, 820);
 }
 
-DetectionSettings MainWindow::savedDetectionSettings(Target target)
+DetectionSettings MainWindow::savedDetectionSettings(Watch watch)
 {
     const QSettings saved;
-    const QString key = settingsPrefix(target) + "detection/";
-    DetectionSettings settings = defaultDetectionSettings(target);
+    const QString key = detectionKey(watch);
+    DetectionSettings settings = defaultDetectionSettings(watch);
     settings.sigma = saved.value(key + "sigma", settings.sigma).toDouble();
     settings.minPixels = saved.value(key + "minPixels", settings.minPixels).toInt();
     settings.maxPixels = saved.value(key + "maxPixels", settings.maxPixels).toInt();
@@ -557,20 +573,23 @@ DetectionSettings MainWindow::savedDetectionSettings(Target target)
     settings.maxDarkPixels = saved.value(key + "maxDarkPixels", settings.maxDarkPixels).toInt();
     settings.maxDarkBoxRatio = saved.value(key + "maxDarkBoxRatio", settings.maxDarkBoxRatio).toDouble();
     settings.darkeningShare = saved.value(key + "darkeningShare", settings.darkeningShare).toDouble();
-    if (target == Target::Sky)
+    settings.ignoreAboveShare = saved.value(key + "ignoreAboveShare", settings.ignoreAboveShare).toDouble();
+    if (watch == Watch::Sky)
     {
         settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
         settings.releaseSeconds = saved.value(key + "releaseSeconds", settings.releaseSeconds).toDouble();
         settings.mask = DetectionMask::fromText(saved.value(key + "mask").toString().toStdString());
     }
-    return settings.valid() ? settings : defaultDetectionSettings(target);
+    // Feature-31: whatever an older version saved, darkening is the shadows'.
+    settings = settingsForWatch(settings, watch);
+    return settings.valid() ? settings : defaultDetectionSettings(watch);
 }
 
 void MainWindow::saveDetectionSettings()
 {
     if (!detectionPanel_) return;
     const auto values = detectionPanel_->settings();
-    const QString key = settingsPrefix(detectionPanel_->target()) + "detection/";
+    const QString key = detectionKey(detectionPanel_->watch());
     QSettings saved;
     saved.setValue(key + "sigma", values.sigma);
     saved.setValue(key + "minPixels", values.minPixels);
@@ -583,6 +602,7 @@ void MainWindow::saveDetectionSettings()
     saved.setValue(key + "maxDarkPixels", values.maxDarkPixels);
     saved.setValue(key + "maxDarkBoxRatio", values.maxDarkBoxRatio);
     saved.setValue(key + "darkeningShare", values.darkeningShare);
+    saved.setValue(key + "ignoreAboveShare", values.ignoreAboveShare);
     if (detectionPanel_->target() == Target::Sky)
     {
         saved.setValue(key + "brighteningShare", values.brighteningShare);
@@ -620,27 +640,36 @@ void MainWindow::saveCaptureSettings()
     saved.sync();
 }
 
-void MainWindow::onTargetRequested(Target target)
+void MainWindow::onWatchRequested(Watch watch)
 {
     // The choice is disabled while running or finalizing; a late request is undone.
-    if (session_->isRunning() || session_->timeLapseFinalizing() || target == target_)
+    if (session_->isRunning() || session_->timeLapseFinalizing() || watch == watch_)
     {
-        detectionPanel_->setTarget(target_);
+        detectionPanel_->setWatch(watch_);
         return;
     }
-    // Keep the old target's settings before the panels take the new ones.
+    // Keep the old watch's settings before the panels take the new ones. The
+    // capture settings change only with the target: both Moon watches share them.
     saveDetectionSettings();
-    saveCaptureSettings();
-    target_ = target;
-    QSettings().setValue("target", target == Target::Sky ? 1 : 0);
-    detectionPanel_->setTarget(target_);
-    detectionPanel_->setSettings(savedDetectionSettings(target_));
-    displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
-    session_->setCaptureSettings(displayPanel_->captureSettings());
+    const bool targetChanges = watchTarget(watch) != target_;
+    if (targetChanges) saveCaptureSettings();
+    watch_ = watch;
+    target_ = watchTarget(watch);
+    QSettings saved;
+    saved.setValue("target", target_ == Target::Sky ? 1 : 0);
+    if (watch != Watch::Sky) saved.setValue("moon/watch", watch == Watch::MoonShadows ? "shadows" : "flashes");
+    detectionPanel_->setWatch(watch_);
+    detectionPanel_->setSettings(savedDetectionSettings(watch_));
+    if (targetChanges)
+    {
+        displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+        session_->setCaptureSettings(displayPanel_->captureSettings());
+    }
     session_->setDetectionSettings(detectionPanel_->settings());
     applyTarget();
-    showMessage(target_ == Target::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
-        : "Watching the Moon: the Moon's settings are loaded.", 6000);
+    showMessage(watch_ == Watch::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
+        : watch_ == Watch::MoonShadows ? "Watching the Moon for shadows on the sunlit side: their settings are loaded."
+        : "Watching the Moon for flashes on the earthlit side: their settings are loaded.", 6000);
 }
 
 void MainWindow::saveSkyExtras()
@@ -2303,6 +2332,25 @@ void MainWindow::updateBlipReadout()
             + QString("  %1 sigma at centre (noise %2 ADU).")
                 .arg(ui_->blipAmplitudeSpinBox->value() / latestDetection_.probeNoise, 0, 'f', 1)
                 .arg(latestDetection_.probeNoise, 0, 'f', 2));
+    }
+    // Feature-31: the flashes watch does not test the sunlit side; a test
+    // flash placed there is not caught, and the readout says why.
+    const double ceiling = detectionPanel_ ? detectionPanel_->settings().ignoreAboveShare : 0;
+    if (!wholeFrame && centre && ceiling > 0 && latestFrame_)
+    {
+        TuneArea pixel;
+        pixel.width = latestFrame_->width;
+        pixel.height = latestFrame_->height;
+        pixel.inside.assign(static_cast<size_t>(pixel.width) * pixel.height, 0);
+        if (centre->x() < pixel.width && centre->y() < pixel.height)
+        {
+            pixel.inside[static_cast<size_t>(centre->y()) * pixel.width + centre->x()] = 1;
+            const auto brightness = measureBrightness(*latestFrame_, pixel, false);
+            if (brightness && brightness->level > ceiling)
+                ui_->blipStatusLabel->setText(ui_->blipStatusLabel->text()
+                    + QString("  This pixel is at %1 % of full scale, above Ignore brighter than (%2 %): the flashes "
+                        "watch does not test it.").arg(100 * brightness->level, 0, 'f', 0).arg(100 * ceiling, 0, 'f', 0));
+        }
     }
 }
 

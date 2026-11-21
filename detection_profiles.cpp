@@ -9,9 +9,17 @@
 
 namespace {
 
-QString targetKey(Target target)
+// Feature-31: the flashes keep the Moon's group, so profiles saved before the
+// Moon had two watches are the flashes' profiles.
+QString watchKey(Watch watch)
 {
-    return target == Target::Sky ? QStringLiteral("sky") : QStringLiteral("moon");
+    switch (watch)
+    {
+    case Watch::MoonFlashes: return QStringLiteral("moon");
+    case Watch::MoonShadows: return QStringLiteral("moonShadows");
+    case Watch::Sky: return QStringLiteral("sky");
+    }
+    return QStringLiteral("moon");
 }
 
 QString sanitizeKey(const QString& name)
@@ -30,7 +38,7 @@ QString sanitizeKey(const QString& name)
     return out.left(48);
 }
 
-QJsonObject settingsToJson(const DetectionSettings& s, Target target)
+QJsonObject settingsToJson(const DetectionSettings& s, Watch watch)
 {
     QJsonObject obj;
     obj["sigma"] = s.sigma;
@@ -44,7 +52,8 @@ QJsonObject settingsToJson(const DetectionSettings& s, Target target)
     obj["maxDarkPixels"] = s.maxDarkPixels;
     obj["maxDarkBoxRatio"] = s.maxDarkBoxRatio;
     obj["darkeningShare"] = s.darkeningShare;
-    if (target == Target::Sky)
+    obj["ignoreAboveShare"] = s.ignoreAboveShare;
+    if (watch == Watch::Sky)
     {
         obj["brighteningShare"] = s.brighteningShare;
         obj["releaseSeconds"] = s.releaseSeconds;
@@ -52,9 +61,9 @@ QJsonObject settingsToJson(const DetectionSettings& s, Target target)
     return obj;
 }
 
-DetectionSettings settingsFromJson(const QJsonObject& obj, Target target)
+DetectionSettings settingsFromJson(const QJsonObject& obj, Watch watch)
 {
-    DetectionSettings s = defaultDetectionSettings(target);
+    DetectionSettings s = defaultDetectionSettings(watch);
     s.sigma = obj["sigma"].toDouble(s.sigma);
     s.minPixels = obj["minPixels"].toInt(s.minPixels);
     s.maxPixels = obj["maxPixels"].toInt(s.maxPixels);
@@ -62,31 +71,26 @@ DetectionSettings settingsFromJson(const QJsonObject& obj, Target target)
     s.maxPatchBoxRatio = obj["maxPatchBoxRatio"].toDouble(s.maxPatchBoxRatio);
     s.referenceTimeConstantSeconds = obj["referenceTimeConstantSeconds"].toDouble(s.referenceTimeConstantSeconds);
     s.minNoiseAdu = obj["minNoiseAdu"].toDouble(s.minNoiseAdu);
-    s.darkening = obj["darkening"].toBool(s.darkening);
     s.maxDarkPixels = obj["maxDarkPixels"].toInt(s.maxDarkPixels);
     s.maxDarkBoxRatio = obj["maxDarkBoxRatio"].toDouble(s.maxDarkBoxRatio);
     s.darkeningShare = obj["darkeningShare"].toDouble(s.darkeningShare);
-    if (target == Target::Sky)
+    s.ignoreAboveShare = obj["ignoreAboveShare"].toDouble(s.ignoreAboveShare);
+    if (watch == Watch::Sky)
     {
         s.brighteningShare = obj["brighteningShare"].toDouble(s.brighteningShare);
         s.releaseSeconds = obj["releaseSeconds"].toDouble(s.releaseSeconds);
     }
-    else
-    {
-        s.brighteningShare = 0.0;
-        s.releaseSeconds = 0.0;
-        s.mask = {};
-    }
-    return s.valid() ? s : defaultDetectionSettings(target);
+    s = settingsForWatch(s, watch);
+    return s.valid() ? s : defaultDetectionSettings(watch);
 }
 
 } // namespace
 
-std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Target target)
+std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Watch watch)
 {
     std::vector<SavedDetectionProfile> list;
     QSettings saved;
-    saved.beginGroup(QStringLiteral("detection/profiles/") + targetKey(target));
+    saved.beginGroup(QStringLiteral("detection/profiles/") + watchKey(watch));
     for (const QString& key : saved.childGroups())
     {
         saved.beginGroup(key);
@@ -98,9 +102,9 @@ std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Target target)
             profile.name = obj["name"].toString(key).trimmed();
             if (!profile.name.isEmpty())
             {
-                profile.target = target;
-                profile.settings = settingsFromJson(obj["settings"].toObject(), target);
-                profile.hasMask = (target == Target::Sky) && obj["hasMask"].toBool(false);
+                profile.watch = watch;
+                profile.settings = settingsFromJson(obj["settings"].toObject(), watch);
+                profile.hasMask = (watch == Watch::Sky) && obj["hasMask"].toBool(false);
                 if (profile.hasMask)
                 {
                     profile.mask = DetectionMask::fromText(obj["mask"].toString().toStdString());
@@ -131,15 +135,15 @@ void saveNamedDetectionProfile(const SavedDetectionProfile& profile)
     QJsonObject root;
     root["version"] = 1;
     root["name"] = trimmed;
-    root["target"] = targetKey(profile.target);
-    root["settings"] = settingsToJson(profile.settings, profile.target);
-    const bool storeMask = (profile.target == Target::Sky) && profile.hasMask;
+    root["target"] = watchKey(profile.watch);
+    root["settings"] = settingsToJson(profile.settings, profile.watch);
+    const bool storeMask = (profile.watch == Watch::Sky) && profile.hasMask;
     root["hasMask"] = storeMask;
     if (storeMask)
         root["mask"] = QString::fromStdString(profile.mask.text());
 
     QSettings saved;
-    saved.beginGroup(QStringLiteral("detection/profiles/") + targetKey(profile.target));
+    saved.beginGroup(QStringLiteral("detection/profiles/") + watchKey(profile.watch));
     saved.beginGroup(sanitizeKey(trimmed));
     saved.setValue("json", QJsonDocument(root).toJson(QJsonDocument::Compact));
     saved.endGroup();
@@ -147,12 +151,12 @@ void saveNamedDetectionProfile(const SavedDetectionProfile& profile)
     saved.sync();
 }
 
-void removeNamedDetectionProfile(Target target, const QString& name)
+void removeNamedDetectionProfile(Watch watch, const QString& name)
 {
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty()) return;
     QSettings saved;
-    saved.beginGroup(QStringLiteral("detection/profiles/") + targetKey(target));
+    saved.beginGroup(QStringLiteral("detection/profiles/") + watchKey(watch));
     saved.remove(sanitizeKey(trimmed));
     saved.endGroup();
     saved.sync();

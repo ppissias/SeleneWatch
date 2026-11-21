@@ -83,7 +83,46 @@ private slots:
     void aDroppedFrameBreaksPendingConfirmation();
     void aNewWeakerCandidateDoesNotReplaceTheStrongestPeak();
     void aFullyProtectedFieldDoesNotAdvanceLearning();
+    void theSunlitSideIsLeftOutForFlashes();
 };
+
+// Feature-31: for flashes on the earthlit side, pixels whose learned
+// brightness is above the ceiling are not tested, and the left-out area
+// follows the learned background as the Moon drifts.
+void DetectionTest::theSunlitSideIsLeftOutForFlashes()
+{
+    // The left half sunlit at 200 (78 % of full scale), the right half earthshine at 20.
+    const auto moon = [](uint64_t index, int sunlitUpTo) {
+        Frame frame = flat(index, 20);
+        for (int y = 0; y < frame.height; ++y)
+            for (int x = 0; x < sunlitUpTo; ++x) frame.data[static_cast<size_t>(y) * frame.width + x] = 200;
+        return frame;
+    };
+    DetectionSettings settings;
+    settings.ignoreAboveShare = 0.30;
+    for (const bool sunlit : {true, false})
+    {
+        FlashDetector detector(settings);
+        for (uint64_t i = 0; i < 3; ++i) observe(detector, moon(i, 32));
+        Frame frame = moon(3, 32);
+        patch(frame, sunlit ? 10 : 44, 20, 3, 20);
+        QCOMPARE(observe(detector, frame), !sunlit);
+    }
+    // Without the ceiling the same flash on the sunlit side triggers.
+    FlashDetector everywhere;
+    for (uint64_t i = 0; i < 3; ++i) observe(everywhere, moon(i, 32));
+    Frame frame = moon(3, 32);
+    patch(frame, 10, 20, 3, 20);
+    QVERIFY(observe(everywhere, frame));
+    // The terminator moves right: once learned, the newly sunlit pixels are left out too.
+    FlashDetector drifting(settings);
+    for (uint64_t i = 0; i < 3; ++i) observe(drifting, moon(i, 32));
+    for (uint64_t i = 3; i < 200; ++i) observe(drifting, moon(i, 48));
+    Frame later = moon(200, 48);
+    patch(later, 40, 20, 3, 20);
+    QVERIFY(!observe(drifting, later));
+    QCOMPARE(drifting.summary().settings.ignoreAboveShare, 0.30);
+}
 
 void DetectionTest::aLaterPatchTriggersWhileAnotherStaysActive()
 {

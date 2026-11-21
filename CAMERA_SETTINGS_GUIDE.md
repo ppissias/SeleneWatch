@@ -104,12 +104,12 @@ Before pressing **Start monitoring**:
 
 ## 2. Settings for the Other Observing Workflows
 
-### 2.1 Lunar Transits & Shadows (`Also trigger on darkening`)
+### 2.1 Lunar Transits & Shadows (`Watching: The Moon: shadows on the sunlit side`)
 
 - **Goal:** Keep the entire **sunlit lunar disk** unsaturated so aircraft, birds, satellites, or the ISS produce crisp, high-SNR negative contrast dips rather than dipping inside a clipped plateau.
 - **Histogram target:** Peak sunlit crater rims around **60 % – 80 %** of full scale (`~150–205 ADU` in `RAW8`, `~40000–52000 ADU` in `RAW16`), with **`At max code` reading `0.00%`** (especially important if recording continuously via **Record** or **Session → Schedule a recording…** for occultations or ISS transits).
 - **Exposure & Gain:** Use **low gain** and fast shutter speeds (**`1 – 10 ms`**, `60 – 200+ fps`) so fast transits (`0.5 s` ISS pass) remain sharp across many frames.
-- **Detection:** Under **Watching: The Moon**, enable **Also trigger on darkening** and raise **Sensitivity K** to **`12.0 – 16.0 sigma`** to suppress normal sunlit crater-rim seeing while reliably catching transits.
+- **Detection:** Set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on there, and its own settings start at **`K 12`** (raise to `16` if seeing still triggers), `20 px` shadows confirmed over two frames.
 
 ### 2.2 Lunar & Planetary Time-Lapses
 
@@ -134,6 +134,6 @@ Before pressing **Start monitoring**:
 | Workflow | Target Histogram Level | Typical Exposure & Rate | Gain & Format | Key Detection / Panel Settings |
 | --- | --- | --- | --- | --- |
 | **1. Lunar Impact Flashes** *(Earthshine)* | **3 % – 10 %** on earthshine (`At 0` = `0.00%`; sunlit side allowed to saturate) | **`16 – 33 ms`** (`30 – 60 fps`) | HCG / unity gain; **`RAW16`** preferred (or `RAW8` at 5–10 %) | **Watching:** `The Moon` · **K:** `6.0 – 10.0 σ` · **Patch:** `8 – 400 px` · **1-frame trigger:** `On` · **Display:** `Auto-stretch` |
-| **2. Lunar Transits & Shadows** *(Sunlit Moon)* | **60 % – 80 %** on brightest sunlit crater rims (`At max code` = `0.00%`) | **`1 – 10 ms`** (`60 – 200+ fps`) | Low gain (maximize dynamic range); `RAW8` or `RAW16` | **Watching:** `The Moon` · **Also trigger on darkening:** `On` · **K:** **`12.0 – 16.0 σ`** · **Max dark patch:** `20000 px` (or **Record** / **Schedule…**) |
+| **2. Lunar Transits & Shadows** *(Sunlit Moon)* | **60 % – 80 %** on brightest sunlit crater rims (`At max code` = `0.00%`) | **`1 – 10 ms`** (`60 – 200+ fps`) | Low gain (maximize dynamic range); `RAW8` or `RAW16` | **Watching:** `The Moon: shadows on the sunlit side` · **K:** **`12.0 – 16.0 σ`** · **Max dark patch:** `20000 px` (or **Record** / **Schedule…**) |
 | **3. Lunar & Planetary Time-Lapses** | **65 % – 85 %** on brightest sunlit terrain or cloud belts (`At max code` = `0.00%`) | **`2 – 15 ms`** (`60 – 150+ fps`) | Low-to-moderate gain; `RAW8` or `RAW16` (mono or Bayer colour) | **Time-lapse:** `Moon` (`25 %` best, `150` cap) or `Planet` (`15 %` best, `200` cap, window `≤ 60–90 s`) |
 | **4. Wide-Field Sky Watch** *(Fixed Camera)* | **8 % – 30 %** unmasked sky median (`At 0` = `0.00%`) | **`33 – 250 ms`** (`4 – 30 fps` for meteors/aircraft) | Moderate-to-high gain; **Follow the sky's brightness** optional | **Watching:** `The sky` · **K:** `6.0 – 14.0 σ` · **Max patch:** `3000 px` · **Box/patch:** `30 ×` · **Large brightening:** `2 %` · **Learn after:** `20 s` · **Draw mask** on horizon |
