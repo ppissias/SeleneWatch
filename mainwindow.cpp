@@ -3,6 +3,8 @@
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "elided_label.h"
+#include "flow_layout.h"
+#include "control_help.h"
 #include "histogram_panel.h"
 #include "guiding_panel.h"
 #include "timelapse_panel.h"
@@ -61,6 +63,7 @@
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QWhatsThis>
 
 #include <filesystem>
 #include <algorithm>
@@ -185,6 +188,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     if (auto api=toupTekApi?std::move(toupTekApi):makeToupTekApi())
         addCameraFamily(new ToupTekCameraPanel(std::move(api),this),"ToupTek camera","toupTekCameraDock");
     setupSourceChoice();
+    arrangeTopControls();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
@@ -250,7 +254,78 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     updateControls();
     updateStatusLabel();
     updateBlipReadout();
+    // Feature-24: every control's tool tip is also its What's This help, and
+    // the label naming it gets a clickable ⓘ.
+    installControlHelp(this);
     QTimer::singleShot(0, this, &MainWindow::checkLegacyEventsNotice);
+}
+
+// Feature-23: the controls above the preview wrap onto another line when
+// the window is narrow, instead of being squeezed until their text is cut
+// off. Controls that belong together stay together on one line.
+void MainWindow::arrangeTopControls()
+{
+    const auto together = [](QWidget* parent, std::initializer_list<QWidget*> widgets) {
+        auto* box = new QWidget(parent);
+        auto* row = new QHBoxLayout(box);
+        row->setContentsMargins(0, 0, 0, 0);
+        for (QWidget* widget : widgets) row->addWidget(widget);
+        return box;
+    };
+
+    // A long recording name is shortened with "…" rather than widening the row.
+    auto* file = new ElidedLabel(ui_->fileLabel->text(), Qt::ElideMiddle, ui_->centralWidget);
+    file->setObjectName("fileLabel");
+    file->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    delete ui_->sourceLayout->replaceWidget(ui_->fileLabel, file);
+    delete ui_->fileLabel;
+    ui_->fileLabel = file;
+
+    auto* stream = new QWidget(ui_->centralWidget);
+    stream->setObjectName("streamControls");
+    auto* flow = new FlowLayout(stream, 16, 4);
+    flow->addWidget(together(stream, {ui_->startButton, ui_->monitoringButton, ui_->stopButton}));
+    flow->addWidget(together(stream, {ui_->saveNowButton, recordButton_, recordFramesSpinBox_, ui_->injectFlashButton}));
+    flow->addWidget(together(stream, {ui_->fpsLabel, ui_->targetFpsSpinBox}));
+    flow->addWidget(together(stream, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox}));
+    // The separators and spacer of the old single row.
+    delete ui_->line;
+    delete ui_->line2;
+    ui_->line = ui_->line2 = nullptr;
+    const int row = ui_->verticalLayout->indexOf(ui_->controlsLayout);
+    ui_->verticalLayout->removeItem(ui_->controlsLayout);
+    delete ui_->controlsLayout;
+    ui_->controlsLayout = nullptr;
+    ui_->verticalLayout->insertWidget(row, stream);
+
+    // Labels name their controls, so each gets the control's ⓘ help (Feature-24).
+    ui_->sourceLabel->setBuddy(ui_->sourceComboBox);
+    ui_->fpsLabel->setBuddy(ui_->targetFpsSpinBox);
+    ui_->speedLabel->setBuddy(ui_->speedComboBox);
+    ui_->blipKindLabel->setBuddy(ui_->blipKindComboBox);
+    ui_->blipFwhmLabel->setBuddy(ui_->blipFwhmSpinBox);
+    ui_->blipAmplitudeLabel->setBuddy(ui_->blipAmplitudeSpinBox);
+    ui_->blipFramesLabel->setBuddy(ui_->blipFramesSpinBox);
+
+    // The test flash controls wrap the same way; its two readouts wrap their text.
+    QGroupBox* blip = ui_->blipGroupBox;
+    delete blip->layout();
+    ui_->blipLayout = nullptr;
+    auto* blipControls = new QWidget(blip);
+    auto* blipFlow = new FlowLayout(blipControls, 16, 4);
+    blipFlow->addWidget(together(blipControls, {ui_->blipKindLabel, ui_->blipKindComboBox}));
+    blipFlow->addWidget(together(blipControls, {ui_->blipFwhmLabel, ui_->blipFwhmSpinBox}));
+    blipFlow->addWidget(together(blipControls, {ui_->blipAmplitudeLabel, ui_->blipAmplitudeSpinBox}));
+    blipFlow->addWidget(together(blipControls, {ui_->blipFramesLabel, ui_->blipFramesSpinBox}));
+    blipFlow->addWidget(ui_->injectBlipButton);
+    ui_->blipPositionLabel->setWordWrap(true);
+    ui_->blipStatusLabel->setWordWrap(true);
+    auto* readouts = new QHBoxLayout;
+    readouts->addWidget(ui_->blipPositionLabel, 1);
+    readouts->addWidget(ui_->blipStatusLabel, 2);
+    auto* column = new QVBoxLayout(blip);
+    column->addWidget(blipControls);
+    column->addLayout(readouts);
 }
 
 void MainWindow::setupSourceChoice()
@@ -1075,6 +1150,11 @@ void MainWindow::setupHelpMenu()
     manual->setToolTip("Open the packaged SeleneWatch User Manual.");
     connect(manual, &QAction::triggered, this, [this] { showManual(); });
 
+    auto* whatsThis = QWhatsThis::createAction(this);
+    whatsThis->setObjectName("whatsThisAction");
+    whatsThis->setText("What's This? (click a control)");
+    whatsThis->setToolTip("Then click any control to read what it does. The ⓘ beside a control's name shows the same text.");
+    menu->addAction(whatsThis);
     auto* tips = menu->addAction("Tips");
     tips->setObjectName("tipsAction");
     tips->setToolTip("Short tips on features and workflows you may not have tried yet.");

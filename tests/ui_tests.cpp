@@ -1,6 +1,7 @@
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "camera_panel.h"
+#include "camera_settings_editor.h"
 #include "elided_label.h"
 #include "guiding_panel.h"
 #include "tests/fake_zwo_api.h"
@@ -18,6 +19,7 @@
 #include "site_dialog.h"
 #include "startup_tips.h"
 #include "tips_dialog.h"
+#include "target_defaults.h"
 #include "release_checker.h"
 #include "recording/output_paths.h"
 #include "recording/ser_reader.h"
@@ -50,10 +52,12 @@
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QScrollBar>
+#include <QtWidgets/QTabBar>
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QToolTip>
+#include <QtWidgets/QWhatsThis>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -127,6 +131,10 @@ private slots:
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
     void diskReserveStartsAtTenGiBAndIsRemembered();
+    void everyControlFitsOnASmallLaptopScreen();
+    void darkeningIsForTheMoonOnly();
+    void everyControlHasHelp();
+    void cameraSlidersSetTheBoxAndReachTheCameraOnce();
     void siteAndRecordingControls();
     void nightScheduleAndExposureFollower();
     void theReleaseIsShown();
@@ -972,6 +980,190 @@ void UiTest::diskReserveStartsAtTenGiBAndIsRemembered()
     QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
     choice->setCurrentIndex(0);
     QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
+}
+
+// The controls whose text is cut off: drawn narrower or lower than their
+// minimum size hint. Labels that shorten themselves with "…" and wrapping
+// labels report a minimum that fits. A spin box's own text field is checked
+// as part of the spin box.
+static QStringList squeezedControls(QWidget& root)
+{
+    QStringList squeezed;
+    for (QWidget* widget : root.findChildren<QWidget*>())
+    {
+        if (!widget->isVisible() || widget->window() != &root) continue;
+        if (qobject_cast<QLineEdit*>(widget) && qobject_cast<QAbstractSpinBox*>(widget->parentWidget())) continue;
+        const bool control = qobject_cast<QAbstractButton*>(widget) || qobject_cast<QLabel*>(widget)
+            || qobject_cast<QComboBox*>(widget) || qobject_cast<QAbstractSpinBox*>(widget)
+            || qobject_cast<QLineEdit*>(widget);
+        if (!control) continue;
+        const QSize need = widget->minimumSizeHint();
+        if (widget->width() + 1 >= need.width() && widget->height() + 1 >= need.height()) continue;
+        QString text;
+        if (auto* button = qobject_cast<QAbstractButton*>(widget)) text = button->text();
+        else if (auto* label = qobject_cast<QLabel*>(widget)) text = label->text();
+        else if (auto* combo = qobject_cast<QComboBox*>(widget)) text = combo->currentText();
+        else if (auto* spin = qobject_cast<QAbstractSpinBox*>(widget)) text = spin->text();
+        squeezed << QString("%1 '%2' \"%3\" %4x%5, needs %6x%7")
+            .arg(widget->metaObject()->className(), widget->objectName(), text.left(40))
+            .arg(widget->width()).arg(widget->height()).arg(need.width()).arg(need.height());
+    }
+    return squeezed;
+}
+
+// Feature-23: a maximised window on a small laptop, 1366 x 768 at 100 %, and
+// 1920 x 1200 at 125 % (1536 x 960 logical pixels), less the title bar and
+// task bar. A camera is chosen, so its dock is open on the left, and the
+// testing tools are on, which adds the most controls. Every dock tab is
+// shown in turn.
+void UiTest::everyControlFitsOnASmallLaptopScreen()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path(), std::make_shared<FakeZwoApi>());
+    window.findChild<QAction*>("testingToolsAction")->setChecked(true);
+    chooseSource(window, "zwo");
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
+    QStringList problems;
+    for (const QSize size : {QSize(1366, 700), QSize(1536, 880)})
+    {
+        window.resize(size);
+        for (QDockWidget* dock : window.findChildren<QDockWidget*>())
+        {
+            if (dock->isHidden()) continue;
+            dock->raise();
+            QApplication::processEvents();
+            const QString where = QString("%1x%2, %3 tab: ").arg(size.width()).arg(size.height()).arg(dock->windowTitle());
+            if (window.size() != size)
+                problems << where + QString("the window cannot be smaller than %1x%2").arg(window.width()).arg(window.height());
+            for (const QString& problem : squeezedControls(window))
+                problems << where + problem;
+        }
+    }
+    problems.removeDuplicates();
+    for (const QString& problem : problems) qWarning().noquote() << problem;
+    QVERIFY2(problems.isEmpty(), qPrintable(QString("%1 problems").arg(problems.size())));
+}
+
+// Feature-22: darkening is for silhouettes against the sunlit Moon. In Sky
+// mode its controls are hidden and it is off, even when an older version
+// saved it on for the sky.
+void UiTest::darkeningIsForTheMoonOnly()
+{
+    DetectionPanel panel;
+    auto* darkening = panel.findChild<QCheckBox*>("darkeningTrigger");
+    auto* share = panel.findChild<QDoubleSpinBox*>("darkeningShare");
+    panel.setTarget(Target::Moon);
+    QVERIFY(darkening->isVisibleTo(&panel) && share->isVisibleTo(&panel));
+    darkening->setChecked(true);
+    QVERIFY(panel.settings().darkening);
+
+    panel.setTarget(Target::Sky);
+    DetectionSettings saved = defaultDetectionSettings(Target::Sky);
+    saved.darkening = true;
+    saved.darkeningShare = 0.05;
+    panel.setSettings(saved);
+    QVERIFY(!darkening->isVisibleTo(&panel) && !share->isVisibleTo(&panel));
+    QVERIFY(!panel.settings().darkening);
+    QCOMPARE(panel.settings().darkeningShare, 0.0);
+
+    panel.setTarget(Target::Moon);
+    QVERIFY(darkening->isVisibleTo(&panel));
+    QVERIFY(panel.settings().darkening);
+    QCOMPARE(panel.settings().darkeningShare, 0.05);
+}
+
+// Feature-24: every control in the window and its docks explains itself:
+// a tool tip, the same text as What's This, and a ⓘ on the label naming it.
+// Checked for both targets with a camera chosen and the testing tools on.
+void UiTest::everyControlHasHelp()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path(), std::make_shared<FakeZwoApi>());
+    window.findChild<QAction*>("testingToolsAction")->setChecked(true);
+    chooseSource(window, "zwo");
+    QVERIFY(window.findChild<QAction*>("whatsThisAction"));
+    QStringList missing;
+    for (const int target : {0, 1})
+    {
+        window.findChild<QComboBox*>("targetChoice")->setCurrentIndex(target);
+        for (QWidget* widget : window.findChildren<QWidget*>())
+        {
+            if (widget->window() != &window || widget->objectName().startsWith("qt_")) continue;
+            if (qobject_cast<QScrollBar*>(widget) || qobject_cast<QTabBar*>(widget->parentWidget())) continue;
+            if (qobject_cast<QLineEdit*>(widget) && (qobject_cast<QAbstractSpinBox*>(widget->parentWidget())
+                    || qobject_cast<QComboBox*>(widget->parentWidget()))) continue;
+            const bool control = qobject_cast<QAbstractButton*>(widget) || qobject_cast<QComboBox*>(widget)
+                || qobject_cast<QAbstractSpinBox*>(widget) || qobject_cast<QAbstractSlider*>(widget)
+                || qobject_cast<QLineEdit*>(widget);
+            if (!control) continue;
+            if (widget->toolTip().isEmpty() || widget->whatsThis().isEmpty())
+            {
+                QString text;
+                if (auto* button = qobject_cast<QAbstractButton*>(widget)) text = button->text();
+                missing << QString("%1 '%2' \"%3\" in %4").arg(widget->metaObject()->className(), widget->objectName(), text,
+                    widget->parentWidget() ? widget->parentWidget()->objectName() : QString());
+            }
+        }
+    }
+    missing.removeDuplicates();
+    for (const QString& line : missing) qWarning().noquote() << "no help:" << line;
+    QVERIFY2(missing.isEmpty(), qPrintable(QString("%1 controls without help").arg(missing.size())));
+
+    // The label naming a camera control and a top-row label carry the ⓘ.
+    QLabel* gain = nullptr;
+    for (QLabel* label : window.findChildren<QLabel*>())
+        if (label->text().startsWith("Gain ")) gain = label;
+    QVERIFY(gain && gain->text().contains("ⓘ"));
+    auto* fps = window.findChild<QLabel*>("fpsLabel");
+    QVERIFY(fps->text().contains("ⓘ"));
+    QVERIFY(fps->text().startsWith("Target FPS:"));
+    emit fps->linkActivated("help");
+    QWhatsThis::hideText();
+}
+
+// Feature-25: a ranged camera control has a slider beside its box, and the
+// exposure's is logarithmic. The slider sets the box, the box moves the
+// slider, and in Preview a drag reaches the camera once, after the pause.
+void UiTest::cameraSlidersSetTheBoxAndReachTheCameraOnce()
+{
+    CameraSettingsEditor editor(2, 2, nullptr);
+    editor.addControl(1, "Gain", 0, 600, 1, 100, 1, "");
+    editor.addControl(2, "Exposure", 32, 2'000'000'000, 1, 10'000, 1000, " ms");
+    editor.addControl(3, "High speed mode", 0, 1, 1, 0, 1, "");
+    editor.addControl(4, "Temperature", -500, 500, 1, 200, 1, "", false);
+    auto* gain = editor.findChild<QSlider*>("cameraControlSlider1");
+    auto* exposure = editor.findChild<QSlider*>("cameraControlSlider2");
+    QVERIFY(gain && exposure);
+    QVERIFY(!editor.findChild<QSlider*>("cameraControlSlider3"));
+    QVERIFY(!editor.findChild<QSlider*>("cameraControlSlider4"));
+    QVERIFY(!gain->toolTip().isEmpty());
+
+    // Gain: one slider position per step.
+    QCOMPARE(gain->maximum(), 600);
+    QCOMPARE(gain->value(), 100);
+    gain->setValue(250);
+    QCOMPARE(*editor.controlValue(1), 250.0);
+    QVERIFY(editor.setControlValue(1, 400));
+    QCOMPARE(gain->value(), 400);
+
+    // Exposure: logarithmic, from the camera's minimum to its maximum; the
+    // middle position is the geometric middle, 0.25 s, not 1000 s.
+    exposure->setValue(0);
+    QCOMPARE(*editor.controlValue(2), 32.0);
+    exposure->setValue(exposure->maximum());
+    QCOMPARE(*editor.controlValue(2), 2e9);
+    exposure->setValue(exposure->maximum() / 2);
+    QVERIFY(*editor.controlValue(2) > 2e5 && *editor.controlValue(2) < 3e5);
+
+    editor.setLiveEditing(true);
+    QSignalSpy requested(&editor, &CameraSettingsEditor::liveControlsRequested);
+    for (int value = 300; value <= 340; value += 4) gain->setValue(value);
+    QTRY_COMPARE(requested.count(), 1);
+    QTest::qWait(400);
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(*editor.controlValue(1), 340.0);
 }
 
 // Feature-14: the site dialog keeps what is entered, the window saves it,
@@ -2379,6 +2571,7 @@ int main(int argc, char** argv)
     QCoreApplication::setApplicationName("Feature9-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
     const int font = QFontDatabase::addApplicationFont("C:/Windows/Fonts/segoeui.ttf");
     if (font >= 0) app.setFont(QFont(QFontDatabase::applicationFontFamilies(font).front(), 9));
+    QFontDatabase::addApplicationFont("C:/Windows/Fonts/seguisym.ttf");
     UiTest tests;
     const int result = QTest::qExec(&tests, argc, argv);
     QSettings saved; saved.clear(); saved.sync();

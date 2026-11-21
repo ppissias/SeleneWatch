@@ -20,6 +20,11 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-16 — A third camera family](#feature-16--a-third-camera-family) | Player One and ToupTek adapters & vendor DLL discovery | Built & tested with deterministic fakes and DLL probes; physical cameras pending |
 | [Feature-17 — One remembered output folder and Preview manual recording](#feature-17--one-remembered-output-folder-and-preview-manual-recording) | Single output root outside install folder, upgrade persistence, manual SER recording in Preview with optional frame limit | Implemented; automated core, session & UI tests passing |
 | [Feature-18 — Time-lapse mode](#feature-18--time-lapse-mode) | Lunar/planetary time-lapse, parallel overload protection, rotation alignment, linear float FITS, MP4/GIF & Re-sharpen | Implemented; automated unit & UI tests passing; overnight field run pending |
+| [Feature-22 — Separate Moon and Sky controls](#feature-22--separate-moon-and-sky-controls) | Hide and switch off Moon-only controls in Sky mode, and Sky-only controls on the Moon | Implemented; UI test passing |
+| [Feature-23 — A window that fits a small laptop screen](#feature-23--a-window-that-fits-a-small-laptop-screen) | Controls above the preview wrap instead of squeezing; a test that no text is cut off | Implemented; UI test passing; laptop check pending |
+| [Feature-24 — Help on every control](#feature-24--help-on-every-control) | One help text per control, as tooltip and as a clickable ⓘ on the label | Implemented; UI test passing |
+| [Feature-25 — Sliders for camera settings](#feature-25--sliders-for-camera-settings) | Slider beside the exact value for gain, offset, exposure (logarithmic) and other ranged controls | Implemented; UI test passing; real camera check pending |
+| [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | Proposed detection settings from a measured Preview, and suggested exposure and gain | Under discussion |
 
 ## Feature-9 — A measured trigger
 
@@ -1359,3 +1364,119 @@ After Feature-17 (which provides `<output folder>/timelapses/` and the unified o
 - **Status:** Implemented (`timelapse/timelapse_settings.h/.cpp`, `timelapse/fits_io.h/.cpp`, `timelapse/stack_processor.h/.cpp`, `timelapse/video_exporter.h/.cpp`, `timelapse/timelapse_session.h/.cpp`, `timelapse_panel.h/.cpp`, `resharpen_dialog.h/.cpp`, `session.h/.cpp`, `mainwindow.h/.cpp`, `preview_widget.h/.cpp`).
 - **Automated tests:** `timelapse` (`SeleneWatchTimelapseTests`, 11 test cases covering CFITSIO 2D/3D `BITPIX=-32` FITS + metadata & external 16-bit integer FITS loading, OpenCV Bayer RGGB/BGGR demosaic + brightness-normalized sharpness, 2-pass phase correlation + sigma clipping, Planet centroid + Moon rigid translation/rotation with `lunarAnchor` against moving shadows, linear sharpening, `100–200` per-period cap + parallel pipeline without skips, pre-capture overload skip gate + `MemoryBudget`, `diskReserveBytes` stop-and-build, `Session::startTimeLapse` MP4/GIF export, and non-destructive `resharpenTimelapseSession` + `rebuildVideoOnly`) and `ui` (`timelapsePanelAndResharpenWorkflow`).
 - **Pending field verification:** overnight Moon and Planet hardware capture at the telescope.
+
+---
+
+## Feature-22 — Separate Moon and Sky controls
+
+*Proposed on 21 November 2026, from the observer's first nights with the program on a laptop.*
+
+The Detection panel shows **Also trigger on darkening** and **Large darkening** in Sky mode. Feature-13 made them for silhouettes against the sunlit Moon: against a night sky an object has nothing to darken. A control that does nothing useful in a mode, or that a value saved earlier keeps active without being seen, misleads the observer.
+
+### What shapes the design
+
+1. **Each target shows only the controls that act on it.** Sky-only controls (horizon mask, large brightening, release) already sit in their own group shown only in Sky mode. Moon-only ones get the same treatment.
+2. **A hidden control is also off.** In Sky mode the detector runs with darkening off and **Large darkening** at zero, whatever an older saved Sky setting says. The Moon's darkening settings are untouched.
+3. **Audit every dock.** Guiding is already disabled in Sky mode. The other docks are checked for controls that only make sense for one target.
+
+### Done when
+
+1. In Sky mode the darkening controls are hidden and the detector never fires on darkening, even with darkening saved on for Sky by an older version.
+2. In Moon mode the controls and their saved values are as before.
+3. A UI test switches between targets and checks which controls are shown and which settings reach the detector.
+
+
+### Feature-22 status & verification
+
+- **Implemented** in `detection_panel.cpp`: the darkening check box and its limits are hidden in Sky mode, and `DetectionPanel::settings()` gives darkening off and **Large darkening** zero there whatever was saved. The other docks were checked: Guiding is already disabled in Sky mode ("Guiding (Moon only)") and the lunar anchor is cleared; no other control acts on one target only.
+- **Test:** `UiTest::darkeningIsForTheMoonOnly`.
+
+---
+
+## Feature-23 — A window that fits a small laptop screen
+
+*Proposed on 21 November 2026.*
+
+On a 1920 × 1200 laptop at 125 % scaling (1536 × 960 logical pixels) the text of the controls above the preview is squeezed: the row of buttons, frame-rate, speed and loop controls is wider than the space beside the docks.
+
+### What shapes the design
+
+1. **Wrap instead of squeeze.** The controls above the preview flow onto a second line when the window is narrow, and stay on one line when it is wide. Controls that belong together (a label and its box, Record and its frame limit) stay together.
+2. **Measured, not eyeballed.** A UI test opens the window at 1366 × 768 and 1536 × 960, shows each dock tab in turn, and fails if any button, label, box or list is drawn smaller than its text needs.
+
+### Done when
+
+1. The test passes at both sizes with the testing tools on (the most controls).
+2. On a wide screen the controls take the same single line as before.
+
+
+### Feature-23 status & verification
+
+- **Implemented:** `FlowLayout` (`flow_layout.h/.cpp`) wraps the stream buttons, Record, frame rate, speed and loop controls, and the test-flash controls; `MainWindow::arrangeTopControls()` groups controls that belong together. The recording name shortens with "…" instead of widening its row.
+- **Measured cause:** the single row of controls needed 1082 px, the right-hand docks about 380 px and a camera dock about 300 px: about 1780 px against 1536 px on the observer's laptop.
+- **Test:** `UiTest::everyControlFitsOnASmallLaptopScreen` (1366 × 700 and 1536 × 880, camera chosen, testing tools on, every dock tab). **Pending:** a look on the laptop itself.
+
+---
+
+## Feature-24 — Help on every control
+
+*Proposed on 21 November 2026.*
+
+Many controls have tooltips, but not all, and a tooltip is easy to miss. The observer wants to click something next to a control's name to read what it affects.
+
+### What shapes the design
+
+1. **One text per control.** The same text is the tooltip and the clickable help, so the two never disagree.
+2. **No extra column.** A small ⓘ at the end of the control's label opens the help; a separate button on every row would take the width that Feature-23 needs.
+3. **A test keeps it complete.** Every input control in the window and docks has help text; a new control without it fails the UI test.
+
+### Done when
+
+1. Every input control has a tooltip, and labelled controls in the docks show a clickable ⓘ that opens the same text.
+2. The UI test fails when a control without help is added.
+
+
+### Feature-24 status & verification
+
+- **Implemented:** `control_help.h/.cpp`. `installControlHelp()` copies each tool tip to What's This and adds a clickable ⓘ (in Segoe UI Symbol, which every Windows has; Segoe UI lacks the glyph) to the label naming a control: form row labels and labels with a buddy. **Help → What's This?** (`Shift+F1`) covers check boxes and buttons. About 75 controls that had no tool tip got one; camera controls get theirs from the name their SDK gives them.
+- **Test:** `UiTest::everyControlHasHelp` fails for any control in the window or its docks without help, for both targets with a camera chosen.
+
+---
+
+## Feature-25 — Sliders for camera settings
+
+*Proposed on 21 November 2026.*
+
+Gain, offset and exposure are adjusted by eye while watching the preview and the histogram, which a slider suits better than typing.
+
+### What shapes the design
+
+1. **Slider beside the exact value.** Every writable camera control with a range of at least ten steps gets a slider in the same row as its box; the box stays for exact entry. On/off and few-valued controls keep only the box.
+2. **Logarithmic when the range is wide.** A control whose range spans more than three decades (exposure: microseconds to seconds) gets a logarithmic slider, so short exposures are not crowded into the first pixel.
+3. **Same live rules as the box.** In Preview a change reaches the camera after the existing short pause (a drag sends one request when it pauses, not one per pixel). During Monitoring the camera settings stay locked, as now.
+4. **One place for all camera families.** The slider lives in the shared camera settings form, so ZWO, QHY, Player One and ToupTek all get it.
+
+### Done when
+
+1. Gain, offset and exposure have sliders for each camera family (checked with the fake cameras); moving one changes the box and reaches the camera once after the pause in Preview.
+2. The exposure slider is logarithmic, and its ends are the camera's minimum and maximum.
+
+
+### Feature-25 status & verification
+
+- **Implemented** in `CameraSettingsEditor`, shared by all four camera families: a writable control with at least ten steps has a slider beside its box (one position per step up to 1000), logarithmic when its range spans more than three decades. The existing 180 ms pause sends one live request per drag pause.
+- **Test:** `UiTest::cameraSlidersSetTheBoxAndReachTheCameraOnce`. **Pending:** a drag with a real camera in Preview.
+
+---
+
+## Feature-26 — Auto-tune and suggested camera settings
+
+*Proposed on 21 November 2026. Under discussion; not approved for implementation.*
+
+Ideas from the observer, to be designed together:
+
+- **Auto-tune detection** from Preview: watch for a short (about 15 s) or a long (minutes) period, and propose detection settings (K, patch sizes) that the observer accepts or not. Hidden test flashes injected while it watches could show the sensitivity the proposal keeps.
+- **Keep tuning while the exposure follows the sky:** when Feature-15's exposure follower is on, auto-tune follows its changes.
+- **Suggested exposure and gain** in Preview, separately for the Moon and the sky, from the histogram and the detection measurements.
+
+Open points: how a short watch can say anything about rare false triggers; whether automatic re-tuning during Monitoring stays within the evidence rules (every change logged); how a suggestion and the exposure follower share control of the camera.

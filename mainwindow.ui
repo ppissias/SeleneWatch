@@ -40,10 +40,13 @@
        </widget>
       </item>
       <item>
-       <widget class="QComboBox" name="sourceComboBox"/>
+       <widget class="QComboBox" name="sourceComboBox">
+        <property name="toolTip"><string>Where frames come from: a connected camera family, or a recorded SER or AVI file.</string></property>
+       </widget>
       </item>
       <item>
        <widget class="QPushButton" name="openFileButton">
+        <property name="toolTip"><string>Chooses the SER or AVI recording to play.</string></property>
         <property name="enabled">
          <bool>false</bool>
         </property>
@@ -71,6 +74,7 @@
      <layout class="QHBoxLayout" name="controlsLayout">
       <item>
        <widget class="QPushButton" name="startButton">
+        <property name="toolTip"><string>Starts the stream in Preview: frames are shown and measured, nothing is saved automatically.</string></property>
         <property name="text">
          <string>Start preview</string>
         </property>
@@ -85,6 +89,7 @@
       </item>
       <item>
        <widget class="QPushButton" name="stopButton">
+        <property name="toolTip"><string>Stops the stream, Monitoring and any recording.</string></property>
         <property name="enabled">
          <bool>false</bool>
         </property>
@@ -195,6 +200,7 @@
       </item>
       <item>
        <widget class="QDoubleSpinBox" name="loopSecondsSpinBox">
+        <property name="toolTip"><string>How many seconds at the start of the recording are played again and again.</string></property>
         <property name="enabled">
          <bool>false</bool>
         </property>

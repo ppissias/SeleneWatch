@@ -131,6 +131,8 @@ private:
     QLabel* followReading_;
     // Feature-13: darkening, in both modes.
     QCheckBox* darkening_;
+    // The darkening limits and readout, shown only for the Moon (Feature-22).
+    QWidget* darkControls_;
     QSpinBox* maxDark_;
     QDoubleSpinBox* darkBox_;
     QDoubleSpinBox* darkShare_;

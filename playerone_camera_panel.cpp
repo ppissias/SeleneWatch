@@ -19,14 +19,17 @@ PlayerOneCameraPanel::PlayerOneCameraPanel(std::shared_ptr<PlayerOneApi> api, QW
     layout->addWidget(runtime_);
     cameras_ = new QComboBox(this);
     cameras_->setObjectName("playerOneCameras");
+    cameras_->setToolTip("The connected Player One camera to use.");
     refresh_ = new QPushButton("Refresh cameras", this);
     refresh_->setObjectName("refreshPlayerOneCameras");
+    refresh_->setToolTip("Searches again for connected Player One cameras.");
     layout->addWidget(cameras_);
     layout->addWidget(refresh_);
     editor_ = new CameraSettingsEditor(4, 2, this);
     layout->addWidget(editor_);
     apply_ = new QPushButton("Apply settings", this);
     apply_->setObjectName("applyPlayerOneCamera");
+    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
     layout->addWidget(apply_);
     readback_ = new QLabel("Refresh to discover Player One cameras.", this);
     readback_->setWordWrap(true);

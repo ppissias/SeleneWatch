@@ -17,6 +17,7 @@ RuntimeChooser::RuntimeChooser(QString vendor, QString fileName, QString setting
     choose_->setObjectName(QString("choose%1Runtime").arg(objectSuffix));
     automatic_ = new QPushButton("Use automatic discovery", this);
     automatic_->setObjectName(QString("automatic%1Runtime").arg(objectSuffix));
+    automatic_->setToolTip(QString("Forgets a chosen %1 DLL and uses the one SeleneWatch finds installed.").arg(vendor_));
     layout->addWidget(choose_);
     layout->addWidget(automatic_);
     connect(choose_, &QPushButton::clicked, this, &RuntimeChooser::choose);

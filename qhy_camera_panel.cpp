@@ -13,10 +13,13 @@ QhyCameraPanel::QhyCameraPanel(std::shared_ptr<QhyApi> api,QWidget* parent):Came
     runtime_=new RuntimeChooser("QHY","qhyccd.dll","qhy/runtimePath","Qhy",this);
     layout->addWidget(runtime_);
     cameras_=new QComboBox(this);cameras_->setObjectName("qhyCameras");
+    cameras_->setToolTip("The connected QHY camera to use.");
     refresh_=new QPushButton("Refresh cameras",this);refresh_->setObjectName("refreshQhyCameras");
+    refresh_->setToolTip("Searches again for connected QHY cameras.");
     layout->addWidget(cameras_);layout->addWidget(refresh_);
     editor_=new CameraSettingsEditor(1,1,this);layout->addWidget(editor_);
     apply_=new QPushButton("Apply settings",this);apply_->setObjectName("applyQhyCamera");layout->addWidget(apply_);
+    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
     readback_=new QLabel("Refresh to discover QHY cameras.",this);
     readback_->setWordWrap(true);
     readback_->setTextFormat(Qt::PlainText);

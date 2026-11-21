@@ -221,6 +221,7 @@ private:
     // camera families. Rebuilt when the testing tools change; keeps the
     // choice when it is still listed.
     void setupSourceChoice();
+    void arrangeTopControls();
     void applyTestingTools(bool on);
     void rebuildSourceList();
     // Feature-16: a camera family's Source entry, dock and connections.

@@ -26,17 +26,24 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
     setMinimumWidth(350);
     auto* form = new QFormLayout(this);
     mode_ = new QComboBox(this); mode_->setObjectName("displayMode");
+    mode_->setToolTip("How frames are shown on the screen: the camera's bits as they are, between black and white levels you set, or stretched automatically. Recorded and detected data are never changed.");
     mode_->addItems({"Linear / high bits", "Black / white levels", "Auto-stretch"});
     form->addRow("Display", mode_);
     black_ = new QDoubleSpinBox(this); black_->setObjectName("displayBlack");
+    black_->setToolTip("Pixel value (ADU) shown as black when Display is Black / white levels.");
     white_ = new QDoubleSpinBox(this); white_->setObjectName("displayWhite");
+    white_->setToolTip("Pixel value (ADU) shown as white when Display is Black / white levels.");
     for (auto* spin : {black_, white_}) { spin->setDecimals(0); spin->setSuffix(" ADU"); }
     blackSlider_ = new QSlider(Qt::Horizontal, this); blackSlider_->setObjectName("blackSlider");
+    blackSlider_->setToolTip("Black level of the display.");
     whiteSlider_ = new QSlider(Qt::Horizontal, this); whiteSlider_->setObjectName("whiteSlider");
+    whiteSlider_->setToolTip("White level of the display.");
     form->addRow("Black", black_); form->addRow(blackSlider_);
     form->addRow("White", white_); form->addRow(whiteSlider_);
     invert_ = new QCheckBox("Invert brightness", this); invert_->setObjectName("displayInvert");
+    invert_->setToolTip("Shows the preview as a negative: dark detail can be easier to see. Display only.");
     debayer_ = new QCheckBox("Show Bayer colour", this); debayer_->setObjectName("displayDebayer");
+    debayer_->setToolTip("Shows a colour camera's Bayer frames in colour. Display only: recordings keep the raw pixels.");
     form->addRow(invert_); form->addRow(debayer_);
     // Room for the widest levels, so the capture settings below stay put.
     levels_ = new ReadoutLabel({levelsText(65535.0, 65535.0)}, this);
@@ -45,11 +52,14 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
     auto* heading = new QLabel("Capture settings (next Start)", this); form->addRow(heading);
     history_ = new QDoubleSpinBox(this); history_->setObjectName("historySeconds");
     post_ = new QDoubleSpinBox(this); post_->setObjectName("postSeconds");
+    post_->setToolTip("A clip continues until the event has been quiet this long.");
     maxPost_ = new QDoubleSpinBox(this); maxPost_->setObjectName("maxPostSeconds");
+    maxPost_->setToolTip("A clip stops this long after the trigger even if the event is still active.");
     for (auto* spin : {history_, post_, maxPost_}) { spin->setRange(0.05, 3600); spin->setDecimals(2); spin->setSuffix(" s"); }
     history_->setRange(0, 600);
     history_->setToolTip("Seconds of source time, including during fast playback. The effective history is capped by the RAM allowance.");
     memory_ = new QSpinBox(this); memory_->setObjectName("memoryMiB"); memory_->setRange(16, 65536); memory_->setSuffix(" MiB");
+    memory_->setToolTip("Most RAM used for frames: the pre-event history, clips being collected and time-lapse bursts share it. History is shortened to fit.");
     form->addRow("Pre-event history", history_); form->addRow("Quiet tail", post_);
     form->addRow("Maximum after trigger", maxPost_); form->addRow("RAM ceiling", memory_);
     reserve_ = new QDoubleSpinBox(this); reserve_->setObjectName("diskReserveGiB");
@@ -58,6 +68,7 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
         "Its candidates are still logged.");
     form->addRow("Disk reserve", reserve_);
     format_ = new QComboBox(this); format_->setObjectName("syntheticFormat");
+    format_->setToolTip("Pixel format of the synthetic test source (testing tools).");
     format_->addItems({"Mono8", "Mono12, low bits", "Mono12, high bits", "Mono16", "Bayer RGGB, 12 high"});
     form->addRow("Synthetic pixels", format_);
     usage_ = new QLabel(this); usage_->setWordWrap(true); usage_->setObjectName("memoryUsage");

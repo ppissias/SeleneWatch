@@ -270,6 +270,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "Drag for a rectangle, or click the corners of a shape and double-click to close it.");
     clearMask_ = new QToolButton(sky_);
     clearMask_->setObjectName("clearMask");
+    clearMask_->setToolTip("Removes every shape of the horizon mask: the whole frame is watched again.");
     clearMask_->setText("Clear");
     maskRow->addWidget(maskLabel_, 1);
     maskRow->addWidget(drawMask_);
@@ -283,6 +284,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "rises again. Needs the site's position (Session → Site and instrument).");
     sunLimit_ = new QDoubleSpinBox(sky_);
     sunLimit_->setObjectName("sunLimit");
+    sunLimit_->setToolTip("Night starts when the Sun's altitude falls below this. -12 degrees is nautical twilight, -18 astronomical.");
     sunLimit_->setRange(-18, 0); sunLimit_->setDecimals(1); sunLimit_->setSuffix("°");
     nightReading_ = new QLabel(sky_);
     nightReading_->setObjectName("nightReading");
@@ -297,13 +299,17 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "minute outside, Monitoring stops, the exposure (then the gain) changes, and Monitoring starts again.");
     minExposure_ = new QDoubleSpinBox(sky_);
     minExposure_->setObjectName("followMinExposure");
+    minExposure_->setToolTip("The shortest exposure the follower uses, at the brightest sky.");
     maxExposure_ = new QDoubleSpinBox(sky_);
     maxExposure_->setObjectName("followMaxExposure");
+    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain.");
     for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); spin->setMaximumWidth(96); }
     maxGain_ = new QDoubleSpinBox(sky_);
     maxGain_->setObjectName("followMaxGain");
+    maxGain_->setToolTip("The highest gain the follower uses once the exposure is at its longest.");
     gainStep_ = new QDoubleSpinBox(sky_);
     gainStep_->setObjectName("followGainStep");
+    gainStep_->setToolTip("How much the follower changes gain at a time.");
     for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); spin->setMaximumWidth(96); }
     gainStep_->setSpecialValueText("Gain fixed");
     followReading_ = new QLabel(sky_);
@@ -333,13 +339,19 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     layout->setColumnStretch(0, 1);
     sigma_ = new QDoubleSpinBox(this);
     sigma_->setObjectName("detectionSigma");
+    sigma_->setToolTip("Sensitivity K: a pixel fires when it rises K times its own noise above the learned background. Lower is more sensitive and gives more false triggers.");
     sigma_->setRange(0.1, 1000); sigma_->setDecimals(1); sigma_->setSingleStep(0.1); sigma_->setSuffix(" sigma");
     minimum_ = new QSpinBox(this); minimum_->setObjectName("detectionMinPixels");
+    minimum_->setToolTip("The fewest connected firing pixels that count as an event. Raise it to ignore single hot pixels and noise.");
     maximum_ = new QSpinBox(this); maximum_->setObjectName("detectionMaxPixels");
+    maximum_->setToolTip("The most connected firing pixels an event may have. Larger patches (a seeing ripple across a crater rim, a cloud) are ignored.");
     for (auto* spin : {minimum_, maximum_}) { spin->setRange(1, 1'000'000); spin->setSuffix(" px"); }
     sigmaSlider_ = new MeterSlider(0.1, 1000, this); sigmaSlider_->setObjectName("sigmaSlider");
+    sigmaSlider_->setToolTip("Sensitivity K. The teal mark is the frame's highest peak now, the amber mark the highest of the last seconds: a mark beyond K would trigger.");
     minSlider_ = new MeterSlider(1, 1'000'000, this); minSlider_->setObjectName("minimumSlider");
+    minSlider_->setToolTip("Minimum patch. The marks show the current and recent largest patch.");
     maxSlider_ = new MeterSlider(1, 1'000'000, this); maxSlider_->setObjectName("maximumSlider");
+    maxSlider_->setToolTip("Maximum patch. The marks show the current and recent largest patch.");
     compactness_ = new QDoubleSpinBox(this);
     compactness_->setObjectName("detectionMaxBoxRatio");
     compactness_->setRange(1.0, 1000.0);
@@ -349,6 +361,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     compactness_->setToolTip("Largest allowed bounding-box area divided by the number of pixels in the patch.");
     compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), this);
     compactnessSlider_->setObjectName("compactnessSlider");
+    compactnessSlider_->setToolTip("Maximum box / patch: how spread out a patch may be. A compact flash is near 1-2; a long thin edge is much higher.");
     // The readouts keep room for their longest texts, so the controls below
     // them stay where they are while the texts change.
     const DetectionSummary widest = widestSummary();
@@ -360,14 +373,20 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     sizeReading_ = new ReadoutLabel({patchText(widest.settings.maxPixels, 9'999'999, 99.99, widest.settings)}, this);
     sizeReading_->setObjectName("patchReading");
     sizeReading_->setText("Patch: --");
-    layout->addWidget(new QLabel("Sensitivity K", this), 0, 0); layout->addWidget(sigma_, 0, 1);
+    // A label naming its control, so the control's help shows on it (Feature-24).
+    const auto named = [this](const QString& text, QWidget* control) {
+        auto* label = new QLabel(text, this);
+        label->setBuddy(control);
+        return label;
+    };
+    layout->addWidget(named("Sensitivity K", sigma_), 0, 0); layout->addWidget(sigma_, 0, 1);
     layout->addWidget(sigmaSlider_, 1, 0, 1, 2);
     layout->addWidget(sigmaReading_, 2, 0, 1, 2);
-    layout->addWidget(new QLabel("Minimum patch", this), 3, 0); layout->addWidget(minimum_, 3, 1);
+    layout->addWidget(named("Minimum patch", minimum_), 3, 0); layout->addWidget(minimum_, 3, 1);
     layout->addWidget(minSlider_, 4, 0, 1, 2);
-    layout->addWidget(new QLabel("Maximum patch", this), 5, 0); layout->addWidget(maximum_, 5, 1);
+    layout->addWidget(named("Maximum patch", maximum_), 5, 0); layout->addWidget(maximum_, 5, 1);
     layout->addWidget(maxSlider_, 6, 0, 1, 2);
-    layout->addWidget(new QLabel("Maximum box / patch", this), 7, 0);
+    layout->addWidget(named("Maximum box / patch", compactness_), 7, 0);
     layout->addWidget(compactness_, 7, 1);
     layout->addWidget(compactnessSlider_, 8, 0, 1, 2);
     layout->addWidget(sizeReading_, 9, 0, 1, 2);
@@ -380,9 +399,10 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     state_->setObjectName("detectionState");
     state_->setText("Start a source to measure its noise.");
     layout->addWidget(state_, 12, 0, 1, 2);
-    layout->addWidget(new QLabel("Preview overlay", this), 13, 0);
     overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
+    overlay_->setToolTip("Draws a map on the preview, for the screen only: none, the sigma map (pixels at or above K in red), or the noise map.");
     overlay_->addItems({"None", "Sigma map", "Noise map"});
+    layout->addWidget(named("Preview overlay", overlay_), 13, 0);
     layout->addWidget(overlay_, 13, 1);
     mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, this);
     mapScale_->setText("Overlays affect the display only.");
@@ -390,6 +410,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 
     auto* showBackground = new QToolButton(content);
     showBackground->setObjectName("backgroundSettings");
+    showBackground->setToolTip("Shows the settings for how the background and its noise are learned.");
     showBackground->setText("Background and noise");
     showBackground->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     showBackground->setArrowType(Qt::RightArrow);
@@ -406,6 +427,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     referenceTime_->setToolTip("Time constant for background learning. Lower values follow brightness changes faster.");
     referenceSlider_ = new MeterSlider(referenceTime_->minimum(), referenceTime_->maximum(), background);
     referenceSlider_->setObjectName("referenceTimeSlider");
+    referenceSlider_->setToolTip("Reference time: how quickly the background learns changes in brightness.");
     minimumNoise_ = new QDoubleSpinBox(background);
     minimumNoise_->setObjectName("detectionMinNoise");
     minimumNoise_->setRange(0.01, 65535.0);
@@ -414,6 +436,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     minimumNoise_->setToolTip("Lower bound for estimated noise in native sample units.");
     noiseSlider_ = new MeterSlider(minimumNoise_->minimum(), minimumNoise_->maximum(), background);
     noiseSlider_->setObjectName("minimumNoiseSlider");
+    noiseSlider_->setToolTip("Minimum noise: the lowest noise a pixel is assumed to have.");
     model->addRow("Reference time", referenceTime_);
     model->addRow(referenceSlider_);
     model->addRow("Minimum noise", minimumNoise_);
@@ -428,13 +451,16 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "Dark patches have their own size limits; minimum patch, K and persistence are shared.");
     layout->addWidget(darkening_, 17, 0, 1, 2);
     auto* dark = new QWidget(content);
+    darkControls_ = dark;
     auto* darkForm = new QFormLayout(dark);
     darkForm->setContentsMargins(0, 0, 0, 0);
     maxDark_ = new QSpinBox(dark);
     maxDark_->setObjectName("detectionMaxDarkPixels");
+    maxDark_->setToolTip("The most connected darkened pixels a dark patch may have: a plane or the ISS covers many.");
     maxDark_->setRange(1, 1'000'000); maxDark_->setSuffix(" px");
     darkBox_ = new QDoubleSpinBox(dark);
     darkBox_->setObjectName("detectionMaxDarkBoxRatio");
+    darkBox_->setToolTip("How spread out a dark patch may be (box area over pixel count).");
     darkBox_->setRange(1.0, 1000.0); darkBox_->setDecimals(2); darkBox_->setSingleStep(0.5); darkBox_->setSuffix(" ×");
     darkShare_ = new QDoubleSpinBox(dark);
     darkShare_->setObjectName("darkeningShare");
@@ -498,10 +524,16 @@ DetectionSettings DetectionPanel::settings() const
 {
     DetectionSettings values{sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
         compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
-    values.darkening = darkening_->isChecked();
     values.maxDarkPixels = maxDark_->value();
     values.maxDarkBoxRatio = darkBox_->value();
-    values.darkeningShare = darkShare_->value() / 100;
+    // Feature-22: darkening is for silhouettes against the sunlit Moon. Its
+    // controls are hidden in Sky mode, and it is off there whatever an older
+    // version saved.
+    if (target() == Target::Moon)
+    {
+        values.darkening = darkening_->isChecked();
+        values.darkeningShare = darkShare_->value() / 100;
+    }
     if (target() == Target::Sky)
     {
         values.brighteningShare = brightening_->value() / 100;
@@ -524,6 +556,8 @@ void DetectionPanel::setTarget(Target target)
     target_->setCurrentIndex(target == Target::Sky ? 1 : 0);
     updating_ = updating;
     sky_->setVisible(target == Target::Sky);
+    darkening_->setVisible(target == Target::Moon);
+    darkControls_->setVisible(target == Target::Moon);
     if (target != Target::Sky) drawMask_->setChecked(false);
     reloadProfiles();
 }

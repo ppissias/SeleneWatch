@@ -57,6 +57,8 @@ From top to bottom, the main screen contains:
   - **View bar (`Fit` | `100%` | `200%`):** immediately above the preview canvas. Switch between **Fit** (scales the full frame to the window), **100%** (actual sensor pixels `1:1`), and **200%** (`2×` actual pixels), or roll the **mouse wheel** over the image to zoom smoothly (`25%`–`800%`) around the cursor pixel. While zoomed in, **right-drag** or **middle-drag** pans across the frame.
   - **Preview canvas:** left-clicking selects a pixel (for local noise readout / **Test flash**), left-dragging locks on a crater (**Guiding**) or lunar anchor (**Time-lapse**), and clicking/dragging in Sky mode with **Draw mask** on defines horizon masks. Every click, drag, and overlay stays pixel-accurate at any zoom level.
 - **Dock panels (right & bottom):** **Detection**, **Display and capture**, **Guiding**, **Time-lapse** share right-hand tabs (opening on **Detection** at startup); the active **Camera** dock opens on the left; **Histogram** opens below the preview.
+  - *Help on every control:* hover a control for its explanation, or click the small **ⓘ** beside its name to show it. **Help → What's This?** (or `Shift+F1`) then a click on any control, including checkboxes and buttons, shows the same text.
+  - *Small screens:* the buttons and playback controls above the preview wrap onto a second or third line when the window is narrow (for example on a 1366 × 768 laptop, or 1920 × 1200 at 125 % scaling), instead of shrinking until their text is cut off.
   - *Mouse-wheel protection:* Spin boxes, sliders, and closed dropdowns across all panels and dialogs ignore mouse-wheel scrolls (forwarding them to the dock scrollbar instead) so you never accidentally alter **Sensitivity K**, exposure, or patch limits while scrolling a panel. When a control is focused, keyboard **Up / Down** arrow keys remain active for fine single-step adjustments.
 - **Two-line status bar (bottom):**
   - Top line: latest status or action message across the full window width (hover if shortened).
@@ -126,7 +128,7 @@ Open **Session → Site and instrument…** once before serious observing:
    - **Recording file** — click **Open…** and load an `.ser` file (8- or 16-bit mono with trailer timestamps) or uncompressed `.avi` file (`8-bit`, `Y800`, `24/32-bit RGB`, `YUY2`; compressed AVIs are refused). Matching FireCapture `.txt` logs automatically supply UTC start time, exposure, gain, and true mean duration/FPS. Use **Speed** (`Real time` / `Fast`) and **Loop first … s** for tuning and playback tests.
    - **Synthetic** *(via **View → Testing tools**)* — renders a built-in test scene without hardware: a cratered lunar disk with a moving pacing marker when **Watching** is **The Moon** (with configurable `Mono8` / `12-bit` / `16-bit` / `Bayer RGGB` format), or a starry night sky with realistic sensor noise and a dark tree/roofline horizon silhouette when **Watching** is **The sky**.
 2. Press **Start preview**. Nothing is recorded to `events/` or `candidates.txt` while in Preview (unless you explicitly press **Record**).
-3. In your **Camera** dock, adjust live controls (**Exposure**, **Gain**, **Offset**, **USB bandwidth**, high-speed mode) — edits apply shortly in Preview, with **Settling** shown briefly as detection relearns. Changing **Raw format** (`RAW8`/`RAW16`), **Binning**, or **ROI** uses **Apply settings** and briefly restarts Preview.
+3. In your **Camera** dock, adjust live controls (**Exposure**, **Gain**, **Offset**, **USB bandwidth**, high-speed mode) with the slider beside each one, or type an exact value in its box. The **Exposure** slider is logarithmic, so short exposures get as much of its length as long ones. Edits apply shortly in Preview (a drag reaches the camera once you pause), with **Settling** shown briefly as detection relearns. Changing **Raw format** (`RAW8`/`RAW16`), **Binning**, or **ROI** uses **Apply settings** and briefly restarts Preview.
    - **RAW16** preserves every bit delivered by the camera without truncation; sensor ADC bit depth is recorded separately in metadata.
 
 ![Camera dock beside the Detection dock in Preview mode](docs/images/manual-camera-settings.png)
@@ -280,7 +282,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 | Panel / Bar | Control | Purpose & Starting Value |
 | --- | --- | --- |
-| **Detection** *(Darkening)* | **Also trigger on darkening** | Enables negative-excursion patch detection (`Off` by default; `ChangeKind::Fall`) |
+| **Detection** *(Darkening, Moon only)* | **Also trigger on darkening** | Enables negative-excursion patch detection (`Off` by default; `ChangeKind::Fall`). Hidden and off when **Watching** is **The sky**: against a night sky an object has nothing to darken |
 | | **Maximum dark patch** | Largest dark silhouette allowed (`20000 px` default) |
 | | **Maximum dark box / patch** | Silhouette bounding-box ratio limit (`10.00 ×` default) |
 | | **Large darkening** | Triggers when this % of unmasked pixels falls by `K` at once (`Off` default) |

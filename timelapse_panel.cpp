@@ -42,12 +42,14 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* form = form_;
     preset_ = new QComboBox(body);
     preset_->setObjectName("timelapsePreset");
+    preset_->setToolTip("Moon: rigid alignment with field rotation, keeps the best 25 %. Planet: centres on the disk's limb, keeps the best 15 %. Sets the defaults below.");
     preset_->addItem("Moon", static_cast<int>(TimelapsePreset::Moon));
     preset_->addItem("Planet", static_cast<int>(TimelapsePreset::Planet));
     form->addRow("Target preset", preset_);
 
     interval_ = new QDoubleSpinBox(body);
     interval_->setObjectName("timelapseInterval");
+    interval_->setToolTip("Time from the start of one burst to the start of the next: one stack, one video frame, per interval. At least the capture window.");
     interval_->setRange(0.5, 86400.0);
     interval_->setDecimals(1);
     interval_->setSuffix(" s");
@@ -56,6 +58,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     window_ = new QDoubleSpinBox(body);
     window_->setObjectName("timelapseWindow");
+    window_->setToolTip("How long each burst collects frames. Keep it short enough that the target does not change during it (for planets, under a minute or so).");
     window_->setRange(0.1, 3600.0);
     window_->setDecimals(1);
     window_->setSuffix(" s");
@@ -64,6 +67,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     keepPercent_ = new QDoubleSpinBox(body);
     keepPercent_->setObjectName("timelapseKeepPercent");
+    keepPercent_->setToolTip("Share of the burst's sharpest frames that are stacked; the rest are discarded.");
     keepPercent_->setRange(1.0, 100.0);
     keepPercent_->setDecimals(0);
     keepPercent_->setSuffix(" %");
@@ -79,10 +83,12 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     sharpening_ = new QComboBox(body);
     sharpening_->setObjectName("timelapseSharpening");
+    sharpening_->setToolTip("Sharpening applied to each stack for the video and sharpened/ copies. The unsharpened stacks are always kept, and Re-sharpen can change it later.");
     form->addRow("Sharpening", sharpening_);
 
     cropToLock_ = new QCheckBox("Crop around locked feature", body);
     cropToLock_->setObjectName("timelapseCropLock");
+    cropToLock_->setToolTip("Crops each stack around the feature locked for guiding, instead of keeping the full frame.");
     form->addRow(cropToLock_);
 
     auto* anchorRow = new QHBoxLayout();
@@ -93,6 +99,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     selectAnchor_->setToolTip("Drag a sunlit lunar region expected to keep steady shadows for rotation alignment.");
     clearAnchor_ = new QPushButton("Clear", body);
     clearAnchor_->setObjectName("timelapseClearAnchor");
+    clearAnchor_->setToolTip("Removes the lunar anchor: rotation is measured on the whole lit disk again.");
     anchorRow->addWidget(selectAnchor_, 1);
     anchorRow->addWidget(clearAnchor_);
     form->addRow("Lunar anchor", anchorRow);
@@ -104,6 +111,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     stopKind_ = new QComboBox(body);
     stopKind_->setObjectName("timelapseStopKind");
+    stopKind_->setToolTip("When the time-lapse ends by itself: never (press Stop), after a duration, at a UTC time, or after a number of stacks. The video is built when it ends.");
     stopKind_->addItem("Until I press Stop", static_cast<int>(StopConditionKind::Manual));
     stopKind_->addItem("Fixed duration", static_cast<int>(StopConditionKind::Duration));
     stopKind_->addItem("UTC end time", static_cast<int>(StopConditionKind::UtcEnd));
@@ -112,6 +120,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     durationMin_ = new QDoubleSpinBox(body);
     durationMin_->setObjectName("timelapseDurationMin");
+    durationMin_->setToolTip("The time-lapse stops this long after it starts.");
     durationMin_->setRange(0.1, 1440.0);
     durationMin_->setDecimals(1);
     durationMin_->setSuffix(" min");
@@ -120,6 +129,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     utcEnd_ = new QDateTimeEdit(body);
     utcEnd_->setObjectName("timelapseUtcEnd");
+    utcEnd_->setToolTip("The time-lapse stops at this UTC time.");
     utcEnd_->setTimeZone(QTimeZone::UTC);
     utcEnd_->setDisplayFormat("yyyy-MM-dd HH:mm 'UTC'");
     utcEnd_->setDateTime(QDateTime::currentDateTimeUtc().addSecs(3600));
@@ -127,6 +137,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     targetStacks_ = new QSpinBox(body);
     targetStacks_->setObjectName("timelapseTargetStacks");
+    targetStacks_->setToolTip("The time-lapse stops after this many stacks.");
     targetStacks_->setRange(1, 10000);
     targetStacks_->setValue(60);
     form->addRow("Stack count", targetStacks_);
@@ -134,11 +145,14 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* outRow = new QHBoxLayout();
     writeMp4_ = new QCheckBox("MP4", body);
     writeMp4_->setObjectName("timelapseMp4");
+    writeMp4_->setToolTip("Builds timelapse.mp4 (H.264) from the stacks when the time-lapse ends.");
     writeMp4_->setChecked(true);
     writeGif_ = new QCheckBox("GIF", body);
     writeGif_->setObjectName("timelapseGif");
+    writeGif_->setToolTip("Also builds timelapse.gif, which plays everywhere but is larger and has fewer colours.");
     videoFps_ = new QSpinBox(body);
     videoFps_->setObjectName("timelapseVideoFps");
+    videoFps_->setToolTip("Frames per second of the video: each stack is one frame.");
     videoFps_->setRange(1, 60);
     videoFps_->setValue(12);
     videoFps_->setSuffix(" fps");
@@ -162,8 +176,10 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* btnRow = new QHBoxLayout();
     startStopButton_ = new QPushButton("Start time-lapse", body);
     startStopButton_->setObjectName("timelapseStartButton");
+    startStopButton_->setToolTip("Starts the time-lapse from the current stream (starting Preview if needed), or stops it and builds the video.");
     resharpenButton_ = new QPushButton("Re-sharpen…", body);
     resharpenButton_->setObjectName("timelapseResharpenButton");
+    resharpenButton_->setToolTip("Opens Re-sharpen for a finished time-lapse: try other sharpening and tone settings, and rebuild the video, without changing the stacks.");
     btnRow->addWidget(startStopButton_, 1);
     btnRow->addWidget(resharpenButton_);
     root->addLayout(btnRow);
@@ -211,6 +227,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* filmHead = new QHBoxLayout();
     filmHead->addWidget(new QLabel("Filmstrip loop", liveBox));
     loopFilmstrip_ = new QCheckBox("Loop", liveBox);
+    loopFilmstrip_->setToolTip("Plays the stacks so far as a loop in the filmstrip, a preview of the video.");
     loopFilmstrip_->setChecked(true);
     filmHead->addWidget(loopFilmstrip_);
     filmCol->addLayout(filmHead);

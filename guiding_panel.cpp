@@ -220,6 +220,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     lockButton_->setToolTip(QString("Lock on a %1 x %1 pixel box centred on the selected pixel.").arg(kDefaultLockSide));
     unlockButton_ = new QPushButton("Unlock", lockBox);
     unlockButton_->setObjectName("unlockButton");
+    unlockButton_->setToolTip("Releases the feature lock. Guiding stops using it until a new region is locked.");
     auto* lockButtons = new QHBoxLayout;
     lockButtons->addWidget(lockButton_);
     lockButtons->addWidget(unlockButton_);
@@ -244,8 +245,10 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     driver_ = wrapped(mountBox, "mountDriverLabel");
     connectButton_ = new QPushButton("Connect", mountBox);
     connectButton_->setObjectName("connectMountButton");
+    connectButton_->setToolTip("Connects to the chosen mount (simulated or ASCOM) so guiding can send pulses to it.");
     disconnectButton_ = new QPushButton("Disconnect", mountBox);
     disconnectButton_->setObjectName("disconnectMountButton");
+    disconnectButton_->setToolTip("Disconnects the mount. Guiding pulses stop.");
     mountState_ = readout(mountBox, "mountStateLabel", {mountText(widest.guide), mountText(GuideStatus{.mountNotResponding = true})});
     auto* driverRow = new QHBoxLayout;
     driverRow->addWidget(chooseButton_);
@@ -281,6 +284,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     toleranceReadout_ = wrapped(guideBox);
     guideButton_ = new QPushButton("Start guiding", guideBox);
     guideButton_->setObjectName("guideButton");
+    guideButton_->setToolTip("Starts or stops pulse guiding on the locked feature. Needs a connected, calibrated mount.");
     guiding_ = readout(guideBox, "guidingLabel", {guidingText(widest.guide)});
     guideMessage_ = wrapped(guideBox, "guideMessageLabel");
     guideMessage_->setStyleSheet("color: #e0a030;");

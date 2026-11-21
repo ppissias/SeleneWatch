@@ -19,14 +19,17 @@ ToupTekCameraPanel::ToupTekCameraPanel(std::shared_ptr<ToupTekApi> api, QWidget*
     layout->addWidget(runtime_);
     cameras_ = new QComboBox(this);
     cameras_->setObjectName("toupTekCameras");
+    cameras_->setToolTip("The connected ToupTek camera to use.");
     refresh_ = new QPushButton("Refresh cameras", this);
     refresh_->setObjectName("refreshToupTekCameras");
+    refresh_->setToolTip("Searches again for connected ToupTek cameras.");
     layout->addWidget(cameras_);
     layout->addWidget(refresh_);
     editor_ = new CameraSettingsEditor(2, 2, this);
     layout->addWidget(editor_);
     apply_ = new QPushButton("Apply settings", this);
     apply_->setObjectName("applyToupTekCamera");
+    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
     layout->addWidget(apply_);
     readback_ = new QLabel("Refresh to discover ToupTek cameras.", this);
     readback_->setWordWrap(true);

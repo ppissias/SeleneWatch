@@ -13,10 +13,13 @@ CameraPanel::CameraPanel(std::shared_ptr<ZwoApi> api,QWidget* parent):CameraFami
     setObjectName("cameraPanel");
     auto* layout=new QVBoxLayout(this);
     cameras_=new QComboBox(this); cameras_->setObjectName("asiCameras");
+    cameras_->setToolTip("The connected ZWO camera to use.");
     refresh_=new QPushButton("Refresh cameras",this); refresh_->setObjectName("refreshCameras");
+    refresh_->setToolTip("Searches again for connected ZWO cameras.");
     layout->addWidget(cameras_); layout->addWidget(refresh_);
     editor_=new CameraSettingsEditor(8,2,this);layout->addWidget(editor_);
     apply_=new QPushButton("Apply settings",this); apply_->setObjectName("applyCamera"); layout->addWidget(apply_);
+    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
     readback_=new QLabel("Select the camera source and refresh to discover ASI devices.",this);
     readback_->setWordWrap(true); readback_->setObjectName("cameraReadback"); layout->addWidget(readback_);
     auto* hint=new QLabel("In Preview, native controls apply live after an edit. Actual readbacks appear below. Format, binning and ROI use Apply and restart Preview. Stop monitoring to tune camera settings again. RAW16 keeps every delivered word.",this);

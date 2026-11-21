@@ -9,6 +9,7 @@ class QComboBox;
 class QSpinBox;
 class QDoubleSpinBox;
 class QFormLayout;
+class QSlider;
 class QTimer;
 // Requested raw format and ROI in output pixels after binning.
 struct CameraGeometry
@@ -47,7 +48,10 @@ private:
     QSpinBox *width_,*height_,*x_,*y_;
     QFormLayout* controlForm_;
     // The spin box uses display units. Scale converts its value back to SDK units.
-    struct Control { QDoubleSpinBox* widget; double scale; };
+    // Feature-25: a ranged, writable control also has a slider beside the box,
+    // logarithmic when its range spans more than three decades (exposure).
+    struct Control { QDoubleSpinBox* widget; double scale; QSlider* slider{nullptr}; };
+    QSlider* addSlider(QDoubleSpinBox* input,bool logarithmic);
     std::map<int,Control> controls_;
     QTimer* liveTimer_;
     bool liveEditing_{false};
