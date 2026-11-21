@@ -1,0 +1,186 @@
+#pragma once
+
+#include "capture_settings.h"
+#include "detection_result.h"
+#include "frame.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+// Feature-26: auto-tune's measurements and suggestions. No widgets and no
+// threads: plain functions over frames and numbers, so they can be tested on
+// synthetic and recorded frames. The session measures (AutoTuneWatch); the
+// window shows and applies.
+
+// What the observer is watching for. Each has its own aim (CAMERA_SETTINGS_GUIDE.md).
+enum class TuneWorkflow { MoonFlashes, MoonTransits, Sky };
+[[nodiscard]] TuneWorkflow tuneWorkflow(Target target, const DetectionSettings& settings);
+
+// Where the measured brightness should be, as shares of full scale, and the
+// exposure range the workflow allows, in microseconds.
+struct TuneAim
+{
+    double low{0}, high{0}, aim{0};
+    double minExposureUs{0}, maxExposureUs{0};
+    // The brightest sunlit pixels (transits), or the area's median.
+    bool brightest{false};
+};
+// skyMaxExposureUs is the longest exposure for meteors, the observer's choice.
+[[nodiscard]] TuneAim tuneAim(TuneWorkflow workflow, double skyMaxExposureUs = 250'000);
+
+// Which pixels are measured: inside[y * width + x] != 0. Empty measures the
+// whole frame.
+struct TuneArea
+{
+    int width{0}, height{0};
+    std::vector<uint8_t> inside;
+    [[nodiscard]] bool wholeFrame() const { return inside.empty(); }
+    [[nodiscard]] bool fits(const Frame& frame) const;
+};
+// The sky outside the mask; whole frame without a mask.
+[[nodiscard]] TuneArea skyArea(const DetectionMask& mask, int width, int height);
+
+// One frame's brightness in the area, as shares of full scale.
+struct BrightnessSample
+{
+    double level{0};    // The median, or the 99.9th percentile with brightest.
+    double atZero{0};   // Share of the area's samples at 0.
+    double atMax{0};    // Share at the maximum code.
+    size_t samples{0};
+};
+// None when the area has no samples in this frame (a fully masked sky).
+[[nodiscard]] std::optional<BrightnessSample> measureBrightness(const Frame& frame, const TuneArea& area, bool brightest);
+
+// Feature-26: the earthshine area grown from the observer's box, on a grid of
+// cells. A cell is in it when it is connected to the box, closer to the box's
+// earthshine than to the sky beyond the Moon's edge, no more than three times
+// as far above that sky as the box, and has no saturated pixel. When the sky
+// cannot be told from the earthshine, or the area is smaller than the box or
+// covers nearly the whole frame, only the box is measured and problem says why.
+struct EarthshineArea
+{
+    static constexpr int kCell = 8;
+    int columns{0}, rows{0};
+    std::vector<uint8_t> cells;   // columns * rows, 1 when in the area.
+    int cellCount{0};
+    double shareOfFrame{0};
+    double boxLevel{0}, skyLevel{0}; // Shares of full scale.
+    bool boxOnly{false};
+    std::string problem;
+    [[nodiscard]] TuneArea pixels(int width, int height) const;
+};
+struct PixelBox
+{
+    int x{0}, y{0}, width{0}, height{0};
+};
+[[nodiscard]] EarthshineArea findEarthshine(const Frame& frame, const PixelBox& box);
+
+// The camera's controls in their native units (exposure in microseconds).
+struct TuneControl
+{
+    double value{0}, minimum{0}, maximum{0};
+    bool operator==(const TuneControl&) const = default;
+};
+struct TuneCamera
+{
+    std::optional<TuneControl> exposure, gain, offset;
+    bool operator==(const TuneCamera&) const = default;
+};
+
+// One suggested change, shown as a row the observer can tick.
+struct TuneRow
+{
+    enum class Kind { Exposure, Gain, Offset, FollowExposure, FollowGain };
+    Kind kind{Kind::Exposure};
+    std::string name, now, suggested, why;
+    // The values to apply: one control's native value, or the follower's
+    // limits (exposure from and to in ms; gain up to and its step).
+    double value{0}, value2{0};
+    bool ticked{false};
+};
+
+// A brightness measured at known camera settings. Two of them at different
+// exposures and the same gain give the camera's black level (Feature-26,
+// design point 8).
+struct TuneMeasurement
+{
+    double exposureUs{0}, gain{0};
+    BrightnessSample brightness;
+};
+
+struct CameraTuneInput
+{
+    TuneWorkflow workflow{TuneWorkflow::MoonFlashes};
+    TuneCamera camera;
+    std::optional<BrightnessSample> measured;
+    std::optional<TuneMeasurement> previous;
+    double skyMaxExposureUs{250'000};
+    // The exposure follower (Sky): whether it is on, and its current limits.
+    bool follow{false};
+    double followFromMs{1}, followToMs{2000}, followMaxGain{0}, followGainStep{0};
+};
+
+struct CameraSuggestion
+{
+    std::vector<TuneRow> rows;
+    std::vector<std::string> warnings;
+    std::string verdict;
+    bool inAim{false};
+    // The aim can be reached within the camera's range and the workflow's limits.
+    bool reachable{true};
+};
+[[nodiscard]] CameraSuggestion suggestCamera(const CameraTuneInput& input);
+
+// What one K would have done during a watch.
+struct TuneEvent
+{
+    uint64_t frameIndex{0};
+    std::chrono::system_clock::time_point time{};
+    ChangeKind change{ChangeKind::Rise};
+    int x{0}, y{0}, width{0}, height{0};
+    int pixels{0};
+    double peakSigma{0};
+};
+struct KRowResult
+{
+    double k{0};
+    uint64_t frames{0};
+    double seconds{0};
+    // Frames whose patch search was skipped because too many pixels were at
+    // K: a quiet count there means nothing.
+    uint64_t limitedFrames{0};
+    uint64_t events{0};              // Every candidate, also past the kept list.
+    std::vector<TuneEvent> kept;     // The first kMaxKept candidates.
+    static constexpr size_t kMaxKept = 200;
+    std::string stopped;             // Why the row stopped early, if it did.
+};
+
+// The K values a watch compares, the most wanted first: the current K, then
+// one above, one below and two above, never below kMinimumK, at most count.
+constexpr double kMinimumK = 5.0;
+[[nodiscard]] std::vector<double> kValuesToTest(double centre, int count);
+
+// One listed event: the candidates of different K rows at the same place and
+// time (frames at most one apart, boxes touching, the same kind).
+struct TuneEventGroup
+{
+    TuneEvent first;
+    std::vector<std::pair<size_t, size_t>> members; // (row, kept index)
+};
+[[nodiscard]] std::vector<TuneEventGroup> groupEvents(const std::vector<KRowResult>& rows);
+
+// A row's candidates left after the excluded groups (the observer's real events).
+[[nodiscard]] uint64_t remainingEvents(const std::vector<KRowResult>& rows, size_t row,
+    const std::vector<TuneEventGroup>& groups, const std::vector<bool>& excluded);
+
+// The lowest K whose row covered the watch, had no limited frames, and has
+// no remaining events. None, with the reason, otherwise.
+struct KChoice
+{
+    std::optional<double> k;
+    std::string reason;
+};
+[[nodiscard]] KChoice chooseK(const std::vector<KRowResult>& rows, const std::vector<TuneEventGroup>& groups,
+    const std::vector<bool>& excluded, double watchSeconds);

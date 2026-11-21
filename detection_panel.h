@@ -11,6 +11,7 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QPushButton;
 class QSpinBox;
 class QToolButton;
 class MeterSlider;
@@ -71,6 +72,11 @@ public:
     void showNight(const QString& text);
     void showFollow(const QString& text);
 
+    // Feature-26: the auto-tune panel, shown at the top of the dock while the
+    // prominent Auto-tune button above the settings is on.
+    void setAutoTunePanel(QWidget* panel);
+    [[nodiscard]] bool autoTuneShown() const;
+
     // Named detection profiles (saved per target; Sky horizon mask is optional).
     void reloadProfiles();
     bool saveCurrentProfile(const QString& name, bool includeMask = false);
@@ -84,6 +90,7 @@ signals:
     // The observer chose another target in the choice box.
     void targetRequested(Target target);
     void maskDrawingChanged(bool drawing);
+    void autoTuneToggled(bool shown);
 
 private:
     void controlsChanged(bool maximumChanged = false);
@@ -93,6 +100,8 @@ private:
     void onDeleteProfileClicked();
     void onProfileComboChanged(int index);
 
+    QPushButton* autoTune_;
+    QWidget* autoTuneHolder_;
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
     MeterSlider* maxSlider_;

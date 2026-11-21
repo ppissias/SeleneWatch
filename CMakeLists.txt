@@ -61,7 +61,7 @@ add_library(selenewatch_core STATIC
     recording/metadata_text.cpp recording/output_paths.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
     timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
     timelapse/video_exporter.cpp timelapse/timelapse_session.cpp
-    detection_mask.cpp detection_profiles.cpp sky_schedule.cpp sky_exposure.cpp
+    detection_mask.cpp detection_profiles.cpp sky_schedule.cpp sky_exposure.cpp auto_tune.cpp auto_tune_watch.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
 )
@@ -192,7 +192,8 @@ if(SELENEWATCH_TOUPTEK_SDK_DIR)
         SELENEWATCH_TOUPTEK_HEADER="${touptek_header}")
 endif()
 
-add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp wheel_guard.h
+add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp mainwindow_autotune.cpp wheel_guard.h
+    auto_tune_panel.h auto_tune_panel.cpp
     preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
     histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
     manual_dialog.h manual_dialog.cpp startup_tips.h startup_tips.cpp tips_dialog.h tips_dialog.cpp
@@ -291,6 +292,11 @@ target_link_libraries(SeleneWatchDarkeningTests PRIVATE selenewatch_core Qt6::Te
 selenewatch_compile_options(SeleneWatchDarkeningTests)
 add_test(NAME darkening COMMAND SeleneWatchDarkeningTests -o -,tap)
 set_tests_properties(darkening PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(SeleneWatchAutoTuneTests tests/auto_tune_tests.cpp)
+target_link_libraries(SeleneWatchAutoTuneTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchAutoTuneTests)
+add_test(NAME auto_tune COMMAND SeleneWatchAutoTuneTests -o -,tap)
 
 add_executable(SeleneWatchSkyExtrasTests tests/sky_extras_tests.cpp)
 target_link_libraries(SeleneWatchSkyExtrasTests PRIVATE selenewatch_core Qt6::Test)

@@ -48,10 +48,10 @@ std::optional<SkyExposureChange> decideSkyExposure(double level, double exposure
     return change;
 }
 
-double skyLevel(const Frame& frame, const DetectionMask& mask)
+std::optional<double> skyLevel(const Frame& frame, const DetectionMask& mask)
 {
     const size_t pixels = static_cast<size_t>(frame.width) * frame.height;
-    if (pixels == 0 || frame.data.size() != frameBytes(frame.width, frame.height, frame.format)) return 0;
+    if (pixels == 0 || frame.data.size() != frameBytes(frame.width, frame.height, frame.format)) return std::nullopt;
     std::vector<uint8_t> masked;
     if (!mask.empty())
     {
@@ -74,7 +74,7 @@ double skyLevel(const Frame& frame, const DetectionMask& mask)
         case PixelFormat::RGB888: samples.push_back((data[3 * i] + data[3 * i + 1] + data[3 * i + 2]) / 3.0); break;
         }
     }
-    if (samples.empty()) return 0;
+    if (samples.empty()) return std::nullopt;
     const auto middle = samples.begin() + static_cast<ptrdiff_t>(samples.size() / 2);
     std::nth_element(samples.begin(), middle, samples.end());
     return *middle / fullScale;

@@ -145,7 +145,9 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         if (!camera) return;
         camera->showSourceReadback(true);
         showMessage("Camera controls read back. Preview is settling and relearning.",4000);
+        onCameraReadbackForAutoTune();
     };
+    notifications.autoTuneChanged = [this] { onAutoTuneChanged(); };
     notifications.manualSaveHandled = [this](bool saved) {
         if (saved) { ++manualCaptures_; updateCandidateReadout(); }
         updateControls();
@@ -213,6 +215,13 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     });
     connect(ui_->previewWidget, &PreviewWidget::shapeClosed, this, [this] { closeMaskShape(); });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
+        // Feature-26: the box auto-tune grows the earthshine area from.
+        if (drawingEarthshineBox_)
+        {
+            setEarthshineBox(region);
+            showMessage("Earthshine box set; its area is outlined on the preview.", 4000);
+            return;
+        }
         if (timelapsePanel_ && timelapsePanel_->selectingAnchor())
         {
             timelapsePanel_->setLunarAnchor(region);
@@ -471,6 +480,7 @@ void MainWindow::setupDetectionPanel()
     connect(detectionPanel_, &DetectionPanel::settingsChanged, this, [this] {
         session_->setDetectionSettings(detectionPanel_->settings());
         ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
+        onDetectionSettingsChangedForAutoTune();
     });
     connect(detectionPanel_, &DetectionPanel::targetRequested, this, &MainWindow::onTargetRequested);
 
@@ -507,6 +517,7 @@ void MainWindow::setupDetectionPanel()
     connect(detectionPanel_, &DetectionPanel::displayChanged, this, &MainWindow::updateDetectionDisplay);
     connect(detectionDock_, &QDockWidget::visibilityChanged, this, &MainWindow::updateDetectionDisplay);
     updateDetectionDisplay();
+    setupAutoTune();
     resize(1340, 820);
 }
 
@@ -713,7 +724,15 @@ void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
         detectionPanel_->showFollow("Follows the sky while a camera runs.");
         return;
     }
-    // Both camera families number Exposure 0 and Gain 1, in microseconds and their own units.
+    // Feature-26: auto-tune measures one settled configuration at a time, so
+    // the follower waits, and its hold starts afresh when it resumes.
+    if (autoTuneMeasuring())
+    {
+        skyExposureState_ = {};
+        detectionPanel_->showFollow("Paused while auto-tune measures.");
+        return;
+    }
+    // Every camera family numbers Exposure 0 and Gain 1, in microseconds and their own units.
     constexpr int kExposure = 0, kGain = 1;
     const auto exposure = controls->controlValue(kExposure);
     if (!exposure) return;
@@ -725,7 +744,16 @@ void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
     rule.minGain = gainRange ? gainRange->first : 0;
     rule.maxGain = gainRange ? std::min(gainRange->second, std::max(rule.minGain, extras.maxGain)) : 0;
     rule.gainStep = gain ? extras.gainStep : 0;
-    const double level = skyLevel(*latestFrame_, detectionPanel_->settings().mask);
+    const auto measured = skyLevel(*latestFrame_, detectionPanel_->settings().mask);
+    if (!measured)
+    {
+        // A fully masked sky has no level; reading it as black would keep
+        // lengthening the exposure.
+        skyExposureState_ = {};
+        detectionPanel_->showFollow("The mask covers the whole frame: there is no sky to follow.");
+        return;
+    }
+    const double level = *measured;
     detectionPanel_->showFollow(QString("Sky at %1% of full scale. Exposure %2 ms, gain %3.")
         .arg(100 * level, 0, 'f', 1).arg(*exposure / 1000, 0, 'g', 4).arg(gain.value_or(0), 0, 'f', 0));
     const auto change = decideSkyExposure(level, *exposure, gain.value_or(0), now, skyExposureState_, rule);
@@ -785,6 +813,9 @@ void MainWindow::applyTarget()
             ui_->previewWidget->setAnchorBox(timelapsePanel_->settings().lunarAnchor);
         }
     }
+    // Feature-26: each target has its own aim; the earthshine outline is the Moon's.
+    updateEarthshineArea();
+    updateAutoTune();
 }
 
 void MainWindow::setupDisplayPanel()
@@ -1962,6 +1993,8 @@ CameraFamilyPanel* MainWindow::activeCamera() const
 // Which controls can be used depends on the source and on whether it runs.
 void MainWindow::updateControls()
 {
+    // Feature-26: what auto-tune may do follows the stream's state.
+    updateAutoTune();
     const bool running = session_->isRunning();
     const bool recording = recordingSelected();
     const bool monitoring = session_->mode()==Session::Mode::Monitoring;
@@ -2573,7 +2606,10 @@ void MainWindow::showLatestFrame()
         lastFrameHeight_ = frame->height;
         lastFrameBpp_ = static_cast<int>(bytesPerPixel(frame->format));
         updateFrameLabel(*frame);
+        const bool firstFrame = !latestFrame_;
         latestFrame_ = frame;
+        // Feature-26: auto-tune measures once the stream's first frame is in.
+        if (firstFrame) updateAutoTune();
         if (const int side = std::min(frame->width, frame->height); side != frameShortSide_)
         {
             frameShortSide_ = side;
@@ -2582,6 +2618,8 @@ void MainWindow::showLatestFrame()
         }
         renderPreview();
         updateHistogram();
+        // Feature-26: the earthshine area, once a frame arrives after the box was drawn.
+        if (autoTunePanel_ && earthshineBox_ && earthshineArea_.columns == 0) updateEarthshineArea();
         if (packet.detection)
         {
             const auto& view = *packet.detection;

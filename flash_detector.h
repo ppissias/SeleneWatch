@@ -53,6 +53,11 @@ public:
     // Before updateReference: reuses the caller's charged buffer for this
     // frame's actual pre-update display difference.
     void difference(const Frame& frame, BudgetVector<float>& values) const;
+    // Feature-26: the noise one pixel's test uses, in native ADU: its learned
+    // spread, but never below the frame's noise floor. Zero before learning.
+    [[nodiscard]] double pixelNoise(size_t pixel) const;
+    // Bytes a copy of this detector holds for a frame of this many pixels.
+    [[nodiscard]] static size_t workingBytes(size_t pixels, const DetectionSettings& settings);
 
 private:
     DetectionSettings settings_;

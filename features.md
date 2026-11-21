@@ -24,7 +24,8 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-23 — A window that fits a small laptop screen](#feature-23--a-window-that-fits-a-small-laptop-screen) | Controls above the preview wrap instead of squeezing; a test that no text is cut off | Implemented; UI test passing; laptop check pending |
 | [Feature-24 — Help on every control](#feature-24--help-on-every-control) | One help text per control, as tooltip and as a clickable ⓘ on the label | Implemented; UI test passing |
 | [Feature-25 — Sliders for camera settings](#feature-25--sliders-for-camera-settings) | Slider beside the exact value for gain, offset, exposure (logarithmic) and other ranged controls | Implemented; UI test passing; real camera check pending |
-| [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | A short or longer watch in Preview suggests exposure, gain and K for the Moon (flashes or transits) or the sky, and fills in the exposure follower's limits | Designed and revised after review; awaiting approval |
+| [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | A short or longer watch in Preview suggests exposure, gain and K for the Moon (flashes or transits) or the sky, and fills in the exposure follower's limits | Implemented; automated and real-window tests passing; real camera, night-sky and earthshine replay checks pending |
+| [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Proposed |
 
 ## Feature-9 — A measured trigger
 
@@ -1472,7 +1473,7 @@ Gain, offset and exposure are adjusted by eye while watching the preview and the
 
 ## Feature-26 — Auto-tune and suggested camera settings
 
-*Proposed on 21 November 2026. Designed and revised the same day, after the observer's decisions and a design review (both below). Awaiting the observer's approval; not implemented.*
+*Proposed on 21 November 2026. Designed and revised the same day, after the observer's decisions and two design reviews (all below). Implemented on 21 November 2026 at the observer's request; see the status section at the end.*
 
 Tonight's settings are found by hand: the observer reads the histogram, compares it with [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md), clicks pixels to read their noise, injects test flashes and adjusts K until Preview stops saying "Would trigger" on nothing. Auto-tune does that measurement for them. It watches the Preview for a short or a longer time and proposes camera and detection settings, separately for the Moon and the sky. The observer accepts the suggestions, or some of them, or none.
 
@@ -1587,7 +1588,10 @@ Auto-tune has two steps, because a K measured with one exposure and gain is no l
 12. **Evidence stays intact.**
     - The watches save nothing.
     - Applied values become ordinary settings, recorded as now: exposure, gain and offset on session_start, and K and the patch limits on every candidate.
-    - The next session_start also gets one `autotune` field. It records the time, the target, the watch length and frames measured, the measured level and noise, the K values tested with their event counts, and which rows were applied with the values the camera reported back.
+    - *(As built.)* Each applied change is logged in `candidates.txt` at the moment it is applied, like the exposure follower's `exposure_change`, instead of one field on the next session_start, which may come hours later or never (Preview and Monitoring in one stream):
+      - `autotune_camera`: the target, the measured level and the applied rows;
+      - `autotune_readback`: the exposure, gain and offset the camera reported back;
+      - `autotune_k`: the old and new K, each tested K with its remaining and found events, its time and its frames with a skipped search, the excluded events, the watch length and the measured noise.
 
 ### Considered and left out
 
@@ -1620,7 +1624,7 @@ Auto-tune has two steps, because a K measured with one exposure and gain is no l
 2. A replay test with two bright cores joined by a faint bridge:
    - each K's count equals that of a detector run alone at that K;
    - the suggested K is never one that had an event;
-   - an unticked event lasting many frames counts once.
+   - *(Revised after the second review.)* Excluding an event removes it and leaves other events, even in the same frame, counted.
 3. On a recorded night from `test_data`, a separate check after the watched span:
    - the suggested K, applied to the same recording, gives no false triggers over a known quiet span;
    - a set of marked test flashes of stated widths, durations and positions is reported with how many were recovered.
@@ -1631,7 +1635,7 @@ Auto-tune has two steps, because a K measured with one exposure and gain is no l
    - Apply and the button are disabled during Monitoring, including when the night schedule starts it;
    - the follower is paused during a watch;
    - with Follow on, the follower's limits are filled in;
-   - the next session_start has the `autotune` field.
+   - *(As built.)* every applied change is logged in `candidates.txt`.
 5. The real-window test (`tests\gui_e2e_test.ps1`) runs a quick auto-tune on the synthetic source.
 6. MANUAL, README and the camera settings guide describe Auto-tune, its aims, its two steps, the twilight advice and its limits.
 
@@ -1678,3 +1682,84 @@ On the open decisions the review and the observer agree:
 - the button in the Detection dock.
 
 For the follower's limits, the review suggested keeping the observer's limits by default. The observer chose to let auto-tune raise the gain. The design does both: the limits are a separate row, ticked by default when the follower is on, and the gain ceiling is bounded.
+
+### Feature-26 second design review — 21 November 2026
+
+The two-step workflow and independent detector runs address the main findings from the first pass. I would keep the observer's four decisions. Before implementation, I would settle three details that determine whether the K recommendation is trustworthy.
+
+1. **A zero count needs usable coverage.** At a low K, enough pixels can cross threshold that `FlashDetector` skips its compact-patch search and sets `patchSearchLimited` or `darkSearchLimited`. With large-change triggers off, that row can show zero candidates even when a higher K resolves two real patches. A fully masked sky also produces zero candidates at every K. Show the usable span and search-limited frames per row. Withhold a quiet-K recommendation when there is no searchable area or an enabled search was skipped during the comparison. Add a dense-frame replay that would otherwise select the lowest K for precisely this reason. [Detector search and limit flags](flash_detector.cpp)
+
+2. **Give each K the same start and protect normal acquisition.** On a live camera, the existing Preview detector may already have minutes of learned history while a new trial detector starts with its first frame. Give every compared row the same initialization frames and count over the same subsequent frames. Budget each extra detector against the session's shared RAM ceiling as well as its frame-time allowance. If none fits, the proposed **Try K** still needs a way to run: offer an explicit change to the ordinary Preview K and label the second watch with its own time span. Test under a tight RAM ceiling that Preview continues and no row claims frames it missed. [Detector state](flash_detector.h) · [Shared memory budget](docs/feature-5-validation.md)
+
+3. **Specify exactly what excluding an event does.** Step 2 says unticking a real event removes it, but design point 4 selects a K with “no unticked event.” Those rules give opposite answers. Use **Exclude from noise count** and choose the lowest eligible K with zero *remaining* candidates. Preserve raw and excluded counts per K in the table and provenance. The detector tracks adjacent patches across frames. A fast plane can move beyond its previous box and produce multiple candidates, and two independent candidates can occur in the same frame. Keep the individual candidates inspectable when grouping them. Test a real transit and a separate noise patch in the same frame: excluding the transit must leave the noise patch counted. [Patch matching](flash_detector.cpp)
+
+Three smaller changes would make the camera and evidence behavior testable:
+
+- **Make the pedestal optional.** The camera adapters expose Offset or Black level in vendor control units. The proposal needs a verified conversion before subtracting that number from a raw median in ADU. If it is unknown, take a bounded exposure step and remeasure. For the earthshine outline, test a tight crop with no off-limb sky: the darkest 2% can be lunar terrain. Fall back to the observer's box when the background estimate is unreliable. Let the observer proceed to K with their current settled settings even if they decline a camera suggestion and the brightness remains outside the aim. [Camera offset readback](cameras/qhy_source.cpp) · [Mode-dependent black-level range](cameras/touptek_sdk.cpp)
+- **Cover manual recording in Preview.** An observer can press **Record** in Preview, and the session applies a test flash before passing the frame to the recorder. A recovery check started then would put the flash in the observer's SER. Keep camera Apply and the injection check unavailable during a manual recording, including when Record starts with the panel open. Verify that cancelling a pending check leaves the recorded frames untouched. [Session frame order](session.cpp) · [Manual recording workflow](MANUAL.md)
+- **Invalidate on detector edits as well as camera edits.** Changing minimum patch size, one-frame confirmation, noise floor or the reference time changes what the K table means. Bind each result to the complete detection settings used for that watch and check them again at Apply. A UI test can finish a watch, switch one-frame confirmation, and verify that the old K suggestion can no longer be applied. [Detector settings handling](flash_detector.cpp)
+
+### Response to the second design review — 21 November 2026
+
+All six points were checked against the code and accepted. Two are met in a slightly different way, noted below.
+
+1. **A zero count needs usable coverage.** Accepted. Each row shows how much time it measured and on how many frames its patch search was skipped. A row with a skipped search, or one that stopped early or covered less than 80 % of the watch, is never suggested. A fully masked sky stops the watch with "there is nothing to watch". Test: `aSkippedSearchIsNeverAQuietK`.
+2. **The same start, within the budgets.**
+   - **Same start:** accepted, met differently. Rather than re-learning every copy from the same first frames (about 5 s of a 15 s watch with the Moon's 2 s learning time), every row is a copy of the live detector taken at one frame, then re-armed with the existing `rearm()`. All rows start from the same learned background, and every row counts over the same later frames. The watch first waits until the live detector has learned for three of its time constants (at most 10 s).
+   - **Budgets:** copies run only within seven tenths of the frame time and within the part of the RAM ceiling's processing reserve that no buffer is sized for. A copy refused by the RAM ceiling stops only its own row.
+   - **No room:** with no room for a copy, the live detector's own candidates are counted at the current K, and **Try K** changes the ordinary Preview K visibly and watches again. Each row keeps its own time span.
+3. **Excluding an event.** Accepted. The list offers each event to exclude from the noise count. One listed event is the candidates of different K rows at the same place and time. The suggestion is the lowest eligible K with no remaining events. Raw and remaining counts are shown and logged. Test: `excludingAnEventLeavesOthersCounted`.
+4. **The pedestal.** Accepted. No vendor offset is converted.
+   - **Black level:** two brightness measurements at the same gain and different exposures give it in ADU. Without them, an exposure change is bounded to a factor of four, and the check measures it.
+   - **Tight crop:** the earthshine area falls back to the box. It does so when the darkest cells are not much darker than the box (below 60 %), or when they do not reach the frame's border. **Measure only my box** forces the fallback.
+   - **Step 2 any time:** the K watch can be run without accepting a camera suggestion.
+5. **Manual recording.** Accepted. Camera Apply and the flash check are unavailable during a recording. The session also cancels a pending check flash, before the flash reaches a frame, when a recording starts or is requested. The cancelled flash is never drawn, so the recorded frames stay untouched.
+6. **Detection setting changes.** Accepted. A K result is bound to the complete detection settings and the camera values it was measured with. Any detection change withdraws it, and Apply K checks both again. Test: `autoTuneMeasuresAppliesAndChecks` switches one-frame confirmation after a watch.
+
+### Feature-26 status & verification
+
+- **Implemented** on 21 November 2026:
+  - `auto_tune.h/.cpp`: aims, brightness over an area, the earthshine area, the camera suggestion, K values, event groups and the choice of K;
+  - `auto_tune_watch.h/.cpp`: the measurement on the source thread, with the K rows, the flash check, and stopping on any change;
+  - the `Session` hooks;
+  - `auto_tune_panel.h/.cpp` and `mainwindow_autotune.cpp`;
+  - the preview's earthshine outline;
+  - the **Auto-tune…** button above the Detection dock's settings.
+- **Follower fixes:** `skyLevel` returns no value for a fully masked frame, and the follower then waits. The follower also pauses while auto-tune measures.
+- **Tests:**
+  - **Core:** the 17-test `auto_tune` suite.
+  - **Window:** `autoTuneMeasuresAppliesAndChecks` and `autoTuneOutlinesTheEarthshineBox` run the whole flow with a fake ZWO camera. Small-screen fit and help on every control are checked with the panel open.
+  - **Real window:** `tests\gui_e2e_test.ps1` runs a quick K watch on the synthetic sky and applies the suggestion; its run gave K 5.0 with a 9 ADU per-pixel threshold.
+  - **Suites:** all 23 CTest suites pass.
+- **Pending:**
+  - **Done-when 3:** a replay on a recorded earthshine night of the suggested K's quiet span and of marked flashes recovered. It needs the representative earthshine recording that Feature-27's field validation also asks for.
+  - **Real cameras:** checks on a real camera of the gain step and the readback check.
+  - **Night sky:** a run under a real night sky.
+## Feature-27 — Detector tuning, capture status and nightly review
+
+*Proposed on 21 November 2026 following a review of the observing workflow.*
+
+The existing observing modes fit three different jobs. Monitoring preserves unexpected events and their lead-up, Record covers the full interval of a predicted event, and Time-lapse stacks selected frames to show gradual change. Display stretch lets the observer examine faint earthshine while the SER retains the original samples. Keep those choices. This proposal addresses what the observer needs to know while tuning, during capture and the following morning.
+
+### 1. Explain what the sensitivity trace measures
+
+The quick start advises raising K above the ten-second peak trace. The slider help says a mark beyond K would trigger. A single noisy pixel can produce that mark. The detector also tests connected patch size and shape and, when selected, confirmation on a second frame. Following the current advice can cost sensitivity even when the detector was already rejecting the peaks. In the terminator replay, K=6 recovered four of five marked flashes. K=24 produced a quiet control run and recovered one of five. These are results for that particular recording. [Quick start](README.md) · [Slider help](detection_panel.cpp) · [Replay measurements](docs/reference-and-manual-validation.md)
+
+Update the trace label, help and observing instructions to explain the peak in pixel-noise units. Direct observers to **Would trigger** for the detector's actual decision and to a marked test flash to check recovery at a chosen position, amplitude and duration. This wording correction can ship independently of Feature-26.
+
+### 2. Say what is being saved
+
+An observer can press **Record** in Preview and see “capture OFF” above a running recording readout. Name the two activities explicitly. For example, while a SER is being written in Preview, show **Automatic event clips off · Continuous recording on**. In Monitoring, show whether automatic clips are armed and whether a continuous recording is also running. Keep recording failures visible. [Mode banner](mainwindow.cpp) · [Observing modes](MANUAL.md)
+
+### 3. Make the first event-browser view a night in chronological order
+
+After a patrol, the observer already has an overview, a short animation and raw frames for each saved clip. The harder question is “When was I watching, and which candidates deserve another look?” Show Monitoring intervals and known interruptions alongside the candidates. For example, a sky-follower exposure change briefly restarts Monitoring. A quiet interval, a known interruption and a candidate whose clip could not be saved should each be identifiable. Where older logs establish only the start of an interval, show its end as unknown. [Sky patrol and saved outputs](MANUAL.md)
+
+Let the observer step through candidates using the existing overviews and animations, open the original clip, and mark a candidate for follow-up. Store that decision beside the evidence. Start with the candidate log and clip metadata. Record any missing Monitoring boundaries needed to establish coverage for future nights.
+
+### Field validation and acceptance
+
+- In Preview, use an isolated above-K pixel that fails the configured minimum patch size. The trace shows the peak and the detector reports no candidate. The quick start and in-app help explain both readings consistently.
+- Exercise Preview and Monitoring with continuous recording both on and off. In each combination the banner correctly names both activities, including after recording stops or fails.
+- Review a watch with zero candidates and a watch containing a known interruption, a saved clip and an unsaved candidate. The observer can account for each outcome, open a saved preview and find their follow-up mark after reopening the night.
+- Make a representative earthshine recording the next lunar validation milestone. Replay the same span with candidate settings under consideration for Feature-26. Count candidates and clips requiring review on the original data. In separate marked trials, report flashes recovered out of those injected, with their positions, amplitudes and durations. Use both measurements when choosing an observing profile. [Open lunar calibration work](docs/feature-9-validation.md)

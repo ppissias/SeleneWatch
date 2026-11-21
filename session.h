@@ -1,5 +1,6 @@
 #pragma once
 
+#include "auto_tune_watch.h"
 #include "blip_injector.h"
 #include "event_capture.h"
 #include "guiding/guider.h"
@@ -62,6 +63,8 @@ public:
         // Time-lapse progress or finished (Feature-18).
         std::function<void(const TimelapseStatus&)> timeLapseChanged;
         std::function<void(const TimelapseFinishResult&)> timeLapseFinished;
+        // Feature-26: an auto-tune measurement changed. Read autoTuneStatus().
+        std::function<void()> autoTuneChanged;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -109,6 +112,15 @@ public:
 
     // Context thread. Copied by the source before the next frame.
     void setDetectionSettings(const DetectionSettings& settings);
+
+    // Feature-26: one auto-tune measurement at a time, in Preview only. It
+    // reads frames and never changes them, except that a flash check has one
+    // marked test flash injected, never into a recording. Context thread.
+    // Returns the measurement's id, or 0 when it cannot start now.
+    uint64_t startAutoTune(TuneWatchRequest request);
+    void cancelAutoTune(const std::string& reason);
+    [[nodiscard]] TuneWatchStatus autoTuneStatus() const { return tuneWatch_.status(); }
+    [[nodiscard]] bool autoTuneBusy() const { return tuneWatch_.busy(); }
     void setDetectionDisplay(DetectionOverlay overlay, int probeX, int probeY);
 
     // The feature lock and mount guiding. The window sends requests through
@@ -218,6 +230,10 @@ private:
     MemoryBudget memory_{size_t{2} * 1024 * 1024 * 1024};
     CaptureSettings captureSettings_;
     bool budgetPrepared_{false};
+    // Feature-26: the part of the processing reserve no buffer is sized for,
+    // which auto-tune's detector copies may use. Set with the budget.
+    std::atomic<size_t> tuneSpareBytes_{0};
+    AutoTuneWatch tuneWatch_;
 
     EventWriter writer_;
     EventCapture capture_;

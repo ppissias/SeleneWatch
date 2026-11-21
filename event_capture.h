@@ -55,6 +55,9 @@ public:
     // and extends collection by the configured tail; no pixels are copied.
     bool saveNow(std::chrono::system_clock::time_point requestedAt);
     [[nodiscard]] DetectionView detectionView() const;
+    // Feature-26: the live detector, copied by auto-tune's K rows so they all
+    // start from the same learned background.
+    [[nodiscard]] const FlashDetector& detector() const { return detector_; }
 
     // Hands off a short clip when Stop interrupts collection.
     void finishPartial(std::string reason = "stream ended");

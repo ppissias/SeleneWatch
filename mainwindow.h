@@ -30,6 +30,7 @@ class WheelGuard;
 class RecordingReader;
 class RecordingSource;
 class SyntheticFrameSource;
+class AutoTunePanel;
 class DetectionPanel;
 class DisplayPanel;
 class HistogramPanel;
@@ -160,8 +161,31 @@ public:
     // exposure or gain when the rule says so. Public so the window test can
     // give the time.
     void checkSkyExposure(std::chrono::steady_clock::time_point now);
+    // Feature-26: the earthshine box, as a drag on the preview would set it.
+    // Public for the window test.
+    void setEarthshineBox(QRect box);
 private:
     void saveSkyExtras();
+    // Feature-26, in mainwindow_autotune.cpp. The panel holds the suggestions
+    // and the K results; the window runs the measurements through the
+    // session, applies what the observer accepts, and logs it.
+    void setupAutoTune();
+    void updateAutoTune();
+    void onAutoTuneChanged();
+    void onCameraReadbackForAutoTune();
+    void onDetectionSettingsChangedForAutoTune();
+    void startCameraMeasurement(bool check);
+    void applyAutoTuneCamera();
+    void startKWatch(bool higher, std::optional<double> onlyK = {});
+    void applyAutoTuneK();
+    void startFlashCheck();
+    void updateEarthshineArea();
+    [[nodiscard]] bool autoTuneMeasuring() const;
+    [[nodiscard]] TuneWorkflow autoTuneWorkflow() const;
+    [[nodiscard]] TuneArea autoTuneArea() const;
+    [[nodiscard]] TuneCamera tuneCamera() const;
+    [[nodiscard]] QString twilightAdvice() const;
+    [[nodiscard]] std::vector<std::string> guidingWarnings() const;
     void setupDisplayPanel();
     void setupHistogramPanel();
     void setupGuidingPanel();
@@ -252,6 +276,22 @@ private:
     NightOwns nightOwns_{NightOwns::Nothing};
     bool nightStartedTonight_{false};
     SkyExposureState skyExposureState_;
+    // Feature-26: auto-tune's panel, the earthshine box and the area grown
+    // from it, and the measurement in hand. A K result is bound to the
+    // detection and camera settings it was measured with.
+    AutoTunePanel* autoTunePanel_{nullptr};
+    std::optional<QRect> earthshineBox_;
+    EarthshineArea earthshineArea_;
+    bool drawingEarthshineBox_{false};
+    enum class TunePhase { Idle, MeasuringCamera, WaitingForCamera, CheckingCamera, WatchingK, CheckingFlash };
+    TunePhase tunePhase_{TunePhase::Idle};
+    uint64_t tuneWatchId_{0};
+    TuneCamera tuneMeasuredCamera_;
+    std::optional<TuneMeasurement> tuneLast_, tunePrevious_;
+    bool tuneHasK_{false};
+    DetectionSettings tuneBoundDetection_;
+    TuneCamera tuneBoundCamera_;
+    QTimer* tuneReadbackTimer_{nullptr};
     DetectionSummary latestDetection_;
     DisplayPanel* displayPanel_{nullptr};
     QDockWidget* displayDock_{nullptr};

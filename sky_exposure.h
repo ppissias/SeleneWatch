@@ -46,4 +46,6 @@ struct SkyExposureChange
 
 // The median of a bounded grid of samples outside the mask, as a share of
 // the frame's full scale. Bayer and RGB samples count as they are stored.
-[[nodiscard]] double skyLevel(const Frame& frame, const DetectionMask& mask);
+// None when no sample is outside the mask: a fully masked sky is not a
+// black one (Feature-26 review).
+[[nodiscard]] std::optional<double> skyLevel(const Frame& frame, const DetectionMask& mask);

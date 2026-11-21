@@ -379,6 +379,11 @@ void Session::stop(std::string reason)
     // Safety rule 8: no guiding without frames. Only pulses were sent, so nothing is undone.
     guider_.endGuiding("The stream stopped (" + reason + ").");
     applyManualSave();
+    if (tuneWatch_.busy())
+    {
+        tuneWatch_.stopped("the stream stopped");
+        post(notifications_.autoTuneChanged);
+    }
     capture_.finishPartial(std::move(reason));
     blip_.reset();
     running_ = false;
@@ -442,6 +447,23 @@ bool Session::requestBlip(const BlipSettings& settings)
 bool Session::blipBusy() const
 {
     return blip_.busy();
+}
+
+uint64_t Session::startAutoTune(TuneWatchRequest request)
+{
+    if (!running_ || sourceFinished_.load() || mode_.load() != Mode::Preview || modeChangePending()) return 0;
+    // A flash check's test flash must never be written into a recording.
+    if (request.kind == TuneWatchRequest::Kind::FlashCheck && (recorder_.status().active || blip_.busy())) return 0;
+    const uint64_t id = tuneWatch_.start(std::move(request));
+    post(notifications_.autoTuneChanged);
+    return id;
+}
+
+void Session::cancelAutoTune(const std::string& reason)
+{
+    if (!tuneWatch_.busy()) return;
+    tuneWatch_.cancel(reason);
+    post(notifications_.autoTuneChanged);
 }
 
 bool Session::requestManualSave()
@@ -689,6 +711,8 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         // A recording's backlog mostly shares its frames with the ring; past
         // the ring's allowance the disk is not keeping up (Feature-14).
         recordingQueueBytes_ = half / 2;
+        const size_t sized = pixels * 32 + frame->data.capacity() * 5 + size_t{4} * 1024 * 1024;
+        tuneSpareBytes_.store(working > sized ? working - sized : 0);
         budgetPrepared_ = true;
     }
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
@@ -701,6 +725,11 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
         {
             std::lock_guard lock(timelapseMutex_);
             activeTl = timelapse_;
+        }
+        if (tuneWatch_.busy())
+        {
+            tuneWatch_.stopped("a time-lapse started");
+            post(notifications_.autoTuneChanged);
         }
         const FramePtr published = std::move(frame);
         if (activeTl && activeTl->active()) activeTl->onFrame(published);
@@ -722,6 +751,18 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     if (captureResetRequested_.exchange(false))
         capture_.reset();
 
+    // Feature-26: a flash check's test flash never goes into a recording,
+    // even one that starts with this frame.
+    if (tuneWatch_.injecting())
+    {
+        bool recordingAsked = false;
+        { std::lock_guard lock(requestMutex_); recordingAsked = recordRequest_.value_or(false); }
+        if (recording_ || recordingAsked)
+        {
+            blip_.reset();
+            tuneWatch_.cancel("A recording started: the test flash would have been written into it.");
+        }
+    }
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);
     updateRecording(published);
@@ -742,6 +783,17 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     display.makeMap = previewDue;
     capture_.setDetectionSettings(settings);
     capture_.onFrame(published, display);
+    // Feature-26: auto-tune measures after the live detector learned from the frame.
+    if (tuneWatch_.busy())
+    {
+        const AutoTuneWatch::Context context{settings, mode_.load() == Mode::Preview, settling, tuneSpareBytes_.load()};
+        if (const auto flash = tuneWatch_.onFrame(*published, capture_.detector(), capture_.detectionCandidates(), context))
+        {
+            if (recording_) tuneWatch_.cancel("A recording is running: the test flash would be written into it.");
+            else if (!blip_.request(*flash)) tuneWatch_.cancel("Another test flash is in progress.");
+        }
+        if (tuneWatch_.takeChanged(now)) post(notifications_.autoTuneChanged);
+    }
     applyManualSave();
     // The guider keeps only the newest frame and does nothing when no lock is wanted.
     guider_.offer(published, mode_.load() == Mode::Monitoring);
@@ -767,6 +819,12 @@ void Session::onDiscontinuity()
     capture_.finishPartial("playback loop boundary");
     capture_.reset();
     guider_.discontinuity();
+    // Feature-26: a repeated clip is not a longer observation.
+    if (tuneWatch_.busy())
+    {
+        tuneWatch_.sourceInterrupted("the recording jumped or started again from its beginning");
+        post(notifications_.autoTuneChanged);
+    }
 }
 
 void Session::onSettingsChanged(const StreamInfo& info, std::chrono::duration<double> settling)
@@ -780,6 +838,8 @@ void Session::onSettingsChanged(const StreamInfo& info, std::chrono::duration<do
     settlingUntil_ = std::chrono::steady_clock::now()
         + std::chrono::duration_cast<std::chrono::steady_clock::duration>(settling);
     { std::lock_guard lock(requestMutex_); streamInfo_ = info; cameraTuned_ = true; }
+    // Feature-26: a measurement belongs to the camera settings it started with.
+    tuneWatch_.cancel("The camera settings changed during the measurement.");
     post(notifications_.cameraSettingsChanged);
 }
 
@@ -797,6 +857,11 @@ void Session::onEnded()
     applyManualSave();
     endRecording("the source ended");
     capture_.finishPartial("source ended");
+    if (tuneWatch_.busy())
+    {
+        tuneWatch_.sourceInterrupted("the recording ended");
+        post(notifications_.autoTuneChanged);
+    }
     post(notifications_.ended);
 }
 

@@ -1,0 +1,556 @@
+// Feature-26: auto-tune's part of the window. The panel holds the
+// suggestions and the K results; the window runs each measurement through
+// the session, applies what the observer accepts, and logs it to
+// candidates.txt like the exposure follower's changes.
+
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+#include "auto_tune_panel.h"
+#include "camera_family_panel.h"
+#include "camera_settings_editor.h"
+#include "detection_panel.h"
+#include "recording/metadata_text.h"
+#include "sky_schedule.h"
+
+#include <QtCore/QSettings>
+#include <QtCore/QTimer>
+#include <QtGui/QColor>
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+
+// Every camera family numbers its controls this way (Feature-15).
+constexpr int kExposureControl = 0, kGainControl = 1, kOffsetControl = 2;
+
+QString rowText(const TuneRow& row)
+{
+    return QString("%1=%2").arg(QString::fromStdString(row.name), QString::fromStdString(row.suggested));
+}
+
+} // namespace
+
+void MainWindow::setupAutoTune()
+{
+    autoTunePanel_ = new AutoTunePanel(detectionPanel_);
+    detectionPanel_->setAutoTunePanel(autoTunePanel_);
+    tuneReadbackTimer_ = new QTimer(this);
+    tuneReadbackTimer_->setSingleShot(true);
+    tuneReadbackTimer_->setInterval(10'000);
+    connect(tuneReadbackTimer_, &QTimer::timeout, this, [this] {
+        if (tunePhase_ != TunePhase::WaitingForCamera) return;
+        tunePhase_ = TunePhase::Idle;
+        autoTunePanel_->setProgress("The camera did not report its new settings within 10 s. Measure again when the "
+            "preview has settled.", 0, false);
+        updateAutoTune();
+    });
+    if (const QRect saved = QSettings().value("autotune/earthshineBox").toRect(); saved.isValid()) earthshineBox_ = saved;
+
+    connect(detectionPanel_, &DetectionPanel::autoTuneToggled, this, [this](bool shown) {
+        if (!shown)
+        {
+            drawingEarthshineBox_ = false;
+            autoTunePanel_->setDrawingBox(false);
+        }
+        updateEarthshineArea();
+        updateAutoTune();
+    });
+    connect(autoTunePanel_, &AutoTunePanel::drawBoxToggled, this, [this](bool on) {
+        drawingEarthshineBox_ = on;
+        if (on) showMessage("Drag a box on the preview over the earthshine.", 6000);
+    });
+    connect(autoTunePanel_, &AutoTunePanel::boxOnlyToggled, this, [this] {
+        autoTunePanel_->clearCamera("The measured area changed: measure again.");
+        autoTunePanel_->clearK("The measured area changed: watch again.");
+        tuneHasK_ = false;
+        updateEarthshineArea();
+    });
+    connect(autoTunePanel_, &AutoTunePanel::measureCameraRequested, this, [this] { startCameraMeasurement(false); });
+    connect(autoTunePanel_, &AutoTunePanel::applyCameraRequested, this, &MainWindow::applyAutoTuneCamera);
+    connect(autoTunePanel_, &AutoTunePanel::watchRequested, this, [this](bool higher) { startKWatch(higher); });
+    connect(autoTunePanel_, &AutoTunePanel::tryKRequested, this, [this](double k) { startKWatch(false, k); });
+    connect(autoTunePanel_, &AutoTunePanel::applyKRequested, this, &MainWindow::applyAutoTuneK);
+    connect(autoTunePanel_, &AutoTunePanel::checkFlashRequested, this, &MainWindow::startFlashCheck);
+    connect(autoTunePanel_, &AutoTunePanel::cancelRequested, this, [this] {
+        tuneReadbackTimer_->stop();
+        if (tunePhase_ == TunePhase::WaitingForCamera) autoTunePanel_->setProgress("Cancelled.", 0, false);
+        tunePhase_ = TunePhase::Idle;
+        session_->cancelAutoTune("Cancelled by the observer. Nothing was changed by the measurement.");
+        updateAutoTune();
+    });
+    updateAutoTune();
+}
+
+TuneWorkflow MainWindow::autoTuneWorkflow() const
+{
+    return tuneWorkflow(target_, detectionPanel_->settings());
+}
+
+bool MainWindow::autoTuneMeasuring() const
+{
+    return (session_ && session_->autoTuneBusy()) || tunePhase_ == TunePhase::WaitingForCamera;
+}
+
+TuneCamera MainWindow::tuneCamera() const
+{
+    TuneCamera camera;
+    const CameraFamilyPanel* family = activeCamera();
+    const CameraSettingsEditor* controls = family ? family->controls() : nullptr;
+    if (!controls) return camera;
+    const auto read = [controls](int id) -> std::optional<TuneControl> {
+        const auto value = controls->controlValue(id);
+        const auto range = controls->controlRange(id);
+        if (!value || !range) return std::nullopt;
+        return TuneControl{*value, range->first, range->second};
+    };
+    camera.exposure = read(kExposureControl);
+    camera.gain = read(kGainControl);
+    camera.offset = read(kOffsetControl);
+    return camera;
+}
+
+QString MainWindow::twilightAdvice() const
+{
+    const TuneWorkflow workflow = autoTuneWorkflow();
+    const ObservingSite site = savedSite();
+    if (!site.hasPosition())
+        return workflow == TuneWorkflow::Sky ? "Auto-tune is best run in full darkness, not at dusk or dawn: the sky "
+            "keeps changing then. (With the site's position, Session → Site and instrument, the Sun's altitude is shown.)"
+            : QString();
+    const double altitude = sunAltitudeDegrees(*site.latitudeDeg, *site.longitudeDeg, std::chrono::system_clock::now());
+    if (workflow == TuneWorkflow::Sky && altitude > -18)
+        return QString("The Sun is at %1°: the sky will still get darker. Auto-tune is best run in full darkness (Sun "
+            "below -18°). With Follow the sky's brightness on, the follower lengthens the exposure as it darkens; "
+            "otherwise run auto-tune again later.").arg(altitude, 0, 'f', 1);
+    if (workflow != TuneWorkflow::Sky && altitude > -12)
+        return QString("The Sun is at %1°: the sky around the Moon will get darker. Run auto-tune again once it is "
+            "dark.").arg(altitude, 0, 'f', 1);
+    return {};
+}
+
+void MainWindow::updateAutoTune()
+{
+    if (!autoTunePanel_) return;
+    AutoTunePanel::Situation situation;
+    situation.workflow = autoTuneWorkflow();
+    situation.preview = session_->isRunning() && session_->mode() == Session::Mode::Preview
+        && !session_->sourceFinished() && !session_->modeChangePending() && latestFrame_;
+    situation.camera = activeCamera() && activeCamera()->controls() && tuneCamera().exposure;
+    situation.recording = session_->recordingStatus().active;
+    situation.testingTools = testingTools_;
+    situation.busy = autoTuneMeasuring();
+    situation.haveBox = earthshineBox_.has_value();
+    situation.twilight = twilightAdvice();
+    autoTunePanel_->setSituation(situation);
+}
+
+void MainWindow::setEarthshineBox(QRect box)
+{
+    earthshineBox_ = box;
+    QSettings().setValue("autotune/earthshineBox", box);
+    drawingEarthshineBox_ = false;
+    if (autoTunePanel_)
+    {
+        autoTunePanel_->setDrawingBox(false);
+        autoTunePanel_->clearCamera("The earthshine box changed: measure again.");
+        autoTunePanel_->clearK("The earthshine box changed: watch again.");
+    }
+    tuneHasK_ = false;
+    updateEarthshineArea();
+    updateAutoTune();
+}
+
+// The earthshine area from the latest frame, outlined on the preview while
+// the panel is shown (Moon flashes only).
+void MainWindow::updateEarthshineArea()
+{
+    const bool shown = autoTunePanel_ && detectionPanel_->autoTuneShown()
+        && autoTuneWorkflow() == TuneWorkflow::MoonFlashes && earthshineBox_;
+    if (!shown)
+    {
+        ui_->previewWidget->setTuneArea({}, 1, std::nullopt);
+        return;
+    }
+    if (!latestFrame_)
+    {
+        ui_->previewWidget->setTuneArea({}, 1, earthshineBox_);
+        autoTunePanel_->setAreaText("The area is found once frames arrive.");
+        return;
+    }
+    const QRect box = *earthshineBox_;
+    earthshineArea_ = findEarthshine(*latestFrame_, {box.x(), box.y(), box.width(), box.height()});
+    if (autoTunePanel_->boxOnly())
+    {
+        ui_->previewWidget->setTuneArea({}, 1, box);
+        autoTunePanel_->setAreaText("Measuring only your box.");
+        return;
+    }
+    // The area cell by cell: a stronger colour on its edge, so its outline shows.
+    const EarthshineArea& area = earthshineArea_;
+    QImage cells(area.columns, area.rows, QImage::Format_ARGB32);
+    cells.fill(Qt::transparent);
+    const auto in = [&](int c, int r) {
+        return c >= 0 && r >= 0 && c < area.columns && r < area.rows && area.cells[static_cast<size_t>(r) * area.columns + c];
+    };
+    for (int r = 0; r < area.rows; ++r)
+        for (int c = 0; c < area.columns; ++c)
+        {
+            if (!in(c, r)) continue;
+            const bool edge = !in(c - 1, r) || !in(c + 1, r) || !in(c, r - 1) || !in(c, r + 1);
+            cells.setPixelColor(c, r, edge ? QColor(90, 209, 168, 190) : QColor(90, 209, 168, 55));
+        }
+    ui_->previewWidget->setTuneArea(cells, EarthshineArea::kCell, box);
+    autoTunePanel_->setAreaText(area.boxOnly ? QString::fromStdString(area.problem)
+        : QString("Earthshine area: %1 % of the frame, outlined on the preview. The box is at %2 % of full scale, the sky "
+            "beyond the Moon's edge at %3 %. If the outline is wrong, draw the box again or measure only your box.")
+              .arg(100 * area.shareOfFrame, 0, 'f', 0).arg(100 * area.boxLevel, 0, 'f', 1).arg(100 * area.skyLevel, 0, 'f', 1));
+}
+
+TuneArea MainWindow::autoTuneArea() const
+{
+    const int width = latestFrame_ ? latestFrame_->width : lastFrameWidth_;
+    const int height = latestFrame_ ? latestFrame_->height : lastFrameHeight_;
+    switch (autoTuneWorkflow())
+    {
+    case TuneWorkflow::Sky:
+        return skyArea(detectionPanel_->settings().mask, width, height);
+    case TuneWorkflow::MoonTransits:
+        return {};
+    case TuneWorkflow::MoonFlashes:
+        break;
+    }
+    if (!earthshineBox_) return {};
+    if (autoTunePanel_->boxOnly() || earthshineArea_.columns == 0)
+    {
+        TuneArea area;
+        area.width = width;
+        area.height = height;
+        area.inside.assign(static_cast<size_t>(width) * height, 0);
+        const QRect box = earthshineBox_->intersected(QRect(0, 0, width, height));
+        for (int y = box.top(); y <= box.bottom(); ++y)
+            for (int x = box.left(); x <= box.right(); ++x) area.inside[static_cast<size_t>(y) * width + x] = 1;
+        return area;
+    }
+    return earthshineArea_.pixels(width, height);
+}
+
+// Moon: a saturated lock box cannot be followed (design point 9).
+std::vector<std::string> MainWindow::guidingWarnings() const
+{
+    if (target_ != Target::Moon || !latestFrame_) return {};
+    const LockStatus lock = session_->guider().status().lock;
+    if (lock.state == LockState::Off || lock.region.width <= 0 || lock.region.height <= 0) return {};
+    TuneArea region;
+    region.width = latestFrame_->width;
+    region.height = latestFrame_->height;
+    region.inside.assign(static_cast<size_t>(region.width) * region.height, 0);
+    for (int y = std::max(0, lock.region.y); y < std::min(region.height, lock.region.y + lock.region.height); ++y)
+        for (int x = std::max(0, lock.region.x); x < std::min(region.width, lock.region.x + lock.region.width); ++x)
+            region.inside[static_cast<size_t>(y) * region.width + x] = 1;
+    const auto measured = measureBrightness(*latestFrame_, region, false);
+    if (!measured || measured->atMax <= 0.05) return {};
+    return {QString("%1 % of the guiding lock box is saturated: guiding cannot follow a flat white area. Lock on an "
+        "unsaturated feature.").arg(100 * measured->atMax, 0, 'f', 0).toStdString()};
+}
+
+void MainWindow::startCameraMeasurement(bool check)
+{
+    if (!latestFrame_) return;
+    updateEarthshineArea();
+    TuneWatchRequest request;
+    request.kind = TuneWatchRequest::Kind::Brightness;
+    request.seconds = 2;
+    request.area = autoTuneArea();
+    request.brightest = autoTuneWorkflow() == TuneWorkflow::MoonTransits;
+    request.settings = detectionPanel_->settings();
+    const uint64_t id = session_->startAutoTune(std::move(request));
+    if (!id)
+    {
+        autoTunePanel_->setProgress("Auto-tune measures only in Preview.", 0, false);
+        return;
+    }
+    tuneWatchId_ = id;
+    tunePhase_ = check ? TunePhase::CheckingCamera : TunePhase::MeasuringCamera;
+    tuneMeasuredCamera_ = tuneCamera();
+    autoTunePanel_->setProgress(check ? "Checking the new settings…" : "Measuring the brightness…", 0, true);
+    updateAutoTune();
+}
+
+void MainWindow::applyAutoTuneCamera()
+{
+    CameraFamilyPanel* family = activeCamera();
+    CameraSettingsEditor* controls = family ? family->controls() : nullptr;
+    if (!controls || session_->mode() != Session::Mode::Preview || session_->recordingStatus().active) return;
+    if (tuneCamera() != tuneMeasuredCamera_)
+    {
+        autoTunePanel_->clearCamera("The camera settings changed since the measurement: measure again.");
+        return;
+    }
+    const std::vector<TuneRow> rows = autoTunePanel_->tickedCameraRows();
+    if (rows.empty()) return;
+    bool cameraChanged = false, followerChanged = false;
+    SkyExtras extras = detectionPanel_->skyExtras();
+    QStringList applied;
+    for (const TuneRow& row : rows)
+    {
+        switch (row.kind)
+        {
+        case TuneRow::Kind::Exposure: cameraChanged |= controls->setControlValue(kExposureControl, row.value); break;
+        case TuneRow::Kind::Gain: cameraChanged |= controls->setControlValue(kGainControl, row.value); break;
+        case TuneRow::Kind::Offset: cameraChanged |= controls->setControlValue(kOffsetControl, row.value); break;
+        case TuneRow::Kind::FollowExposure:
+            extras.minExposureMs = row.value;
+            extras.maxExposureMs = row.value2;
+            followerChanged = true;
+            break;
+        case TuneRow::Kind::FollowGain:
+            extras.maxGain = row.value;
+            extras.gainStep = row.value2;
+            followerChanged = true;
+            break;
+        }
+        applied << rowText(row);
+    }
+    if (followerChanged)
+    {
+        detectionPanel_->setSkyExtras(extras);
+        saveSkyExtras();
+        skyExposureState_ = {};
+    }
+    const QString measured = tuneLast_ ? QString(" measured_level=%1%").arg(100 * tuneLast_->brightness.level, 0, 'f', 2) : QString();
+    session_->logRecord(QString("%1 autotune_camera target=%2%3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
+        target_ == Target::Sky ? "sky" : "moon", measured, applied.join("; ")));
+    tunePrevious_ = tuneLast_;
+    if (cameraChanged)
+    {
+        // The editor sends the changed controls to the camera together, after
+        // its short pause; the check starts when the camera reports them back.
+        tunePhase_ = TunePhase::WaitingForCamera;
+        tuneReadbackTimer_->start();
+        autoTunePanel_->clearCamera("Applied: " + applied.join(", ") + ".");
+        autoTunePanel_->clearK("The camera settings changed: watch again with the new ones.");
+        tuneHasK_ = false;
+        autoTunePanel_->setProgress("Waiting for the camera to report its new settings…", 0, true);
+    }
+    else
+    {
+        autoTunePanel_->clearCamera("Applied: " + applied.join(", ") + ".");
+        autoTunePanel_->setProgress({}, 0, false);
+    }
+    showMessage("Auto-tune applied: " + applied.join(", "), 6000);
+    updateAutoTune();
+}
+
+void MainWindow::onCameraReadbackForAutoTune()
+{
+    if (!autoTunePanel_) return;
+    if (tunePhase_ == TunePhase::WaitingForCamera)
+    {
+        tuneReadbackTimer_->stop();
+        const StreamInfo info = session_->streamInfo();
+        session_->logRecord(QString("%1 autotune_readback exposure=\"%2\" gain=\"%3\" offset=\"%4\"\n")
+            .arg(utcText(std::chrono::system_clock::now()), QString::fromStdString(info.exposure),
+                QString::fromStdString(info.gain), QString::fromStdString(info.offset)));
+        tunePhase_ = TunePhase::Idle;
+        startCameraMeasurement(true);
+        return;
+    }
+    // The observer changed the camera: what was measured no longer holds.
+    if (tuneLast_ || tuneHasK_)
+    {
+        autoTunePanel_->clearCamera("The camera settings changed: measure again.");
+        autoTunePanel_->clearK("The camera settings changed: watch again.");
+        tuneHasK_ = false;
+        tuneLast_.reset();
+        tunePrevious_.reset();
+    }
+}
+
+void MainWindow::onDetectionSettingsChangedForAutoTune()
+{
+    if (!autoTunePanel_) return;
+    if (tuneHasK_ && detectionPanel_->settings() != tuneBoundDetection_)
+    {
+        autoTunePanel_->clearK("The detection settings changed after the watch: watch again.");
+        tuneHasK_ = false;
+    }
+    updateEarthshineArea();
+    updateAutoTune();
+}
+
+void MainWindow::startKWatch(bool higher, std::optional<double> onlyK)
+{
+    if (onlyK)
+    {
+        // Try K: an ordinary, visible change of the Preview's K, then a watch of it.
+        DetectionSettings settings = detectionPanel_->settings();
+        settings.sigma = *onlyK;
+        detectionPanel_->setSettings(settings);
+        session_->setDetectionSettings(detectionPanel_->settings());
+        saveDetectionSettings();
+    }
+    updateEarthshineArea();
+    const DetectionSettings settings = detectionPanel_->settings();
+    TuneWatchRequest request;
+    request.kind = TuneWatchRequest::Kind::Sensitivity;
+    request.seconds = autoTunePanel_->watchSeconds();
+    request.area = autoTuneArea();
+    request.brightest = autoTuneWorkflow() == TuneWorkflow::MoonTransits;
+    request.settings = settings;
+    request.kValues = onlyK ? std::vector<double>{*onlyK}
+        : kValuesToTest(higher ? autoTunePanel_->highestTestedK() + 1 : settings.sigma, 4);
+    const uint64_t id = session_->startAutoTune(std::move(request));
+    if (!id)
+    {
+        autoTunePanel_->setProgress("Auto-tune watches only in Preview.", 0, false);
+        return;
+    }
+    tuneWatchId_ = id;
+    tunePhase_ = TunePhase::WatchingK;
+    tuneBoundDetection_ = settings;
+    tuneBoundCamera_ = tuneCamera();
+    autoTunePanel_->setProgress("Watching…", 0, true);
+    updateAutoTune();
+}
+
+void MainWindow::applyAutoTuneK()
+{
+    const auto k = autoTunePanel_->suggestedK();
+    if (!k || session_->mode() == Session::Mode::Monitoring) return;
+    if (detectionPanel_->settings() != tuneBoundDetection_ || tuneCamera() != tuneBoundCamera_)
+    {
+        autoTunePanel_->clearK("A camera or detection setting changed since the watch: watch again.");
+        tuneHasK_ = false;
+        return;
+    }
+    const double before = detectionPanel_->settings().sigma;
+    session_->logRecord(QString("%1 autotune_k target=%2 k_from=%3 k_to=%4 %5\n").arg(utcText(std::chrono::system_clock::now()),
+        target_ == Target::Sky ? "sky" : "moon").arg(before, 0, 'f', 1).arg(*k, 0, 'f', 1).arg(autoTunePanel_->kRecord()));
+    DetectionSettings settings = detectionPanel_->settings();
+    settings.sigma = *k;
+    detectionPanel_->setSettings(settings);
+    session_->setDetectionSettings(detectionPanel_->settings());
+    saveDetectionSettings();
+    autoTunePanel_->clearK(QString("Applied K %1 (it was %2).").arg(*k, 0, 'f', 1).arg(before, 0, 'f', 1));
+    tuneHasK_ = false;
+    showMessage(QString("Auto-tune applied K %1.").arg(*k, 0, 'f', 1), 6000);
+    updateAutoTune();
+}
+
+void MainWindow::startFlashCheck()
+{
+    if (!testingTools_ || !latestFrame_ || session_->recordingStatus().active) return;
+    // The flash goes where the observer clicked, or into the measured area.
+    QPoint at(latestFrame_->width / 2, latestFrame_->height / 2);
+    if (const auto selected = ui_->previewWidget->selectedPosition()) at = *selected;
+    else if (autoTuneWorkflow() == TuneWorkflow::MoonFlashes && earthshineBox_) at = earthshineBox_->center();
+    else
+    {
+        const TuneArea area = autoTuneArea();
+        if (!area.wholeFrame() && !area.inside[static_cast<size_t>(at.y()) * area.width + at.x()])
+            for (size_t i = 0; i < area.inside.size(); ++i)
+                if (area.inside[i])
+                {
+                    at = QPoint(static_cast<int>(i % area.width), static_cast<int>(i / area.width));
+                    break;
+                }
+    }
+    TuneWatchRequest request;
+    request.kind = TuneWatchRequest::Kind::FlashCheck;
+    request.settings = detectionPanel_->settings();
+    request.flash = BlipSettings{at.x(), at.y(), ui_->blipFwhmSpinBox->value(), ui_->blipAmplitudeSpinBox->value(),
+        ui_->blipFramesSpinBox->value(), BlipKind::BrightFlash};
+    const uint64_t id = session_->startAutoTune(std::move(request));
+    if (!id)
+    {
+        autoTunePanel_->setCheckResult("The flash check needs Preview, no recording and no other test flash.", std::nullopt);
+        return;
+    }
+    tuneWatchId_ = id;
+    tunePhase_ = TunePhase::CheckingFlash;
+    autoTunePanel_->setCheckResult(QString("Checking with a %1 ADU test flash at (%2, %3)…")
+        .arg(ui_->blipAmplitudeSpinBox->value(), 0, 'f', 0).arg(at.x()).arg(at.y()), std::nullopt);
+    updateAutoTune();
+}
+
+void MainWindow::onAutoTuneChanged()
+{
+    if (!autoTunePanel_) return;
+    const TuneWatchStatus status = session_->autoTuneStatus();
+    if (status.id != tuneWatchId_ || tunePhase_ == TunePhase::Idle || tunePhase_ == TunePhase::WaitingForCamera)
+    {
+        updateAutoTune();
+        return;
+    }
+    switch (status.state)
+    {
+    case TuneWatchStatus::State::Idle:
+        break;
+    case TuneWatchStatus::State::Waiting:
+    case TuneWatchStatus::State::Measuring:
+        autoTunePanel_->setProgress(status.state == TuneWatchStatus::State::Waiting || status.note.empty()
+            ? QString::fromStdString(status.note.empty() ? "Measuring…" : status.note)
+            : QString::fromStdString(status.note), status.progress, true);
+        if (status.state == TuneWatchStatus::State::Measuring && tunePhase_ == TunePhase::WatchingK)
+            autoTunePanel_->setProgress(QString("Watching: %1 of %2 s, %3 frames.%4").arg(status.seconds, 0, 'f', 0)
+                .arg(status.requestedSeconds, 0, 'f', 0).arg(status.frames)
+                .arg(status.note.empty() ? QString() : " " + QString::fromStdString(status.note)), status.progress, true);
+        break;
+    case TuneWatchStatus::State::Cancelled:
+        if (tunePhase_ == TunePhase::CheckingFlash) autoTunePanel_->setCheckResult(QString::fromStdString(status.note), std::nullopt);
+        autoTunePanel_->setProgress(QString::fromStdString(status.note), 0, false);
+        tunePhase_ = TunePhase::Idle;
+        break;
+    case TuneWatchStatus::State::Finished:
+    {
+        const TunePhase phase = tunePhase_;
+        tunePhase_ = TunePhase::Idle;
+        if (phase == TunePhase::MeasuringCamera || phase == TunePhase::CheckingCamera)
+        {
+            const TuneCamera camera = tuneCamera();
+            if (camera != tuneMeasuredCamera_)
+            {
+                autoTunePanel_->clearCamera("The camera settings changed during the measurement: measure again.");
+                autoTunePanel_->setProgress({}, 0, false);
+                break;
+            }
+            const SkyExtras extras = detectionPanel_->skyExtras();
+            CameraTuneInput input;
+            input.workflow = autoTuneWorkflow();
+            input.camera = camera;
+            input.measured = status.brightness;
+            input.previous = tunePrevious_;
+            input.skyMaxExposureUs = autoTunePanel_->skyMaxExposureUs();
+            input.follow = extras.follow;
+            input.followFromMs = extras.minExposureMs;
+            input.followToMs = extras.maxExposureMs;
+            input.followMaxGain = extras.maxGain;
+            input.followGainStep = extras.gainStep;
+            CameraSuggestion suggestion = suggestCamera(input);
+            for (std::string& warning : guidingWarnings()) suggestion.warnings.push_back(std::move(warning));
+            autoTunePanel_->setCameraSuggestion(suggestion);
+            if (status.brightness && camera.exposure)
+                tuneLast_ = TuneMeasurement{camera.exposure->value, camera.gain ? camera.gain->value : 0, *status.brightness};
+            autoTunePanel_->setProgress(phase == TunePhase::CheckingCamera
+                ? (suggestion.inAim ? "Checked: the new settings are in the aim. Go on to step 2."
+                    : "Checked: not in the aim yet. See the new suggestion.")
+                : QString("Measured over %1 frames.").arg(status.frames), 1, false);
+        }
+        else if (phase == TunePhase::WatchingK)
+        {
+            autoTunePanel_->setKResults(status);
+            tuneHasK_ = true;
+            autoTunePanel_->setProgress(QString("Watched %1 s of source time over %2 frames.").arg(status.seconds, 0, 'f', 1)
+                .arg(status.frames), 1, false);
+        }
+        else if (phase == TunePhase::CheckingFlash)
+        {
+            autoTunePanel_->setCheckResult(QString::fromStdString(status.checkText), status.recovered);
+            autoTunePanel_->setProgress({}, 0, false);
+        }
+        break;
+    }
+    }
+    updateAutoTune();
+}

@@ -152,9 +152,14 @@ void SkyExtrasTest::theSkyLevelLeavesTheMaskOut()
     // The top half of the frame is bright ground lights; the sky below is dark.
     std::mt19937 random(51);
     const auto lit = frame(0, random, [](int, int y) { return y < 48 ? 150.0 : 0.0; }, 20);
-    QVERIFY(skyLevel(*lit, {}) > 0.3);
+    QVERIFY(skyLevel(*lit, {}).value_or(0) > 0.3);
     const DetectionMask ground({DetectionMask::rectangle(0, 0, 128, 48)});
-    QVERIFY2(std::abs(skyLevel(*lit, ground) - 20.0 / 255) < 0.02, qPrintable(QString::number(skyLevel(*lit, ground))));
+    const auto sky = skyLevel(*lit, ground);
+    QVERIFY2(sky && std::abs(*sky - 20.0 / 255) < 0.02, qPrintable(QString::number(sky.value_or(-1))));
+    // Feature-26 review: a mask over the whole frame leaves no sky to
+    // measure, which is not the same as a black sky.
+    const DetectionMask everything({DetectionMask::rectangle(0, 0, 128, 96)});
+    QVERIFY(!skyLevel(*lit, everything));
 }
 
 // Done-when 3.

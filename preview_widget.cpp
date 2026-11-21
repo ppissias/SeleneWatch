@@ -117,6 +117,14 @@ void PreviewWidget::setPendingShape(std::vector<QPoint> corners)
     update();
 }
 
+void PreviewWidget::setTuneArea(QImage cells, int cellSize, std::optional<QRect> box)
+{
+    tuneCells_ = std::move(cells);
+    tuneCellSize_ = std::max(1, cellSize);
+    tuneBox_ = box;
+    update();
+}
+
 void PreviewWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton && framePosition(event->position())) emit shapeClosed();
@@ -267,6 +275,21 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
             painter.setPen(QPen(QColor(255, 120, 120), 1, Qt::DashLine));
             painter.drawPolyline(line);
             for (const QPointF& corner : line) painter.drawEllipse(corner, 3, 3);
+        }
+        painter.restore();
+    }
+    // Feature-26: the earthshine area, cell by cell, and the box it grew from.
+    if (!tuneCells_.isNull() || tuneBox_)
+    {
+        painter.save();
+        painter.setClipRect(visibleImage);
+        if (!tuneCells_.isNull())
+            painter.drawImage(QRectF(toScreen({0, 0}), toScreen({tuneCells_.width() * tuneCellSize_,
+                tuneCells_.height() * tuneCellSize_})), tuneCells_);
+        if (tuneBox_)
+        {
+            painter.setPen(QPen(QColor("#5ad1a8"), 1.5, Qt::DashLine));
+            painter.drawRect(toWidget(*tuneBox_));
         }
         painter.restore();
     }

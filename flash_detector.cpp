@@ -458,3 +458,18 @@ void FlashDetector::difference(const Frame& frame, BudgetVector<float>& values) 
     values.resize(mean_.size());
     for (size_t i = 0; i < values.size(); ++i) values[i] = samples.at(i) - mean_[i];
 }
+
+double FlashDetector::pixelNoise(size_t pixel) const
+{
+    if (pixel >= variance_.size() || !summary_.ready) return 0;
+    const double floor = summary_.noiseFloor;
+    return std::sqrt(std::max(static_cast<double>(variance_[pixel]), floor * floor));
+}
+
+size_t FlashDetector::workingBytes(size_t pixels, const DetectionSettings& settings)
+{
+    // Reference and variance, the protected and mask maps, and the bounded
+    // sparse search for rising and falling patches.
+    const size_t sparse = std::max(size_t{4096}, static_cast<size_t>(std::max(settings.maxPixels, settings.maxDarkPixels)) * 4);
+    return pixels * (2 * sizeof(float) + 2) + 2 * sparse * (sizeof(size_t) + sizeof(float) + 1 + sizeof(size_t)) + 4096 * sizeof(float);
+}
