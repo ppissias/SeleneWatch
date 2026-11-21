@@ -322,6 +322,9 @@ private slots:
     {
         const Canvas canvas;
         LockTracker tracker;
+        // Feature-32: the search lasts the grace period the observer sets; 60 s here.
+        tracker.setSearchSeconds(60);
+        QCOMPARE(tracker.searchSeconds(), 60.0);
         QVERIFY2(tracker.lock(*canvas.frame(0, 0, 0.0), {100, 70, 24, 24}), tracker.status().message.c_str());
         // Steps of 0.2 s: the last valid match is at step 5 (1.0 s).
         for (int step = 1; step <= 5; ++step) tracker.step(*canvas.frame(2, -1, step * 0.2));
@@ -347,7 +350,7 @@ private slots:
         QVERIFY(std::abs(tracker.status().foundDx - 30) < 0.1);
         QVERIFY(std::abs(tracker.status().foundDy + 20) < 0.1);
 
-        // Gone for good: after kSearchSeconds of searching nothing more is measured.
+        // Gone for good: after the search time nothing more is measured.
         for (int second = 4; second <= 70; ++second)
         {
             tracker.step(*Canvas::blank(second));

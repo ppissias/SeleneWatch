@@ -121,6 +121,18 @@ SimulatedPointing::Offset SimulatedPointing::skyOffset(Clock::time_point now)
     return {ra_, dec_};
 }
 
+void SimulatedPointing::setTracking(bool tracking)
+{
+    std::lock_guard lock(mutex_);
+    tracking_ = tracking;
+}
+
+bool SimulatedPointing::tracking() const
+{
+    std::lock_guard lock(mutex_);
+    return tracking_;
+}
+
 SimulatedPointing::Settings SimulatedPointing::settings() const
 {
     std::lock_guard lock(mutex_);
@@ -169,7 +181,8 @@ MountState SimulatedMount::state()
     MountState state;
     state.connected = connected_;
     if (!connected_) return state;
-    state.tracking = condition.tracking;
+    state.tracking = condition.tracking && pointing_->tracking();
+    state.canSetTracking = condition.canSetTracking;
     state.slewing = condition.slewing;
     state.parked = condition.parked;
     state.canPulseGuide = condition.canPulseGuide;
@@ -180,6 +193,12 @@ MountState SimulatedMount::state()
     state.guideRateRa = rate;
     state.guideRateDec = rate;
     return state;
+}
+
+void SimulatedMount::stopTracking()
+{
+    if (!connected_) throw std::runtime_error("the simulated mount is not connected");
+    pointing_->setTracking(false);
 }
 
 void SimulatedMount::pulseGuide(GuideDirection direction, int milliseconds)

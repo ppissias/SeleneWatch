@@ -15,8 +15,9 @@ enum class LockState
     // Valid matches stopped for longer than kLockLostSeconds. The search is
     // wider and the lock resumes when two matches agree.
     Searching,
-    // The wide search found nothing for kSearchSeconds. Nothing is measured
-    // until the observer locks again.
+    // The wide search found nothing for the search time. Nothing is measured
+    // until the observer locks again; while guiding, the session ends
+    // (Feature-32).
     Lost
 };
 
@@ -60,7 +61,11 @@ public:
     static constexpr double kEstimateSeconds = 3.0;
     static constexpr int kMinEstimateSamples = 3;
     static constexpr double kLockLostSeconds = 2.0;
-    static constexpr double kSearchSeconds = 60.0;
+    // Feature-32: how long the wide search lasts, the guiding's grace period
+    // for a passing cloud. The observer sets it in the Guiding dock.
+    static constexpr double kDefaultSearchSeconds = 120.0;
+    static constexpr double kMinSearchSeconds = 30.0;
+    static constexpr double kMaxSearchSeconds = 600.0;
     // Search radius in frame pixels while locked and while searching.
     static constexpr int kTrackRadius = 24;
     static constexpr int kSearchRadius = 64;
@@ -70,6 +75,9 @@ public:
     // Takes the template from frame. False, with the reason in the status,
     // when the region cannot be locked; an earlier lock is then released.
     bool lock(const Frame& frame, LockRegion region);
+    // Clamped to kMinSearchSeconds..kMaxSearchSeconds; a search in progress uses it at once.
+    void setSearchSeconds(double seconds);
+    [[nodiscard]] double searchSeconds() const { return searchSeconds_; }
     void unlock(std::string reason = {});
 
     // The next frame does not follow the last one (a loop restarting, or a
@@ -105,4 +113,5 @@ private:
     // The first of two agreeing matches while searching.
     std::optional<LockMatch> candidate_;
     bool restart_{false};
+    double searchSeconds_{kDefaultSearchSeconds};
 };

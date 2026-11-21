@@ -11,9 +11,10 @@
 // linked at build time; the observer installs the ASCOM Platform and the
 // driver.
 //
-// It reads Connected, CanPulseGuide, Tracking, Slewing, AtPark, SideOfPier,
-// AlignmentMode, GuideRateRightAscension, GuideRateDeclination, and
-// IsPulseGuiding. It writes Connected and calls PulseGuide. Nothing else.
+// It reads Connected, CanPulseGuide, CanSetTracking, Tracking, Slewing,
+// AtPark, SideOfPier, AlignmentMode, GuideRateRightAscension,
+// GuideRateDeclination, and IsPulseGuiding. It writes Connected, writes
+// Tracking only to stop it (Feature-32), and calls PulseGuide. Nothing else.
 //
 // Create, use, and destroy it on one thread: the guide thread. It joins the
 // multithreaded COM apartment there. A 32-bit in-process driver cannot be
@@ -33,6 +34,7 @@ public:
     void disconnect() override;
     [[nodiscard]] MountState state() override;
     void pulseGuide(GuideDirection direction, int milliseconds) override;
+    void stopTracking() override;
 
 private:
     struct Driver;

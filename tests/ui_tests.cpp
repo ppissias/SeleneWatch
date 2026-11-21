@@ -6,6 +6,8 @@
 #include "camera_settings_editor.h"
 #include "elided_label.h"
 #include "guiding_panel.h"
+#include "guiding/simulated_mount.h"
+#include "session_end_dialog.h"
 #include "tests/fake_zwo_api.h"
 #include "tests/fake_qhy_api.h"
 #include "tests/fake_playerone_api.h"
@@ -34,6 +36,7 @@
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimer>
+#include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
 #include <QtGui/QAction>
 #include <QtGui/QDesktopServices>
@@ -54,6 +57,8 @@
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QTimeEdit>
+#include <QtWidgets/QRadioButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QScrollBar>
@@ -152,7 +157,11 @@ private slots:
     void aDragDrawsOnlyWhatWasChosen();
     void sitePresetsSaveLoadAndDelete();
     void siteAndRecordingControls();
-    void nightScheduleAndExposureFollower();
+    void exposureFollower();
+    void aSessionEndsByItselfAndStopsTheMountsTracking();
+    void theDiskReserveEndsMonitoring();
+    void lostGuidingEndsTheSession();
+    void theEndsDialogShowsWhenEachConditionIsMet();
     void theReleaseIsShown();
     void aNewReleaseAppearsAtTheTopRight();
     void aMaskShapeIsDrawnOnThePreview();
@@ -1710,87 +1719,9 @@ void UiTest::aNewReleaseAppearsAtTheTopRight()
     window.findChild<QPushButton*>("stopButton")->click();
 }
 
-// Feature-15, Done-when 1 and 2 in the window. The site is put where it is
-// local midnight now, then where it is noon, so the test runs at any hour.
-void UiTest::nightScheduleAndExposureFollower()
+// Feature-15, Done-when 2 in the window: the exposure follower.
+void UiTest::exposureFollower()
 {
-    {
-        QTemporaryDir directory;
-        MainWindow window(nullptr, directory.path());
-        useSynthetic(window);
-        auto* panel = window.findChild<DetectionPanel*>();
-        auto* stop = window.findChild<QPushButton*>("stopButton");
-        auto* reading = panel->findChild<QLabel*>("nightReading");
-        chooseWatch(*panel, Watch::Sky);
-        const double utcHour = std::fmod(std::chrono::duration<double>(
-            std::chrono::system_clock::now().time_since_epoch()).count() / 3600.0, 24.0);
-        const auto wrap = [](double longitude) { return std::fmod(longitude + 540.0, 360.0) - 180.0; };
-        ObservingSite night;
-        night.latitudeDeg = 0; night.heightM = 0;
-        night.longitudeDeg = wrap(-15 * utcHour);
-        ObservingSite day = night;
-        day.longitudeDeg = wrap(15 * (12 - utcHour));
-
-        // The schedule off: nothing starts.
-        window.applySite(night, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QVERIFY(!stop->isEnabled());
-        SkyExtras extras;
-        extras.night = true;
-        extras.sunLimitDeg = -10;
-        panel->setSkyExtras(extras);
-        // No position: nothing starts, and the panel says why. Feature-28: the
-        // schedule is turned off and cannot be turned on until there is one.
-        auto* nightBox = panel->findChild<QCheckBox*>("nightSchedule");
-        QVERIFY(nightBox->isEnabled() && nightBox->isChecked());
-        window.applySite(ObservingSite{}, false, "pool.ntp.org");
-        QVERIFY(!nightBox->isEnabled());
-        QVERIFY(!nightBox->isChecked());
-        QVERIFY(!panel->findChild<QDoubleSpinBox*>("sunLimit")->isEnabled());
-        QVERIFY(!QSettings().value("sky/night/enabled").toBool());
-        window.checkNightSchedule();
-        QVERIFY(!stop->isEnabled());
-        QVERIFY(reading->text().contains("position"));
-        auto* mode = window.findChild<QLabel*>("captureModeLabel");
-        // Night: the position is back, the observer turns the schedule on, and
-        // the stream and Monitoring start.
-        window.applySite(night, false, "pool.ntp.org");
-        QVERIFY(nightBox->isEnabled() && !nightBox->isChecked());
-        nightBox->click();
-        QVERIFY(QSettings().value("sky/night/enabled").toBool());
-        window.checkNightSchedule();
-        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
-        QVERIFY2(reading->text().contains("Dawn stop at"), qPrintable(reading->text()));
-        QVERIFY2(reading->text().contains("local time (") && reading->text().contains(" UTC)."), qPrintable(reading->text()));
-        // The observer stops in the night: the schedule leaves it stopped.
-        stop->click();
-        window.checkNightSchedule();
-        QVERIFY(!stop->isEnabled());
-        // Day, then the next night: it starts again, and stops at dawn.
-        window.applySite(day, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QVERIFY2(reading->text().contains("Dusk start at"), qPrintable(reading->text()));
-        window.applySite(night, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
-        window.applySite(day, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QVERIFY(!stop->isEnabled());
-        // A stream the observer started: at night the schedule adds
-        // Monitoring, and at dawn it ends only that.
-        window.findChild<QPushButton*>("startButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && mode->text().contains("PREVIEW"), 5000);
-        window.applySite(night, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
-        window.applySite(day, false, "pool.ntp.org");
-        window.checkNightSchedule();
-        QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("PREVIEW"), 5000);
-        QVERIFY(stop->isEnabled());
-        window.checkNightSchedule();
-        QVERIFY(stop->isEnabled());
-        stop->click();
-    }
     {
         // The fake camera's sky is 42% of full scale: too bright.
         QTemporaryDir directory;
@@ -2368,14 +2299,14 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(std::abs(tl->settings().video.gamma - 1.45) < 1e-4);
     QVERIFY(!tl->settings().video.autoStretch);
 
-    // Switching stop condition to UTC end when stale must refresh UTC end into the future.
-    auto* utcEndEdit = tl->findChild<QDateTimeEdit*>("timelapseUtcEnd");
+    // Feature-32: a duration and an end time are the session's Ends setting;
+    // the time-lapse's own choice is when the session ends, or a number of stacks.
     auto* stopKindCombo = tl->findChild<QComboBox*>("timelapseStopKind");
-    QVERIFY(utcEndEdit && stopKindCombo);
-    utcEndEdit->setDateTime(QDateTime::currentDateTimeUtc().addSecs(-3600));
-    stopKindCombo->setCurrentIndex(2); // StopConditionKind::UtcEnd
-    QVERIFY(utcEndEdit->dateTime() > QDateTime::currentDateTimeUtc());
-    stopKindCombo->setCurrentIndex(0); // Restore Manual stop
+    QCOMPARE(stopKindCombo->count(), 2);
+    QVERIFY(!tl->findChild<QWidget*>("timelapseUtcEnd") && !tl->findChild<QWidget*>("timelapseDurationMin"));
+    stopKindCombo->setCurrentIndex(1);
+    QCOMPARE(tl->settings().stopKind, StopConditionKind::StackCount);
+    stopKindCombo->setCurrentIndex(0);
 
     ResharpenDialog dlg(tlRoot, sessionDir, &window);
     dlg.show();
@@ -2989,6 +2920,229 @@ void UiTest::closingDuringTimelapseWaitsForTheVideo()
     const QString sessionDir = QDir(tlRoot).filePath(sessions.first());
     QVERIFY(QFileInfo::exists(QDir(sessionDir).filePath("timelapse.mp4")));
     QVERIFY(text(QDir(sessionDir).filePath("timelapse.txt")).contains("stop_reason: the program closed"));
+}
+
+// Feature-32, Done-when 2, 5 and 6: with the simulated mount, a session
+// ends an hour after its start, stops the mount's tracking and records it;
+// the first start asks what the mount does; the observer's own Stop leaves
+// it tracking; a time-lapse ends the same way; the sky shows no mount choice.
+void UiTest::aSessionEndsByItselfAndStopsTheMountsTracking()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    auto* mode = window.findChild<QLabel*>("captureModeLabel");
+    auto* summary = window.findChild<QLabel*>("sessionEndSummary");
+    auto* warning = window.findChild<QLabel*>("sessionEndWarning");
+    QCOMPARE(summary->text(), QString("Ends: when you stop it"));
+    QVERIFY(!warning->isVisibleTo(&window));
+
+    SessionEndSettings ends;
+    ends.afterDuration = true;
+    ends.durationMinutes = 60;
+    window.applySessionEnd(ends, MountAtEnd::Unset);
+    QVERIFY2(summary->text().startsWith("Ends: ") && summary->text().endsWith("1 h 00 min after the start"),
+        qPrintable(summary->text()));
+
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && mode->text().contains("PREVIEW"), 5000);
+    window.findChild<QPushButton*>("connectMountButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(warning->isVisibleTo(&window) && warning->text().contains("choose"), 3000);
+    const auto pointing = window.simulatedPointing();
+    QVERIFY(pointing->tracking());
+
+    // The first start with a mount asks. Cancel starts nothing; Stop tracking is remembered.
+    answerMessageBox("mountAtEndQuestion", false);
+    monitoring->click();
+    QVERIFY(mode->text().contains("PREVIEW"));
+    QCOMPARE(QSettings().value("sessionEnd/mount").toInt(), 0);
+    answerMessageBox("mountAtEndQuestion", true);
+    monitoring->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+    QCOMPARE(QSettings().value("sessionEnd/mount").toInt(), 2);
+    QVERIFY(!warning->isVisibleTo(&window));
+    QVERIFY2(summary->text().startsWith("Ends in ") && summary->text().contains("then the mount stops tracking"),
+        qPrintable(summary->text()));
+
+    // An hour later: Monitoring and the stream end, then the mount's tracking.
+    window.checkSessionEnd(std::chrono::system_clock::now() + std::chrono::minutes{61});
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!pointing->tracking(), 5000);
+    const QString watch = latestWatch(eventsFolder(directory.path(), Target::Moon));
+    QTRY_VERIFY_WITH_TIMEOUT(text(watch + "/session.txt").contains(
+        " mount_at_end action=stop_tracking result=\"tracking stopped\""), 5000);
+    QVERIFY2(text(watch + "/session.txt").contains("reason=session end: 1 h 00 min after the start"),
+        qPrintable(text(watch + "/session.txt")));
+    QTRY_VERIFY2_WITH_TIMEOUT(text(watch + "/report.html").contains("At the end, the mount: tracking stopped"),
+        qPrintable(text(watch + "/report.html").section("<summary>Monitoring and recording timeline", 1).left(800)), 15000);
+    // The status line keeps why it ended and what the mount did, also once the report is ready.
+    auto* message = window.findChild<QLabel*>("statusMessage");
+    QTRY_VERIFY2_WITH_TIMEOUT(message->text().contains("the session ended (1 h 00 min after the start). The mount: tracking stopped."),
+        qPrintable(message->text()), 5000);
+
+    // The observer's own Stop leaves the mount tracking, and nothing is asked again.
+    pointing->setTracking(true);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && mode->text().contains("PREVIEW"), 5000);
+    monitoring->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+    stop->click();
+    QTest::qWait(300);
+    QVERIFY(pointing->tracking());
+
+    // A time-lapse ends the same way, its video built and its record kept.
+    auto* tl = window.findChild<TimelapsePanel*>();
+    tl->findChild<QDoubleSpinBox*>("timelapseInterval")->setValue(0.45);
+    tl->findChild<QDoubleSpinBox*>("timelapseWindow")->setValue(0.25);
+    tl->findChild<QComboBox*>("timelapseStopKind")->setCurrentIndex(0);
+    tl->findChild<QSpinBox*>("timelapseVideoFps")->setValue(5);
+    auto* startTl = tl->findChild<QPushButton*>("timelapseStartButton");
+    startTl->click();
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->text().contains("Stop"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(tl->findChild<QLabel*>("timelapseStats")->text().contains("Stacks: 1"), 15000);
+    window.checkSessionEnd(std::chrono::system_clock::now() + std::chrono::minutes{61});
+    QTRY_VERIFY_WITH_TIMEOUT(!pointing->tracking(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->text().contains("Start") && !stop->isEnabled(), 20000);
+    const QString tlRoot = timelapsesFolder(directory.path());
+    const QStringList runs = QDir(tlRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    QCOMPARE(runs.size(), 1);
+    const QString record = QDir(tlRoot).filePath(runs.first() + "/timelapse.txt");
+    QTRY_VERIFY_WITH_TIMEOUT(text(record).contains("mount_at_end: stop_tracking, tracking stopped"), 20000);
+    QVERIFY2(text(record).contains("stop_reason: session end: 1 h 00 min after the start"), qPrintable(text(record)));
+
+    // The sky is watched with a fixed camera: no mount choice there.
+    chooseWatch(*window.findChild<DetectionPanel*>(), Watch::Sky);
+    window.checkSessionEnd(std::chrono::system_clock::now());
+    QVERIFY(!summary->text().contains("mount"));
+    QVERIFY(!warning->isVisibleTo(&window));
+}
+
+// Feature-32, Done-when 4: a clip refused for the disk reserve ends Monitoring.
+void UiTest::theDiskReserveEndsMonitoring()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* mode = window.findChild<QLabel*>("captureModeLabel");
+    // More than any drive has: Monitoring starts with a warning, and the first clip is refused.
+    window.findChild<QDoubleSpinBox*>("diskReserveGiB")->setValue(100000);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && mode->text().contains("PREVIEW"), 5000);
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+    auto* saveNow = window.findChild<QPushButton*>("saveNowButton");
+    QTRY_VERIFY_WITH_TIMEOUT(saveNow->isEnabled(), 3000);
+    saveNow->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 30000);
+    const QString watch = latestWatch(eventsFolder(directory.path(), Target::Moon));
+    QTRY_VERIFY_WITH_TIMEOUT(text(watch + "/session.txt").contains("reason=session end: the disk reserve"), 5000);
+}
+
+// Feature-32, Done-when 3: guiding that stops by itself ends a guided session
+// at once; the observer's own stop of guiding does not. Calibrates the
+// simulated mount, which takes most of a minute.
+void UiTest::lostGuidingEndsTheSession()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
+    window.applySessionEnd({}, MountAtEnd::KeepTracking);
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* mode = window.findChild<QLabel*>("captureModeLabel");
+    auto* preview = window.findChild<PreviewWidget*>();
+    auto* state = window.findChild<QLabel*>("lockStateLabel");
+    auto* guide = window.findChild<QPushButton*>("guideButton");
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled() && !preview->imageRect().isEmpty(), 5000);
+    window.findChild<QPushButton*>("connectMountButton")->click();
+    QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
+    window.findChild<QPushButton*>("lockAtSelectionButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(state->text().contains("Locked"), 5000);
+    auto* calibrate = window.findChild<QPushButton*>("calibrateButton");
+    QTRY_VERIFY_WITH_TIMEOUT(calibrate->isEnabled(), 3000);
+    calibrate->click();
+    auto* calibration = window.findChild<QLabel*>("calibrationLabel");
+    QTRY_VERIFY2_WITH_TIMEOUT(calibration->text().startsWith("West "), qPrintable(calibration->text()), 120000);
+    QTRY_VERIFY_WITH_TIMEOUT(guide->isEnabled(), 3000);
+    guide->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guide->text() == "Stop guiding", 3000);
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
+
+    // The observer stops guiding and starts it again: the session goes on.
+    guide->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guide->text() == "Start guiding", 3000);
+    QTest::qWait(1500);
+    QVERIFY(mode->text().contains("MONITORING"));
+    guide->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guide->text() == "Stop guiding", 3000);
+
+    // The mount stops tracking (a limit in its driver): guiding stops, and the session ends.
+    window.simulatedPointing()->setTracking(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 5000);
+    const QString watch = latestWatch(eventsFolder(directory.path(), Target::Moon));
+    QTRY_VERIFY_WITH_TIMEOUT(text(watch + "/session.txt").contains(
+        " mount_at_end action=keep_tracking result=\"kept tracking, as chosen\""), 5000);
+    QVERIFY2(text(watch + "/session.txt").contains("reason=session end: guiding stopped:"), qPrintable(text(watch + "/session.txt")));
+}
+
+// Feature-32: the dialog shows each condition's time and the first one; the
+// Moon's row only for the Moon, the mount's only with a mount; a mount that
+// cannot stop its tracking cannot be told to. An old Watch from dusk to dawn
+// becomes At dawn.
+void UiTest::theEndsDialogShowsWhenEachConditionIsMet()
+{
+    SessionEndSettings settings;
+    settings.atLocalTime = true;
+    settings.localTime = QTime(4, 30);
+    SessionEndDialog::Context context;
+    context.zone = QTimeZone(2 * 3600);
+    context.moon = false;
+    {
+        SessionEndDialog dialog(settings, MountAtEnd::Unset, context);
+        QVERIFY(!dialog.findChild<QCheckBox*>("sessionEndMoonBelow")->isVisibleTo(&dialog));
+        QVERIFY(!dialog.findChild<QGroupBox*>("sessionEndMount")->isVisibleTo(&dialog));
+        QCOMPARE(dialog.findChild<QLabel*>("sessionEndTimeReading")->text(), QString("= 02:30 UTC"));
+        QVERIFY(dialog.findChild<QLabel*>("sessionEndDawnReading")->text().contains("needs the site's position"));
+        QVERIFY2(dialog.findChild<QLabel*>("sessionEndResult")->text().startsWith("→ Ends at 04:30 local (02:30 UTC): the local time"),
+            qPrintable(dialog.findChild<QLabel*>("sessionEndResult")->text()));
+        dialog.findChild<QCheckBox*>("sessionEndAtTime")->setChecked(false);
+        QCOMPARE(dialog.findChild<QLabel*>("sessionEndResult")->text(), QString("→ Runs until you stop it."));
+        dialog.findChild<QCheckBox*>("sessionEndAfter")->setChecked(true);
+        dialog.findChild<QTimeEdit*>("sessionEndDuration")->setTime(QTime(2, 15));
+        QCOMPARE(dialog.settings().durationMinutes, 135);
+        QVERIFY(dialog.settings().afterDuration && !dialog.settings().atLocalTime);
+        QCOMPARE(dialog.mountAtEnd(), MountAtEnd::Unset);
+    }
+    context.moon = true;
+    context.mountConnected = true;
+    context.canSetTracking = false;
+    context.site.latitudeDeg = 37.98;
+    context.site.longitudeDeg = 23.73;
+    {
+        SessionEndDialog dialog(settings, MountAtEnd::StopTracking, context);
+        QVERIFY(dialog.findChild<QCheckBox*>("sessionEndMoonBelow")->isVisibleTo(&dialog));
+        QVERIFY(dialog.findChild<QGroupBox*>("sessionEndMount")->isVisibleTo(&dialog));
+        QVERIFY(dialog.findChild<QLabel*>("sessionEndDawnReading")->text().startsWith("dawn: "));
+        QVERIFY(!dialog.findChild<QRadioButton*>("mountStopsTracking")->isEnabled());
+        QVERIFY(dialog.findChild<QRadioButton*>("mountKeepsTracking")->isChecked());
+        QVERIFY(dialog.findChild<QLabel*>("mountKeepWarning")->isVisibleTo(&dialog));
+        QCOMPARE(dialog.mountAtEnd(), MountAtEnd::KeepTracking);
+    }
+
+    // Feature-15's Watch from dusk to dawn becomes At dawn, once.
+    QSettings saved;
+    saved.setValue("sky/night/enabled", true);
+    saved.setValue("sky/night/sunLimit", -12.0);
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    QVERIFY(saved.value("sessionEnd/atDawn").toBool());
+    QCOMPARE(saved.value("sessionEnd/sunLimit").toDouble(), -12.0);
+    QVERIFY(!saved.contains("sky/night/enabled"));
+    QVERIFY(!window.findChild<QCheckBox*>("nightSchedule"));
 }
 
 int main(int argc, char** argv)

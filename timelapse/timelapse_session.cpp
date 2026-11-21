@@ -135,9 +135,6 @@ TimelapseSession::TimelapseSession(QObject* context, Config config)
 
     status_.active = true;
     status_.sessionDir = sessionDir_;
-    status_.remainingSeconds = config_.settings.stopKind == StopConditionKind::Duration
-        ? config_.settings.durationMinutes * 60.0
-        : -1.0;
 
     worker_ = std::jthread([this](std::stop_token stopToken) { workerLoop(stopToken); });
 }
@@ -228,9 +225,6 @@ void TimelapseSession::onFrame(const FramePtr& frame)
 {
     if (!accepting_.load(std::memory_order_acquire) || !frame) return;
 
-    bool triggerStop = false;
-    std::string triggerReason;
-
     {
         std::lock_guard collectorLock(collectorMutex_);
         if (!accepting_.load(std::memory_order_relaxed)) return;
@@ -250,149 +244,107 @@ void TimelapseSession::onFrame(const FramePtr& frame)
                 (frame->steadyTimestamp != std::chrono::steady_clock::time_point{}
                     ? frame->steadyTimestamp : std::chrono::steady_clock::now()) - startSteady_).count());
 
-        // Check duration / UTC end stop conditions.
-        if (config_.settings.stopKind == StopConditionKind::Duration
-            && tSec >= config_.settings.durationMinutes * 60.0)
+        if (collecting_ && tSec >= windowEndSec_)
+            finishCurrentWindowLocked(/*allowAfterStop=*/false);
+
+        startNextWindowIfDueLocked(tSec, frame->timestamp);
+
+        if (collecting_)
         {
-            if (collecting_) finishCurrentWindowLocked(/*allowAfterStop=*/true);
-            accepting_.store(false);
-            triggerStop = true;
-            triggerReason = "duration complete";
-        }
-        else if (config_.settings.stopKind == StopConditionKind::UtcEnd
-            && config_.settings.utcEndTime.isValid())
-        {
-            const qint64 endMs = config_.settings.utcEndTime.toMSecsSinceEpoch();
-            const qint64 frameMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                frame->timestamp.time_since_epoch()).count();
-            if (frameMs >= endMs)
+            std::optional<QRect> qualityRoi;
+            if (config_.settings.lunarAnchor && config_.settings.lunarAnchor->isValid())
+                qualityRoi = config_.settings.lunarAnchor;
+            else if (config_.lockRegion)
+                qualityRoi = QRect(config_.lockRegion->x, config_.lockRegion->y,
+                    config_.lockRegion->width, config_.lockRegion->height);
+
+            RawBurstFrame captured;
+            try
             {
-                if (collecting_) finishCurrentWindowLocked(/*allowAfterStop=*/true);
-                accepting_.store(false);
-                triggerStop = true;
-                triggerReason = "UTC end time reached";
+                captured = captureRawBurstFrame(*frame, effectiveCropRoi_, qualityRoi);
             }
-        }
-
-        if (!triggerStop)
-        {
-            if (collecting_ && tSec >= windowEndSec_)
-                finishCurrentWindowLocked(/*allowAfterStop=*/false);
-
-            startNextWindowIfDueLocked(tSec, frame->timestamp);
-
-            if (collecting_)
+            catch (...)
             {
-                std::optional<QRect> qualityRoi;
-                if (config_.settings.lunarAnchor && config_.settings.lunarAnchor->isValid())
-                    qualityRoi = config_.settings.lunarAnchor;
-                else if (config_.lockRegion)
-                    qualityRoi = QRect(config_.lockRegion->x, config_.lockRegion->y,
-                        config_.lockRegion->width, config_.lockRegion->height);
+                // Never allow an allocation/scoring failure in time-lapse collection
+                // to escape onto the camera acquisition thread.
+                captured = {};
+            }
 
-                RawBurstFrame captured;
-                try
-                {
-                    captured = captureRawBurstFrame(*frame, effectiveCropRoi_, qualityRoi);
-                }
-                catch (...)
-                {
-                    // Never allow an allocation/scoring failure in time-lapse collection
-                    // to escape onto the camera acquisition thread.
-                    captured = {};
-                }
+            if (captured.width > 0 && captured.height > 0)
+            {
+                ++currentCaptured_;
+                windowEndUtc_ = frame->timestamp;
+                const size_t cap = static_cast<size_t>(
+                    std::clamp(config_.settings.maxFramesPerPeriod, 1, TimelapseSettings::kMaxFramesCap));
+                const size_t frameMem = captured.data.size();
 
-                if (captured.width > 0 && captured.height > 0)
+                auto minCmp = [](const RawBurstFrame& a, const RawBurstFrame& b) {
+                    return a.sharpness > b.sharpness; // std::push_heap puts smallest sharpness at front
+                };
+                const bool heapHasRoom = currentHeap_.size() < cap;
+                const bool beatsWorst = !heapHasRoom && !currentHeap_.empty()
+                    && captured.sharpness > currentHeap_.front().sharpness;
+                // Copy the full raw frame only for a frame that will enter the burst.
+                // Without the copy the frame is not admitted, so the SER always holds
+                // exactly the frames that were stacked.
+                bool admissible = heapHasRoom || beatsWorst;
+                if (admissible && config_.settings.saveRawSer)
                 {
-                    ++currentCaptured_;
-                    windowEndUtc_ = frame->timestamp;
-                    const size_t cap = static_cast<size_t>(
-                        std::clamp(config_.settings.maxFramesPerPeriod, 1, TimelapseSettings::kMaxFramesCap));
-                    const size_t frameMem = captured.data.size();
-
-                    auto minCmp = [](const RawBurstFrame& a, const RawBurstFrame& b) {
-                        return a.sharpness > b.sharpness; // std::push_heap puts smallest sharpness at front
-                    };
-                    const bool heapHasRoom = currentHeap_.size() < cap;
-                    const bool beatsWorst = !heapHasRoom && !currentHeap_.empty()
-                        && captured.sharpness > currentHeap_.front().sharpness;
-                    // Copy the full raw frame only for a frame that will enter the burst.
-                    // Without the copy the frame is not admitted, so the SER always holds
-                    // exactly the frames that were stacked.
-                    bool admissible = heapHasRoom || beatsWorst;
-                    if (admissible && config_.settings.saveRawSer)
+                    captured.rawFullFrame = copyRawFrame(*frame);
+                    if (!captured.rawFullFrame)
                     {
-                        captured.rawFullFrame = copyRawFrame(*frame);
-                        if (!captured.rawFullFrame)
-                        {
-                            admissible = false;
-                            ++currentRamRefused_;
-                        }
+                        admissible = false;
+                        ++currentRamRefused_;
                     }
+                }
 
-                    if (admissible && heapHasRoom)
+                if (admissible && heapHasRoom)
+                {
+                    if (tryReserveBurstMemory(frameMem))
                     {
-                        if (tryReserveBurstMemory(frameMem))
-                        {
-                            currentBurstBytes_ += frameMem;
-                            currentHeap_.push_back(std::move(captured));
-                            std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
-                        }
-                        else
-                        {
-                            ++currentRamRefused_;
-                        }
+                        currentBurstBytes_ += frameMem;
+                        currentHeap_.push_back(std::move(captured));
+                        std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
                     }
-                    else if (admissible)
+                    else
                     {
-                        std::pop_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
-                        const size_t oldBytes = currentHeap_.back().data.size();
-                        if (frameMem <= oldBytes || tryReserveBurstMemory(frameMem - oldBytes))
+                        ++currentRamRefused_;
+                    }
+                }
+                else if (admissible)
+                {
+                    std::pop_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
+                    const size_t oldBytes = currentHeap_.back().data.size();
+                    if (frameMem <= oldBytes || tryReserveBurstMemory(frameMem - oldBytes))
+                    {
+                        if (frameMem > oldBytes) currentBurstBytes_ += (frameMem - oldBytes);
+                        else if (oldBytes > frameMem)
                         {
-                            if (frameMem > oldBytes) currentBurstBytes_ += (frameMem - oldBytes);
-                            else if (oldBytes > frameMem)
-                            {
-                                releaseBurstMemory(oldBytes - frameMem);
-                                currentBurstBytes_ -= (oldBytes - frameMem);
-                            }
-                            // Assigning replaces the evicted entry, immediately dropping any
-                            // evicted rawFullFrame FramePtr back to the FramePool.
-                            currentHeap_.back() = std::move(captured);
-                            std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
+                            releaseBurstMemory(oldBytes - frameMem);
+                            currentBurstBytes_ -= (oldBytes - frameMem);
                         }
-                        else
-                        {
-                            ++currentRamRefused_;
-                            std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
-                        }
+                        // Assigning replaces the evicted entry, immediately dropping any
+                        // evicted rawFullFrame FramePtr back to the FramePool.
+                        currentHeap_.back() = std::move(captured);
+                        std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
+                    }
+                    else
+                    {
+                        ++currentRamRefused_;
+                        std::push_heap(currentHeap_.begin(), currentHeap_.end(), minCmp);
                     }
                 }
             }
-
-            // Update lightweight timing telemetry under lock without allocating.
-            {
-                std::lock_guard lock(mutex_);
-                status_.elapsedSeconds = tSec;
-                if (config_.settings.stopKind == StopConditionKind::Duration)
-                    status_.remainingSeconds = std::max(0.0, config_.settings.durationMinutes * 60.0 - tSec);
-                const double interval = config_.settings.intervalSeconds;
-                const int nextK = std::max(0, currentPeriodIndex_ + 1);
-                status_.nextBurstInSeconds = collecting_ ? 0.0 : std::max(0.0, nextK * interval - tSec);
-            }
         }
-    }
 
-    if (triggerStop)
-    {
+        // Update lightweight timing telemetry under lock without allocating.
         {
             std::lock_guard lock(mutex_);
-            if (!stopRequested_)
-            {
-                stopRequested_ = true;
-                stopReason_ = triggerReason;
-            }
+            status_.elapsedSeconds = tSec;
+            const double interval = config_.settings.intervalSeconds;
+            const int nextK = std::max(0, currentPeriodIndex_ + 1);
+            status_.nextBurstInSeconds = collecting_ ? 0.0 : std::max(0.0, nextK * interval - tSec);
         }
-        cv_.notify_all();
     }
 }
 

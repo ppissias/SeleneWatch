@@ -8,11 +8,13 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
+class QSpinBox;
 
 // The Guiding dock: the feature lock, the mount, the calibration, and
 // guiding. It holds no guiding state; the window passes each status the
 // guider publishes and forwards the requests. The only values it keeps are
-// the observer's choices: the mount kind and the tolerance.
+// the observer's choices: the mount kind, the tolerance and how long a lost
+// lock is searched for (Feature-32).
 class GuidingPanel final : public QWidget
 {
     Q_OBJECT
@@ -40,6 +42,9 @@ public:
     // The tolerance as a percentage of the frame's shorter side.
     [[nodiscard]] double tolerancePercent() const;
     void setTolerancePercent(double percent);
+    // Feature-32: the grace period for a lost lock while guiding, seconds.
+    [[nodiscard]] double lostAfterSeconds() const;
+    void setLostAfterSeconds(double seconds);
 
 signals:
     void lockAtSelectionRequested();
@@ -51,6 +56,7 @@ signals:
     void calibrateRequested();
     void guidingRequested(bool on);
     void toleranceChanged();
+    void lostAfterChanged();
     void mountKindChanged();
 
 private:
@@ -79,6 +85,7 @@ private:
     QDoubleSpinBox* tolerance_;
     QLabel* toleranceReadout_;
     QPushButton* guideButton_;
+    QSpinBox* lostAfter_;
     QLabel* guiding_;
     QLabel* guideMessage_;
 

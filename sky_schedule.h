@@ -3,7 +3,8 @@
 #include <chrono>
 #include <optional>
 
-// Feature-15 Part A: watching the sky from dusk to dawn.
+// The Sun's and the Moon's altitude, for the end of a session (Feature-32):
+// at dawn, or when the Moon sinks below an altitude.
 
 // The Sun's geometric altitude in degrees (no refraction), seen from a place
 // (degrees, north and east positive) at a UTC time. The NOAA solar
@@ -11,16 +12,19 @@
 [[nodiscard]] double sunAltitudeDegrees(double latitudeDeg, double longitudeDeg,
     std::chrono::system_clock::time_point utc);
 
-// The next time, after from and within the next two days, at which the Sun
-// crosses the given altitude, to the second. None when it does not (polar
-// day or night).
-[[nodiscard]] std::optional<std::chrono::system_clock::time_point> nextSunCrossing(double latitudeDeg,
-    double longitudeDeg, double altitudeDeg, std::chrono::system_clock::time_point from);
+// The Moon's topocentric altitude in degrees (its parallax included, no
+// refraction). The Astronomical Almanac's low-precision lunar position;
+// within a few tenths of a degree, a few hundredths against JPL Horizons.
+[[nodiscard]] double moonAltitudeDegrees(double latitudeDeg, double longitudeDeg,
+    std::chrono::system_clock::time_point utc);
 
-// What the schedule does now. Below the limit it starts watching once a
-// night, if the sky is not being watched; so a stop by the observer holds
-// until the next dusk. Above the limit it stops what it started and still
-// runs, never what the observer started.
-enum class NightAction { None, Start, Stop };
-[[nodiscard]] NightAction nightAction(double sunAltitudeDeg, double limitDeg, bool watching, bool startedTonight,
-    bool ownsWhatRuns);
+// Which way a body passes an altitude.
+enum class Crossing { Rising, Setting };
+
+// The next time, after from and within the next two days, at which the body
+// passes the given altitude in that direction, to the second. None when it
+// does not (polar day or night).
+[[nodiscard]] std::optional<std::chrono::system_clock::time_point> nextSunCrossing(double latitudeDeg,
+    double longitudeDeg, double altitudeDeg, std::chrono::system_clock::time_point from, Crossing direction);
+[[nodiscard]] std::optional<std::chrono::system_clock::time_point> nextMoonCrossing(double latitudeDeg,
+    double longitudeDeg, double altitudeDeg, std::chrono::system_clock::time_point from, Crossing direction);

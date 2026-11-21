@@ -103,6 +103,12 @@ public:
 
     // Stops the source and hands off a clip still being collected. Safe when stopped.
     void stop(std::string reason = "stopped", bool resumeWatch = false);
+    // Feature-32: the folder of the last Monitoring session that ended, or empty.
+    [[nodiscard]] QString lastWatchFolder() const;
+    // Feature-32: a line added to a finished session's record by the writer
+    // (what the mount did at its end), after everything queued before it.
+    // With rewriteReport, that session's nightly report is written again.
+    void addToRecord(const QString& folder, const QString& fileName, const QString& line, bool rewriteReport);
     void finishInterruptedWatch() { if (!running_) closeWatch("camera restart failed"); }
 
     // Context thread. One request at a time, while running only. Settings
@@ -217,9 +223,13 @@ private:
     void applyManualSave();
     void applyModeRequest();
     bool openWatch(QString& error);
+    void retryReport(const QString& folder, const QString& error, int attemptsLeft);
     void closeWatch(const QString& reason, bool resume = false);
     // Owned by the source thread during acquisition, otherwise by its caller.
     QString watchFolder_;
+    // Feature-32: written on the source or context thread, read by the window.
+    mutable std::mutex lastWatchMutex_;
+    QString lastWatchFolder_;
     bool watchIntervalOpen_{false};
     std::chrono::steady_clock::time_point watchStart_{};
     // Source thread: starts, feeds and ends the continuous recording.

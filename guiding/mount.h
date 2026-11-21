@@ -49,6 +49,8 @@ struct MountState
     bool parked{false};
     bool canPulseGuide{false};
     bool pulseGuiding{false};
+    // Feature-32: tracking can be stopped at the end of a session.
+    bool canSetTracking{false};
     PierSide pierSide{PierSide::Unknown};
     // True for an alt-azimuth mount, which this step refuses to guide.
     bool altAzimuth{false};
@@ -57,9 +59,11 @@ struct MountState
 };
 
 // A mount that can be connected, asked for its state, and sent guide pulses.
-// Nothing else: no slew, sync, park, tracking change, axis rate, or rate
-// offset. A pulse ends by itself, so a crash or a lost connection cannot
-// leave the mount moving.
+// One more command, stopTracking, which a session sends when it ends by
+// itself and the observer chose it (Feature-32). Nothing else: no slew,
+// sync, park, tracking start, axis rate, or rate offset. A pulse ends by
+// itself and stopping tracking stops motion, so a crash or a lost connection
+// cannot leave the mount moving because of SeleneWatch.
 //
 // Two implementations: SimulatedMount for tests and the synthetic source,
 // and AscomMount for real drivers. All calls are made on the guide thread.
@@ -76,4 +80,6 @@ public:
     [[nodiscard]] virtual MountState state() = 0;
     // May return before the pulse ends; state().pulseGuiding tells when it has.
     virtual void pulseGuide(GuideDirection direction, int milliseconds) = 0;
+    // Only when state().canSetTracking.
+    virtual void stopTracking() = 0;
 };

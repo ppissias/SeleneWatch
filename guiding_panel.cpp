@@ -12,6 +12,7 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
+#include <QtWidgets/QSpinBox>
 #include <QtWidgets/QVBoxLayout>
 
 #include <cmath>
@@ -275,8 +276,9 @@ GuidingPanel::GuidingPanel(QWidget* parent)
 
     // Calibration and guiding.
     auto* guideBox = new QGroupBox("Guiding", this);
-    auto* guideHint = new QLabel("Only guide pulses are sent: never a slew, a park, or a tracking change. "
-        "Calibrate with the lock held, then start guiding. Guiding is off at every start.", guideBox);
+    auto* guideHint = new QLabel("Only guide pulses are sent, and a tracking stop when a session ends if you chose it "
+        "(Ends → Change…): never a slew or a park. Calibrate with the lock held, then start guiding. Guiding is off at "
+        "every start.", guideBox);
     guideHint->setWordWrap(true);
     calibrateButton_ = new QPushButton("Calibrate", guideBox);
     calibrateButton_->setObjectName("calibrateButton");
@@ -295,6 +297,20 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     guideButton_ = new QPushButton("Start guiding", guideBox);
     guideButton_->setObjectName("guideButton");
     guideButton_->setToolTip("Starts or stops pulse guiding on the locked feature. Needs a connected, calibrated mount.");
+    // Feature-32: a lost lock is searched for this long before guiding, and the session, end.
+    lostAfter_ = new QSpinBox(guideBox);
+    lostAfter_->setObjectName("lockLostAfter");
+    lostAfter_->setRange(static_cast<int>(LockTracker::kMinSearchSeconds), static_cast<int>(LockTracker::kMaxSearchSeconds));
+    lostAfter_->setSingleStep(30);
+    lostAfter_->setSuffix(" s");
+    lostAfter_->setValue(static_cast<int>(LockTracker::kDefaultSearchSeconds));
+    lostAfter_->setToolTip("While guiding, a lock that finds no match (a cloud, the feature out of view) is searched for "
+        "this long. If it is not found again, guiding stops, and so does the session: Monitoring or the time-lapse ends "
+        "and the mount is left as chosen under Ends → Change…. A guiding stop for a safety reason (the mount stopped "
+        "tracking, changed its side of pier, did not answer) ends the session at once.");
+    auto* endsNote = new QLabel("While guiding, a lost lock (after this time) or a guiding stop ends the session.", guideBox);
+    endsNote->setObjectName("guidingEndsSession");
+    endsNote->setWordWrap(true);
     guiding_ = readout(guideBox, "guidingLabel", {guidingText(widest.guide)});
     guideMessage_ = wrapped(guideBox, "guideMessageLabel");
     guideMessage_->setStyleSheet("color: #e0a030;");
@@ -308,11 +324,13 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* guideForm = new QFormLayout;
     guideForm->addRow("Calibration", calibration_);
     guideForm->addRow("Tolerance", toleranceRow);
+    guideForm->addRow("Lock lost after", lostAfter_);
     guideForm->addRow("Status", guiding_);
     auto* guideLayout = new QVBoxLayout(guideBox);
     guideLayout->addWidget(guideHint);
     guideLayout->addLayout(guideButtons);
     guideLayout->addLayout(guideForm);
+    guideLayout->addWidget(endsNote);
     guideLayout->addWidget(guideMessage_);
 
     // The readouts keep room for long texts, so the panel scrolls when the
@@ -344,6 +362,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
         updateTolerance();
         emit toleranceChanged();
     });
+    connect(lostAfter_, &QSpinBox::valueChanged, this, &GuidingPanel::lostAfterChanged);
     connect(mountKind_, &QComboBox::currentIndexChanged, this, [this] {
         updateMountControls();
         emit mountKindChanged();
@@ -471,4 +490,14 @@ double GuidingPanel::tolerancePercent() const
 void GuidingPanel::setTolerancePercent(double percent)
 {
     tolerance_->setValue(percent);
+}
+
+double GuidingPanel::lostAfterSeconds() const
+{
+    return lostAfter_->value();
+}
+
+void GuidingPanel::setLostAfterSeconds(double seconds)
+{
+    lostAfter_->setValue(static_cast<int>(std::lround(seconds)));
 }

@@ -153,15 +153,20 @@ bool LockTracker::step(const Frame& frame)
     else
     {
         candidate_.reset();
-        if (seconds(now - searchingSince_) > kSearchSeconds)
+        if (seconds(now - searchingSince_) > searchSeconds_)
         {
             status_.state = LockState::Lost;
             status_.message = std::format("The feature was not found within {} pixels for {:.0f} s. Lock again.",
-                kSearchRadius, kSearchSeconds);
+                kSearchRadius, searchSeconds_);
         }
     }
     updateEstimate(now);
     return true;
+}
+
+void LockTracker::setSearchSeconds(double seconds)
+{
+    searchSeconds_ = std::clamp(seconds, kMinSearchSeconds, kMaxSearchSeconds);
 }
 
 void LockTracker::updateEstimate(std::chrono::system_clock::time_point now)

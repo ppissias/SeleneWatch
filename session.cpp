@@ -5,6 +5,7 @@
 #include "recording/output_paths.h"
 #include "selenewatch_version.h"
 
+#include <QtCore/QTimer>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
@@ -114,12 +115,45 @@ void Session::closeWatch(const QString& reason, bool resume)
     }
     if (resume) return;
     const QString folder = std::exchange(watchFolder_, QString{});
+    {
+        std::lock_guard lock(lastWatchMutex_);
+        lastWatchFolder_ = folder;
+    }
     // The recorder may still be flushing its SER. Its stop record and all
     // earlier clip outcomes must reach the event writer before finalization.
     recorder_.afterQueued([this, folder, done = notifications_.reportReady] {
         writer_.finishReport(folder, [done](QString path, QString error) { if (done) done(path, error); });
     });
     writer_.setOutputRoot(eventsRoot());
+}
+
+QString Session::lastWatchFolder() const
+{
+    std::lock_guard lock(lastWatchMutex_);
+    return lastWatchFolder_;
+}
+
+void Session::addToRecord(const QString& folder, const QString& fileName, const QString& line, bool rewriteReport)
+{
+    if (folder.isEmpty()) return;
+    // Behind the recorder, as closeWatch queues the report.
+    recorder_.afterQueued([this, folder, fileName, line, rewriteReport] {
+        writer_.logRecord(line, folder, fileName);
+        if (rewriteReport) writer_.finishReport(folder, [this, folder](QString, QString error) { retryReport(folder, error, 5); });
+    });
+}
+
+// Context thread. A report written moments ago can still be held open by
+// another program (a virus scan), so replacing it is refused; it is tried
+// again a second later, a few times.
+void Session::retryReport(const QString& folder, const QString& error, int attemptsLeft)
+{
+    if (error.isEmpty() || attemptsLeft <= 0) return;
+    QTimer::singleShot(1000, context_, [this, folder, attemptsLeft] {
+        writer_.finishReport(folder, [this, folder, attemptsLeft](QString, QString error) {
+            retryReport(folder, error, attemptsLeft - 1);
+        });
+    });
 }
 
 void Session::setSite(const ObservingSite& site)

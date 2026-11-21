@@ -2,6 +2,7 @@
 
 #include "recording/event_writer.h"
 #include "frame.h"
+#include "session_end.h"
 #include "sky_exposure.h"
 #include "sources/frame_source.h"
 #include "session.h"
@@ -43,6 +44,7 @@ class TipsDialog;
 class ReleaseChecker;
 class SimulatedPointing;
 class CameraFamilyPanel;
+class ElidedLabel;
 class ZwoApi;
 class QhyApi;
 class PlayerOneApi;
@@ -159,9 +161,6 @@ public:
     // Feature-15: closes the mask shape whose corners were clicked; the
     // preview's double-click, and the window test.
     void closeMaskShape();
-    // Feature-15, every 30 s and on a change: starts or stops watching by
-    // the Sun's altitude. Public for the window test.
-    void checkNightSchedule();
     // Feature-15, every 5 s: measures the sky and changes the camera's
     // exposure or gain when the rule says so. Public so the window test can
     // give the time.
@@ -169,6 +168,16 @@ public:
     // Feature-26: the earthshine box, as a drag on the preview would set it.
     // Public for the window test.
     void setEarthshineBox(QRect box);
+    // Feature-32, in mainwindow_session_end.cpp. Saves when a session ends
+    // and what the mount does then; the dialog's OK, and the window test.
+    void applySessionEnd(const SessionEndSettings& settings, MountAtEnd mount);
+    // Feature-32, every second: ends the running session when a condition is
+    // met or it stopped by itself, and updates the Ends row. Public so the
+    // window test can give the time.
+    void checkSessionEnd(std::chrono::system_clock::time_point now);
+    // The simulated mount's sky, shared with the synthetic source; the window
+    // test stops its tracking.
+    [[nodiscard]] std::shared_ptr<SimulatedPointing> simulatedPointing() const { return simulatedPointing_; }
 private:
     void saveSkyExtras();
     // Feature-26, in mainwindow_autotune.cpp. The panel holds the suggestions
@@ -202,6 +211,36 @@ private:
     [[nodiscard]] TuneCamera tuneCamera() const;
     [[nodiscard]] QString twilightAdvice() const;
     [[nodiscard]] std::vector<std::string> guidingWarnings() const;
+    // Feature-32, in mainwindow_session_end.cpp.
+    struct SessionRun
+    {
+        bool timeLapse{false};
+        std::chrono::system_clock::time_point start;
+        // GuideStatus::unplannedStops at the start: a new one ends the session.
+        int guideStops{0};
+        QString folder;
+    };
+    // Where the mount's result goes once the guider has answered.
+    struct MountRecord
+    {
+        int trackingStops{0};
+        bool timeLapse{false};
+        QString folder;
+        // "04:30: the session ended (…)."
+        QString note;
+    };
+    [[nodiscard]] QWidget* makeSessionEndRow(QWidget* parent);
+    void loadSessionEnd();
+    void onChangeSessionEnd();
+    [[nodiscard]] bool askMountAtEnd();
+    [[nodiscard]] bool moonEnds() const;
+    [[nodiscard]] bool mountForEnd() const;
+    void beginSessionRun(bool timeLapse);
+    void endSession(const QString& why);
+    void updateSessionEndRow(std::chrono::system_clock::time_point now);
+    void checkTrackingStop(const GuideStatus& guide);
+    void recordMountAtEnd(const MountRecord& record, const QString& result);
+    void writeTimeLapseMountLine(const QString& folder);
     void setupDisplayPanel();
     void setupHistogramPanel();
     void setupGuidingPanel();
@@ -229,8 +268,9 @@ private:
     // The source the controls describe. Null, with a message, when none can be made.
     std::unique_ptr<FrameSource> makeSource();
 
-    // Stops the session after Stop, the end of a recording, or a failure.
-    void finishStream();
+    // Stops the session after Stop, the end of a recording, a failure, or an
+    // end by itself (Feature-32); the reason goes into the session's record.
+    void finishStream(const std::string& reason = "stopped");
 
     void updateControls();
     void updateBufferReadout();
@@ -283,17 +323,25 @@ private:
     Watch watch_{Watch::MoonFlashes};
     // The corners of a mask shape being drawn (Feature-15).
     std::vector<MaskPoint> pendingShape_;
-    // Feature-15: the timer of the night schedule and the exposure follower,
-    // and the follower's memory. The schedule's own record: whether it has
-    // started tonight, and what it started that still runs (the stream, or
-    // only Monitoring on the observer's stream). The observer's Stop ends
-    // what it owns.
+    // Feature-15: the exposure follower's timer and memory.
     QTimer* skyTimer_{nullptr};
-    int skyTicks_{0};
-    enum class NightOwns { Nothing, Monitoring, Stream };
-    NightOwns nightOwns_{NightOwns::Nothing};
-    bool nightStartedTonight_{false};
     SkyExposureState skyExposureState_;
+    // Feature-32: when a session ends and what the mount does then; the
+    // running session (Monitoring or a time-lapse the observer started); a
+    // tracking stop waiting for the guider's answer; a time-lapse's mount
+    // line waiting for its timelapse.txt.
+    SessionEndSettings sessionEnd_;
+    MountAtEnd mountAtEnd_{MountAtEnd::Unset};
+    std::optional<SessionRun> sessionRun_;
+    int sessionRunGone_{0};
+    std::optional<MountRecord> pendingMount_;
+    // Why the last session ended by itself, kept in the status line when its report arrives.
+    QString endNote_;
+    std::optional<std::pair<QString, QString>> timeLapseMountLine_;
+    ElidedLabel* sessionEndSummary_{nullptr};
+    QLabel* sessionEndWarning_{nullptr};
+    QPushButton* sessionEndChange_{nullptr};
+    QTimer* sessionEndTimer_{nullptr};
     // Feature-26: auto-tune's panel, the earthshine box and the area grown
     // from it, and the measurement in hand. A K result is bound to the
     // detection and camera settings it was measured with.

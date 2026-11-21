@@ -247,6 +247,8 @@ struct AscomMount::Driver
     // Declared first: joined before the driver is made, left after it is released.
     ComApartment apartment;
     Dispatch telescope;
+    // Read once at connect: a capability does not change while connected.
+    bool canSetTracking{false};
 };
 
 AscomMount::AscomMount(std::string progId)
@@ -264,6 +266,14 @@ void AscomMount::connect()
     driver_->telescope.put(L"Connected", on);
     if (!driver_->telescope.getBool(L"Connected"))
         throw std::runtime_error("The driver did not connect. Check the mount's cable, power, and driver settings.");
+    try
+    {
+        driver_->canSetTracking = driver_->telescope.getBool(L"CanSetTracking");
+    }
+    catch (const std::runtime_error&)
+    {
+        driver_->canSetTracking = false;
+    }
 }
 
 void AscomMount::disconnect()
@@ -280,6 +290,7 @@ MountState AscomMount::state()
     state.connected = telescope.getBool(L"Connected");
     if (!state.connected) return state;
     state.canPulseGuide = telescope.getBool(L"CanPulseGuide");
+    state.canSetTracking = driver_->canSetTracking;
     state.tracking = telescope.getBool(L"Tracking");
     state.slewing = telescope.getBool(L"Slewing");
     state.parked = telescope.getBool(L"AtPark");
@@ -320,6 +331,13 @@ MountState AscomMount::state()
 void AscomMount::pulseGuide(GuideDirection direction, int milliseconds)
 {
     driver_->telescope.call(L"PulseGuide", {intVariant(static_cast<int>(direction)), intVariant(milliseconds)});
+}
+
+void AscomMount::stopTracking()
+{
+    Variant off;
+    off.value = boolVariant(false);
+    driver_->telescope.put(L"Tracking", off);
 }
 
 bool ascomAvailable()
@@ -366,6 +384,7 @@ void AscomMount::connect() {}
 void AscomMount::disconnect() {}
 MountState AscomMount::state() { return {}; }
 void AscomMount::pulseGuide(GuideDirection, int) {}
+void AscomMount::stopTracking() {}
 
 bool ascomAvailable()
 {

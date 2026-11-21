@@ -21,12 +21,13 @@ enum class SharpeningPreset
     Custom
 };
 
+// Feature-32: a time-lapse also ends with the session's Ends setting; the
+// window stops it then. The values are those saved before Duration and the
+// UTC end time moved there.
 enum class StopConditionKind
 {
-    Manual,
-    Duration,
-    UtcEnd,
-    StackCount
+    Manual = 0,
+    StackCount = 3
 };
 
 [[nodiscard]] const char* timelapsePresetName(TimelapsePreset preset);
@@ -81,8 +82,6 @@ struct TimelapseSettings
     // the session for rigid translation + rotation alignment.
     std::optional<QRect> lunarAnchor;
     StopConditionKind stopKind{StopConditionKind::Manual};
-    double durationMinutes{60.0};
-    QDateTime utcEndTime;
     int targetStacks{60};
     bool saveRawSer{false};
     SharpeningSettings sharpening;

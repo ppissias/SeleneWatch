@@ -37,7 +37,6 @@ struct TimelapseStatus
     int stacksCompleted{0};
     int periodsSkipped{0};
     double elapsedSeconds{0};
-    double remainingSeconds{0}; // < 0 when open-ended (manual stop)
     double nextBurstInSeconds{0};
     double lastProcessingSeconds{0};
 

@@ -60,6 +60,10 @@ public:
     // Arcseconds along RA and Dec.
     [[nodiscard]] Offset skyOffset(Clock::time_point now);
     [[nodiscard]] Settings settings() const;
+    // Feature-32: whether the mount tracks, as the simulated mount reports
+    // it. Only reported: the scene does not drift faster when it is off.
+    void setTracking(bool tracking);
+    [[nodiscard]] bool tracking() const;
 
     // The image motion of one millisecond of pulse in a direction, frame pixels.
     // What a perfect calibration measures, ignoring backlash.
@@ -72,6 +76,7 @@ private:
     mutable std::mutex mutex_;
     Settings settings_;
     bool active_{false};
+    bool tracking_{true};
     Clock::time_point time_;
     double ra_{0}, dec_{0};
     std::optional<GuideDirection> direction_;
@@ -95,6 +100,7 @@ public:
         bool slewing{false};
         bool parked{false};
         bool canPulseGuide{true};
+        bool canSetTracking{true};
         bool altAzimuth{false};
         PierSide pierSide{PierSide::West};
     };
@@ -107,6 +113,8 @@ public:
     void disconnect() override;
     [[nodiscard]] MountState state() override;
     void pulseGuide(GuideDirection direction, int milliseconds) override;
+    // Stops the shared pointing's tracking.
+    void stopTracking() override;
 
     Condition condition;
 

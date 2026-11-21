@@ -49,9 +49,7 @@ bool TimelapseSettings::valid() const
     if (!std::isfinite(captureWindowSeconds) || captureWindowSeconds < 0.1 || captureWindowSeconds > intervalSeconds) return false;
     if (!std::isfinite(keepPercent) || keepPercent < 1.0 || keepPercent > 100.0) return false;
     if (maxFramesPerPeriod < 1 || maxFramesPerPeriod > kMaxFramesCap) return false;
-    if (stopKind == StopConditionKind::Duration && (!std::isfinite(durationMinutes) || durationMinutes <= 0.0)) return false;
     if (stopKind == StopConditionKind::StackCount && targetStacks < 1) return false;
-    if (stopKind == StopConditionKind::UtcEnd && !utcEndTime.isValid()) return false;
     if (!sharpening.valid() || !video.valid()) return false;
     return true;
 }

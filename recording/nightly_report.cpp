@@ -128,6 +128,8 @@ QString activity(const QString& line)
     else if (action == "monitoring_stop") description = "Monitoring ended (" + line.section(" reason=", 1) + ")";
     else if (action == "recording_start") description = "Continuous recording began (" + field(line,"started_by") + ")";
     else if (action == "recording_stop") description = "Continuous recording ended (" + field(line,"ended") + ")";
+    // Feature-32: what the mount did when the session ended by itself.
+    else if (action == "mount_at_end") description = "At the end, the mount: " + field(line, "result");
     else if (action == "exposure_change") description = "Sky follower adjusted exposure and gain: " + line.section(" exposure_ms=", 1).section(" reason=",0,0);
     else description = line.section(' ',1);
     return h(readableTime(line.section(' ',0,0))) + " &middot; " + h(description);
@@ -244,6 +246,7 @@ QString writeNightlyReport(const QString& folder, QString& error)
             const QString line = in.readLine();
             if (line.contains(" monitoring_start ")) { ++starts; boundaries << line; }
             if (line.contains(" monitoring_stop ")) { ++ends; seconds += field(line, "seconds").toDouble(); boundaries << line; }
+            if (line.contains(" mount_at_end ")) boundaries << line;
         }
     }
     QDir parent = root;

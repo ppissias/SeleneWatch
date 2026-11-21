@@ -1,6 +1,7 @@
 #include "tests/detector_observation.h"
 #include "recording/clip_overview.h"
 #include "sky_exposure.h"
+#include "session_end.h"
 #include "sky_schedule.h"
 
 #include <QtGui/QGuiApplication>
@@ -54,7 +55,8 @@ class SkyExtrasTest : public QObject
     Q_OBJECT
 private slots:
     void theSunsAltitudeMatchesPublishedValues();
-    void theScheduleStartsBelowTheLimitAndStopsAbove();
+    void theMoonsAltitudeMatchesJplHorizons();
+    void aSessionEndsAtTheFirstConditionMet();
     void theExposureFollowsTheSky();
     void theSkyLevelLeavesTheMaskOut();
     void eachClipGetsASuggestedKind();
@@ -77,32 +79,123 @@ void SkyExtrasTest::theSunsAltitudeMatchesPublishedValues()
     // Midnight in winter in Athens: far below the horizon.
     QVERIFY(sunAltitudeDegrees(37.98, 23.73, utc(2026, 12, 21, 22, 30, 0)) < -60);
 
-    // The next dusk at -10 degrees after an Athens afternoon.
+    // The next dusk at -10 degrees after an Athens afternoon, then the dawn after it.
     const auto from = utc(2026, 11, 17, 12, 0, 0);
-    const auto dusk = nextSunCrossing(37.98, 23.73, -10, from);
+    const auto dusk = nextSunCrossing(37.98, 23.73, -10, from, Crossing::Setting);
     QVERIFY(dusk && *dusk > from && *dusk < from + hours{12});
     QVERIFY(std::abs(sunAltitudeDegrees(37.98, 23.73, *dusk) + 10) < 0.01);
     QVERIFY(sunAltitudeDegrees(37.98, 23.73, *dusk - minutes{1}) > -10);
+    // Feature-32: dawn is the next rising crossing, not the dusk that comes first.
+    const auto dawn = nextSunCrossing(37.98, 23.73, -10, from, Crossing::Rising);
+    QVERIFY(dawn && *dawn > *dusk && *dawn < *dusk + hours{14});
+    QVERIFY(std::abs(sunAltitudeDegrees(37.98, 23.73, *dawn) + 10) < 0.01);
+    QVERIFY(sunAltitudeDegrees(37.98, 23.73, *dawn - minutes{1}) < -10);
     // No crossing at the pole in polar night.
-    QVERIFY(!nextSunCrossing(89.9, 0, -1, utc(2026, 12, 21, 0, 0, 0)));
+    QVERIFY(!nextSunCrossing(89.9, 0, -1, utc(2026, 12, 21, 0, 0, 0), Crossing::Rising));
 }
 
-// Done-when 1: the decision itself.
-void SkyExtrasTest::theScheduleStartsBelowTheLimitAndStopsAbove()
+// Feature-32: the Moon's topocentric, airless altitude against JPL Horizons
+// (observer tables, quantity 4, fetched on 21 November 2026).
+void SkyExtrasTest::theMoonsAltitudeMatchesJplHorizons()
 {
-    // Arguments: Sun, limit, watching, started tonight, owns what runs.
-    QCOMPARE(nightAction(-15, -10, false, false, false), NightAction::Start);
-    QCOMPARE(nightAction(-15, -10, true, true, true), NightAction::None);
-    QCOMPARE(nightAction(-15, -10, true, false, false), NightAction::None);
-    // Once a night: the observer's stop holds until the next dusk.
-    QCOMPARE(nightAction(-15, -10, false, true, false), NightAction::None);
-    QCOMPARE(nightAction(-5, -10, true, true, true), NightAction::Stop);
-    // Whatever runs, if it is the schedule's own, stops: the stream, or
-    // Monitoring on the observer's stream.
-    QCOMPARE(nightAction(-5, -10, false, true, true), NightAction::Stop);
-    // Never what the observer started.
-    QCOMPARE(nightAction(-5, -10, true, false, false), NightAction::None);
-    QCOMPARE(nightAction(-5, -10, false, false, false), NightAction::None);
+    struct Published
+    {
+        double latitude, longitude;
+        system_clock::time_point at;
+        double altitude;
+    };
+    const Published published[] = {
+        {37.98, 23.73, utc(2026, 11, 21, 0, 0, 0), 14.694419},
+        {37.98, 23.73, utc(2026, 11, 21, 4, 0, 0), -27.751358},
+        {37.98, 23.73, utc(2026, 11, 21, 8, 0, 0), -42.093332},
+        {37.98, 23.73, utc(2026, 11, 21, 12, 0, 0), -9.787921},
+        {37.98, 23.73, utc(2026, 11, 21, 16, 0, 0), 35.959954},
+        {37.98, 23.73, utc(2026, 11, 21, 20, 0, 0), 63.326636},
+        {37.98, 23.73, utc(2026, 11, 22, 0, 0, 0), 27.561805},
+        {51.48, 0, utc(2030, 3, 15, 0, 0, 0), 33.929281},
+        {51.48, 0, utc(2030, 3, 15, 4, 0, 0), -1.479085},
+        {51.48, 0, utc(2030, 3, 15, 8, 0, 0), -21.672969},
+        {51.48, 0, utc(2030, 3, 15, 12, 0, 0), -9.381177},
+        {51.48, 0, utc(2030, 3, 15, 16, 0, 0), 23.655964},
+        {51.48, 0, utc(2030, 3, 15, 20, 0, 0), 52.126091},
+        {51.48, 0, utc(2030, 3, 16, 0, 0, 0), 38.050652},
+    };
+    for (const Published& p : published)
+    {
+        const double altitude = moonAltitudeDegrees(p.latitude, p.longitude, p.at);
+        QVERIFY2(std::abs(altitude - p.altitude) < 0.1,
+            qPrintable(QString("%1 against %2").arg(altitude, 0, 'f', 3).arg(p.altitude, 0, 'f', 3)));
+    }
+    // Athens on 21 November 2026: up at 20:00 UTC, so it sets below 10 degrees later.
+    const auto from = utc(2026, 11, 21, 20, 0, 0);
+    const auto sets = nextMoonCrossing(37.98, 23.73, 10, from, Crossing::Setting);
+    QVERIFY(sets && *sets > from + hours{4} && *sets < from + hours{12});
+    QVERIFY(std::abs(moonAltitudeDegrees(37.98, 23.73, *sets) - 10) < 0.01);
+    QVERIFY(moonAltitudeDegrees(37.98, 23.73, *sets - minutes{1}) > 10);
+    const auto rises = nextMoonCrossing(37.98, 23.73, 10, from, Crossing::Rising);
+    QVERIFY(rises && *rises > *sets);
+}
+
+// Feature-32: the end of a session is the first ticked condition met.
+void SkyExtrasTest::aSessionEndsAtTheFirstConditionMet()
+{
+    const QTimeZone zone(2 * 3600); // UTC+2, the observer's clock
+    ObservingSite athens;
+    athens.latitudeDeg = 37.98;
+    athens.longitudeDeg = 23.73;
+    const auto start = utc(2026, 11, 21, 18, 0, 0); // 20:00 local
+
+    SessionEndSettings settings;
+    QVERIFY(!settings.any(true));
+    QVERIFY(!plannedEnd(settings, start, athens, true, zone));
+
+    // The next 04:30 local after the start is tomorrow's, 02:30 UTC.
+    settings.atLocalTime = true;
+    auto end = plannedEnd(settings, start, athens, true, zone);
+    QVERIFY(end && end->cause == EndCause::LocalTime);
+    QVERIFY(end->time == utc(2026, 11, 22, 2, 30, 0));
+    QCOMPARE(localAndUtc(end->time, zone), QString("04:30 local (02:30 UTC)"));
+    // A time later the same evening is today's.
+    settings.localTime = QTime(21, 0);
+    QVERIFY(plannedEnd(settings, start, athens, true, zone)->time == utc(2026, 11, 21, 19, 0, 0));
+    settings.atLocalTime = false;
+
+    settings.afterDuration = true;
+    settings.durationMinutes = 6 * 60;
+    end = plannedEnd(settings, start, athens, true, zone);
+    QVERIFY(end && end->cause == EndCause::Duration && end->time == start + hours{6});
+    QCOMPARE(endCauseText(settings, EndCause::Duration), QString("6 h 00 min after the start"));
+    settings.afterDuration = false;
+
+    // Dawn: the Sun rising through -10 degrees the next morning.
+    settings.atDawn = true;
+    end = plannedEnd(settings, start, athens, true, zone);
+    QVERIFY(end && end->cause == EndCause::Dawn);
+    QVERIFY(end->time > start + hours{8} && end->time < start + hours{14});
+    QVERIFY(std::abs(sunAltitudeDegrees(37.98, 23.73, end->time) + 10) < 0.01);
+    settings.atDawn = false;
+
+    // The Moon sinking below 10 degrees: only for the Moon.
+    settings.moonBelow = true;
+    end = plannedEnd(settings, start, athens, true, zone);
+    QVERIFY(end && end->cause == EndCause::MoonBelow);
+    QVERIFY(std::abs(moonAltitudeDegrees(37.98, 23.73, end->time) - 10) < 0.01);
+    QVERIFY(!plannedEnd(settings, start, athens, false, zone));
+    QVERIFY(!settings.any(false) && settings.any(true));
+
+    // All of them: the first one met. Without a position, dawn and the Moon do not apply.
+    settings.atLocalTime = settings.afterDuration = settings.atDawn = true;
+    settings.localTime = QTime(4, 30);
+    const auto first = plannedEnd(settings, start, athens, true, zone);
+    for (const EndCause cause : {EndCause::LocalTime, EndCause::Duration, EndCause::Dawn, EndCause::MoonBelow})
+        QVERIFY(first->time <= *endTime(settings, cause, start, athens, true, zone));
+    end = plannedEnd(settings, start, ObservingSite{}, true, zone);
+    QVERIFY(end && end->cause == EndCause::Duration);
+    QVERIFY(!endTime(settings, EndCause::Dawn, start, ObservingSite{}, true, zone));
+
+    QCOMPARE(durationText(hours{3} + minutes{12}), QString("3 h 12 min"));
+    QCOMPARE(durationText(seconds{45}), QString("45 s"));
+    QCOMPARE(QString(mountAtEndName(MountAtEnd::StopTracking)), QString("stop_tracking"));
 }
 
 // Done-when 2: the rule.

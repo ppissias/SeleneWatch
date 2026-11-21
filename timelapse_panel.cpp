@@ -3,12 +3,10 @@
 #include <QtCore/QDir>
 #include <QtCore/QSettings>
 #include <QtCore/QSignalBlocker>
-#include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
 #include <QtGui/QPixmap>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
-#include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
@@ -111,29 +109,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     stopKind_ = new QComboBox(body);
     stopKind_->setObjectName("timelapseStopKind");
-    stopKind_->setToolTip("When the time-lapse ends by itself: never (press Stop), after a duration, at a UTC time, or after a number of stacks. The video is built when it ends.");
-    stopKind_->addItem("Until I press Stop", static_cast<int>(StopConditionKind::Manual));
-    stopKind_->addItem("Fixed duration", static_cast<int>(StopConditionKind::Duration));
-    stopKind_->addItem("UTC end time", static_cast<int>(StopConditionKind::UtcEnd));
-    stopKind_->addItem("Number of stacks", static_cast<int>(StopConditionKind::StackCount));
-    form->addRow("Stop condition", stopKind_);
-
-    durationMin_ = new QDoubleSpinBox(body);
-    durationMin_->setObjectName("timelapseDurationMin");
-    durationMin_->setToolTip("The time-lapse stops this long after it starts.");
-    durationMin_->setRange(0.1, 1440.0);
-    durationMin_->setDecimals(1);
-    durationMin_->setSuffix(" min");
-    durationMin_->setValue(60.0);
-    form->addRow("Duration", durationMin_);
-
-    utcEnd_ = new QDateTimeEdit(body);
-    utcEnd_->setObjectName("timelapseUtcEnd");
-    utcEnd_->setToolTip("The time-lapse stops at this UTC time.");
-    utcEnd_->setTimeZone(QTimeZone::UTC);
-    utcEnd_->setDisplayFormat("yyyy-MM-dd HH:mm 'UTC'");
-    utcEnd_->setDateTime(QDateTime::currentDateTimeUtc().addSecs(3600));
-    form->addRow("UTC end", utcEnd_);
+    stopKind_->setToolTip("When the time-lapse ends: when the session ends (the Ends setting above the preview, or "
+        "Stop), or also after a number of stacks. The video is built when it ends.");
+    stopKind_->addItem("When the session ends", static_cast<int>(StopConditionKind::Manual));
+    stopKind_->addItem("After a number of stacks", static_cast<int>(StopConditionKind::StackCount));
+    form->addRow("Stops", stopKind_);
 
     targetStacks_ = new QSpinBox(body);
     targetStacks_->setObjectName("timelapseTargetStacks");
@@ -278,17 +258,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     });
     connect(stopKind_, &QComboBox::currentIndexChanged, this, [this] {
         if (updating_) return;
-        const auto kind = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
-        if (kind == StopConditionKind::UtcEnd && utcEnd_->dateTime() <= QDateTime::currentDateTimeUtc())
-        {
-            const QSignalBlocker b(utcEnd_);
-            utcEnd_->setDateTime(QDateTime::currentDateTimeUtc().addSecs(3600));
-        }
         saveToQSettings();
         updateEstimates();
     });
     for (QObject* w : std::initializer_list<QObject*>{keepPercent_, maxFrames_, sharpening_, cropToLock_,
-             durationMin_, utcEnd_, targetStacks_, writeMp4_, writeGif_, videoFps_, saveRawSer_})
+             targetStacks_, writeMp4_, writeGif_, videoFps_, saveRawSer_})
     {
         if (auto* sb = qobject_cast<QDoubleSpinBox*>(w))
             connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
@@ -298,8 +272,6 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
             connect(cb, &QComboBox::currentIndexChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
         else if (auto* ck = qobject_cast<QCheckBox*>(w))
             connect(ck, &QCheckBox::toggled, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
-        else if (auto* dt = qobject_cast<QDateTimeEdit*>(w))
-            connect(dt, &QDateTimeEdit::dateTimeChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
     }
 
     // Only the observer's click asks; setSettings() applies a value without asking.
@@ -368,8 +340,6 @@ TimelapseSettings TimelapsePanel::settings() const
     s.cropToLock = cropToLock_->isChecked();
     s.lunarAnchor = (s.preset == TimelapsePreset::Moon) ? lunarAnchor_ : std::nullopt;
     s.stopKind = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
-    s.durationMinutes = durationMin_->value();
-    s.utcEndTime = utcEnd_->dateTime();
     s.targetStacks = targetStacks_->value();
     s.saveRawSer = saveRawSer_->isChecked();
 
@@ -412,9 +382,7 @@ void TimelapsePanel::setSettings(const TimelapseSettings& s)
     maxFrames_->setValue(std::clamp(s.maxFramesPerPeriod, 1, TimelapseSettings::kMaxFramesCap));
     cropToLock_->setChecked(s.cropToLock);
     setLunarAnchor(s.lunarAnchor);
-    stopKind_->setCurrentIndex(static_cast<int>(s.stopKind));
-    durationMin_->setValue(s.durationMinutes);
-    if (s.utcEndTime.isValid()) utcEnd_->setDateTime(s.utcEndTime);
+    stopKind_->setCurrentIndex(std::max(0, stopKind_->findData(static_cast<int>(s.stopKind))));
     targetStacks_->setValue(s.targetStacks);
     writeMp4_->setChecked(s.video.writeMp4);
     writeGif_->setChecked(s.video.writeGif);
@@ -441,7 +409,7 @@ void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording
     const bool busy = timeLapsing_ || finalizing;
     const bool editable = !busy;
     for (QWidget* w : std::initializer_list<QWidget*>{preset_, interval_, window_, keepPercent_, maxFrames_,
-             sharpening_, cropToLock_, clearAnchor_, stopKind_, durationMin_, utcEnd_, targetStacks_,
+             sharpening_, cropToLock_, clearAnchor_, stopKind_, targetStacks_,
              writeMp4_, writeGif_, videoFps_, saveRawSer_})
     {
         w->setEnabled(editable);
@@ -492,8 +460,6 @@ void TimelapsePanel::cancelAnchorSelection()
 void TimelapsePanel::updateEstimates()
 {
     const auto stop = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
-    form_->setRowVisible(durationMin_, stop == StopConditionKind::Duration);
-    form_->setRowVisible(utcEnd_, stop == StopConditionKind::UtcEnd);
     form_->setRowVisible(targetStacks_, stop == StopConditionKind::StackCount);
 
     const double estCaptured = std::max(1.0, window_->value() * estimatedFps_);
@@ -577,15 +543,7 @@ void TimelapsePanel::updateStatus(const TimelapseStatus& s)
     }
     else if (s.active)
     {
-        if (s.remainingSeconds >= 0)
-        {
-            const double total = s.elapsedSeconds + s.remainingSeconds;
-            progressBar_->setRange(0, 100);
-            progressBar_->setValue(total > 0 ? static_cast<int>(100.0 * s.elapsedSeconds / total) : 0);
-            timingLabel_->setText(QString("Elapsed %1 s · Remaining %2 s · Next burst in %3 s")
-                .arg(s.elapsedSeconds, 0, 'f', 0).arg(s.remainingSeconds, 0, 'f', 0).arg(s.nextBurstInSeconds, 0, 'f', 1));
-        }
-        else if (static_cast<StopConditionKind>(stopKind_->currentData().toInt()) == StopConditionKind::StackCount)
+        if (static_cast<StopConditionKind>(stopKind_->currentData().toInt()) == StopConditionKind::StackCount)
         {
             progressBar_->setRange(0, targetStacks_->value());
             progressBar_->setValue(std::min(s.stacksCompleted, targetStacks_->value()));
@@ -708,8 +666,9 @@ void TimelapsePanel::loadFromQSettings()
     const QString sharpKey = saved.value("sharpeningKey", "preset:mild").toString();
     const int si = sharpening_->findData(sharpKey);
     if (si >= 0) sharpening_->setCurrentIndex(si);
-    stopKind_->setCurrentIndex(std::clamp(saved.value("stopKind", 0).toInt(), 0, 3));
-    durationMin_->setValue(saved.value("durationMin", 60.0).toDouble());
+    // Feature-32: a saved duration or UTC end time is now part of Ends; it reads as "when the session ends".
+    stopKind_->setCurrentIndex(std::max(0, stopKind_->findData(saved.value("stopKind", 0).toInt())));
+    saved.remove("durationMin");
     targetStacks_->setValue(saved.value("targetStacks", 60).toInt());
     writeMp4_->setChecked(saved.value("writeMp4", true).toBool());
     writeGif_->setChecked(saved.value("writeGif", false).toBool());
@@ -734,7 +693,6 @@ void TimelapsePanel::saveToQSettings() const
     saved.setValue("cropToLock", cropToLock_->isChecked());
     saved.setValue("sharpeningKey", sharpening_->currentData().toString());
     saved.setValue("stopKind", stopKind_->currentData().toInt());
-    saved.setValue("durationMin", durationMin_->value());
     saved.setValue("targetStacks", targetStacks_->value());
     saved.setValue("writeMp4", writeMp4_->isChecked());
     saved.setValue("writeGif", writeGif_->isChecked());

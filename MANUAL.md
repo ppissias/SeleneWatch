@@ -18,6 +18,7 @@ For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md). For arch
    - [2.4 Selecting a camera or recording & starting Preview](#24-selecting-a-camera-or-recording--starting-preview)
    - [2.5 Display stretch & the native-ADU histogram](#25-display-stretch--the-native-adu-histogram)
    - [2.6 Auto-tune: suggested camera settings and K](#26-auto-tune-suggested-camera-settings-and-k)
+   - [2.7 Ending a session unattended](#27-ending-a-session-unattended)
 3. [Feature Lock & Mount Guiding (Shared for Lunar & Planetary Workflows)](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)
 4. [Workflow 1 — Lunar Flashes on the Earth-Illuminated Side](#4-workflow-1--lunar-flashes-on-the-earth-illuminated-side)
 5. [Workflow 2 — Objects Passing in Front of the Moon (Shadows & Transits)](#5-workflow-2--objects-passing-in-front-of-the-moon-shadows--transits)
@@ -46,6 +47,7 @@ From top to bottom, the main screen contains:
   - **Source** selector (`Choose a source…`, **Recording file**, camera families, and **Synthetic** when Testing tools are on), **Connect at startup**, **Open…**, and the amber **TESTING TOOLS ON** indicator when enabled.
   - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count), and (testing tools only) **Fixed flash**.
   - Timing/playback controls: **Target FPS**, **Speed** (`Real time` / `Fast` for files), and **Loop first … s**.
+  - **Ends** and **Change…**: when Monitoring or a time-lapse ends by itself, and what the mount does then ([Section 2.7](#27-ending-a-session-unattended)).
 - **Mode banner:** a full-width colour strip immediately above the image showing which operating state SeleneWatch is in:
 
 | Mode | Banner & what happens | Camera settings | Output written |
@@ -119,7 +121,7 @@ Open **Session → Site and instrument…** once before serious observing:
 ***Session → Site and instrument…**: records observer metadata, computes image scale in arcseconds per pixel, and configures optional NTP clock checking.*
 
 - **Presets:** save the observer, site, position and instrument under a name (**Save as preset**), and fill them back in by choosing the preset from the list, for example *Home, 8-inch* and *Club field, refractor*. **Delete** removes the chosen preset. The clock check is the computer's, not part of a preset. Nothing is used until you press **OK**.
-- **Observer and site:** Name, site label, and **Position known** (North latitude, East longitude, height in meters). Required for **Watch from dusk to dawn** in Workflow 4. Without a position, that schedule is switched off and cannot be turned on, and the Detection panel says why.
+- **Observer and site:** Name, site label, and **Position known** (North latitude, East longitude, height in meters). Needed to end a session **At dawn** or **When the Moon is below** an altitude ([Section 2.7](#27-ending-a-session-unattended)). Without a position those conditions are not met, and **Ends** says why.
 - **Instrument:** Telescope, aperture, focal length, and binned pixel size in microns. SeleneWatch calculates image scale (`″/px`) so clip overviews report moving object speeds in `°/s`. Telescope name also embeds in SER headers.
 - **Time:** Windows Time service status is always logged at Start. Tick **Compare the PC clock with an NTP server at each Start** to measure PC clock offset via SNTP for multi-site lunar flash or occultation timing comparisons (off by default).
 
@@ -189,6 +191,23 @@ Astronomers do the same in survey photometry ("artificial star tests"). Injectin
 
 While auto-tune measures, the exposure follower waits, and its one-minute hold starts again afterwards. Every applied change is written to `candidates.txt`. `autotune_camera` lines list the applied rows and the measured level, and `autotune_readback` lines give the values the camera reported back. `autotune_k` lines give the old and new K, each tested K with its remaining and found events, the time measured, the frames with a skipped search, and the measured noise.
 
+### 2.7 Ending a session unattended
+
+The **Ends** row, above the preview, beside the stream buttons, says when Monitoring or a time-lapse ends by itself, for example *Ends: 04:55 local (02:55 UTC), the Moon below 10° · then the mount stops tracking*. While a session runs it counts down: *Ends in 3 h 12 min: …*. **Change…** sets it:
+
+- **When it ends.** Tick any of these; the session ends at the first one met. With none ticked it runs until you stop it.
+  - **At a local time**, on this computer's clock (the UTC time is shown beside it).
+  - **After** a duration from the start.
+  - **At dawn**: the Sun rising above an altitude (−10° by default).
+  - **When the Moon is below** an altitude (10° by default), for the Moon and a Moon time-lapse: the natural end of an evening crescent.
+
+  Each row shows when it would be met tonight. Dawn and the Moon need the site's position ([Section 2.3](#23-site-instrument--clock-accuracy)).
+- **Then the mount** (shown with a mount connected, for the Moon): **Stops tracking** or **Keeps tracking**. The first time you start Monitoring or a time-lapse with a mount connected, SeleneWatch asks. **Keeps tracking** shows a warning on the row: on a German equatorial mount, hours of tracking unattended can drive the telescope into the pier, so set the meridian limits in the mount's driver. SeleneWatch never slews or parks the mount.
+
+**What ends a session by itself:** an **Ends** condition, the camera or source failing, a clip refused for the **Disk reserve** (Monitoring can save nothing more), and lost guiding ([Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)). Then the clip in hand, any continuous recording and the nightly report are finished, or the time-lapse's video is built; the camera is closed; and the mount is kept tracking or stopped, as chosen. The status line says when and why. `session.txt` records the reason on its `monitoring_stop` line (`reason=session end: …`) and what the mount did on a `mount_at_end` line, which the nightly report shows too. A time-lapse records them as `stop_reason:` and `mount_at_end:` in `timelapse.txt`.
+
+**Your own Stop** leaves the mount as it is: you are there.
+
 ---
 
 ## 3. Feature Lock & Mount Guiding (Shared for Lunar & Planetary Workflows)
@@ -204,13 +223,14 @@ Even with lunar tracking enabled, the Moon moves continuously in declination (~0
 ### Step-by-step Feature Lock & Guiding
 
 1. **Lock onto a feature:** In **Preview**, open **View → Guiding**. Either press **Draw lock box** and **drag a rectangle** around a crater or detailed region (contrast in two dimensions—avoid flat mare or straight limb edges), or click a point and press **Lock at selection** (`64 × 64 px` default box). A drag on the preview draws only what you chose: **Draw lock box** here, **Draw earthshine box** in Auto-tune, **Select lunar anchor** in Time-lapse, or **Draw mask** for the sky. With nothing chosen, a drag draws nothing and the status line says how to choose. The lock box is drawn in cyan and labelled *Guiding lock*.
-   - **Dashed box:** original locked position. **Solid green box:** current tracked feature (turns amber if temporarily missed; searches wider for 60 s during cloud/bumps before releasing).
+   - **Dashed box:** original locked position. **Solid green box:** current tracked feature (turns amber if temporarily missed; searches wider during cloud or bumps for **Lock lost after** (`2 min` by default, `30 s` to `10 min`) before giving up).
    - **Unlock** releases by hand. A valid lock persists across Preview -> Monitoring transitions and stream restarts unless geometry changes.
-2. **Connect a mount:** Under **Mount**, pick **ASCOM telescope** -> **Choose…** (select 64-bit out-of-process driver such as EQMOD, GS Sky, Device Hub, or ASCOM Simulator) -> **Connect**. Confirm **tracking is ON** in your mount's driver (SeleneWatch never turns mount tracking on/off). Use **Simulated mount** when practicing with the Synthetic source.
+2. **Connect a mount:** Under **Mount**, pick **ASCOM telescope** -> **Choose…** (select 64-bit out-of-process driver such as EQMOD, GS Sky, Device Hub, or ASCOM Simulator) -> **Connect**. Confirm **tracking is ON** in your mount's driver. SeleneWatch never turns tracking on. It stops it only when a session ends by itself and you chose **Stops tracking** ([Section 2.7](#27-ending-a-session-unattended)). Use **Simulated mount** when practicing with the Synthetic source.
 3. **Calibrate:** With a lock held and mount tracking, press **Calibrate** (~1 min). SeleneWatch pulses West/East, takes up Dec backlash, and pulses North/South to measure image axis orientation, drift, and pixels moved per ms of pulse. *Recalibrate if your mount performs a meridian flip.*
 4. **Start guiding:** Set **Tolerance** (default `3.0 %` of shorter frame side—kept comfortably wider than ~1–2 px atmospheric seeing jitter) and press **Start guiding**.
    - **Gentle correction rule:** Corrections fire only when an axis leaves the tolerance box, removing 70% of error per pulse and settling before re-measuring. Dec pulses never reverse on small overshoots to avoid backlash oscillation.
-   - **Safety bounds:** SeleneWatch sends **pulse-guide commands only** (no slew, sync, park, or rate changes), stops guiding automatically if the lock is lost, tracking turns off, pier side changes, 3 pulses fail to reduce error, per-minute pulse budget (`20 s/min`) is exceeded, or calibration moves `> 0.25 px/frame` (lower guide rate in your mount driver if refused).
+   - **Safety bounds:** SeleneWatch sends **pulse-guide commands only** (no slew, sync, park, or rate changes; a tracking stop only at a session's end, if you chose it), stops guiding automatically if the lock is lost, tracking turns off, pier side changes, 3 pulses fail to reduce error, per-minute pulse budget (`20 s/min`) is exceeded, or calibration moves `> 0.25 px/frame` (lower guide rate in your mount driver if refused).
+   - **Lost guiding ends the session:** while guiding, a guiding stop for one of these reasons ends Monitoring or the time-lapse at once, and a lock not found again within **Lock lost after** ends it then; the mount is left as chosen under **Ends** ([Section 2.7](#27-ending-a-session-unattended)). Stopping guiding yourself ends nothing. A lock used only for the drift readout ends nothing either.
    - **Evidence integrity:** Every pulse and once-per-second offset logs to `guiding.txt`. Any event candidate triggered during a pulse or settle interval stays saved and is marked `during_mount_correction=yes`. On real lunar data, guide corrections at `<= 0.25 px/frame` stayed quiet at `K ≥ 12`; check your guiding candidate rate on your first guided night before leaving unattended.
 
 ### Guiding Controls Reference
@@ -220,6 +240,7 @@ Even with lunar tracking enabled, the Moon moves continuously in declination (~0
 | **Feature lock** | **Lock at selection** / **Unlock** / drag box | Lock onto a 2D crater feature and inspect **State**, **Drift** (`dx`, `dy`), **Last match** score, and template quality |
 | **Mount** | **ASCOM telescope** / **Simulated mount**, **Choose…**, **Connect** / **Disconnect** | Connects mount late-bound via ASCOM COM and displays tracking, slewing, park, pier side, and guide rates |
 | **Guiding** | **Calibrate**, **Start guiding**, **Tolerance** (`% of field`) | Measures mount axes once per pier side and holds feature drift inside tolerance (`3 %` default) via bounded guide pulses |
+| | **Lock lost after** | How long a lost lock is searched for before guiding, and so the session, ends (`2 min` default) |
 
 ---
 
@@ -356,10 +377,10 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
    - Select **Target preset**: **Moon** (default `25 %` best, `150` max frames/period, rigid translation + rotation alignment) or **Planet** (`15 %` best, `200` max frames/period, limb-centroid centering tolerant of surface rotation).
    - Set **Interval** (`≥ Capture window`), **Capture window** (for planets keep ≤ 60–90 s to avoid planetary rotation blur during one burst), **Keep best %**, and **Max frames/period** (`100–200`).
    - *(Moon optional)* Press **Select lunar anchor** and drag a box on the preview around a sunlit crater that will stay illuminated throughout your session, or tick **Crop around locked feature**.
-   - Pick initial **Sharpening** (`Mild (default)`, `Off`, `Medium`, or saved custom profile), **Stop condition** (**Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks**), and **Animation** outputs (**MP4**, optional **GIF**, FPS, optional raw SER burst archival).
+   - Pick initial **Sharpening** (`Mild (default)`, `Off`, `Medium`, or saved custom profile), **Stops** (**When the session ends**, or **After a number of stacks**; the time and duration are the **Ends** setting above the preview, [Section 2.7](#27-ending-a-session-unattended)), and **Animation** outputs (**MP4**, optional **GIF**, FPS, optional raw SER burst archival).
    - **Also save raw SER bursts** writes every stacked frame of every burst to `raw/*.ser` and can fill a drive in one night (the dock's **Est. disk** line shows the rate). Ticking it asks for confirmation, and it is off again each time SeleneWatch starts. The time-lapse stops only when free space falls below the **Disk reserve** in **Display and capture** (10 GiB unless you change it; your value is remembered for each target); with the reserve at **None** it runs until the drive is full. A burst keeps a raw frame only while the RAM ceiling has room, so a full burst never stalls the camera.
 3. Press **Start time-lapse**. Monitor **Latest stack**, **Filmstrip loop**, per-stack stats (`Q` quality, shift, rotation), and any overload/cloud/disk-reserve warnings.
-4. After **Stop time-lapse** (or the stop condition), the dock shows **Building the video: n / N frames** while the MP4/GIF is assembled. Closing SeleneWatch during a time-lapse asks to stop it first, then keeps the window open with a progress dialog until the video is built; **Close without video** abandons only the video (the FITS stacks stay, and **Rebuild video only** makes it later). If stacking fails unexpectedly, the time-lapse stops on its own (not the program), records `error` and `stop_reason: internal error: …` in `timelapse.txt`, and still builds the video from the stacks already saved.
+4. After **Stop time-lapse** (or **Ends**, or the number of stacks), the dock shows **Building the video: n / N frames** while the MP4/GIF is assembled. Closing SeleneWatch during a time-lapse asks to stop it first, then keeps the window open with a progress dialog until the video is built; **Close without video** abandons only the video (the FITS stacks stay, and **Rebuild video only** makes it later). If stacking fails unexpectedly, the time-lapse stops on its own (not the program), records `error` and `stop_reason: internal error: …` in `timelapse.txt`, and still builds the video from the stacks already saved.
 5. When finished, inspect `timelapses/<UTC>/timelapse.mp4` / `.gif`. Open **Session → Re-sharpen time-lapse…** (or **Re-sharpen…**) anytime to fine-tune sliders live (`Before` vs `After`), save reusable profiles, choose **Rebuild video only** for fast FPS/gamma/GIF adjustments, or **Apply to all** non-destructively into `<session>/sharpened_<profile>_<UTC>/`.
 
 ### Screenshots
@@ -381,7 +402,7 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
 | | **Keep best** & **Max frames/period** | Percentage retained per burst capped at `100–200` frames max (hard cap `200`) |
 | | **Sharpening** | Linear profile (`Off`, `Mild`, `Medium`, or saved `Profile: ...`) |
 | | **Lunar anchor** / **Crop around locked feature** | Moon sunlit anchor box for hours-long shadow shifts, or crop output around guiding lock |
-| | **Stop condition** | **Until I press Stop**, **Fixed duration**, **UTC end time**, or **Number of stacks** |
+| | **Stops** | **When the session ends** (**Ends** above the preview, or **Stop**) or **After a number of stacks** |
 | | **Animation** (`MP4` / `GIF`, `fps`) & **Save raw SER bursts** | End-of-session video formats and frame rate. Raw SER bursts (very large) ask for confirmation and are never remembered between runs |
 | | **Session progress & preview** | Live bar, elapsed/countdown, stack telemetry, warnings, **Latest stack**, & **Filmstrip loop** |
 | **Re-sharpen dialog** | **Linear sharpening sliders** | `USM radius (px)` (`0.30–15.0 px`), `USM amount` (`0.00–6.00`), `Noise threshold`, `Pre-denoise` |
@@ -400,7 +421,7 @@ Switching **Watching** (at the top of **Detection**) from **The Moon** to **The 
 - **Large brightening:** Triggers automatically as `kind=brightening` whenever at least **2 %** (editable) of *unmasked* pixels rise by `K` at once—catching lightning strokes and bright fireball flares while keeping noise statistics intact. Slow dusk/dawn brightness ramps adapt harmlessly.
 - **Slow-drifter release (`Learn a patch after`):** Fixed cameras watch stars drift slowly across pixels. A patch firing continuously beyond `20 s` is released to learn into the background so drifting stars/planets fade cleanly, while fast meteors, aircraft, and satellites continue firing cleanly on fresh pixels.
 - **Horizon polygon & rectangle masks (`Draw mask`):** Excludes trees, rooftops, streetlights, and passing headlights from both detection and noise estimation while saving the masked SER pixels completely unmodified for evidence.
-- **Dusk-to-dawn automation & sky-following exposure:** Computes NOAA solar altitude every 30 s to start Monitoring automatically below **Sun below** (`−10°` default) and stop at dawn, and can step camera exposure/gain smoothly between user limits to keep sky background median inside `8–30 %` of full scale (logged as `exposure_change` in `candidates.txt`).
+- **Ending at dawn & sky-following exposure:** **Ends → At dawn** stops Monitoring when the Sun rises above the altitude (`−10°` default; [Section 2.7](#27-ending-a-session-unattended)). **Follow the sky's brightness** can step camera exposure/gain smoothly between user limits to keep sky background median inside `8–30 %` of full scale (logged as `exposure_change` in `candidates.txt`).
 - **Triage & compact animated previews:** Every clip generates `00_overview.png` showing the full trajectory, `suggested_kind` classification (`meteor`, `lightning`, `aircraft`, `satellite`, `flash`, `seeing`, `unclear`), and `04_event_preview.gif` (`≤ 10` frames, `≤ 512 px`, `≤ 512 KiB`) for rapid morning scanning.
 
 ### Main Use Case
@@ -416,7 +437,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
    - **Saving Sky detection profiles:** When you click **Save…** on the **Profile** row in Sky mode, the dialog offers an optional **Include horizon mask** checkbox (unchecked by default). Leave it unchecked for sensitivity-only profiles that preserve whatever horizon mask you currently have drawn, or check it (`(+mask)`) to save a site-specific profile that restores its own horizon mask when selected.
    - **Testing indoors:** With **View → Testing tools** enabled and **Watching** set to **The sky**, the **Synthetic** source generates a realistic starry sky and horizon silhouette, and **Test flash → Kind** lets you inject **Moving streak (meteor)**, **Blinking mover (aircraft)**, **Lightning** (whole frame), or **Bright flash** inside or outside your mask.
 4. Configure unattended options in **The sky** group:
-   - Tick **Watch from dusk to dawn** (available once the site's position is known) and set **Sun below** (`−10.0°`). Below it the panel shows the Sun's altitude and when Monitoring next starts or stops, in the computer's local time with UTC in brackets (for example `Dawn stop at 2026-11-22 06:41 local time (05:41 UTC).`).
+   - Under **Ends**, above the preview, press **Change…** and tick **At dawn** (it needs the site's position), and if you like **At a local time**. The row shows when Monitoring will end, in local time with UTC in brackets (for example `Ends: 06:41 local (05:41 UTC), dawn (the Sun above -10°)`).
    - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation. Only these limits are yours to set. The rest is fixed, and the tooltip and the ⓘ beside **Exposure** repeat it:
      - The sky's median outside the mask is kept between **8 % and 30 %** of full scale.
      - Once it has been outside that band for **60 s**, one change is made. The exposure moves toward **15 %**, multiplied or divided by at most **2** per change. When the exposure is at your limit, gain moves by one step instead. A brighter sky lowers gain first, then shortens the exposure.
@@ -424,14 +445,14 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
      - With **Gain fixed** (the default), only the exposure changes.
      - While Monitoring, each change saves the clip in hand and restarts Monitoring with the new settings, a gap of a few seconds.
    - **Auto-tune** (in full darkness): **Auto-tune…** at the top of the Detection dock measures the sky, suggests exposure and gain, fills in the follower's limits, and watches what each K would trigger ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
-5. Either press **Start monitoring** immediately—or stop/leave Preview ready and let the **Watch from dusk to dawn** schedule arm Monitoring automatically once dusk arrives.
+5. Press **Start monitoring**. It runs until the **Ends** condition, then stops the stream by itself.
 6. The next morning, choose **Session → Open last nightly report**. Select a suggested kind, play a preview or open the original SER and metadata.
 
 ### Screenshots
 
-![Sky watch mode with polygon horizon mask and dusk-to-dawn settings](docs/images/manual-sky-mask.png)
+![Sky watch mode with polygon horizon mask](docs/images/manual-sky-mask.png)
 
-***The sky** target in **Detection**: hatched red polygon **Mask** excludes the roofline/horizon, while **Watch from dusk to dawn** (`Sun below -10.0°`), **Follow the sky's brightness**, and streak limits (`3000 px`, `30.00 ×`) prepare an unattended night run.*
+***The sky** target in **Detection**: hatched red polygon **Mask** excludes the roofline/horizon, while **Follow the sky's brightness** and streak limits (`3000 px`, `30.00 ×`) prepare an unattended night run. (This picture predates Feature-32: the night's end is now **Ends**, above the preview.)*
 
 ![Overnight ZWO ASI120MM Mini Sky capture showing a crisp single-frame streak and hatched rooftop mask](docs/images/manual-sky-streak.jpg)
 
@@ -449,7 +470,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 | **Large brightening** | Share of unmasked pixels rising by `K` in one frame (lightning / fireball flare) | `2.0 % of frame` |
 | **Learn a patch after** | Releases persistent patches (e.g. slowly drifting stars/planets) back to background learning | `20 s` |
 | **Mask** (`Draw mask` / `Clear`) | Polygon (click corners + double-click) or rectangle (drag) exclusion zones, up to 16 × 32 corners | None |
-| **Watch from dusk to dawn** & **Sun below** | NOAA solar altitude scheduler starting/stopping capture automatically once per night | `Off`, `−10.0°` |
+| **Ends → At dawn** (above the preview) | Ends Monitoring when the Sun rises above the altitude ([Section 2.7](#27-ending-a-session-unattended)) | `Off`, `Sun above −10°` |
 | **Follow the sky's brightness** | Auto-adjusts Exposure (within `ms` bounds, max 2× step) then Gain (up to `maxGain` by step) when median sky leaves `8–30 %` for 60 s (`≥ 2 min` cooldown) | `Off` (`1.00–2000.00 ms`, `Gain fixed`) |
 | **Sensitivity K** / **Min & Max patch** / **Box / patch** | Tuned wider for meteor streaks across the field | `6.0 sigma`, `8–3000 px`, `30.00 ×` |
 | **Capture history / tail / max** | Short pre-event history + longer tail to keep multi-stroke lightning & bright trails whole | `3.0 s` / `5.0 s` / `20.0 s` |
@@ -465,7 +486,7 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
     events/
         moon/session-<UTC start>/     (the same structure under sky/)
             report.html
-            session.txt              Monitoring starts, stops and reasons
+            session.txt              Monitoring starts, stops and reasons; mount_at_end
             candidates.txt
             guiding.txt              When guiding activity was logged
             clips/<trigger UTC>/     event.ser, event.txt, PNG and GIF previews
@@ -479,7 +500,8 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
             timelapse.mp4
             timelapse.gif         (optional)
             timelapse.txt         (settings, stop_reason, one stack: line per stack, and skip / error /
-                                   raw_ser_error / discarded lines for periods without a stack or SER)
+                                   raw_ser_error / discarded lines for periods without a stack or SER;
+                                   mount_at_end: when it ended by itself with a mount connected)
             raw/*.ser             (optional raw burst archival)
 ```
 

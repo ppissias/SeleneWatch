@@ -2,7 +2,7 @@
 
 Historical record of completed features in the program. Open proposals stay in [features.md](features.md). When moving completed features from `features.md`, append them here in full detail without removing or condensing specifications, review notes, or design decisions. This file is an append-only history.
 
-Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 31 were moved here on 21 November 2026, when their software was complete. Some of their texts say they stayed in `features.md` until a field check was done; those checks are now listed under [Field validation](features.md#field-validation) in `features.md`.
+Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here on 21 November 2026, when their software was complete. Some of their texts say they stayed in `features.md` until a field check was done; those checks are now listed under [Field validation](features.md#field-validation) in `features.md`.
 
 ## Contents
 
@@ -36,6 +36,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 31 were moved here o
 - [Feature-29 — Site and instrument presets](#feature-29--site-and-instrument-presets)
 - [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune)
 - [Feature-31 — The Moon's flashes and shadows watched apart](#feature-31--the-moons-flashes-and-shadows-watched-apart)
+- [Feature-32 — The end of a session](#feature-32--the-end-of-a-session)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -2910,3 +2911,155 @@ The **Also trigger on darkening** checkbox is gone. Both Moon watches save under
 **Tests:**
 - `theSunlitSideIsLeftOutForFlashes` (detector).
 - `eachTargetKeepsItsOwnSettings` and `darkeningIsForTheMoonOnly` (window), plus the end-to-end window and real-window tests, which now flash in one watch and shadow in another.
+
+---
+
+## Feature-32 — The end of a session
+
+*Proposed on 21 November 2026, from a discussion with the observer.*
+
+The observer often leaves the telescope unattended. A session must then end by itself, at a time the observer chose, and leave the mount in a known state. Today:
+- **The sky** ends at dawn through **Watch from dusk to dawn**, which also starts it.
+- **A time-lapse** has its own stop condition: until Stop, a fixed duration, a UTC end time, or a number of stacks. The end time is in UTC only.
+- **The Moon** has no end: Monitoring runs until the observer stops it or something fails.
+- **After any end** the mount keeps tracking. On a German equatorial mount, tracking for hours unattended can drive the telescope into the pier.
+- **Lost guiding** does not end anything. When the lock finds no match for 2 s, it searches wider for 60 s and then gives up until the observer locks again. Guiding sends nothing meanwhile, and a time-lapse only shows a warning. A Moon or planet session then goes on while the target drifts out of the field.
+
+### What shapes the design
+
+1. **One way to end, for every mode.** Monitoring (Moon or sky) and Time-lapse share one **Ends** setting, with the same choices and the same wording. Times are shown in local time with UTC beside them.
+2. **An end is complete.** Whatever ends the session, the evidence is finished and the mount is left as the observer chose.
+3. **The mount: keep or stop tracking, nothing else.** SeleneWatch does not park, slew or unpark. The observer chooses, before the night, whether the mount keeps tracking or stops tracking at the end. The choice cannot be forgotten: it has no default, it is always shown, and keeping tracking carries a warning.
+4. **Guiding that is lost ends the session.** An observer who turned guiding on wants a guided session. Without guiding the target drifts away and nobody is there to lock again.
+5. **Every end says why.** The reason and what was done to the mount are logged and shown in the nightly report.
+
+### The Ends setting
+
+A row in the stream controls above the preview, beside **Start monitoring**, applies to Monitoring and to a time-lapse. It shows a summary and **Change…**. For example: *Ends 04:55 local (03:55 UTC): the Moon below 10° · then the mount stops tracking.*
+
+**Change…** offers these conditions. Any number can be ticked; the session ends at the first one met. With none ticked, it runs until the observer stops it.
+- **At a local time.**
+- **After a duration**, from the start.
+- **At dawn**: when the Sun rises above the **Sun below** limit. This needs the site's position.
+- **When the Moon sinks below** an altitude (10° by default), for the Moon and a Moon time-lapse. This needs the site's position. The Moon's altitude comes from a low-precision lunar position with its parallax (accurate to a few tenths of a degree), in the same file as the Sun's (`sky_schedule`), with no new library. This is the natural end for an evening crescent: earthshine is observed in twilight and ends at moonset, not at dawn.
+
+What changes in the existing controls:
+- **The sky:** **Watch from dusk to dawn** is removed (the observer's decision below). Its stop at dawn becomes the **At dawn** condition, ticked for anyone who had the schedule on, and it can be combined with an earlier local time. The automatic start at dusk goes; it may come back later as an extension of **Ends**.
+- **Time-lapse:** **Fixed duration** and **UTC end time** move to **Ends**, the end time becoming local. **Number of stacks** stays in the time-lapse panel and is one more condition: whichever comes first.
+
+### What an end does
+
+**Which ends count:**
+- an **Ends** condition being met;
+- a failure: the camera lost, the source failing, the RAM ceiling;
+- the disk reserve. *(New for Monitoring:* today a clip refused for the disk reserve is not saved, and Monitoring goes on saving nothing. It now ends.*)*
+- lost guiding (below).
+
+**What happens:**
+- **Monitoring:** the open clip and any continuous recording are finished, the nightly report is written, guiding is turned off and the camera is closed.
+- **A time-lapse:** the current period is finished and the video is built from the completed stacks, as at an early stop today.
+- **Then the mount** is kept tracking or stopped, as chosen.
+- **The record:** a `session_end reason="…" mount="…"` line in `candidates.txt` (or `timelapse.txt`). The nightly report shows the end and its reason. The window says what ended, when and why.
+
+**The observer's own Stop leaves the mount as it is.** The observer is there, and may only be changing a setting in Preview.
+
+### The mount at the end
+
+**The choice.**
+- **Keep tracking** or **Stop tracking**, shown on the **Ends** row whenever a mount is connected.
+- It has no default. The first start of Monitoring or a time-lapse with a mount connected asks for it; it is then remembered, and **Change…** changes it.
+- **Keep tracking** shows a warning on the row: *The mount keeps tracking after the session ends. On a German equatorial mount it can reach the pier: set the meridian limits in the mount's driver.*
+
+**How it is done.**
+- **Stop tracking** sets ASCOM `Tracking` to false, then reads `Tracking` back.
+- A mount that does not let its tracking be set (`CanSetTracking` false) has the choice disabled, with the reason.
+- If the mount is disconnected or does not answer, the failure is logged and the window says the mount may still be tracking.
+
+**The mount interface gains one command, `stopTracking`.** It stops motion, so the rule that nothing SeleneWatch sends can leave the mount moving still holds. The [project description](PROJECT_DESCRIPTION.md)'s mount section and `guiding/mount.h` say so. `SimulatedMount` implements it for the tests.
+
+**The sky needs no mount.** It is watched with a fixed camera and lens, so the mount choice is not shown in Sky mode, and the mount stays Moon-only as today.
+
+### Lost guiding ends the session
+
+While guiding is on, for Monitoring and for a time-lapse, the session ends:
+- **At once** when guiding stops for a safety reason:
+  - the mount stopped tracking, is slewing or is parked;
+  - the side of pier changed;
+  - corrections have no effect;
+  - the pulse cap was reached;
+  - a pulse does not end;
+  - the mount does not answer.
+- **After the grace period** when the lock is lost and not found again. The lock's wide search, 60 s today, lasts the grace period instead.
+  - **The grace period** is set in the Guiding tab: 2 minutes by default, from 30 s to 10 minutes. Passing clouds often last longer than 30 s. With the mount tracking, the Moon drifts only slowly meanwhile, and the search covers 64 px.
+  - **When the lock is found again** within the grace period, guiding goes on as now and nothing ends.
+
+**Only guiding counts.** A lock without guiding, used only for the drift readout, ends nothing.
+
+**The Guiding tab says it** beside **Start guiding**: *While guiding, a lost lock (after the grace period) or a guiding stop ends the session.* The same text is the control's help.
+
+### Done when
+
+1. **Core tests:**
+   - the end decision is a plain function: the first condition met among local time, duration, dawn and the Moon's altitude, with none ticked meaning no end;
+   - the Moon's altitude agrees with published positions within 0.3°.
+2. **A scheduled end, with the simulated mount:** Monitoring ends, its clip and recording are finished, the stream is closed, tracking stops and the `session_end` line names the reason and the mount.
+3. **Lost guiding, with the simulated mount:**
+   - a mount that stops tracking ends the session at once;
+   - a lock lost for longer than the grace period ends it;
+   - a lock found again within the grace period ends nothing.
+4. **The disk reserve:** a clip refused for the disk reserve ends Monitoring.
+5. **Time-lapse:** an end at a local time builds the video; a lost lock while guiding ends the time-lapse.
+6. **The mount choice:**
+   - the first start with a mount connected asks for it;
+   - **Keep tracking** shows the warning;
+   - a mount that cannot set its tracking has the choice disabled;
+   - the observer's own Stop leaves the mount tracking.
+7. **The sky:** no mount choice is shown. **Watch from dusk to dawn** is gone, and a saved one becomes **At dawn**.
+8. **Window:** every new control has help (Feature-24) and fits the small screen (Feature-23).
+9. **Documentation:** the MANUAL and README describe **Ends**, the mount choice and the grace period.
+10. **By hand:** EQMOD stops tracking at a scheduled end and after guiding is lost.
+
+### Out of this step
+
+- Parking, slewing or unparking the mount (the observer's decision).
+- Ending a session because tracking stopped while not guiding.
+- Starting a Moon session when the Moon rises above an altitude: a natural follow-up, cheap once the Moon's altitude exists.
+- Starting a sky session at dusk (removed with **Watch from dusk to dawn**). It can come back as a start condition beside **Ends**.
+- A mount for the sky.
+
+### The observer's decisions (21 November 2026)
+
+1. **One shared Ends row** beside the start buttons, with the choices proposed.
+2. **No parking.** At the end the mount keeps tracking or stops tracking. The observer must choose one, and a warning makes sure keeping it tracking is not forgotten.
+3. **The choice applies to every end SeleneWatch makes by itself**: the schedule, lost guiding, a lost camera, a full disk.
+4. **The sky needs no mount.** It is watched with a fixed camera and lens.
+5. **Lost guiding ends the session**, for Monitoring and for a time-lapse (a Moon or planet time-lapse is guided too), after a grace period longer than today's for passing clouds.
+6. **Watch from dusk to dawn is removed**, with every reference in the code and the documentation. A start condition can be added later by extending **Ends**.
+
+### Feature-32 status & verification
+
+**Implemented** on 21 November 2026:
+- **The conditions:** `session_end.h/.cpp` (the settings, `endTime`, `plannedEnd`, their texts) and the Moon's altitude in `sky_schedule.h/.cpp`: the Astronomical Almanac's low-precision position with its parallax. Dawn is now a rising crossing of the Sun.
+- **The window:** `mainwindow_session_end.cpp` (the Ends row, the session's start, the checks every second, the end, the first-start question, the records) and `session_end_dialog.h/.cpp` (**Change…**).
+- **The mount:** `Mount::stopTracking` and `MountState::canSetTracking`; `AscomMount` writes `Tracking` false after reading `CanSetTracking` at connect; `SimulatedMount` stops the shared pointing's tracking.
+- **The guider:** `requestStopTracking` (ends guiding first, then stops tracking and reads it back), `setLostAfter` (the lock's search time, **Lock lost after** in the Guiding dock, 2 min by default, 30 s to 10 min), and `GuideStatus::unplannedStops`, which counts guiding stops that were not the observer's or the stream's.
+- **Removed:** **Watch from dusk to dawn**, **Sun below** and the schedule's reading in the Detection dock, the window's night schedule and `nightAction`; the time-lapse's **Fixed duration** and **UTC end time** (its **Stops** choice is now **When the session ends** or **After a number of stacks**).
+
+**As built, beside the proposal:**
+- **The record.** There is no separate `session_end` line. The reason goes on the `monitoring_stop` line of `session.txt` (`reason=session end: …`) and on `stop_reason:` in `timelapse.txt`. What the mount did is a `mount_at_end action=… result="…"` line in `session.txt`, shown in the nightly report, which is written again for it, and a `mount_at_end:` line in `timelapse.txt` once the time-lapse has written that file.
+- **The report rewrite** is tried again, a second apart, up to five times. On Windows a report written moments before can still be held open by another program (a virus scan), and replacing it is refused (found by the window test).
+- **The status line** keeps why the session ended and what the mount did, also when the nightly report's message arrives after it.
+- **A short gap is not an end.** A session counts as stopped by itself only after three seconds without Monitoring or the time-lapse, so the sky follower's restart of Monitoring does not end it.
+- **The Moon's altitude** agrees with JPL Horizons within 0.04° at 14 times in 2026 and 2030, against the 0.3° proposed.
+
+**Tests:**
+- **Core:** `theMoonsAltitudeMatchesJplHorizons`, `aSessionEndsAtTheFirstConditionMet` and the Sun's rising crossing (`sky_extras`); the lock's search time (`guiding`).
+- **Window:**
+  - `aSessionEndsByItselfAndStopsTheMountsTracking`: the first-start question (Cancel and Stop tracking), Monitoring ended an hour later with the stream closed, tracking stopped and recorded in `session.txt` and the report; the observer's Stop leaving the mount tracking; a time-lapse ended the same way with its record; no mount choice for the sky.
+  - `theDiskReserveEndsMonitoring`.
+  - `lostGuidingEndsTheSession`: a real calibration of the simulated mount, guiding, the observer's stop of guiding ending nothing, then the mount's tracking stopping and ending the session at once.
+  - `theEndsDialogShowsWhenEachConditionIsMet`, with the migration of a saved **Watch from dusk to dawn**.
+- **Suites:** all 23 pass. The window suite takes about 110 s instead of 55 s, most of it the calibration.
+- **Real window:** `tests\gui_e2e_test.ps1` passed on the Release build, with the **Ends** row in place and the sky group without **Watch from dusk to dawn**.
+
+**Pending:** EQMOD with the observer's mount stopping its tracking at a scheduled end and after guiding is lost.

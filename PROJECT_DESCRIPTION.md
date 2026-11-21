@@ -171,6 +171,7 @@ The guider measures where a locked lunar feature is, and corrects the mount when
 
 - **It disturbs the detector, so it does little.** A correction moves the image under the detector's reference. Corrections are rare, slower than the seeing, and logged. Guiding holds the field; it does not sharpen the image.
 - **It moves hardware, so it cannot run away.** Only guide pulses are sent. A pulse ends by itself, so a crash leaves nothing moving. No pulse is sent on a weak match, a lost lock, or a mount that is slewing, parked, or not tracking. Guiding that has no effect stops itself.
+- **The end of a session (Feature-32).** One more command exists: stopping the mount's tracking, sent only when a session ends by itself and the observer chose it beforehand. It stops motion, so the rule above holds: nothing SeleneWatch sends can leave the mount moving. SeleneWatch never slews, parks or starts tracking. Guiding that stops by itself (a safety stop, or a lock not found again within the observer's grace period) ends a guided session, since nobody is there to lock again.
 - **Each mount family is an adapter**, like a camera. ASCOM is the first, reached through late-bound COM with no code in the repository, and optional at build time. A simulated mount is the second implementation and the test seam.
 
 The measured field shift is also what registration needs later. It is recorded from the start so that the detector's reference can use it when that is built.
@@ -310,9 +311,10 @@ Dependencies point one way: `ui` depends on everything below it; nothing below d
 | 9 | **First light.** The ZWO adapter, then the QHY adapter, camera controls, the dropped-frame record, and manual save | Feature-10 | Both adapters and manual save implemented. QHY hardware and observing checks pending. |
 | 10 | **A stable field.** (A) feature lock and drift readout; (B) the guiding loop on a simulated mount; (C) the ASCOM mount adapter | Feature-8 | Built; a real mount under the Moon is pending |
 | — | **An overview of every clip.** One picture per clip: what changed, where, when, and the clip's flags | Feature-12 | Built; review of real clips pending |
-| — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside pending |
+| — | **Watching the sky.** A second target with its own settings: large brightenings, release of slow drifters, a detection mask, linked clips without repeated history, and a disk reserve for both targets | Feature-11 | Built; a night outside done |
 | — | **A trigger for darkening.** Dark patches and large darkenings, for transits in front of the sunlit Moon; off by default after measurement on recordings | Feature-13 | Built; a real transit pending |
-| — | **Sky extras.** Watching from dusk to dawn by the Sun's altitude, an exposure that follows the sky, a suggested kind for each clip, polygon masks | Feature-15 | Built; a night outside pending |
+| — | **Sky extras.** Watching from dusk to dawn by the Sun's altitude (the dusk start was removed in Feature-32), an exposure that follows the sky, a suggested kind for each clip, polygon masks | Feature-15 | Built; a night outside done |
+| — | **The end of a session.** One Ends setting for Monitoring and time-lapses (local time, duration, dawn, the Moon's altitude); keep or stop the mount's tracking at every end by itself; lost guiding ends the session | Feature-32 | Built; a real mount at a scheduled end pending |
 | — | **Player One and ToupTek cameras** (ToupTek also for cameras it makes for other brands), with the observer's own vendor DLL | Feature-16 | Built and checked with deterministic camera tests and runtime DLL loading; physical cameras pending |
 | 11 | **The full session record.** Continuous recording, the time model, complete clip metadata | Feature-14 | Built; a predicted transit recorded with a schedule is pending |
 | 12 | **Later.** More camera families as observers bring the hardware; registration, transit tracking, event browser, export | To be written | Planned |

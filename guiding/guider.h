@@ -57,6 +57,13 @@ struct GuideStatus
     std::chrono::system_clock::time_point lastPulseTime{};
     // Why calibration or guiding last ended, or why a request was refused.
     std::string message;
+    // Feature-32: how many times guiding has stopped by itself: a safety
+    // stop, a mount that did not answer, or a lock lost for the search
+    // time. Not the observer's stops, nor the stream's. A session ends on a new one.
+    int unplannedStops{0};
+    // Feature-32: how many tracking stops were asked for, and the result of the last one.
+    int trackingStops{0};
+    std::string trackingStopResult;
 };
 
 struct GuiderStatus
@@ -70,8 +77,9 @@ struct GuiderStatus
 // The source thread offers each published frame. The guider keeps only the
 // newest and skips the rest, so it never holds up the frame path; with no
 // lock and no lock request it does not even keep that one. The window sends
-// requests (lock, unlock, connect, calibrate, guide on or off) and reads a
-// copy of the status; it holds no guiding state of its own.
+// requests (lock, unlock, connect, calibrate, guide on or off, and at a
+// session's end stop tracking) and reads a copy of the status; it holds no
+// guiding state of its own.
 //
 // The mount is created, used, and destroyed on this thread (COM apartment
 // rules). A driver call that hangs stalls this thread only; the status then
@@ -121,6 +129,13 @@ public:
     void setTolerance(double pixels);
     // Any thread. Ends calibration or guiding with the reason (safety rules 1 and 8).
     void endGuiding(std::string reason);
+    // Any thread. Feature-32: how long a lost lock is searched for before it
+    // is given up, which ends guiding (and so a guided session).
+    void setLostAfter(double seconds);
+    // Any thread. Feature-32: the session has ended and the observer chose to
+    // stop the mount's tracking. Ends guiding first. The result is in
+    // status().guide.trackingStopResult once trackingStops has grown.
+    void requestStopTracking();
 
     // Any thread.
     [[nodiscard]] GuiderStatus status() const;
@@ -140,6 +155,8 @@ private:
         std::optional<bool> guide;
         std::optional<double> tolerance;
         std::optional<std::string> end;
+        std::optional<double> lostAfter;
+        bool stopTracking{false};
     };
 
     void run(std::stop_token stopToken);
@@ -147,7 +164,9 @@ private:
     // One step of calibration or guiding, and the idle state reads.
     bool stepMount(bool recording);
     void execute(const GuideDecision& decision, bool calibration, bool recording);
-    void stopActivity(const std::string& reason, bool recording);
+    // unplanned: guiding stopped by itself, which ends a guided session.
+    void stopActivity(const std::string& reason, bool recording, bool unplanned = false);
+    void stopTracking(bool recording);
     void connectMount(const MountFactory& factory, bool recording);
     void disconnectMount(bool recording);
     [[nodiscard]] GuideObservation observation(const MountState& state) const;
@@ -193,6 +212,9 @@ private:
     std::optional<GuideCalibration> calibration_;
     double tolerance_{10};
     std::string message_;
+    int unplannedStops_{0};
+    int trackingStops_{0};
+    std::string trackingStopResult_;
     int pulses_{0};
     std::optional<GuidePulse> lastPulse_;
     std::chrono::system_clock::time_point lastPulseTime_{};

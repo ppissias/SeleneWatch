@@ -181,6 +181,26 @@ void Guider::setTolerance(double pixels)
     wake_.notify_one();
 }
 
+void Guider::setLostAfter(double seconds)
+{
+    {
+        std::lock_guard lock(mutex_);
+        requests_.lostAfter = seconds;
+    }
+    wake_.notify_one();
+}
+
+void Guider::requestStopTracking()
+{
+    {
+        std::lock_guard lock(mutex_);
+        requests_.stopTracking = true;
+        requests_.calibrate = false;
+        requests_.guide.reset();
+    }
+    wake_.notify_one();
+}
+
 void Guider::endGuiding(std::string reason)
 {
     {
@@ -231,6 +251,9 @@ void Guider::publish()
         guide.lastPulse = lastPulse_;
         guide.lastPulseTime = lastPulseTime_;
         guide.message = message_;
+        guide.unplannedStops = unplannedStops_;
+        guide.trackingStops = trackingStops_;
+        guide.trackingStopResult = trackingStopResult_;
     }
     if (statusChanged_ && !notifyPending_.exchange(true)) statusChanged_();
 }
@@ -283,9 +306,10 @@ GuideObservation Guider::observation(const MountState& state) const
     return o;
 }
 
-void Guider::stopActivity(const std::string& reason, bool recording)
+void Guider::stopActivity(const std::string& reason, bool recording, bool unplanned)
 {
     if (mode_ == GuideMode::Idle) return;
+    if (unplanned && mode_ == GuideMode::Guiding) ++unplannedStops_;
     const char* what = mode_ == GuideMode::Calibrating ? " guide_calibration_stopped" : " guide_stop";
     mode_ = GuideMode::Idle;
     calibrator_.reset();
@@ -337,9 +361,52 @@ void Guider::disconnectMount(bool recording)
     log(hostTime() + " guide_mount_disconnect name=" + quotedText(name) + "\n", recording);
 }
 
+void Guider::stopTracking(bool recording)
+{
+    stopActivity("The session ended.", recording);
+    std::string result;
+    if (!mount_)
+    {
+        result = "no mount is connected";
+    }
+    else
+    {
+        try
+        {
+            mountState_ = mountCall([&] { return mount_->state(); });
+            if (!mountState_.tracking)
+            {
+                result = "the mount was already not tracking";
+            }
+            else if (!mountState_.canSetTracking)
+            {
+                result = "the mount cannot stop its tracking from SeleneWatch; it is still tracking";
+            }
+            else
+            {
+                mountCall([&] { mount_->stopTracking(); });
+                mountState_ = mountCall([&] { return mount_->state(); });
+                result = mountState_.tracking ? "the mount still reports tracking" : "tracking stopped";
+            }
+            mountError_.clear();
+        }
+        catch (const std::exception& error)
+        {
+            mountError_ = error.what();
+            result = std::string("the mount did not answer (") + error.what() + "); it may still be tracking";
+        }
+        lastStateRead_ = std::chrono::steady_clock::now();
+    }
+    trackingStopResult_ = result;
+    ++trackingStops_;
+    log(hostTime() + " guide_tracking_stop result=" + quotedText(result) + "\n", recording);
+}
+
 void Guider::handleMountRequests(Requests& requests, bool recording)
 {
     if (requests.end) stopActivity(*requests.end, recording);
+    if (requests.lostAfter) tracker_.setSearchSeconds(*requests.lostAfter);
+    if (requests.stopTracking) stopTracking(recording);
     if (requests.disconnect) disconnectMount(recording);
     if (requests.connect) connectMount(*requests.connect, recording);
     if (requests.tolerance)
@@ -429,7 +496,7 @@ void Guider::execute(const GuideDecision& decision, bool calibration, bool recor
     catch (const std::exception& error)
     {
         mountError_ = error.what();
-        stopActivity(std::string("The mount refused a guide pulse: ") + error.what(), recording);
+        stopActivity(std::string("The mount refused a guide pulse: ") + error.what(), recording, true);
         return;
     }
     ++pulses_;
@@ -469,7 +536,7 @@ bool Guider::stepMount(bool recording)
     {
         lastStateRead_ = now;
         mountError_ = error.what();
-        stopActivity(std::string("The mount did not answer: ") + error.what(), recording);
+        stopActivity(std::string("The mount did not answer: ") + error.what(), recording, true);
         return true;
     }
 
@@ -515,7 +582,7 @@ bool Guider::stepMount(bool recording)
         {
             if (controller_->calibrationInvalid()) calibration_.reset();
             const std::string reason = controller_->stopReason();
-            stopActivity(reason, recording);
+            stopActivity(reason, recording, true);
         }
     }
     return true;
@@ -532,7 +599,8 @@ void Guider::run(std::stop_token stopToken)
             std::unique_lock lock(mutex_);
             auto ready = [&] {
                 return pending_ != nullptr || requests_.unlock || requests_.discontinuity || requests_.connect
-                    || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance || requests_.end;
+                    || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance || requests_.end
+                    || requests_.lostAfter || requests_.stopTracking;
             };
             // With a mount, the guider also wakes to follow pulses and read the mount's state.
             if (mount_) wake_.wait_for(lock, stopToken, std::chrono::milliseconds{100}, ready);
@@ -550,6 +618,8 @@ void Guider::run(std::stop_token stopToken)
             requests.guide = std::exchange(requests_.guide, std::nullopt);
             requests.tolerance = std::exchange(requests_.tolerance, std::nullopt);
             requests.end = std::exchange(requests_.end, std::nullopt);
+            requests.lostAfter = std::exchange(requests_.lostAfter, std::nullopt);
+            requests.stopTracking = std::exchange(requests_.stopTracking, false);
         }
 
         const LockStatus before = tracker_.status();
@@ -589,7 +659,12 @@ void Guider::run(std::stop_token stopToken)
             unlocked = true;
         }
         frame.reset();
-        if (locked || unlocked) stopActivity(locked ? "A new lock was taken." : "The lock was released.", recording);
+        // The observer's lock or unlock stops guiding as planned; a lock the
+        // frame's layout released, or one lost for the search time, does not.
+        if (locked || unlocked)
+            stopActivity(locked ? "A new lock was taken." : "The lock was released.", recording, !locked && !requests.unlock);
+        else if (before.state != LockState::Lost && tracker_.status().state == LockState::Lost)
+            stopActivity("The lock was lost: " + tracker_.status().message, recording, true);
         {
             std::lock_guard lock(mutex_);
             wanted_.store(tracker_.active() || requests_.lock.has_value());
@@ -607,10 +682,10 @@ void Guider::run(std::stop_token stopToken)
         catch (const std::exception& error)
         {
             mountError_ = error.what();
-            stopActivity(std::string("Guiding failed: ") + error.what(), recording);
+            stopActivity(std::string("Guiding failed: ") + error.what(), recording, true);
         }
         if (changed || requests.connect || requests.disconnect || requests.calibrate || requests.guide || requests.tolerance
-            || requests.end)
+            || requests.end || requests.stopTracking)
             publish();
     }
 

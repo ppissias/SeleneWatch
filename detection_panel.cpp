@@ -298,22 +298,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     maskRow->addWidget(clearMask_);
     skyForm->addRow(maskRow);
 
-    // Feature-15: unattended nights.
-    night_ = new QCheckBox("Watch from dusk to dawn", sky_);
-    night_->setObjectName("nightSchedule");
-    night_->setToolTip("Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it "
-        "rises again. Needs the site's position (Session → Site and instrument).");
-    sunLimit_ = new QDoubleSpinBox(sky_);
-    sunLimit_->setObjectName("sunLimit");
-    sunLimit_->setToolTip("Night starts when the Sun's altitude falls below this. -12 degrees is nautical twilight, -18 astronomical.");
-    sunLimit_->setRange(-18, 0); sunLimit_->setDecimals(1); sunLimit_->setSuffix("°");
-    nightReading_ = new QLabel(sky_);
-    nightReading_->setObjectName("nightReading");
-    nightReading_->setWordWrap(true);
-    nightReading_->hide();
-    skyForm->addRow(night_);
-    skyForm->addRow("Sun below", sunLimit_);
-    skyForm->addRow(nightReading_);
+    // Feature-15: the exposure follower.
     follow_ = new QCheckBox("Follow the sky's brightness", sky_);
     follow_->setObjectName("followSky");
     // The fixed rules come from the follower itself, so the help cannot disagree with it.
@@ -544,9 +529,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(maxDark_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
-    for (auto* box : {night_, follow_})
-        connect(box, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
-    for (auto* spin : {sunLimit_, minExposure_, maxExposure_, maxGain_, gainStep_})
+    connect(follow_, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
+    for (auto* spin : {minExposure_, maxExposure_, maxGain_, gainStep_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) emit skyExtrasChanged(); });
     connect(clearMask_, &QToolButton::clicked, this, [this] {
         mask_ = {};
@@ -627,16 +611,13 @@ bool DetectionPanel::drawingMask() const
 
 SkyExtras DetectionPanel::skyExtras() const
 {
-    return {night_->isChecked(), sunLimit_->value(), follow_->isChecked(), minExposure_->value(), maxExposure_->value(),
-        maxGain_->value(), gainStep_->value()};
+    return {follow_->isChecked(), minExposure_->value(), maxExposure_->value(), maxGain_->value(), gainStep_->value()};
 }
 
 void DetectionPanel::setSkyExtras(const SkyExtras& extras)
 {
     const bool updating = updating_;
     updating_ = true;
-    night_->setChecked(extras.night);
-    sunLimit_->setValue(extras.sunLimitDeg);
     follow_->setChecked(extras.follow);
     minExposure_->setValue(extras.minExposureMs);
     maxExposure_->setValue(extras.maxExposureMs);
@@ -645,28 +626,6 @@ void DetectionPanel::setSkyExtras(const SkyExtras& extras)
     updating_ = updating;
 }
 
-void DetectionPanel::showNight(const QString& text)
-{
-    nightReading_->setText(text);
-    nightReading_->setVisible(!text.isEmpty());
-}
-
-// Feature-28: without the site's position there is no dusk or dawn to wait
-// for, so the schedule is off and cannot be turned on.
-bool DetectionPanel::setSitePositionKnown(bool known)
-{
-    const bool wasOn = night_->isChecked();
-    night_->setEnabled(known);
-    sunLimit_->setEnabled(known);
-    night_->setToolTip(QString("Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it "
-        "rises again.") + (known ? QString() : " Needs the site's position: Session → Site and instrument, Position known."));
-    if (known || !wasOn) return false;
-    const bool updating = updating_;
-    updating_ = true;
-    night_->setChecked(false);
-    updating_ = updating;
-    return true;
-}
 
 void DetectionPanel::showFollow(const QString& text)
 {

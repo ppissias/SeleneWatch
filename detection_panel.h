@@ -17,13 +17,11 @@ class QToolButton;
 class MeterSlider;
 class PeakHistory;
 
-// Feature-15: the Sky group's unattended-night controls. The window acts on
-// them; the panel only holds and shows them.
+// Feature-15: the Sky group's exposure follower. The window acts on it; the
+// panel only holds and shows it. (The dusk-to-dawn start was removed in
+// Feature-32; a session's end is the Ends setting.)
 struct SkyExtras
 {
-    // Watch from dusk to dawn: below this Sun altitude, in degrees.
-    bool night{false};
-    double sunLimitDeg{-10};
     // Follow the sky's brightness within these limits.
     bool follow{false};
     double minExposureMs{1}, maxExposureMs{2000};
@@ -71,13 +69,8 @@ public:
 
     [[nodiscard]] SkyExtras skyExtras() const;
     void setSkyExtras(const SkyExtras& extras);
-    // What the schedule and the exposure follower found; empty hides it.
-    void showNight(const QString& text);
+    // What the exposure follower found; empty hides it.
     void showFollow(const QString& text);
-
-    // Feature-28: Watch from dusk to dawn needs the site's position. Without
-    // it the schedule is turned off and disabled; true when it was on.
-    bool setSitePositionKnown(bool known);
 
     // Named detection profiles (saved per target; Sky horizon mask is optional).
     void reloadProfiles();
@@ -130,10 +123,7 @@ private:
     QToolButton* drawMask_;
     QToolButton* clearMask_;
     DetectionMask mask_;
-    // Feature-15: unattended nights.
-    QCheckBox* night_;
-    QDoubleSpinBox* sunLimit_;
-    QLabel* nightReading_;
+    // Feature-15: the exposure follower.
     QCheckBox* follow_;
     QDoubleSpinBox* minExposure_;
     QDoubleSpinBox* maxExposure_;

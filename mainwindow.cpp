@@ -28,7 +28,6 @@
 #include "camera_settings_editor.h"
 #include "selenewatch_version.h"
 #include "site_dialog.h"
-#include "sky_schedule.h"
 #include "target_defaults.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
@@ -173,7 +172,8 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         if (!error.isEmpty()) { showMessage(error); return; }
         reportOffer_->setProperty("reportPath", path);
         reportOffer_->show();
-        showMessage("Monitoring finished. Your nightly report is ready.");
+        // Feature-32: why a session ended by itself stays in view.
+        showMessage((endNote_.isEmpty() ? QString("Monitoring finished.") : endNote_) + " Your nightly report is ready.");
     };
     notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
     notifications.ended = [this] { onPlaybackEnded(); };
@@ -213,6 +213,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         addCameraFamily(new ToupTekCameraPanel(std::move(api),this),"ToupTek camera","toupTekCameraDock");
     setupSourceChoice();
     arrangeTopControls();
+    loadSessionEnd();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(ui_->stopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
@@ -343,6 +344,10 @@ void MainWindow::arrangeTopControls()
     flow->addWidget(together(stream, {ui_->saveNowButton, recordButton_, recordFramesSpinBox_, ui_->injectFlashButton}));
     flow->addWidget(together(stream, {ui_->fpsLabel, ui_->targetFpsSpinBox}));
     flow->addWidget(together(stream, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox}));
+    // Feature-32: when the session ends, and what the mount does then.
+    QWidget* ends = makeSessionEndRow(stream);
+    ends->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    flow->addWidget(ends);
     // The separators and spacer of the old single row.
     delete ui_->line;
     delete ui_->line2;
@@ -517,12 +522,10 @@ void MainWindow::setupDetectionPanel()
     });
     connect(detectionPanel_, &DetectionPanel::watchRequested, this, &MainWindow::onWatchRequested);
 
-    // Feature-15: the night schedule and the exposure follower.
+    // Feature-15: the exposure follower.
     {
         const QSettings saved;
         SkyExtras extras;
-        extras.night = saved.value("sky/night/enabled", extras.night).toBool();
-        extras.sunLimitDeg = saved.value("sky/night/sunLimit", extras.sunLimitDeg).toDouble();
         extras.follow = saved.value("sky/follow/enabled", extras.follow).toBool();
         extras.minExposureMs = saved.value("sky/follow/minExposureMs", extras.minExposureMs).toDouble();
         extras.maxExposureMs = saved.value("sky/follow/maxExposureMs", extras.maxExposureMs).toDouble();
@@ -530,19 +533,13 @@ void MainWindow::setupDetectionPanel()
         extras.gainStep = saved.value("sky/follow/gainStep", extras.gainStep).toDouble();
         detectionPanel_->setSkyExtras(extras);
     }
-    // Feature-28: no dusk or dawn without the site's position.
-    if (detectionPanel_->setSitePositionKnown(savedSite().hasPosition())) saveSkyExtras();
     connect(detectionPanel_, &DetectionPanel::skyExtrasChanged, this, [this] {
         saveSkyExtras();
         skyExposureState_ = {};
-        checkNightSchedule();
     });
     skyTimer_ = new QTimer(this);
     skyTimer_->setInterval(5000);
-    connect(skyTimer_, &QTimer::timeout, this, [this] {
-        checkSkyExposure(std::chrono::steady_clock::now());
-        if (++skyTicks_ % 6 == 0) checkNightSchedule();
-    });
+    connect(skyTimer_, &QTimer::timeout, this, [this] { checkSkyExposure(std::chrono::steady_clock::now()); });
     skyTimer_->start();
     connect(detectionPanel_, &DetectionPanel::maskDrawingChanged, this, [this](bool drawing) {
         if (drawing) chooseDrawing(Drawing::Mask);
@@ -676,88 +673,11 @@ void MainWindow::saveSkyExtras()
 {
     const SkyExtras extras = detectionPanel_->skyExtras();
     QSettings saved;
-    saved.setValue("sky/night/enabled", extras.night);
-    saved.setValue("sky/night/sunLimit", extras.sunLimitDeg);
     saved.setValue("sky/follow/enabled", extras.follow);
     saved.setValue("sky/follow/minExposureMs", extras.minExposureMs);
     saved.setValue("sky/follow/maxExposureMs", extras.maxExposureMs);
     saved.setValue("sky/follow/maxGain", extras.maxGain);
     saved.setValue("sky/follow/gainStep", extras.gainStep);
-}
-
-void MainWindow::checkNightSchedule()
-{
-    const SkyExtras extras = detectionPanel_->skyExtras();
-    if (target_ != Target::Sky || !extras.night)
-    {
-        detectionPanel_->showNight(target_ == Target::Sky && !savedSite().hasPosition()
-            ? "Watch from dusk to dawn needs the site's position: Session → Site and instrument." : QString());
-        nightOwns_ = NightOwns::Nothing;
-        nightStartedTonight_ = false;
-        return;
-    }
-    const ObservingSite site = savedSite();
-    if (!site.hasPosition())
-    {
-        detectionPanel_->showNight("Needs the site's position: Session → Site and instrument.");
-        return;
-    }
-    const auto now = std::chrono::system_clock::now();
-    const double altitude = sunAltitudeDegrees(*site.latitudeDeg, *site.longitudeDeg, now);
-    const bool watching = session_->isRunning() && session_->mode() == Session::Mode::Monitoring;
-    // What the schedule started may have ended without it: a source that
-    // stopped, or Monitoring turned off by the observer.
-    if (!session_->isRunning()
-        || (nightOwns_ == NightOwns::Monitoring && !watching && !session_->modeChangePending()))
-        nightOwns_ = NightOwns::Nothing;
-    switch (nightAction(altitude, extras.sunLimitDeg, watching, nightStartedTonight_, nightOwns_ != NightOwns::Nothing))
-    {
-    case NightAction::Start:
-        if (session_->modeChangePending()) break;
-        if (!session_->isRunning() && ui_->sourceComboBox->currentData().toString().isEmpty())
-        {
-            // Nothing to watch with yet; tried again at the next check.
-            showMessage("Dusk, but no source is chosen: choose the camera to watch with.", 6000);
-            break;
-        }
-        nightStartedTonight_ = true;
-        showMessage(QString("Dusk: the Sun is at %1°. Watching the sky.").arg(altitude, 0, 'f', 1), 6000);
-        if (!session_->isRunning())
-        {
-            nightOwns_ = NightOwns::Stream;
-            startStream(Session::Mode::Monitoring);
-        }
-        else
-        {
-            nightOwns_ = NightOwns::Monitoring;
-            onMonitoringClicked();
-        }
-        break;
-    case NightAction::Stop:
-        showMessage(QString("Dawn: the Sun is at %1°. Watching stopped.").arg(altitude, 0, 'f', 1), 6000);
-        if (nightOwns_ == NightOwns::Stream) finishStream();
-        else if (!session_->modeChangePending() && session_->requestMonitoring(false))
-        {
-            updateControls();
-            updateStatusLabel();
-        }
-        nightOwns_ = NightOwns::Nothing;
-        break;
-    case NightAction::None:
-        break;
-    }
-    if (altitude >= extras.sunLimitDeg) nightStartedTonight_ = false;
-    const auto next = nextSunCrossing(*site.latitudeDeg, *site.longitudeDeg, extras.sunLimitDeg, now);
-    QString text = QString("Sun at %1°.").arg(altitude, 0, 'f', 1);
-    if (next)
-    {
-        // The observer's clock first; UTC as the logs and files write it.
-        const QDateTime when = utcDateTime(*next);
-        text += QString(" %1 at %2 local time (%3 UTC).").arg(altitude < extras.sunLimitDeg ? "Dawn stop" : "Dusk start",
-            when.toLocalTime().toString("yyyy-MM-dd HH:mm"), when.toString("HH:mm"));
-    }
-    else text += " It does not cross the limit in the next two days.";
-    detectionPanel_->showNight(text);
 }
 
 void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
@@ -976,8 +896,12 @@ void MainWindow::setupGuidingPanel()
     guidingPanel_->setMountKind(saved.value("guiding/mountKind", 0).toInt() == 1 && ascomAvailable()
             ? GuidingPanel::MountKind::Ascom : GuidingPanel::MountKind::Simulated);
     guidingPanel_->setTolerancePercent(std::clamp(saved.value("guiding/tolerancePercent", 3.0).toDouble(), 0.5, 20.0));
+    // Feature-32: how long a lost lock is searched for before guiding, and the session, end.
+    guidingPanel_->setLostAfterSeconds(std::clamp(saved.value("guiding/lostAfterSeconds", LockTracker::kDefaultSearchSeconds)
+        .toDouble(), LockTracker::kMinSearchSeconds, LockTracker::kMaxSearchSeconds));
 
     Guider& guider = session_->guider();
+    guider.setLostAfter(guidingPanel_->lostAfterSeconds());
     connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
     connect(guidingPanel_, &GuidingPanel::drawLockToggled, this, [this](bool on) {
         if (!on) return;
@@ -991,6 +915,10 @@ void MainWindow::setupGuidingPanel()
     connect(guidingPanel_, &GuidingPanel::calibrateRequested, this, [&guider] { guider.requestCalibration(); });
     connect(guidingPanel_, &GuidingPanel::guidingRequested, this, [&guider](bool on) { guider.requestGuiding(on); });
     connect(guidingPanel_, &GuidingPanel::toleranceChanged, this, [this] { sendTolerance(); saveGuidingSettings(); });
+    connect(guidingPanel_, &GuidingPanel::lostAfterChanged, this, [this, &guider] {
+        guider.setLostAfter(guidingPanel_->lostAfterSeconds());
+        saveGuidingSettings();
+    });
     connect(guidingPanel_, &GuidingPanel::mountKindChanged, this, &MainWindow::saveGuidingSettings);
 
     // A hung driver call publishes nothing, so the panel also asks once a second.
@@ -1052,13 +980,8 @@ void MainWindow::onStartTimeLapse()
         showMessage("Check time-lapse settings (capture window must be <= interval).", 5000);
         return;
     }
-    if (tlSettings.stopKind == StopConditionKind::UtcEnd
-        && !recording_
-        && tlSettings.utcEndTime <= QDateTime::currentDateTimeUtc())
-    {
-        showMessage("UTC end time is in the past; choose a future UTC end time.", 5000);
-        return;
-    }
+    // Feature-32: the first start with a mount asks what it does at the end.
+    if (!askMountAtEnd()) return;
     timelapsePanel_->clearRunVisuals();
     QString error;
     if (!session_->startTimeLapse(tlSettings, error))
@@ -1066,6 +989,7 @@ void MainWindow::onStartTimeLapse()
         showMessage(QString("Cannot start time-lapse: %1").arg(error), 5000);
         return;
     }
+    beginSessionRun(true);
     timelapseDock_->raise();
     showMessage("Time-lapse started (flash detection is off).", 4000);
     updateControls();
@@ -1074,6 +998,7 @@ void MainWindow::onStartTimeLapse()
 
 void MainWindow::onStopTimeLapse()
 {
+    sessionRun_.reset();
     session_->stopTimeLapse("stopped by the observer");
     showMessage("Stopping time-lapse and building video…", 4000);
     updateControls();
@@ -1110,6 +1035,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
         box.exec();
         if (box.clickedButton() != stopAndClose) return;
     }
+    sessionRun_.reset();
     if (timeLapsing) session_->stopTimeLapse("the program closed");
     closeAfterTimeLapse_ = true;
     showClosingProgress();
@@ -1160,6 +1086,8 @@ void MainWindow::updateClosingProgress(const TimelapseStatus& status)
 void MainWindow::onTimeLapseFinished(const TimelapseFinishResult& result)
 {
     if (timelapsePanel_) timelapsePanel_->onSessionFinished(result);
+    // Feature-32: timelapse.txt is written; what the mount did is added to it.
+    writeTimeLapseMountLine(result.sessionDir);
     if (closeAfterTimeLapse_)
     {
         if (closingProgress_) closingProgress_->hide();
@@ -1199,6 +1127,7 @@ void MainWindow::saveGuidingSettings()
     saved.setValue("guiding/ascomDriver", ascomDriver_);
     saved.setValue("guiding/mountKind", guidingPanel_->mountKind() == GuidingPanel::MountKind::Ascom ? 1 : 0);
     saved.setValue("guiding/tolerancePercent", guidingPanel_->tolerancePercent());
+    saved.setValue("guiding/lostAfterSeconds", guidingPanel_->lostAfterSeconds());
 }
 
 void MainWindow::setupSessionMenu()
@@ -1464,13 +1393,8 @@ void MainWindow::applySite(const ObservingSite& site, bool ntp, const QString& s
     session_->setSite(site);
     session_->setClockCheck(true, ntp && !server.isEmpty() ? server.toStdString() : std::string());
     showMessage("Site and instrument saved; they are recorded from the next clip on.", 4000);
-    // Feature-28: removing the position turns Watch from dusk to dawn off.
-    if (detectionPanel_->setSitePositionKnown(site.hasPosition()))
-    {
-        saveSkyExtras();
-        checkNightSchedule();
-        showMessage("Watch from dusk to dawn is off: it needs the site's position.", 6000);
-    }
+    // Feature-32: dawn and the Moon's altitude follow the site's position.
+    updateSessionEndRow(std::chrono::system_clock::now());
 }
 
 void MainWindow::onCameraSupport()
@@ -1852,6 +1776,14 @@ void MainWindow::onLockChanged()
 {
     const GuiderStatus all = session_->guider().status();
     guidingPanel_->setStatus(all);
+    // Feature-32: guiding that stopped by itself ends a guided session.
+    if (sessionRun_ && all.guide.unplannedStops > sessionRun_->guideStops)
+    {
+        sessionRun_->guideStops = all.guide.unplannedStops;
+        endSession("guiding stopped: " + QString::fromStdString(all.guide.message));
+    }
+    checkTrackingStop(all.guide);
+    updateSessionEndRow(std::chrono::system_clock::now());
     const LockStatus& status = all.lock;
     const QString guiding = all.guide.mode == GuideMode::Idle ? QString() : QString(" | %1").arg(guideModeName(all.guide.mode));
     if (status.state == LockState::Off)
@@ -2489,8 +2421,9 @@ void MainWindow::startStream(Session::Mode mode)
 
 void MainWindow::onStopClicked()
 {
-    // The observer's stop: the night schedule leaves it until the next dusk.
-    nightOwns_ = NightOwns::Nothing;
+    // Feature-32: the observer's stop leaves the mount as it is.
+    sessionRun_.reset();
+    endNote_.clear();
     finishStream();
 }
 
@@ -2499,6 +2432,10 @@ void MainWindow::onMonitoringClicked()
     if (!session_->isRunning() || session_->modeChangePending()) return;
     const bool monitoring=session_->mode()==Session::Mode::Monitoring;
     if (!monitoring && !ensureOutputFolderReady("monitoring")) return;
+    // Feature-32: the first start with a mount asks what it does at the end;
+    // the observer's own stop leaves it as it is.
+    if (!monitoring && !askMountAtEnd()) return;
+    if (monitoring) sessionRun_.reset();
     if (!monitoring && activeCamera())
     {
         // Reopen with the requested controls, then read them back before any
@@ -2507,18 +2444,20 @@ void MainWindow::onMonitoringClicked()
         bufferReadoutTimer_->stop();
         session_->stop("monitoring settings boundary");
         startStream(Session::Mode::Monitoring);
+        if (session_->isRunning()) beginSessionRun(false);
         return;
     }
     if (session_->requestMonitoring(!monitoring))
     {
+        if (!monitoring) beginSessionRun(false);
         updateControls(); updateStatusLabel();
     }
 }
 
-void MainWindow::finishStream()
+void MainWindow::finishStream(const std::string& reason)
 {
     bufferReadoutTimer_->stop();
-    session_->stop();
+    session_->stop(reason);
     saveDetectionSettings();
     saveDisplaySettings();
 
@@ -2803,10 +2742,12 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
         // Feature-11: saving stops before the drive fills. The candidates are still logged.
         ++clipsNotSaved_;
         updateCandidateReadout();
-        showMessage(QString("Saving stopped: %1 GiB free on the output drive, below the disk reserve of %2 GiB. "
-            "Candidates are still logged.")
+        const QString free = QString("%1 GiB free on the output drive, below the disk reserve of %2 GiB")
             .arg(static_cast<double>(result.freeBytes) / kGiB, 0, 'f', 1)
-            .arg(static_cast<double>(displayPanel_->captureSettings().diskReserveBytes) / kGiB, 0, 'f', 0));
+            .arg(static_cast<double>(displayPanel_->captureSettings().diskReserveBytes) / kGiB, 0, 'f', 0);
+        showMessage("Saving stopped: " + free + ". Candidates are still logged.");
+        // Feature-32: Monitoring cannot save evidence any more, so it ends.
+        if (sessionRun_ && !sessionRun_->timeLapse) endSession("the disk reserve: " + free);
     }
     else if (!result.notSaved.isEmpty())
     {
@@ -2832,6 +2773,7 @@ void MainWindow::onPlaybackEnded()
     playbackEnded_ = true;
     finishStream();
     showMessage("Playback finished");
+    endSession("the recording ended");
 }
 
 void MainWindow::onSourceFailed(const QString& message)
@@ -2843,4 +2785,5 @@ void MainWindow::onSourceFailed(const QString& message)
     sourceFailed_ = true;
     finishStream();
     showMessage(message);
+    endSession("the source failed: " + message);
 }

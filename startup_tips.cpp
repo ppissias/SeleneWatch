@@ -7,6 +7,7 @@ constexpr auto kSectionOutput = "22-choosing-your-output-folder";
 constexpr auto kSectionSite = "23-site-instrument--clock-accuracy";
 constexpr auto kSectionSource = "24-selecting-a-camera-or-recording--starting-preview";
 constexpr auto kSectionDisplay = "25-display-stretch--the-native-adu-histogram";
+constexpr auto kSectionEnds = "27-ending-a-session-unattended";
 constexpr auto kSectionGuides = "3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows";
 constexpr auto kSectionLunar = "4-workflow-1--lunar-flashes-on-the-earth-illuminated-side";
 constexpr auto kSectionTransits = "5-workflow-2--objects-passing-in-front-of-the-moon-shadows--transits";
@@ -182,12 +183,12 @@ const std::vector<StartupTip>& allStartupTips()
             kSectionSky
         },
         {
-            "Unattended dusk-to-dawn runs",
-            "For unattended nights under <b>The sky</b>, tick <b>Watch from dusk to dawn</b> and set a "
-            "<b>Sun below</b> altitude (for example <code>&minus;10.0&deg;</code>). Using your site coordinates from "
-            "<b>Session &rarr; Site and instrument&hellip;</b>, SeleneWatch starts <b>Monitoring</b> after dusk and "
-            "stops at dawn.",
-            kSectionSky
+            "Ending an unattended night",
+            "<b>Ends</b>, above the preview, stops <b>Monitoring</b> or a time-lapse by itself: at a local time, "
+            "after a duration, at dawn, or when the Moon sinks below an altitude, whichever comes first "
+            "(<b>Change&hellip;</b>). Dawn and the Moon use your position from <b>Session &rarr; Site and "
+            "instrument&hellip;</b>. With a mount connected, choose whether it then keeps or stops tracking.",
+            kSectionEnds
         },
         {
             "Automatic night-sky exposure",
@@ -216,8 +217,8 @@ const std::vector<StartupTip>& allStartupTips()
             "Lunar and planetary time-lapses",
             "Watch planets turn and lunar shadows unfold. Open <b>View &rarr; Time-lapse</b> to capture "
             "regular bursts, stack the sharpest frames, and build MP4/GIF animations alongside 32-bit FITS stacks. "
-            "Under <b>Stop condition</b>, you can finish automatically at a <b>UTC end time</b>, "
-            "after a <b>Fixed duration</b>, or after a chosen <b>Number of stacks</b>.",
+            "It ends with <b>Ends</b>, above the preview (a local time, a duration, dawn, the Moon's "
+            "altitude), or, under <b>Stops</b>, after a chosen number of stacks.",
             kSectionTimelapse
         },
         {

@@ -14,7 +14,6 @@
 
 class QCheckBox;
 class QComboBox;
-class QDateTimeEdit;
 class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
@@ -90,8 +89,6 @@ private:
     QLabel* anchorLabel_{nullptr};
 
     QComboBox* stopKind_{nullptr};
-    QDoubleSpinBox* durationMin_{nullptr};
-    QDateTimeEdit* utcEnd_{nullptr};
     QSpinBox* targetStacks_{nullptr};
 
     QCheckBox* writeMp4_{nullptr};
