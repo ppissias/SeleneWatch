@@ -205,16 +205,18 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     setMinimumWidth(380);
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
-    // Feature-26: above the scrolled settings, so it is always in view.
+    // Feature-26: above the scrolled settings, so it is always in view. It
+    // opens auto-tune's own window (Feature-28), leaving the settings in place.
     autoTune_ = new QPushButton("Auto-tune…", this);
     autoTune_->setObjectName("autoTuneButton");
-    autoTune_->setCheckable(true);
     autoTune_->setMinimumHeight(30);
     autoTune_->setStyleSheet("QPushButton { font-weight: bold; background: #2f6f9f; color: white; border-radius: 4px; "
-        "padding: 4px 10px; } QPushButton:checked { background: #1d4f75; } QPushButton:disabled { background: #8aa4b8; }");
-    autoTune_->setToolTip("Shows auto-tune: in Preview it measures the camera's brightness and what each K would have "
-        "triggered, and suggests exposure, gain and K for the Moon or the sky. Nothing changes until you apply it.");
+        "padding: 4px 10px; } QPushButton:pressed { background: #1d4f75; } QPushButton:disabled { background: #8aa4b8; }");
+    autoTune_->setToolTip("Opens the auto-tune window: in Preview it measures the camera's brightness and what each K "
+        "would have triggered, and suggests exposure, gain and K for the Moon or the sky. Nothing changes until you "
+        "apply it.");
     outer->addWidget(autoTune_);
+    connect(autoTune_, &QPushButton::clicked, this, &DetectionPanel::autoTuneRequested);
     auto* scroll = new QScrollArea(this);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
@@ -222,17 +224,6 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     auto* column = new QVBoxLayout(content);
     scroll->setWidget(content);
     outer->addWidget(scroll);
-    autoTuneHolder_ = new QWidget(content);
-    autoTuneHolder_->setObjectName("autoTuneHolder");
-    auto* holderLayout = new QVBoxLayout(autoTuneHolder_);
-    holderLayout->setContentsMargins(0, 0, 0, 6);
-    autoTuneHolder_->hide();
-    column->addWidget(autoTuneHolder_);
-    connect(autoTune_, &QPushButton::toggled, this, [this, scroll](bool on) {
-        autoTuneHolder_->setVisible(on);
-        if (on) scroll->ensureVisible(0, 0);
-        emit autoTuneToggled(on);
-    });
 
     // Feature-11: what is watched, and the settings only the sky needs.
     auto* targetRow = new QHBoxLayout;
@@ -651,12 +642,22 @@ void DetectionPanel::showNight(const QString& text)
     nightReading_->setVisible(!text.isEmpty());
 }
 
-void DetectionPanel::setAutoTunePanel(QWidget* panel)
+// Feature-28: without the site's position there is no dusk or dawn to wait
+// for, so the schedule is off and cannot be turned on.
+bool DetectionPanel::setSitePositionKnown(bool known)
 {
-    autoTuneHolder_->layout()->addWidget(panel);
+    const bool wasOn = night_->isChecked();
+    night_->setEnabled(known);
+    sunLimit_->setEnabled(known);
+    night_->setToolTip(QString("Starts the stream and Monitoring when the Sun goes below the altitude, and stops them when it "
+        "rises again.") + (known ? QString() : " Needs the site's position: Session → Site and instrument, Position known."));
+    if (known || !wasOn) return false;
+    const bool updating = updating_;
+    updating_ = true;
+    night_->setChecked(false);
+    updating_ = updating;
+    return true;
 }
-
-bool DetectionPanel::autoTuneShown() const { return autoTune_->isChecked(); }
 
 void DetectionPanel::showFollow(const QString& text)
 {

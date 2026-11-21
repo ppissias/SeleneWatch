@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "auto_tune_panel.h"
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "elided_label.h"
@@ -238,9 +239,19 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
                 showMessage(QString("The mask is full: %1 shapes. Clear it to start again.").arg(DetectionMask::kMaxShapes), 5000);
             return;
         }
-        if (target_ == Target::Sky || !session_->isRunning()) return;
-        session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
-        showMessage("Locking on the selected region…", 3000);
+        // Feature-28: a drag locks only after Draw lock box, one box per press.
+        if (guidingPanel_ && guidingPanel_->drawingLock())
+        {
+            guidingPanel_->setDrawingLock(false);
+            if (target_ == Target::Sky || !session_->isRunning()) return;
+            session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
+            showMessage("Locking on the selected region…", 3000);
+            return;
+        }
+        showMessage(target_ == Target::Sky
+            ? "A drag draws nothing until you choose what to draw: Draw mask in Detection."
+            : "A drag draws nothing until you choose what to draw: Draw lock box in Guiding, Draw earthshine box in "
+              "Auto-tune, or Select lunar anchor in Time-lapse.", 6000);
     });
     connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
     connect(ui_->sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
@@ -497,6 +508,8 @@ void MainWindow::setupDetectionPanel()
         extras.gainStep = saved.value("sky/follow/gainStep", extras.gainStep).toDouble();
         detectionPanel_->setSkyExtras(extras);
     }
+    // Feature-28: no dusk or dawn without the site's position.
+    if (detectionPanel_->setSitePositionKnown(savedSite().hasPosition())) saveSkyExtras();
     connect(detectionPanel_, &DetectionPanel::skyExtrasChanged, this, [this] {
         saveSkyExtras();
         skyExposureState_ = {};
@@ -510,6 +523,7 @@ void MainWindow::setupDetectionPanel()
     });
     skyTimer_->start();
     connect(detectionPanel_, &DetectionPanel::maskDrawingChanged, this, [this](bool drawing) {
+        if (drawing) chooseDrawing(Drawing::Mask);
         pendingShape_.clear();
         ui_->previewWidget->setPendingShape({});
         if (drawing) showMessage("Drag a rectangle, or click the corners of a shape and double-click to close it.", 6000);
@@ -641,7 +655,8 @@ void MainWindow::checkNightSchedule()
     const SkyExtras extras = detectionPanel_->skyExtras();
     if (target_ != Target::Sky || !extras.night)
     {
-        detectionPanel_->showNight({});
+        detectionPanel_->showNight(target_ == Target::Sky && !savedSite().hasPosition()
+            ? "Watch from dusk to dawn needs the site's position: Session → Site and instrument." : QString());
         nightOwns_ = NightOwns::Nothing;
         nightStartedTonight_ = false;
         return;
@@ -791,6 +806,26 @@ void MainWindow::closeMaskShape()
         showMessage(QString("The mask is full: %1 shapes. Clear it to start again.").arg(DetectionMask::kMaxShapes), 5000);
 }
 
+// Feature-28: one drawing on the preview at a time, each with its own colour.
+// Choosing one turns the others off.
+void MainWindow::chooseDrawing(Drawing drawing)
+{
+    if (drawing != Drawing::EarthshineBox && drawingEarthshineBox_)
+    {
+        drawingEarthshineBox_ = false;
+        if (autoTunePanel_) autoTunePanel_->setDrawingBox(false);
+    }
+    if (drawing != Drawing::LockBox && guidingPanel_) guidingPanel_->setDrawingLock(false);
+    if (drawing != Drawing::Anchor && timelapsePanel_ && timelapsePanel_->selectingAnchor()) timelapsePanel_->cancelAnchorSelection();
+    switch (drawing)
+    {
+    case Drawing::LockBox: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kLockColour)); break;
+    case Drawing::EarthshineBox: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kEarthshineColour)); break;
+    case Drawing::Anchor: ui_->previewWidget->setDragColour(QColor("#ff99dd")); break;
+    case Drawing::Mask: ui_->previewWidget->setDragColour(QColor(220, 70, 70)); break;
+    }
+}
+
 void MainWindow::applyTarget()
 {
     const bool sky = target_ == Target::Sky;
@@ -908,6 +943,11 @@ void MainWindow::setupGuidingPanel()
 
     Guider& guider = session_->guider();
     connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
+    connect(guidingPanel_, &GuidingPanel::drawLockToggled, this, [this](bool on) {
+        if (!on) return;
+        chooseDrawing(Drawing::LockBox);
+        showMessage("Drag a box on the preview around a crater or other detail to lock guiding on it.", 6000);
+    });
     connect(guidingPanel_, &GuidingPanel::unlockRequested, this, [&guider] { guider.requestUnlock(); });
     connect(guidingPanel_, &GuidingPanel::chooseDriverRequested, this, &MainWindow::onChooseMountDriver);
     connect(guidingPanel_, &GuidingPanel::connectRequested, this, &MainWindow::onConnectMount);
@@ -937,7 +977,9 @@ void MainWindow::setupTimelapsePanel()
     connect(timelapsePanel_, &TimelapsePanel::stopRequested, this, &MainWindow::onStopTimeLapse);
     connect(timelapsePanel_, &TimelapsePanel::resharpenRequested, this, &MainWindow::onOpenResharpen);
     connect(timelapsePanel_, &TimelapsePanel::anchorSelectionChanged, this, [this](bool active) {
-        if (active) showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
+        if (!active) return;
+        chooseDrawing(Drawing::Anchor);
+        showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
     });
     connect(timelapsePanel_, &TimelapsePanel::anchorChanged, this, [this](const std::optional<QRect>& rect) {
         ui_->previewWidget->setAnchorBox(rect);
@@ -1348,6 +1390,13 @@ void MainWindow::applySite(const ObservingSite& site, bool ntp, const QString& s
     session_->setSite(site);
     session_->setClockCheck(true, ntp && !server.isEmpty() ? server.toStdString() : std::string());
     showMessage("Site and instrument saved; they are recorded from the next clip on.", 4000);
+    // Feature-28: removing the position turns Watch from dusk to dawn off.
+    if (detectionPanel_->setSitePositionKnown(site.hasPosition()))
+    {
+        saveSkyExtras();
+        checkNightSchedule();
+        showMessage("Watch from dusk to dawn is off: it needs the site's position.", 6000);
+    }
 }
 
 void MainWindow::onCameraSupport()

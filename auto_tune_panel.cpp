@@ -232,6 +232,8 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
     column->addLayout(statusRow);
     status_ = wrapped(this, "autoTuneStatus");
     column->addWidget(status_);
+    // In a tall window the spare height goes below everything, not between rows.
+    column->addStretch(1);
     connect(cancel_, &QPushButton::clicked, this, &AutoTunePanel::cancelRequested);
 
     clearCamera({});

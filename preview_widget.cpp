@@ -117,6 +117,25 @@ void PreviewWidget::setPendingShape(std::vector<QPoint> corners)
     update();
 }
 
+namespace {
+
+// A small label at a box's top-left corner, so boxes of different jobs are told apart.
+void drawBoxLabel(QPainter& painter, const QRectF& box, const QString& text, const QColor& colour)
+{
+    const QFontMetrics metrics(painter.font());
+    const QRectF label(box.left(), box.top() - metrics.height() - 2, metrics.horizontalAdvance(text) + 8, metrics.height() + 2);
+    painter.fillRect(label, QColor(0, 0, 0, 160));
+    painter.setPen(colour);
+    painter.drawText(label, Qt::AlignCenter, text);
+}
+
+} // namespace
+
+void PreviewWidget::setDragColour(QColor colour)
+{
+    dragColour_ = colour;
+}
+
 void PreviewWidget::setTuneArea(QImage cells, int cellSize, std::optional<QRect> box)
 {
     tuneCells_ = std::move(cells);
@@ -288,8 +307,9 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
                 tuneCells_.height() * tuneCellSize_})), tuneCells_);
         if (tuneBox_)
         {
-            painter.setPen(QPen(QColor("#5ad1a8"), 1.5, Qt::DashLine));
+            painter.setPen(QPen(QColor(kEarthshineColour), 1.5, Qt::DashLine));
             painter.drawRect(toWidget(*tuneBox_));
+            drawBoxLabel(painter, toWidget(*tuneBox_), "Earthshine", QColor(kEarthshineColour));
         }
         painter.restore();
     }
@@ -304,8 +324,9 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
         }
         if (lockBox_)
         {
-            painter.setPen(QPen(QColor("#65e5ff"), 1, Qt::DashLine));
+            painter.setPen(QPen(QColor(kLockColour), 1, Qt::DashLine));
             painter.drawRect(toWidget(*lockBox_));
+            drawBoxLabel(painter, toWidget(*lockBox_), "Guiding lock", QColor(kLockColour));
         }
         if (foundBox_)
         {
@@ -314,7 +335,7 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
         }
         if (dragging_ && pressPosition_)
         {
-            painter.setPen(QPen(QColor("#65e5ff"), 1));
+            painter.setPen(QPen(dragColour_, 1));
             painter.drawRect(QRectF(*pressPosition_, dragPosition_).normalized());
         }
         painter.restore();

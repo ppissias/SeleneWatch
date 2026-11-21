@@ -23,8 +23,12 @@ public:
 
     explicit GuidingPanel(QWidget* parent = nullptr);
     void setStatus(const GuiderStatus& status);
-    // Lock at selection needs a running stream and a selected pixel.
+    // Lock at selection needs a running stream and a selected pixel; Draw
+    // lock box needs a running stream.
     void setAvailable(bool running, bool pixelSelected);
+    // Feature-28: whether the next drag on the preview draws the lock box.
+    void setDrawingLock(bool on);
+    [[nodiscard]] bool drawingLock() const;
     void setLogFailed(bool failed);
     void setAscomAvailable(bool available);
     void setAscomDriver(const QString& progId);
@@ -39,6 +43,7 @@ public:
 
 signals:
     void lockAtSelectionRequested();
+    void drawLockToggled(bool on);
     void unlockRequested();
     void chooseDriverRequested();
     void connectRequested();
@@ -58,6 +63,7 @@ private:
     QLabel* region_;
     QLabel* message_;
     QLabel* logProblem_;
+    QPushButton* drawLock_;
     QPushButton* lockButton_;
     QPushButton* unlockButton_;
 

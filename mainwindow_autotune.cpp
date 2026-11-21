@@ -15,6 +15,10 @@
 #include <QtCore/QSettings>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
+#include <QtWidgets/QDialog>
+#include <QtWidgets/QFrame>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -33,8 +37,30 @@ QString rowText(const TuneRow& row)
 
 void MainWindow::setupAutoTune()
 {
-    autoTunePanel_ = new AutoTunePanel(detectionPanel_);
-    detectionPanel_->setAutoTunePanel(autoTunePanel_);
+    // Feature-28: its own window beside the main one, so opening it leaves the
+    // Detection dock as it is. Closing it ends a box being drawn and hides the
+    // earthshine outline; a measurement in progress goes on.
+    autoTuneWindow_ = new QDialog(this, Qt::Window);
+    autoTuneWindow_->setObjectName("autoTuneWindow");
+    autoTuneWindow_->setWindowTitle("Auto-tune");
+    auto* scroll = new QScrollArea(autoTuneWindow_);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    autoTunePanel_ = new AutoTunePanel;
+    autoTunePanel_->setContentsMargins(8, 8, 8, 8);
+    scroll->setWidget(autoTunePanel_);
+    auto* windowLayout = new QVBoxLayout(autoTuneWindow_);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    windowLayout->addWidget(scroll);
+    autoTuneWindow_->resize(480, 760);
+    if (const QByteArray geometry = QSettings().value("autotune/geometry").toByteArray(); !geometry.isEmpty())
+        autoTuneWindow_->restoreGeometry(geometry);
+    connect(autoTuneWindow_, &QDialog::finished, this, [this] {
+        QSettings().setValue("autotune/geometry", autoTuneWindow_->saveGeometry());
+        drawingEarthshineBox_ = false;
+        autoTunePanel_->setDrawingBox(false);
+        updateEarthshineArea();
+    });
     tuneReadbackTimer_ = new QTimer(this);
     tuneReadbackTimer_->setSingleShot(true);
     tuneReadbackTimer_->setInterval(10'000);
@@ -47,18 +73,18 @@ void MainWindow::setupAutoTune()
     });
     if (const QRect saved = QSettings().value("autotune/earthshineBox").toRect(); saved.isValid()) earthshineBox_ = saved;
 
-    connect(detectionPanel_, &DetectionPanel::autoTuneToggled, this, [this](bool shown) {
-        if (!shown)
-        {
-            drawingEarthshineBox_ = false;
-            autoTunePanel_->setDrawingBox(false);
-        }
+    connect(detectionPanel_, &DetectionPanel::autoTuneRequested, this, [this] {
+        autoTuneWindow_->show();
+        autoTuneWindow_->raise();
+        autoTuneWindow_->activateWindow();
         updateEarthshineArea();
         updateAutoTune();
     });
     connect(autoTunePanel_, &AutoTunePanel::drawBoxToggled, this, [this](bool on) {
         drawingEarthshineBox_ = on;
-        if (on) showMessage("Drag a box on the preview over the earthshine.", 6000);
+        if (!on) return;
+        chooseDrawing(Drawing::EarthshineBox);
+        showMessage("Drag a box on the preview over the earthshine.", 6000);
     });
     connect(autoTunePanel_, &AutoTunePanel::boxOnlyToggled, this, [this] {
         autoTunePanel_->clearCamera("The measured area changed: measure again.");
@@ -85,6 +111,11 @@ void MainWindow::setupAutoTune()
 TuneWorkflow MainWindow::autoTuneWorkflow() const
 {
     return tuneWorkflow(target_, detectionPanel_->settings());
+}
+
+bool MainWindow::autoTuneShown() const
+{
+    return autoTuneWindow_ && autoTuneWindow_->isVisible();
 }
 
 bool MainWindow::autoTuneMeasuring() const
@@ -165,7 +196,7 @@ void MainWindow::setEarthshineBox(QRect box)
 // the panel is shown (Moon flashes only).
 void MainWindow::updateEarthshineArea()
 {
-    const bool shown = autoTunePanel_ && detectionPanel_->autoTuneShown()
+    const bool shown = autoTunePanel_ && autoTuneShown()
         && autoTuneWorkflow() == TuneWorkflow::MoonFlashes && earthshineBox_;
     if (!shown)
     {
@@ -198,7 +229,7 @@ void MainWindow::updateEarthshineArea()
         {
             if (!in(c, r)) continue;
             const bool edge = !in(c - 1, r) || !in(c + 1, r) || !in(c, r - 1) || !in(c, r + 1);
-            cells.setPixelColor(c, r, edge ? QColor(90, 209, 168, 190) : QColor(90, 209, 168, 55));
+            cells.setPixelColor(c, r, edge ? QColor(195, 140, 255, 190) : QColor(195, 140, 255, 50));
         }
     ui_->previewWidget->setTuneArea(cells, EarthshineArea::kCell, box);
     autoTunePanel_->setAreaText(area.boxOnly ? QString::fromStdString(area.problem)

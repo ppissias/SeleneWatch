@@ -18,6 +18,7 @@
 #include "manual_dialog.h"
 #include "preview_widget.h"
 #include "site_dialog.h"
+#include "site_presets.h"
 #include "startup_tips.h"
 #include "tips_dialog.h"
 #include "target_defaults.h"
@@ -42,6 +43,7 @@
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDateTimeEdit>
+#include <QtWidgets/QDialog>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QGroupBox>
@@ -139,6 +141,8 @@ private slots:
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
     void autoTuneMeasuresAppliesAndChecks();
     void autoTuneOutlinesTheEarthshineBox();
+    void aDragDrawsOnlyWhatWasChosen();
+    void sitePresetsSaveLoadAndDelete();
     void siteAndRecordingControls();
     void nightScheduleAndExposureFollower();
     void theReleaseIsShown();
@@ -470,11 +474,24 @@ void UiTest::dragLocksOnAFeatureAndClickStillSelects()
         const QPoint to = preview->imageRect().center() + QPoint(30, 25);
         QSignalSpy regions(preview, &PreviewWidget::regionSelected);
         QSignalSpy pixels(preview, &PreviewWidget::positionSelected);
-        QTest::mousePress(preview, Qt::LeftButton, Qt::NoModifier, from);
-        QTest::mouseMove(preview, from + QPoint(12, 9));
-        QTest::mouseMove(preview, to);
-        QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
+        const auto drag = [&] {
+            QTest::mousePress(preview, Qt::LeftButton, Qt::NoModifier, from);
+            QTest::mouseMove(preview, from + QPoint(12, 9));
+            QTest::mouseMove(preview, to);
+            QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
+        };
+        // Feature-28: a drag locks only after Draw lock box; one box per press.
+        drag();
         QCOMPARE(regions.size(), 1);
+        QTest::qWait(300);
+        QVERIFY(state->text().contains("Off"));
+        auto* drawLock = window.findChild<QPushButton*>("drawLockBox");
+        QVERIFY(drawLock->isEnabled());
+        drawLock->click();
+        QVERIFY(drawLock->isChecked());
+        drag();
+        QVERIFY(!drawLock->isChecked());
+        QCOMPARE(regions.size(), 2);
         QCOMPARE(pixels.size(), 0);
         QVERIFY(!preview->selectedPosition());
         QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
@@ -1107,7 +1124,9 @@ void UiTest::everyControlHasHelp()
         window.findChild<QComboBox*>("targetChoice")->setCurrentIndex(target);
         for (QWidget* widget : window.findChildren<QWidget*>())
         {
-            if (widget->window() != &window || widget->objectName().startsWith("qt_")) continue;
+            // The auto-tune window is part of the window (Feature-28).
+            if ((widget->window() != &window && widget->window()->objectName() != "autoTuneWindow")
+                || widget->objectName().startsWith("qt_")) continue;
             if (qobject_cast<QScrollBar*>(widget) || qobject_cast<QTabBar*>(widget->parentWidget())) continue;
             if (qobject_cast<QLineEdit*>(widget) && (qobject_cast<QAbstractSpinBox*>(widget->parentWidget())
                     || qobject_cast<QComboBox*>(widget->parentWidget()))) continue;
@@ -1279,6 +1298,128 @@ void UiTest::autoTuneOutlinesTheEarthshineBox()
     auto* exposureRow = panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Exposure)));
     QVERIFY(exposureRow && exposureRow->isChecked() && exposureRow->text().contains("→ 10 ms"));
     window.findChild<QPushButton*>("stopButton")->click();
+}
+// Feature-28: auto-tune opens in its own window, leaving the Detection dock as
+// it is. A drag on the preview draws only what the observer chose: a guiding
+// lock box (Guiding) or an earthshine box (Auto-tune), one at a time, each in
+// its own colour; with nothing chosen it draws nothing and says how to.
+void UiTest::aDragDrawsOnlyWhatWasChosen()
+{
+    QTemporaryDir dir;
+    QSettings().remove("autotune");
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    useSynthetic(window);
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* preview = window.findChild<PreviewWidget*>();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 3000);
+
+    auto* autoTuneWindow = window.findChild<QDialog*>("autoTuneWindow");
+    QVERIFY(autoTuneWindow && !autoTuneWindow->isVisible());
+    auto* dock = window.findChild<QDockWidget*>("detectionDock");
+    const QSize dockBefore = dock->size();
+    window.findChild<QPushButton*>("autoTuneButton")->click();
+    QVERIFY(autoTuneWindow->isVisible());
+    QCOMPARE(window.findChild<AutoTunePanel*>()->window(), static_cast<QWidget*>(autoTuneWindow));
+    QCOMPARE(dock->size(), dockBefore);
+
+    const QPoint from = preview->imageRect().center() - QPoint(20, 15);
+    const QPoint to = preview->imageRect().center() + QPoint(20, 15);
+    const auto drag = [&] {
+        QTest::mousePress(preview, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(preview, from + QPoint(10, 8));
+        QTest::mouseMove(preview, to);
+        QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
+    };
+    auto* message = window.findChild<QLabel*>("statusMessage");
+    auto* lockState = window.findChild<QLabel*>("lockStateLabel");
+    drag();
+    QVERIFY2(message->text().contains("draws nothing until you choose"), qPrintable(message->text()));
+    QVERIFY(!QSettings().contains("autotune/earthshineBox"));
+
+    // Choosing one drawing turns the other off.
+    auto* drawLock = window.findChild<QPushButton*>("drawLockBox");
+    auto* drawEarthshine = window.findChild<QToolButton*>("autoTuneDrawBox");
+    drawLock->click();
+    QVERIFY(drawLock->isChecked());
+    drawEarthshine->click();
+    QVERIFY(drawEarthshine->isChecked());
+    QVERIFY(!drawLock->isChecked());
+    drag();
+    QVERIFY(!drawEarthshine->isChecked());
+    QVERIFY(QSettings().value("autotune/earthshineBox").toRect().isValid());
+    QTest::qWait(300);
+    QVERIFY(lockState->text().contains("Off")); // The earthshine box is not a lock.
+    drawEarthshine->click();
+    drawLock->click();
+    QVERIFY(!drawEarthshine->isChecked());
+    drag();
+    QTRY_VERIFY_WITH_TIMEOUT(lockState->text().contains("Locked"), 5000);
+
+    // Closing the window ends a box being drawn.
+    drawEarthshine->click();
+    autoTuneWindow->close();
+    QVERIFY(!drawEarthshine->isChecked());
+    window.findChild<QPushButton*>("stopButton")->click();
+}
+
+// Feature-29: the site and instrument can be saved under a name and loaded back.
+void UiTest::sitePresetsSaveLoadAndDelete()
+{
+    QSettings().remove("site/presets");
+    SiteDialog dialog;
+    auto* combo = dialog.findChild<QComboBox*>("sitePresetCombo");
+    auto* name = dialog.findChild<QLineEdit*>("sitePresetName");
+    auto* save = dialog.findChild<QPushButton*>("sitePresetSave");
+    auto* remove = dialog.findChild<QPushButton*>("sitePresetDelete");
+    QCOMPARE(combo->count(), 1);
+    QVERIFY(!save->isEnabled() && !remove->isEnabled());
+
+    ObservingSite home;
+    home.observer = "Observer A";
+    home.site = "Home";
+    home.latitudeDeg = 37.98; home.longitudeDeg = 23.72; home.heightM = 120;
+    home.telescope = "8-inch SCT";
+    home.apertureMm = 203; home.focalLengthMm = 2032; home.pixelSizeUm = 2.9;
+    ObservingSite club = home;
+    club.site = "Club field";
+    club.latitudeDeg.reset(); club.longitudeDeg.reset(); club.heightM.reset();
+    club.telescope = "80 mm refractor";
+    club.apertureMm = 80; club.focalLengthMm = 480;
+
+    dialog.setSite(home);
+    name->setText("Home, 8-inch");
+    QVERIFY(save->isEnabled());
+    save->click();
+    dialog.setSite(club);
+    name->setText("Club");
+    save->click();
+    QCOMPARE(combo->count(), 3);
+    QCOMPARE(loadSitePresets().size(), size_t{2});
+
+    // Choosing a preset fills the form.
+    const int homeIndex = combo->findData("Home, 8-inch");
+    QVERIFY(homeIndex > 0);
+    combo->setCurrentIndex(homeIndex);
+    emit combo->activated(homeIndex);
+    QCOMPARE(dialog.site(), home);
+    QVERIFY(remove->isEnabled());
+    const int clubIndex = combo->findData("Club");
+    combo->setCurrentIndex(clubIndex);
+    emit combo->activated(clubIndex);
+    QCOMPARE(dialog.site(), club);
+    QVERIFY(!dialog.site().hasPosition());
+
+    // Saving under the same name replaces; deleting removes.
+    club.telescope = "80 mm refractor, reducer";
+    dialog.setSite(club);
+    save->click();
+    QCOMPARE(loadSitePresets().size(), size_t{2});
+    remove->click();
+    QCOMPARE(loadSitePresets().size(), size_t{1});
+    QCOMPARE(loadSitePresets().front().name, QString("Home, 8-inch"));
+    QCOMPARE(combo->count(), 2);
+    QSettings().remove("site/presets");
 }
 // Feature-25: a ranged camera control has a slider beside its box, and the
 // exposure's is logarithmic. The slider sets the box, the box moves the
@@ -1502,14 +1643,25 @@ void UiTest::nightScheduleAndExposureFollower()
         extras.night = true;
         extras.sunLimitDeg = -10;
         panel->setSkyExtras(extras);
-        // No position: nothing starts, and the panel says why.
+        // No position: nothing starts, and the panel says why. Feature-28: the
+        // schedule is turned off and cannot be turned on until there is one.
+        auto* nightBox = panel->findChild<QCheckBox*>("nightSchedule");
+        QVERIFY(nightBox->isEnabled() && nightBox->isChecked());
         window.applySite(ObservingSite{}, false, "pool.ntp.org");
+        QVERIFY(!nightBox->isEnabled());
+        QVERIFY(!nightBox->isChecked());
+        QVERIFY(!panel->findChild<QDoubleSpinBox*>("sunLimit")->isEnabled());
+        QVERIFY(!QSettings().value("sky/night/enabled").toBool());
         window.checkNightSchedule();
         QVERIFY(!stop->isEnabled());
         QVERIFY(reading->text().contains("position"));
         auto* mode = window.findChild<QLabel*>("captureModeLabel");
-        // Night: the stream and Monitoring start.
+        // Night: the position is back, the observer turns the schedule on, and
+        // the stream and Monitoring start.
         window.applySite(night, false, "pool.ntp.org");
+        QVERIFY(nightBox->isEnabled() && !nightBox->isChecked());
+        nightBox->click();
+        QVERIFY(QSettings().value("sky/night/enabled").toBool());
         window.checkNightSchedule();
         QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
         QVERIFY2(reading->text().contains("Dawn stop at"), qPrintable(reading->text()));

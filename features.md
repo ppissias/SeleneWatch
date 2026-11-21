@@ -26,6 +26,9 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-25 — Sliders for camera settings](#feature-25--sliders-for-camera-settings) | Slider beside the exact value for gain, offset, exposure (logarithmic) and other ranged controls | Implemented; UI test passing; real camera check pending |
 | [Feature-26 — Auto-tune and suggested camera settings](#feature-26--auto-tune-and-suggested-camera-settings) | A short or longer watch in Preview suggests exposure, gain and K for the Moon (flashes or transits) or the sky, and fills in the exposure follower's limits | Implemented; automated and real-window tests passing; real camera, night-sky and earthshine replay checks pending |
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Proposed |
+| [Feature-28 — Auto-tune's own window and explicit preview drawing](#feature-28--auto-tunes-own-window-and-explicit-preview-drawing) | Auto-tune opens in a window of its own; a drag on the preview draws only the chosen box (lock, earthshine, anchor, mask), each labelled in its own colour; dusk to dawn needs the site's position | Implemented; UI tests passing; real-window and laptop checks pending |
+| [Feature-29 — Site and instrument presets](#feature-29--site-and-instrument-presets) | Save, load and delete named sets of observer, site, position and instrument | Implemented; UI test passing |
+| [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune) | Measure the footprint of a just-detectable flash and the noise at smaller minimum patches, and suggest the minimum patch | Under discussion |
 
 ## Feature-9 — A measured trigger
 
@@ -1763,3 +1766,82 @@ Let the observer step through candidates using the existing overviews and animat
 - Exercise Preview and Monitoring with continuous recording both on and off. In each combination the banner correctly names both activities, including after recording stops or fails.
 - Review a watch with zero candidates and a watch containing a known interruption, a saved clip and an unsaved candidate. The observer can account for each outcome, open a saved preview and find their follow-up mark after reopening the night.
 - Make a representative earthshine recording the next lunar validation milestone. Replay the same span with candidate settings under consideration for Feature-26. Count candidates and clips requiring review on the original data. In separate marked trials, report flashes recovered out of those injected, with their positions, amplitudes and durations. Use both measurements when choosing an observing profile. [Open lunar calibration work](docs/feature-9-validation.md)
+
+---
+
+## Feature-28 — Auto-tune's own window and explicit preview drawing
+
+*Proposed and implemented on 21 November 2026, from the observer's remarks after using Feature-26.*
+
+1. **Auto-tune in its own window.** Pressing **Auto-tune…** expanded the panel at the top of the Detection dock and pushed every setting down. Auto-tune now opens in its own window beside the main one, with a scroll area inside. Its size and place are remembered. Closing it ends a box being drawn and hides the earthshine outline; a measurement in progress goes on and its result is shown when the window is opened again.
+2. **A drag draws only what was chosen.** On the Moon every drag locked guiding, so drawing the earthshine box and locking guiding could be confused. A drag on the preview now draws only after the observer chooses what to draw:
+   - **Draw lock box** (new, in Guiding): the guiding lock box, cyan, labelled *Guiding lock*;
+   - **Draw earthshine box** (Auto-tune): purple, labelled *Earthshine*, its area tinted purple;
+   - **Select lunar anchor** (Time-lapse): pink, as before;
+   - **Draw mask** (the sky): red, as before.
+
+   Choosing one turns the others off, and each turns itself off after one box. While a box is being drawn, its rubber band has the colour of what it will become. With nothing chosen, a drag draws nothing and the status line says how to choose. **Lock at selection** (a clicked pixel) is unchanged.
+3. **Dusk to dawn needs the site's position.** With **Position known** unticked, **Watch from dusk to dawn** stayed ticked and did nothing. Without a position it is now turned off and disabled, as is **Sun below**, and the panel says why. With the position back the observer ticks it again.
+
+### Feature-28 status & verification
+
+- **Implemented:**
+  - `MainWindow::setupAutoTune` (the window);
+  - the `GuidingPanel` **Draw lock box**;
+  - `MainWindow::chooseDrawing` (one drawing at a time, its colour);
+  - `PreviewWidget` box labels and the rubber band colour;
+  - `DetectionPanel::setSitePositionKnown`.
+- **Tests:**
+  - `aDragDrawsOnlyWhatWasChosen`: the window opens without changing the dock; a drag with nothing chosen draws nothing and says so; the two drawings are exclusive; an earthshine box is not a lock; closing the window ends drawing.
+  - `dragLocksOnAFeatureAndClickStillSelects` now locks through **Draw lock box**.
+  - `nightScheduleAndExposureFollower` checks the schedule is turned off, disabled and saved off without a position.
+  - Help and small-screen tests cover the auto-tune window.
+- **Pending:** `tests\gui_e2e_test.ps1` was updated to find the auto-tune window, but it was not run: SeleneWatch was observing from the Release build. A look on the observer's laptop is also pending.
+
+---
+
+## Feature-29 — Site and instrument presets
+
+*Proposed and implemented on 21 November 2026.*
+
+An observer who observes from more than one place, or with more than one telescope, retyped the site and instrument each time. **Session → Site and instrument…** now has a **Presets** row:
+- **Choosing a preset** fills in the observer, the site, its position and the instrument. Nothing is used until **OK**.
+- **Save as preset** stores the values in the form under the name typed beside it, replacing a preset of the same name.
+- **Delete** removes the chosen preset.
+
+The NTP clock check belongs to the computer, not to a site, so it is not part of a preset. Presets are kept in QSettings under `site/presets/` (`site_presets.h/.cpp`).
+
+### Feature-29 status & verification
+
+- **Implemented** in `site_presets.h/.cpp` and `SiteDialog`.
+- **Test:** `sitePresetsSaveLoadAndDelete` saves two presets (one without a position), loads each back exactly, replaces one by name and deletes one.
+
+---
+
+## Feature-30 — Minimum patch from auto-tune
+
+*Proposed on 21 November 2026. Under discussion; not approved for implementation.*
+
+The observer asked whether auto-tune can also find the minimum patch, which decides how small an object can be detected.
+
+### What the minimum patch trades
+
+A candidate must cover at least **Minimum patch** pixels at K (8 by default):
+- **Too large:** a faint flash covers few pixels above K and is rejected. A flash's footprint at K is set by the optics and seeing (its FWHM) and by how far its peak stands above K × the noise: a flash just above the threshold covers only its core.
+- **Too small:** noise, single hot pixels, cosmic-ray hits (one to four pixels) and twinkling stars pass.
+
+So the minimum patch is not a property of the night's noise alone, as K is: it depends on the image scale and seeing (stable for one instrument) and on the faintest flash the observer wants. It is worth measuring rather than guessing, but from two sides.
+
+### Proposal
+
+1. **The signal side: the footprint of a just-detectable flash.**
+   - **Moon:** a marked test flash with the seeing's FWHM, at an amplitude just above the threshold (for example 1.5 × K × the measured noise), is injected into the measured area, as the flash check does. The size of the patch it makes at K is the footprint to protect: the minimum patch must not be larger. FWHM is the observer's Test flash setting, or for the sky the measured FWHM of stars outside the mask.
+   - **Sky:** meteors are streaks, far larger than a star, so there the minimum patch matters mainly for noise.
+2. **The noise side: what smaller minimum patches would trigger.** The K watch's complete detectors also run at smaller minimum patches, for example the current value, two thirds of it and a half. The table then becomes K × minimum patch, with the events of each. This is affordable only within the same frame-time and RAM budgets, so pairs are tested only where there is room. The thorough watch is the natural place.
+3. **The suggestion:** the smallest tested minimum patch, never larger than the footprint, whose row at the suggested K has no remaining events, and never below 3 pixels (single hot pixels and most cosmic rays). It is shown together with the faintest flash it keeps.
+
+### Questions for the observer
+
+1. Should the minimum patch be suggested at all, or only measured and shown (footprint and noise at each size), leaving the choice to the observer?
+2. Is the Test flash's FWHM the right seeing for the Moon, or should auto-tune measure the sharpness of the earthshine (for example the edge of a crater rim) instead?
+3. Is a longer thorough watch acceptable when pairs of K and minimum patch are compared (the copies share the same frame-time budget, so fewer pairs fit at a high frame rate)?

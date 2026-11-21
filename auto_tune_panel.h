@@ -19,7 +19,8 @@ class QTableWidget;
 class QToolButton;
 class QVBoxLayout;
 
-// Feature-26: the auto-tune panel, at the top of the Detection dock.
+// Feature-26: the auto-tune panel, in its own window (Feature-28), opened by
+// the Auto-tune button at the top of the Detection dock.
 //
 // Two steps, camera first and then K, each ending in suggestions the
 // observer ticks and applies. The panel holds the latest suggestions and the

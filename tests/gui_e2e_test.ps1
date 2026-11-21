@@ -449,22 +449,26 @@ try {
 
     # Feature-26: a quick auto-tune K watch on the synthetic sky (not a camera,
     # so only K is tuned). It must end with a suggestion or say why not.
+    # Feature-28: auto-tune opens in its own window.
     $autoTuneBtn = Find-UiaElement -Root $mainWin -IdSuffix "autoTuneButton"
-    Invoke-UiaClick $autoTuneBtn "Show auto-tune"
-    $watchBtn = Find-UiaElement -Root $mainWin -IdSuffix "autoTuneWatch"
+    Invoke-UiaClick $autoTuneBtn "Open the auto-tune window"
+    $tuneWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Auto-tune" -OwnerWindow $mainWin -TimeoutMs 8000
+    $watchBtn = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneWatch"
     Wait-Until { $watchBtn.Current.IsEnabled } "Auto-tune Watch enabled in Sky Preview" -TimeoutMs 8000
-    Assert-True (-not (Find-UiaElement -Root $mainWin -IdSuffix "autoTuneMeasureCamera").Current.IsEnabled) "Measure camera must be off for a non-camera source"
+    Assert-True (-not (Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneMeasureCamera").Current.IsEnabled) "Measure camera must be off for a non-camera source"
     Invoke-UiaClick $watchBtn "Auto-tune quick K watch"
-    $kVerdict = Find-UiaElement -Root $mainWin -IdSuffix "autoTuneKVerdict"
+    $kVerdict = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneKVerdict"
     Wait-Until { $kVerdict.Current.Name -match "Suggested K|Every K value|No K value" } "Auto-tune K watch finished" -TimeoutMs 45000
     Write-Host "  Auto-tune: $(($kVerdict.Current.Name -split "`n")[0])"
-    Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "02b_autotune_sky.png")
-    $applyKBtn = Find-UiaElement -Root $mainWin -IdSuffix "autoTuneApplyK"
+    Save-WindowScreenshot $tuneWin (Join-Path $ScreenshotDir "02b_autotune_sky.png")
+    $applyKBtn = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneApplyK"
     if ($kVerdict.Current.Name -match "Suggested K") {
         Invoke-UiaClick $applyKBtn "Apply suggested K"
         Wait-Until { Select-String -Path (Join-Path $TempOut "events\sky\candidates.txt") -Pattern " autotune_k target=sky " -Quiet } "autotune_k logged" -TimeoutMs 5000
     }
-    Invoke-UiaClick $autoTuneBtn "Hide auto-tune"
+    $closePattern = $tuneWin.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+    $closePattern.Close()
+    Write-Host "  Auto-tune window closed"
 
     Invoke-UiaClick $monitorBtn "Start Sky monitoring"
     Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Sky monitoring active"

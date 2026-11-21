@@ -2,6 +2,7 @@
 #include "readout_label.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QTimeZone>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
@@ -192,8 +193,9 @@ GuidingPanel::GuidingPanel(QWidget* parent)
 {
     // The lock.
     auto* lockBox = new QGroupBox("Feature lock", this);
-    auto* hint = new QLabel("Drag a rectangle on the image around a crater or other detail to lock on it, "
-        "or click a pixel and press <b>Lock at selection</b>. The lock measures how far the field drifts.", lockBox);
+    auto* hint = new QLabel("Press <b>Draw lock box</b>, then drag a rectangle on the image around a crater or other "
+        "detail to lock on it; or click a pixel and press <b>Lock at selection</b>. The lock measures how far the field "
+        "drifts. Its box is drawn in cyan, labelled <i>Guiding lock</i>.", lockBox);
     hint->setWordWrap(true);
     // The readouts keep room for their longest texts, and the lock message
     // for two lines, so the controls below them stay where they are.
@@ -215,6 +217,13 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     lockForm->addRow("Drift", drift_);
     lockForm->addRow("Last match", match_);
     lockForm->addRow("Region", region_);
+    // Feature-28: a drag on the preview locks only after this is pressed, so
+    // it is not mistaken for auto-tune's earthshine box or the sky mask.
+    drawLock_ = new QPushButton("Draw lock box", lockBox);
+    drawLock_->setObjectName("drawLockBox");
+    drawLock_->setCheckable(true);
+    drawLock_->setToolTip("While on, the next rectangle dragged on the preview becomes the guiding lock box. It turns "
+        "off by itself after one box, or when another drawing (earthshine box, mask, anchor) is chosen.");
     lockButton_ = new QPushButton("Lock at selection", lockBox);
     lockButton_->setObjectName("lockAtSelectionButton");
     lockButton_->setToolTip(QString("Lock on a %1 x %1 pixel box centred on the selected pixel.").arg(kDefaultLockSide));
@@ -222,6 +231,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     unlockButton_->setObjectName("unlockButton");
     unlockButton_->setToolTip("Releases the feature lock. Guiding stops using it until a new region is locked.");
     auto* lockButtons = new QHBoxLayout;
+    lockButtons->addWidget(drawLock_);
     lockButtons->addWidget(lockButton_);
     lockButtons->addWidget(unlockButton_);
     lockButtons->addStretch();
@@ -322,6 +332,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     layout->addWidget(logProblem_);
     layout->addStretch();
 
+    connect(drawLock_, &QPushButton::toggled, this, &GuidingPanel::drawLockToggled);
     connect(lockButton_, &QPushButton::clicked, this, &GuidingPanel::lockAtSelectionRequested);
     connect(unlockButton_, &QPushButton::clicked, this, &GuidingPanel::unlockRequested);
     connect(chooseButton_, &QPushButton::clicked, this, &GuidingPanel::chooseDriverRequested);
@@ -400,7 +411,17 @@ void GuidingPanel::updateTolerance()
 void GuidingPanel::setAvailable(bool running, bool pixelSelected)
 {
     lockButton_->setEnabled(running && pixelSelected);
+    drawLock_->setEnabled(running);
+    if (!running) setDrawingLock(false);
 }
+
+void GuidingPanel::setDrawingLock(bool on)
+{
+    const QSignalBlocker blocked(drawLock_);
+    drawLock_->setChecked(on);
+}
+
+bool GuidingPanel::drawingLock() const { return drawLock_->isChecked(); }
 
 void GuidingPanel::setLogFailed(bool failed)
 {

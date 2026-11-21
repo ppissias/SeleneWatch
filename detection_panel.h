@@ -72,10 +72,9 @@ public:
     void showNight(const QString& text);
     void showFollow(const QString& text);
 
-    // Feature-26: the auto-tune panel, shown at the top of the dock while the
-    // prominent Auto-tune button above the settings is on.
-    void setAutoTunePanel(QWidget* panel);
-    [[nodiscard]] bool autoTuneShown() const;
+    // Feature-28: Watch from dusk to dawn needs the site's position. Without
+    // it the schedule is turned off and disabled; true when it was on.
+    bool setSitePositionKnown(bool known);
 
     // Named detection profiles (saved per target; Sky horizon mask is optional).
     void reloadProfiles();
@@ -90,7 +89,8 @@ signals:
     // The observer chose another target in the choice box.
     void targetRequested(Target target);
     void maskDrawingChanged(bool drawing);
-    void autoTuneToggled(bool shown);
+    // Feature-26: the prominent Auto-tune button was pressed.
+    void autoTuneRequested();
 
 private:
     void controlsChanged(bool maximumChanged = false);
@@ -101,7 +101,6 @@ private:
     void onProfileComboChanged(int index);
 
     QPushButton* autoTune_;
-    QWidget* autoTuneHolder_;
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
     MeterSlider* maxSlider_;

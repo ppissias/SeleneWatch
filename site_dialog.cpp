@@ -1,6 +1,11 @@
 #include "site_dialog.h"
 
+#include "site_presets.h"
+
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QComboBox>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QPushButton>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
@@ -8,6 +13,8 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QVBoxLayout>
+
+#include <algorithm>
 
 namespace {
 
@@ -30,6 +37,34 @@ SiteDialog::SiteDialog(QWidget* parent) : QDialog(parent)
     setWindowTitle("Site and instrument");
     setObjectName("siteDialog");
     auto* layout = new QVBoxLayout(this);
+
+    // Feature-29: named presets of the observer, the site and the instrument.
+    auto* presets = new QGroupBox("Presets", this);
+    auto* presetColumn = new QVBoxLayout(presets);
+    auto* loadRow = new QHBoxLayout;
+    preset_ = new QComboBox(presets);
+    preset_->setObjectName("sitePresetCombo");
+    preset_->setToolTip("Fills in the observer, the site, its position and the instrument from a saved preset. "
+        "Nothing is used until you press OK.");
+    deletePreset_ = new QPushButton("Delete", presets);
+    deletePreset_->setObjectName("sitePresetDelete");
+    deletePreset_->setToolTip("Removes the chosen preset. The values in the form stay as they are.");
+    loadRow->addWidget(preset_, 1);
+    loadRow->addWidget(deletePreset_);
+    auto* saveRow = new QHBoxLayout;
+    presetName_ = new QLineEdit(presets);
+    presetName_->setObjectName("sitePresetName");
+    presetName_->setPlaceholderText("Name, for example Home, 8-inch");
+    presetName_->setToolTip("The name to save the values below under. A preset of the same name is replaced.");
+    savePreset_ = new QPushButton("Save as preset", presets);
+    savePreset_->setObjectName("sitePresetSave");
+    savePreset_->setToolTip("Saves the observer, the site, its position and the instrument below under this name. "
+        "The clock check is the computer's and is not part of a preset.");
+    saveRow->addWidget(presetName_, 1);
+    saveRow->addWidget(savePreset_);
+    presetColumn->addLayout(loadRow);
+    presetColumn->addLayout(saveRow);
+    layout->addWidget(presets);
 
     auto* who = new QGroupBox("Observer and site", this);
     auto* whoForm = new QFormLayout(who);
@@ -85,6 +120,33 @@ SiteDialog::SiteDialog(QWidget* parent) : QDialog(parent)
     for (auto* box : {focalLength_, pixelSize_})
         connect(box, &QDoubleSpinBox::valueChanged, this, &SiteDialog::showScale);
     connect(ntp_, &QCheckBox::toggled, server_, &QLineEdit::setEnabled);
+    connect(preset_, &QComboBox::activated, this, [this](int index) {
+        const QString name = preset_->itemData(index).toString();
+        for (const SitePreset& preset : loadSitePresets())
+            if (preset.name == name)
+            {
+                setSite(preset.site);
+                presetName_->setText(preset.name);
+            }
+        deletePreset_->setEnabled(!name.isEmpty());
+    });
+    connect(deletePreset_, &QPushButton::clicked, this, [this] {
+        const QString name = preset_->currentData().toString();
+        if (name.isEmpty()) return;
+        removeSitePreset(name);
+        reloadPresets({});
+    });
+    connect(savePreset_, &QPushButton::clicked, this, [this] {
+        const QString name = presetName_->text().trimmed();
+        if (name.isEmpty()) return;
+        saveSitePreset({name, site()});
+        reloadPresets(name);
+    });
+    connect(presetName_, &QLineEdit::textChanged, this, [this](const QString& text) {
+        savePreset_->setEnabled(!text.trimmed().isEmpty());
+    });
+    reloadPresets({});
+    savePreset_->setEnabled(false);
     setSite({});
     setClockCheck(false, "pool.ntp.org");
 }
@@ -121,6 +183,17 @@ ObservingSite SiteDialog::site() const
     site.focalLengthMm = focalLength_->value();
     site.pixelSizeUm = pixelSize_->value();
     return site;
+}
+
+void SiteDialog::reloadPresets(const QString& select)
+{
+    preset_->clear();
+    const std::vector<SitePreset> presets = loadSitePresets();
+    preset_->addItem(presets.empty() ? "No presets saved yet" : "Choose a preset…", QString());
+    for (const SitePreset& preset : presets) preset_->addItem(preset.name, preset.name);
+    const int index = select.isEmpty() ? 0 : std::max(0, preset_->findData(select));
+    preset_->setCurrentIndex(index);
+    deletePreset_->setEnabled(index > 0);
 }
 
 void SiteDialog::setClockCheck(bool ntp, const QString& server)

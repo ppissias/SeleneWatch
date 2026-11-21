@@ -19,6 +19,7 @@
 
 class QAction;
 class QCheckBox;
+class QDialog;
 class QCloseEvent;
 class QProgressDialog;
 class QMenu;
@@ -150,6 +151,9 @@ private:
     void onTargetRequested(Target target);
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
+    // Feature-28: what the next drag on the preview draws. Only one at a time.
+    enum class Drawing { LockBox, EarthshineBox, Anchor, Mask };
+    void chooseDrawing(Drawing drawing);
 public:
     // Feature-15: closes the mask shape whose corners were clicked; the
     // preview's double-click, and the window test.
@@ -181,6 +185,7 @@ private:
     void startFlashCheck();
     void updateEarthshineArea();
     [[nodiscard]] bool autoTuneMeasuring() const;
+    [[nodiscard]] bool autoTuneShown() const;
     [[nodiscard]] TuneWorkflow autoTuneWorkflow() const;
     [[nodiscard]] TuneArea autoTuneArea() const;
     [[nodiscard]] TuneCamera tuneCamera() const;
@@ -280,6 +285,8 @@ private:
     // from it, and the measurement in hand. A K result is bound to the
     // detection and camera settings it was measured with.
     AutoTunePanel* autoTunePanel_{nullptr};
+    // Feature-28: auto-tune has its own window, opened from the Detection dock.
+    QDialog* autoTuneWindow_{nullptr};
     std::optional<QRect> earthshineBox_;
     EarthshineArea earthshineArea_;
     bool drawingEarthshineBox_{false};

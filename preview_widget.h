@@ -43,6 +43,12 @@ public:
     // the corners of a shape being drawn (Feature-15), joined by a line.
     void setMask(std::vector<QPolygon> mask);
     void setPendingShape(std::vector<QPoint> corners);
+    // Feature-28: the colours of the boxes the observer draws, and of the
+    // rubber band while one is being drawn, so a guiding lock box is never
+    // taken for an earthshine box.
+    static constexpr const char* kLockColour = "#65e5ff";
+    static constexpr const char* kEarthshineColour = "#c38cff";
+    void setDragColour(QColor colour);
     // Feature-26: the earthshine area auto-tune measures, as one pixel per
     // square cell of cellSize frame pixels (transparent outside it), and the
     // observer's box it grew from. A null image and no box clear it.
@@ -86,6 +92,7 @@ private:
     QImage tuneCells_;
     int tuneCellSize_{1};
     std::optional<QRect> tuneBox_;
+    QColor dragColour_{kLockColour};
     // A left press on the image, and whether it has become a drag.
     std::optional<QPointF> pressPosition_;
     QPointF dragPosition_;
