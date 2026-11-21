@@ -273,6 +273,7 @@ private:
     void finishStream(const std::string& reason = "stopped");
 
     void updateControls();
+    void updateRecordButton();
     void updateBufferReadout();
     void updateStreamReadout();
     void updateCandidateReadout();
@@ -440,6 +441,8 @@ private:
     QLabel* modeLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
     QPushButton* recordButton_{nullptr};
+    // Whether the Record button is drawn as the red Stop button (Feature-33).
+    bool recordButtonStops_{false};
     QSpinBox* recordFramesSpinBox_{nullptr};
     bool customOutputRoot_{false};
 

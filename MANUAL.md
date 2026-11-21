@@ -45,7 +45,7 @@ From top to bottom, the main screen contains:
   - **New version … available** — appears at the top right only when the startup GitHub check finds a newer stable release. Click it to open [SeleneWatch releases](https://github.com/ppissias/SeleneWatch/releases) in your browser and choose a package. The check runs once per launch, has a four-second deadline, and stays silent when offline, when there are no releases, or when GitHub cannot be reached. It does not interrupt observing or install updates. Draft and prerelease builds are ignored.
 - **Top bar:**
   - **Source** selector (`Choose a source…`, **Recording file**, camera families, and **Synthetic** when Testing tools are on), **Connect at startup**, **Open…**, and the amber **TESTING TOOLS ON** indicator when enabled.
-  - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count), and (testing tools only) **Fixed flash**.
+  - Mode & capture buttons: **Start preview**, **Start monitoring** / **Stop monitoring**, **Stop stream**, **Save now**, **Record** paired with an optional frame limit (**Unlimited** = `0` or an explicit frame count; while recording, **Record** turns into a red **Stop** button showing the recording's length), and (testing tools only) **Fixed flash**.
   - Timing/playback controls: **Target FPS**, **Speed** (`Real time` / `Fast` for files), and **Loop first … s**.
   - **Ends** and **Change…**: when Monitoring or a time-lapse ends by itself, and what the mount does then ([Section 2.7](#27-ending-a-session-unattended)).
 - **Mode banner:** a full-width colour strip immediately above the image showing which operating state SeleneWatch is in:
@@ -327,7 +327,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 1. Verify **Session → Output folder…** points to a fast local SSD, and enable **NTP clock check** in **Session → Site and instrument…** if micro/millisecond timing comparison is needed.
 2. Focus, set ROI/exposure/gain in **Preview**:
-   - **Quick manual capture (Preview or Monitoring):** Leave frame limit at **Unlimited** (`0`)—or enter an exact frame count (`N frames`) to stop automatically—and press **Record** ~10 s before the transit/occultation. Press **Stop recording** afterwards (or let the frame count finish).
+   - **Quick manual capture (Preview or Monitoring):** Leave frame limit at **Unlimited** (`0`)—or enter an exact frame count (`N frames`) to stop automatically—and press **Record** ~10 s before the transit/occultation. While it records, the button is a red **Stop** showing the recording's length (for example **Stop 0:42**); press it afterwards (or let the frame count finish).
    - **Scheduled UTC capture (Monitoring):** Open **Session → Schedule a recording…**, enter the predicted **From** UTC time (start slightly early, e.g., −15 s) and **For** duration in seconds, press **OK**, and start **Monitoring**. SeleneWatch starts and stops the SER file on the exact frame timestamps and logs `recording_start`/`recording_stop` lines in `candidates.txt`.
 
 ### Screenshots
@@ -349,7 +349,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 | | **Maximum dark box / patch** | Silhouette bounding-box ratio limit (`10.00 ×` default) |
 | | **Large darkening** | Triggers when this % of unmasked pixels falls by `K` at once (`Off` default) |
 | | **Dark readout** | Live `Deepest fall ... sigma. Largest dark patch ... px` |
-| **Top Bar & Session** | **Record** + Frame limit (`Unlimited` / `N frames`) | Lossless continuous SER writer in both **Preview** and **Monitoring** (`recordings/<UTC>/`); auto-stops cleanly on limit, Stop, or disk guard |
+| **Top Bar & Session** | **Record** + Frame limit (`Unlimited` / `N frames`) | Lossless continuous SER writer in both **Preview** and **Monitoring** (`recordings/<UTC>/`); turns into a red **Stop** with the recording's length while recording; auto-stops cleanly on limit, Stop, or disk guard |
 | | **Session → Schedule a recording…** | Arms a UTC `From` / `For` continuous recording triggered by frame timestamps during **Monitoring** |
 
 ---

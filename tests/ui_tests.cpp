@@ -1623,10 +1623,13 @@ void UiTest::siteAndRecordingControls()
         window.findChild<QPushButton*>("monitoringButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 3000);
         record->click();
-        QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Stop recording"), 3000);
+        // Feature-33: while recording, the button is Stop with the recording's length.
+        QTRY_VERIFY_WITH_TIMEOUT(record->text().startsWith("Stop ") && record->text().contains(':'), 3000);
+        QVERIFY(!record->styleSheet().isEmpty());
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("RECORDING"), 3000);
         record->click();
         QTRY_COMPARE_WITH_TIMEOUT(record->text(), QString("Record"), 3000);
+        QVERIFY(record->styleSheet().isEmpty());
         window.findChild<QPushButton*>("stopButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(!record->isEnabled(), 3000);
     };

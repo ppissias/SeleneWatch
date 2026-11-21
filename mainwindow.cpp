@@ -45,6 +45,8 @@
 #include <QtGui/QCloseEvent>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeySequence>
+#include <QtGui/QPainter>
+#include <QtGui/QPixmap>
 #include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
@@ -79,6 +81,9 @@ constexpr int kSyntheticHeight = 480;
 
 constexpr uint64_t kGiB = uint64_t{1024} * 1024 * 1024;
 
+constexpr const char* kRecordTip = "In Preview or Monitoring, writes every frame to one SER file in recordings/ "
+                                   "until stopped (or the optional frame limit is reached).";
+
 // Where a target's settings are saved. The Moon keeps the keys used before
 // Sky mode existed, so an observer who never picks Sky sees no change.
 QString settingsPrefix(Target target)
@@ -112,6 +117,32 @@ std::vector<QPolygon> maskRects(const DetectionMask& mask)
         shapes.push_back(polygon);
     }
     return shapes;
+}
+
+// Feature-33: the Record button's mark, a red dot to start and a white square to stop.
+QIcon recordMark(bool stop)
+{
+    QPixmap pixmap(64, 64);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(stop ? QColor(Qt::white) : QColor(0xd0, 0x30, 0x30));
+    if (stop) painter.drawRect(12, 12, 40, 40);
+    else painter.drawEllipse(8, 8, 48, 48);
+    return QIcon(pixmap);
+}
+
+// A recording's length on the Stop button: m:ss, or h:mm:ss from an hour on.
+QString recordingLength(double seconds)
+{
+    const auto total = static_cast<long long>(std::max(0.0, seconds));
+    const long long hours = total / 3600;
+    const long long minutes = (total / 60) % 60;
+    const long long secs = total % 60;
+    if (hours > 0)
+        return QString("%1:%2:%3").arg(hours).arg(minutes, 2, 10, QChar('0')).arg(secs, 2, 10, QChar('0'));
+    return QString("%1:%2").arg(minutes).arg(secs, 2, 10, QChar('0'));
 }
 
 } // namespace
@@ -1197,9 +1228,14 @@ void MainWindow::setupSessionMenu()
     });
 
     // Record, beside Save now: every frame until pressed again or frame limit reached (Feature-14 / Feature-17).
+    // While recording it is a red Stop button showing the recording's length (Feature-33).
     recordButton_ = new QPushButton("Record", this);
     recordButton_->setObjectName("recordButton");
-    recordButton_->setToolTip("In Preview or Monitoring, writes every frame to one SER file in recordings/ until stopped (or the optional frame limit is reached).");
+    recordButton_->setIcon(recordMark(false));
+    recordButton_->setToolTip(kRecordTip);
+    // Wide enough for "Stop 0:00:00", so the row does not move as the time grows.
+    recordButton_->setMinimumWidth(recordButton_->fontMetrics().horizontalAdvance("Stop 0:00:00")
+        + recordButton_->iconSize().width() + 40);
     recordFramesSpinBox_ = new QSpinBox(this);
     recordFramesSpinBox_->setObjectName("recordFramesSpinBox");
     recordFramesSpinBox_->setRange(0, 10000000);
@@ -1700,6 +1736,23 @@ void MainWindow::onRecordingChanged()
     updateStatusLabel();
 }
 
+// Feature-33: Record turns into a red Stop button that shows the recording's
+// length; the length is stream time, as in the RECORDING line.
+void MainWindow::updateRecordButton()
+{
+    const auto status = session_->recordingStatus();
+    recordButton_->setText(status.active ? "Stop " + recordingLength(status.streamSeconds) : QString("Record"));
+    if (status.active == recordButtonStops_) return;
+    recordButtonStops_ = status.active;
+    recordButton_->setIcon(recordMark(status.active));
+    recordButton_->setToolTip(status.active ? "Stops the recording. The time is the recording's length." : kRecordTip);
+    recordButton_->setStyleSheet(status.active
+        ? "QPushButton { background:#b3261e; color:white; font-weight:bold; border:1px solid #7a1912;"
+          " border-radius:4px; padding:3px 10px; }"
+          " QPushButton:hover { background:#c8352c; } QPushButton:pressed { background:#8f1e17; }"
+        : QString());
+}
+
 QString MainWindow::recordingReadout() const
 {
     const auto status = session_->recordingStatus();
@@ -2074,9 +2127,9 @@ void MainWindow::updateControls()
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
     if (recordButton_)
     {
-        const bool writing = session_->recordingStatus().active;
-        recordButton_->setText(writing ? "Stop recording" : "Record");
-        recordButton_->setEnabled(writing || (running && !timeLapsing && !timeLapseFinalizing && !pending && !session_->sourceFinished()));
+        updateRecordButton();
+        recordButton_->setEnabled(session_->recordingStatus().active
+            || (running && !timeLapsing && !timeLapseFinalizing && !pending && !session_->sourceFinished()));
     }
     if (recordFramesSpinBox_)
         recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing && !timeLapseFinalizing);
@@ -2130,6 +2183,7 @@ void MainWindow::updateStreamReadout()
 {
     updateBufferReadout();
     updateBlipReadout();
+    if (session_->recordingStatus().active) updateRecordButton();
     if (session_->recordingStatus().active || session_->schedule()) updateStatusLabel();
 
     const auto now = std::chrono::steady_clock::now();

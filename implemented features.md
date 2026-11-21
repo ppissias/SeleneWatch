@@ -37,6 +37,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune)
 - [Feature-31 — The Moon's flashes and shadows watched apart](#feature-31--the-moons-flashes-and-shadows-watched-apart)
 - [Feature-32 — The end of a session](#feature-32--the-end-of-a-session)
+- [Feature-33 — A Record button that becomes Stop](#feature-33--a-record-button-that-becomes-stop)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3063,3 +3064,29 @@ While guiding is on, for Monitoring and for a time-lapse, the session ends:
 - **Real window:** `tests\gui_e2e_test.ps1` passed on the Release build, with the **Ends** row in place and the sky group without **Watch from dusk to dawn**.
 
 **Pending:** EQMOD with the observer's mount stopping its tracking at a scheduled end and after guiding is lost.
+
+## Feature-33 — A Record button that becomes Stop
+
+*Requested and built on 22 November 2026, from a discussion with the observer.*
+
+The observer asked for manual recording to work like a recorder: a **Record** button that becomes a **Stop** button while recording, and stops the recording when clicked. The button already toggled since Feature-14 / Feature-17, but only its text changed ("Record" / "Stop recording") and it looked the same in both states, so the change was easy to miss at the telescope.
+
+### What changed
+
+- **Not recording:** the button shows a red dot and **Record**, in the normal button style.
+- **Recording:** the button turns red with white bold text, shows a white square and **Stop** followed by the recording's length, for example **Stop 0:42** (m:ss, h:mm:ss from an hour on). Clicking it stops the recording, as before.
+- **The length** is the time between the recording's first and last frames, the same figure the `● RECORDING` line in the mode banner shows, refreshed with it once a second.
+- **The button's width** is fixed wide enough for **Stop 0:00:00**, so the controls row does not move as the time grows.
+- The tooltip while recording says the button stops it and what the time is.
+- What starts, stops and ends a recording (frame limit, disk guard, a scheduled recording) is unchanged.
+
+### Design notes
+
+- `MainWindow::updateRecordButton()` owns the button's look. `updateControls()` calls it and keeps deciding whether the button is enabled; `updateStreamReadout()` calls it each second while recording. The icon, tooltip and style sheet are changed only when the state changes (`recordButtonStops_`), not every second.
+- The icons are drawn with `QPainter`, with no new image files. A disabled **Record** uses Qt's greyed version of the red dot.
+
+### Feature-33 status & verification
+
+**Tests:** `UiTest::siteAndRecordingControls` checks that the button reads **Stop m:ss** with the red style while recording in Monitoring, and **Record** with the normal style after it stops. The `ui`, `preview`, `session_record` and `manual_capture` suites pass on the Debug build. Both states were checked in offscreen screenshots.
+
+**Pending:** a look at the real window on the observing laptop (1920×1200 at 125 %).
