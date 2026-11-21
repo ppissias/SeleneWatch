@@ -174,6 +174,7 @@ public:
         uint32_t width=0,height=0,bits=0; double cw=0,ch=0,pw=0,ph=0;
         check(functions().GetQHYCCDChipInfo(handle_,&cw,&ch,&width,&height,&pw,&ph,&bits),"Reading QHY sensor geometry");
         p.camera.width=dimension(width); p.camera.height=dimension(height); p.camera.sensorBits=dimension(bits);
+        p.camera.pixelSizeUm=pw>0 && pw<100 ? pw : 0;
         const auto colour=available(CAM_COLOR);
         switch (colour)
         {

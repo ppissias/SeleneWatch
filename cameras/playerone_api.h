@@ -32,6 +32,8 @@ struct PlayerOneCameraInfo
     std::vector<int> bins;
     std::vector<PixelFormat> formats;
     bool usb3{false}, testSource{false};
+    // Feature-30: the sensor's pixel in micrometres, unbinned; 0 when not reported.
+    double pixelSizeUm{0};
 };
 
 // ROI size and origin in output pixels after binning, as the SDK reads them back.

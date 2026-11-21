@@ -184,6 +184,16 @@ private:
     void startKWatch(bool higher, std::optional<double> onlyK = {});
     void applyAutoTuneK();
     void startFlashCheck();
+    // Feature-30: the minimum patch for flashes: the footprint flash, then
+    // the 60 s watch of minimum patches at the current K.
+    void startMinPatch();
+    void startMinPatchWatch();
+    void applyAutoTuneMinPatch();
+    void updateFlashWidth();
+    [[nodiscard]] FlashWidth tuneFlashWidth() const;
+    [[nodiscard]] std::optional<double> tuneImageScale(bool& pixelFromCamera) const;
+    // Where a test flash goes: the clicked pixel, the earthshine box, or the measured area.
+    [[nodiscard]] QPoint tuneFlashPoint() const;
     void updateEarthshineArea();
     [[nodiscard]] bool autoTuneMeasuring() const;
     [[nodiscard]] bool autoTuneShown() const;
@@ -293,12 +303,15 @@ private:
     std::optional<QRect> earthshineBox_;
     EarthshineArea earthshineArea_;
     bool drawingEarthshineBox_{false};
-    enum class TunePhase { Idle, MeasuringCamera, WaitingForCamera, CheckingCamera, WatchingK, CheckingFlash };
+    enum class TunePhase { Idle, MeasuringCamera, WaitingForCamera, CheckingCamera, WatchingK, CheckingFlash,
+        MeasuringFootprint, WatchingMinPatch };
     TunePhase tunePhase_{TunePhase::Idle};
     uint64_t tuneWatchId_{0};
     TuneCamera tuneMeasuredCamera_;
     std::optional<TuneMeasurement> tuneLast_, tunePrevious_;
     bool tuneHasK_{false};
+    bool tuneHasMinPatch_{false};
+    std::optional<int> tuneFootprint_;
     DetectionSettings tuneBoundDetection_;
     TuneCamera tuneBoundCamera_;
     QTimer* tuneReadbackTimer_{nullptr};

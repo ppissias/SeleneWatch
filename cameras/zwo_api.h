@@ -28,6 +28,8 @@ struct ZwoCameraInfo
     std::vector<int> bins;
     std::vector<PixelFormat> formats;
     bool usb3{false}, triggerCamera{false}, testSource{false};
+    // Feature-30: the sensor's pixel in micrometres, unbinned; 0 when not reported.
+    double pixelSizeUm{0};
 };
 
 // ROI dimensions and origin are in output pixels, after binning, as returned

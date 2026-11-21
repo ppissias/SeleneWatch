@@ -28,7 +28,7 @@ Open proposals. What is already in the program is in [implemented features.md](i
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Nightly review implemented; other items proposed |
 | [Feature-28 — Auto-tune's own window and explicit preview drawing](#feature-28--auto-tunes-own-window-and-explicit-preview-drawing) | Auto-tune opens in a window of its own; a drag on the preview draws only the chosen box (lock, earthshine, anchor, mask), each labelled in its own colour; dusk to dawn needs the site's position | Implemented; UI tests passing; real-window and laptop checks pending |
 | [Feature-29 — Site and instrument presets](#feature-29--site-and-instrument-presets) | Save, load and delete named sets of observer, site, position and instrument | Implemented; UI test passing |
-| [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune) | Measure the footprint of a just-detectable flash and the noise at smaller minimum patches, and suggest the minimum patch | Under discussion |
+| [Feature-30 — Minimum patch from auto-tune](#feature-30--minimum-patch-from-auto-tune) | Measure the footprint of a just-detectable flash and the noise at smaller minimum patches, and suggest the minimum patch | Implemented; tests passing; real earthshine check pending |
 | [Feature-31 — The Moon's flashes and shadows watched apart](#feature-31--the-moons-flashes-and-shadows-watched-apart) | Watching: Moon flashes (earthlit side), Moon shadows (sunlit side) or the sky, each with its own detection settings; flashes leave out the sunlit side | Implemented; tests passing |
 
 ## Feature-9 — A measured trigger
@@ -1848,6 +1848,45 @@ So the minimum patch is not a property of the night's noise alone, as K is: it d
 1. Should the minimum patch be suggested at all, or only measured and shown (footprint and noise at each size), leaving the choice to the observer?
 2. Is the Test flash's FWHM the right seeing for the Moon, or should auto-tune measure the sharpness of the earthshine (for example the edge of a crater rim) instead?
 3. Is a longer thorough watch acceptable when pairs of K and minimum patch are compared (the copies share the same frame-time budget, so fewer pairs fit at a high frame rate)?
+
+### The observer's decisions (21 November 2026) and the approved design
+
+1. **A value is suggested**, as for K, for the flashes watch only (Feature-31). The shadows keep their fixed 20-pixel default.
+2. **The flash width.**
+   - **With an image scale:** a real flash is a point source, as wide as a star: the FWHM in pixels is the typical seeing divided by the image scale (″ per pixel, from **Site and instrument**). The typical seeing is one field in the auto-tune window, 2.5″ by default, and is remembered.
+   - **Without an image scale** (no focal length or pixel size): the **Test flash** FWHM (3 px by default) is used and labelled as an assumption, with a one-line hint to enter the focal length and pixel size. A narrower assumed flash keeps the minimum patch small, which errs towards catching faint flashes; the noise watch still rules out any value that triggers on noise.
+   - **The pixel size** will be filled in from the connected camera's SDK when the observer has not entered it (times binning), so usually only the focal length is needed.
+   - **Later:** measuring the blur on the Moon's limb.
+3. **A separate step, after K.**
+   - **3. Minimum patch (flashes):** the footprint is measured first. One marked test flash of the assumed width is injected with its peak at 1.5 × K × the measured noise, and a copy of the live detector with a minimum patch of 1 counts the pixels it covers at K.
+   - **The noise watch** then runs for 60 s at the applied K, with complete detector copies at the current minimum patch and about ⅔, ½ and ⅓ of it (never below 3).
+   - **The suggestion** is the smallest tested value with no remaining events and a fully searched watch, no larger than the footprint and never below 3. When noise needs a larger value than the footprint allows, the panel says that flashes of this width cannot be told from noise at this K, and suggests the smallest quiet value.
+4. **The MANUAL explains** why a test flash is injected into real frames (section 2.6).
+
+### Implementation plan
+
+1. **Core** (`auto_tune.h/.cpp`): `minPatchValuesToTest`, `flashWidth` (seeing, image scale, fallback), `footprintAmplitude`, `chooseMinPatch`, and the row's `minPixels`; tests in `auto_tune_tests.cpp`. **Done** (21 November 2026): two new tests, all 21 auto-tune tests pass.
+2. **Watch** (`auto_tune_watch`):
+   - rows that vary the minimum patch at a fixed K;
+   - a footprint kind, injecting through the flash path into a copy with minimum patch 1, which reports the patch size at the flash.
+3. **Panel and window:** step 3, with the seeing field, the width readout and its source, the 60 s watch, the table, the footprint and Apply; logged as `autotune_min_patch`.
+4. **Camera pixel size** from the four SDKs.
+5. **Tests:** window and real-window tests, then the MANUAL step.
+
+**Status (21 November 2026): implemented.**
+- **Steps 2 to 4:**
+  - footprint and minimum-patch rows in `AutoTuneWatch`;
+  - step 3 in the panel, with the seeing remembered as `autotune/seeing`;
+  - the window flow, logged as `autotune_min_patch`, and Apply bound to the settings it was measured with;
+  - the pixel size from the ZWO, QHY and Player One SDKs, and ToupTek's as an optional export.
+- **Tests:**
+  - `theFootprintOfAJustDetectableFlashIsMeasured`: a 3 px flash covers a few pixels, a 6 px one more;
+  - `minimumPatchRowsCountWhatEachValueWould`;
+  - `autoTuneSuggestsTheMinimumPatchForFlashes`: the window flow, the Test-flash fallback, the camera's pixel size, and the scale from the seeing.
+- **Not in the real-window test:** its 60 s watch is too long there.
+- **Pending:**
+  - a run on a real earthshine recording or the real sky;
+  - measuring the blur on the Moon's limb (later).
 
 ---
 

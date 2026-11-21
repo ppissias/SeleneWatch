@@ -56,6 +56,9 @@ public:
     virtual void requestLiveControls() = 0;
     // The requested controls' form (Feature-15: exposure that follows the sky).
     [[nodiscard]] virtual CameraSettingsEditor* controls() const = 0;
+    // Feature-30: the camera's pixel as imaged, in micrometres (the sensor's
+    // pixel times the binning), as its SDK reports it; 0 when unknown.
+    [[nodiscard]] virtual double pixelSizeUm() const = 0;
 
     // While stopped: loads the family's SDK if needed and lists the connected
     // cameras, opening none (Session → Camera support).

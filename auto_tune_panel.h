@@ -75,6 +75,21 @@ public:
     // The flash check's result.
     void setCheckResult(const QString& text, std::optional<bool> caught);
 
+    // Feature-30, step 3: the minimum patch, for flashes on the earthlit side.
+    [[nodiscard]] double seeingArcsec() const;
+    void setSeeingArcsec(double arcsec);
+    // How wide a flash is taken to be, and from what.
+    void setFlashWidthText(const QString& text);
+    void setFootprintText(const QString& text);
+    void setMinPatchResults(const TuneWatchStatus& status, std::optional<int> footprint);
+    void clearMinPatch(const QString& why);
+    [[nodiscard]] std::optional<int> suggestedMinPatch() const;
+    // How long the minimum-patch watch runs: 60 s; the window test shortens it.
+    [[nodiscard]] double minPatchSeconds() const { return minPatchSeconds_; }
+    void setMinPatchSeconds(double seconds) { minPatchSeconds_ = seconds; }
+    // For the log line: the values tested and their counts.
+    [[nodiscard]] QString minPatchRecord() const;
+
 signals:
     void drawBoxToggled(bool on);
     void boxOnlyToggled(bool on);
@@ -84,6 +99,9 @@ signals:
     void tryKRequested(double k);
     void applyKRequested();
     void checkFlashRequested();
+    void seeingChanged(double arcsec);
+    void minPatchRequested();
+    void applyMinPatchRequested();
     void cancelRequested();
 
 private:
@@ -117,6 +135,14 @@ private:
     QPushButton* applyK_;
     QPushButton* checkFlash_;
     QLabel* checkResult_;
+    QWidget* minPatchBox_;
+    QDoubleSpinBox* seeing_;
+    QLabel* flashWidth_;
+    QPushButton* minPatchWatch_;
+    QLabel* footprint_;
+    QTableWidget* minTable_;
+    QLabel* minVerdict_;
+    QPushButton* applyMinPatch_;
     QLabel* status_;
     QProgressBar* progress_;
     QPushButton* cancel_;
@@ -132,4 +158,10 @@ private:
     std::vector<TuneEventGroup> groups_;
     std::vector<bool> excluded_;
     KChoice choice_;
+    // Step 3's results.
+    std::vector<KRowResult> minRows_;
+    double minWatchSeconds_{0};
+    std::optional<int> footprintPixels_;
+    MinPatchChoice minChoice_;
+    double minPatchSeconds_{60};
 };

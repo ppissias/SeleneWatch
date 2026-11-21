@@ -19,7 +19,8 @@ struct TuneWatchRequest
     {
         Brightness,   // The camera step: the area's brightness.
         Sensitivity,  // The K step: what each K would have triggered.
-        FlashCheck    // Whether the live detector finds a marked test flash.
+        FlashCheck,   // Whether the live detector finds a marked test flash.
+        Footprint     // Feature-30: how many pixels a just-detectable flash covers at K.
     };
     Kind kind{Kind::Brightness};
     double seconds{2};
@@ -29,8 +30,14 @@ struct TuneWatchRequest
     DetectionSettings settings;
     // Sensitivity: the K values to compare, the most wanted first.
     std::vector<double> kValues;
-    // FlashCheck: the flash the session injects once the stream has settled.
+    // Feature-30: when given, the rows compare these minimum patches at the
+    // settings' K instead of K values.
+    std::vector<int> minPixelValues;
+    // FlashCheck and Footprint: the flash the session injects once the stream
+    // has settled. For a footprint its peak is set at the start, from the
+    // noise the detector uses at the flash's pixel: this many times K.
     BlipSettings flash;
+    double footprintPeakInK{1.5};
 };
 
 // What a measurement found so far, or at its end.
@@ -59,6 +66,9 @@ struct TuneWatchStatus
     // FlashCheck.
     std::optional<bool> recovered;
     std::string checkText;
+    // Footprint: the pixels at K of the flash's patch, and its peak in ADU.
+    std::optional<int> footprintPixels;
+    double footprintPeakAdu{0};
 };
 
 // Feature-26: one auto-tune measurement, run on the source thread.
@@ -75,6 +85,9 @@ struct TuneWatchStatus
 //   at the current K.
 // - FlashCheck asks the session to inject one marked test flash, and watches
 //   whether the live detector finds it at its place and time.
+// - Footprint (Feature-30) injects one flash just above K and counts, with a
+//   copy of the live detector whose minimum patch is 1, the pixels it covers.
+// - Sensitivity with minimum-patch values compares those at one K.
 // It waits for the camera to settle and the detector to learn before it
 // measures, and stops when its settings, the mode or the camera change.
 class AutoTuneWatch
@@ -147,5 +160,8 @@ private:
     // FlashCheck.
     bool injecting_{false};
     std::optional<uint64_t> flashFirst_, flashLast_;
+    // Footprint: a copy of the live detector that keeps patches of any size.
+    std::unique_ptr<FlashDetector> footprint_;
+    int footprintMax_{0};
     std::chrono::system_clock::time_point flashAsked_{};
 };

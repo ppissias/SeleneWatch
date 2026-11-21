@@ -139,6 +139,7 @@ public:
             c.width = p.maxWidth;
             c.height = p.maxHeight;
             c.sensorBits = p.bitDepth;
+            c.pixelSizeUm = p.pixelSize;
             c.usb3 = p.isUSB3Speed == POA_TRUE;
             if (p.isColorCamera == POA_TRUE)
             {

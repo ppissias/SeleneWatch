@@ -22,6 +22,13 @@ template<class Function> Function resolve(void* module, const char* name)
     return reinterpret_cast<Function>(vendorExport(module, name));
 }
 
+// An export the adapter can do without: null when the runtime lacks it.
+template<class Function> Function optionalExport(void* module, const char* name)
+{
+    try { return resolve<Function>(module, name); }
+    catch (const std::runtime_error&) { return nullptr; }
+}
+
 // Every export the adapter uses, resolved before the DLL is accepted.
 struct ToupTekFunctions
 {
@@ -53,6 +60,9 @@ struct ToupTekFunctions
     TOUPCAM_FUNCTION(Toupcam_put_HFlip);
     TOUPCAM_FUNCTION(Toupcam_put_VFlip);
     TOUPCAM_FUNCTION(Toupcam_StartPullModeWithCallback);
+    // Feature-30: optional, so a runtime without it is still accepted.
+    decltype(&::Toupcam_get_PixelSize) Toupcam_get_PixelSize{
+        optionalExport<decltype(&::Toupcam_get_PixelSize)>(module, "Toupcam_get_PixelSize")};
     TOUPCAM_FUNCTION(Toupcam_WaitImageV4);
     TOUPCAM_FUNCTION(Toupcam_Stop);
 #undef TOUPCAM_FUNCTION
@@ -143,6 +153,10 @@ public:
         const HRESULT bits = functions().Toupcam_get_MaxBitDepth(handle_);
         check(bits, "Reading ToupTek bit depth");
         p.camera.sensorBits = static_cast<int>(bits);
+        // Feature-30: optional; a runtime without it leaves the pixel size unknown.
+        float pixelX = 0, pixelY = 0;
+        if (functions().Toupcam_get_PixelSize && SUCCEEDED(functions().Toupcam_get_PixelSize(handle_, 0, &pixelX, &pixelY)))
+            p.camera.pixelSizeUm = pixelX;
         p.camera.formats = {PixelFormat::Mono8};
         if (p.camera.sensorBits > 8) p.camera.formats.push_back(PixelFormat::Mono16);
         unsigned code = 0, bitsPerPixel = 0;

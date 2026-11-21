@@ -98,6 +98,14 @@ void MainWindow::setupAutoTune()
     connect(autoTunePanel_, &AutoTunePanel::tryKRequested, this, [this](double k) { startKWatch(false, k); });
     connect(autoTunePanel_, &AutoTunePanel::applyKRequested, this, &MainWindow::applyAutoTuneK);
     connect(autoTunePanel_, &AutoTunePanel::checkFlashRequested, this, &MainWindow::startFlashCheck);
+    // Feature-30: the minimum patch, and the seeing it assumes.
+    autoTunePanel_->setSeeingArcsec(QSettings().value("autotune/seeing", 2.5).toDouble());
+    connect(autoTunePanel_, &AutoTunePanel::seeingChanged, this, [this](double arcsec) {
+        QSettings().setValue("autotune/seeing", arcsec);
+        updateFlashWidth();
+    });
+    connect(autoTunePanel_, &AutoTunePanel::minPatchRequested, this, &MainWindow::startMinPatch);
+    connect(autoTunePanel_, &AutoTunePanel::applyMinPatchRequested, this, &MainWindow::applyAutoTuneMinPatch);
     connect(autoTunePanel_, &AutoTunePanel::cancelRequested, this, [this] {
         tuneReadbackTimer_->stop();
         if (tunePhase_ == TunePhase::WaitingForCamera) autoTunePanel_->setProgress("Cancelled.", 0, false);
@@ -174,6 +182,7 @@ void MainWindow::updateAutoTune()
     situation.haveBox = earthshineBox_.has_value();
     situation.twilight = twilightAdvice();
     autoTunePanel_->setSituation(situation);
+    updateFlashWidth();
 }
 
 void MainWindow::setEarthshineBox(QRect box)
@@ -388,11 +397,13 @@ void MainWindow::onCameraReadbackForAutoTune()
         return;
     }
     // The observer changed the camera: what was measured no longer holds.
-    if (tuneLast_ || tuneHasK_)
+    if (tuneLast_ || tuneHasK_ || tuneHasMinPatch_)
     {
         autoTunePanel_->clearCamera("The camera settings changed: measure again.");
         autoTunePanel_->clearK("The camera settings changed: watch again.");
+        autoTunePanel_->clearMinPatch("The camera settings changed: measure again.");
         tuneHasK_ = false;
+        tuneHasMinPatch_ = false;
         tuneLast_.reset();
         tunePrevious_.reset();
     }
@@ -405,6 +416,11 @@ void MainWindow::onDetectionSettingsChangedForAutoTune()
     {
         autoTunePanel_->clearK("The detection settings changed after the watch: watch again.");
         tuneHasK_ = false;
+    }
+    if (tuneHasMinPatch_ && detectionPanel_->settings() != tuneBoundDetection_)
+    {
+        autoTunePanel_->clearMinPatch("The detection settings changed after the watch: measure again.");
+        tuneHasMinPatch_ = false;
     }
     updateEarthshineArea();
     updateAutoTune();
@@ -469,24 +485,23 @@ void MainWindow::applyAutoTuneK()
     updateAutoTune();
 }
 
+QPoint MainWindow::tuneFlashPoint() const
+{
+    // The flash goes where the observer clicked, or into the measured area.
+    QPoint at(latestFrame_->width / 2, latestFrame_->height / 2);
+    if (const auto selected = ui_->previewWidget->selectedPosition()) return *selected;
+    if (autoTuneWorkflow() == TuneWorkflow::MoonFlashes && earthshineBox_) return earthshineBox_->center();
+    const TuneArea area = autoTuneArea();
+    if (!area.wholeFrame() && !area.inside[static_cast<size_t>(at.y()) * area.width + at.x()])
+        for (size_t i = 0; i < area.inside.size(); ++i)
+            if (area.inside[i]) return QPoint(static_cast<int>(i % area.width), static_cast<int>(i / area.width));
+    return at;
+}
+
 void MainWindow::startFlashCheck()
 {
     if (!testingTools_ || !latestFrame_ || session_->recordingStatus().active) return;
-    // The flash goes where the observer clicked, or into the measured area.
-    QPoint at(latestFrame_->width / 2, latestFrame_->height / 2);
-    if (const auto selected = ui_->previewWidget->selectedPosition()) at = *selected;
-    else if (autoTuneWorkflow() == TuneWorkflow::MoonFlashes && earthshineBox_) at = earthshineBox_->center();
-    else
-    {
-        const TuneArea area = autoTuneArea();
-        if (!area.wholeFrame() && !area.inside[static_cast<size_t>(at.y()) * area.width + at.x()])
-            for (size_t i = 0; i < area.inside.size(); ++i)
-                if (area.inside[i])
-                {
-                    at = QPoint(static_cast<int>(i % area.width), static_cast<int>(i / area.width));
-                    break;
-                }
-    }
+    const QPoint at = tuneFlashPoint();
     TuneWatchRequest request;
     request.kind = TuneWatchRequest::Kind::FlashCheck;
     request.settings = detectionPanel_->settings();
@@ -523,6 +538,9 @@ void MainWindow::onAutoTuneChanged()
         autoTunePanel_->setProgress(status.state == TuneWatchStatus::State::Waiting || status.note.empty()
             ? QString::fromStdString(status.note.empty() ? "Measuring…" : status.note)
             : QString::fromStdString(status.note), status.progress, true);
+        if (status.state == TuneWatchStatus::State::Measuring && tunePhase_ == TunePhase::WatchingMinPatch)
+            autoTunePanel_->setProgress(QString("Watching minimum patches: %1 of %2 s, %3 frames.").arg(status.seconds, 0, 'f', 0)
+                .arg(status.requestedSeconds, 0, 'f', 0).arg(status.frames), status.progress, true);
         if (status.state == TuneWatchStatus::State::Measuring && tunePhase_ == TunePhase::WatchingK)
             autoTunePanel_->setProgress(QString("Watching: %1 of %2 s, %3 frames.%4").arg(status.seconds, 0, 'f', 0)
                 .arg(status.requestedSeconds, 0, 'f', 0).arg(status.frames)
@@ -530,6 +548,8 @@ void MainWindow::onAutoTuneChanged()
         break;
     case TuneWatchStatus::State::Cancelled:
         if (tunePhase_ == TunePhase::CheckingFlash) autoTunePanel_->setCheckResult(QString::fromStdString(status.note), std::nullopt);
+        if (tunePhase_ == TunePhase::MeasuringFootprint || tunePhase_ == TunePhase::WatchingMinPatch)
+            autoTunePanel_->setFootprintText(QString::fromStdString(status.note));
         autoTunePanel_->setProgress(QString::fromStdString(status.note), 0, false);
         tunePhase_ = TunePhase::Idle;
         break;
@@ -575,6 +595,21 @@ void MainWindow::onAutoTuneChanged()
             autoTunePanel_->setProgress(QString("Watched %1 s of source time over %2 frames.").arg(status.seconds, 0, 'f', 1)
                 .arg(status.frames), 1, false);
         }
+        else if (phase == TunePhase::MeasuringFootprint)
+        {
+            // The footprint, found or not; the watch of minimum patches follows.
+            tuneFootprint_ = status.footprintPixels;
+            autoTunePanel_->setFootprintText(QString::fromStdString(status.checkText));
+            startMinPatchWatch();
+            return;
+        }
+        else if (phase == TunePhase::WatchingMinPatch)
+        {
+            autoTunePanel_->setMinPatchResults(status, tuneFootprint_);
+            tuneHasMinPatch_ = true;
+            autoTunePanel_->setProgress(QString("Watched %1 s of source time over %2 frames.").arg(status.seconds, 0, 'f', 1)
+                .arg(status.frames), 1, false);
+        }
         else if (phase == TunePhase::CheckingFlash)
         {
             autoTunePanel_->setCheckResult(QString::fromStdString(status.checkText), status.recovered);
@@ -583,5 +618,125 @@ void MainWindow::onAutoTuneChanged()
         break;
     }
     }
+    updateAutoTune();
+}
+
+// Feature-30: a real flash is as wide as a star; without an image scale the
+// Test flash FWHM is the assumption.
+// The image scale: from Site and instrument, or its focal length with the
+// pixel size the camera reports when none was entered.
+std::optional<double> MainWindow::tuneImageScale(bool& pixelFromCamera) const
+{
+    ObservingSite site = savedSite();
+    pixelFromCamera = false;
+    const CameraFamilyPanel* camera = activeCamera() ? activeCamera() : selectedCamera();
+    if (site.pixelSizeUm <= 0 && camera && camera->pixelSizeUm() > 0)
+    {
+        site.pixelSizeUm = camera->pixelSizeUm();
+        pixelFromCamera = true;
+    }
+    return site.arcsecPerPixel();
+}
+
+FlashWidth MainWindow::tuneFlashWidth() const
+{
+    bool pixelFromCamera = false;
+    return flashWidth(autoTunePanel_->seeingArcsec(), tuneImageScale(pixelFromCamera), ui_->blipFwhmSpinBox->value());
+}
+
+void MainWindow::updateFlashWidth()
+{
+    if (!autoTunePanel_) return;
+    const FlashWidth width = tuneFlashWidth();
+    bool pixelFromCamera = false;
+    const auto scale = tuneImageScale(pixelFromCamera);
+    QString text;
+    if (width.fromSeeing)
+        text = QString("A flash is about %1 px wide (%2″ seeing at %3″ per pixel%4).").arg(width.pixels, 0, 'f', 1)
+            .arg(autoTunePanel_->seeingArcsec(), 0, 'f', 1).arg(*scale, 0, 'f', 2)
+            .arg(pixelFromCamera ? ", with the pixel size the camera reports" : "");
+    else if (savedSite().focalLengthMm > 0)
+        text = QString("A flash is assumed %1 px wide (the Test flash FWHM). Enter the pixel size in Session → Site and "
+            "instrument, or connect the camera, for a width from your seeing.").arg(width.pixels, 0, 'f', 1);
+    else
+        text = QString("A flash is assumed %1 px wide (the Test flash FWHM). Enter the focal length in Session → Site and "
+            "instrument for a width from your seeing.").arg(width.pixels, 0, 'f', 1);
+    autoTunePanel_->setFlashWidthText(text);
+}
+
+void MainWindow::startMinPatch()
+{
+    if (!latestFrame_ || autoTuneWorkflow() != TuneWorkflow::MoonFlashes || session_->recordingStatus().active) return;
+    updateEarthshineArea();
+    const QPoint at = tuneFlashPoint();
+    TuneWatchRequest request;
+    request.kind = TuneWatchRequest::Kind::Footprint;
+    request.settings = detectionPanel_->settings();
+    request.flash = BlipSettings{at.x(), at.y(), tuneFlashWidth().pixels, 0, 2, BlipKind::BrightFlash};
+    const uint64_t id = session_->startAutoTune(std::move(request));
+    if (!id)
+    {
+        autoTunePanel_->setProgress("The footprint flash needs Preview, no recording and no other test flash.", 0, false);
+        return;
+    }
+    tuneWatchId_ = id;
+    tunePhase_ = TunePhase::MeasuringFootprint;
+    tuneFootprint_.reset();
+    autoTunePanel_->clearMinPatch({});
+    autoTunePanel_->setFootprintText(QString("Measuring the footprint of a flash at (%1, %2)…").arg(at.x()).arg(at.y()));
+    autoTunePanel_->setProgress("Measuring the footprint…", 0, true);
+    updateAutoTune();
+}
+
+void MainWindow::startMinPatchWatch()
+{
+    const DetectionSettings settings = detectionPanel_->settings();
+    TuneWatchRequest request;
+    request.kind = TuneWatchRequest::Kind::Sensitivity;
+    request.seconds = autoTunePanel_->minPatchSeconds();
+    request.area = autoTuneArea();
+    request.settings = settings;
+    request.minPixelValues = minPatchValuesToTest(settings.minPixels);
+    const uint64_t id = session_->startAutoTune(std::move(request));
+    if (!id)
+    {
+        tunePhase_ = TunePhase::Idle;
+        autoTunePanel_->setProgress("Auto-tune watches only in Preview.", 0, false);
+        updateAutoTune();
+        return;
+    }
+    tuneWatchId_ = id;
+    tunePhase_ = TunePhase::WatchingMinPatch;
+    tuneBoundDetection_ = settings;
+    tuneBoundCamera_ = tuneCamera();
+    autoTunePanel_->setProgress("Watching minimum patches…", 0, true);
+    updateAutoTune();
+}
+
+void MainWindow::applyAutoTuneMinPatch()
+{
+    const auto minPixels = autoTunePanel_->suggestedMinPatch();
+    if (!minPixels || session_->mode() == Session::Mode::Monitoring) return;
+    if (detectionPanel_->settings() != tuneBoundDetection_ || tuneCamera() != tuneBoundCamera_)
+    {
+        autoTunePanel_->clearMinPatch("A camera or detection setting changed since the watch: measure again.");
+        tuneHasMinPatch_ = false;
+        return;
+    }
+    DetectionSettings settings = detectionPanel_->settings();
+    const int before = settings.minPixels;
+    const FlashWidth width = tuneFlashWidth();
+    session_->logRecord(QString("%1 autotune_min_patch target=moon k=%2 min_from=%3 min_to=%4 flash_width_px=%5 "
+        "flash_width_from=%6 %7\n").arg(utcText(std::chrono::system_clock::now())).arg(settings.sigma, 0, 'f', 1).arg(before)
+        .arg(*minPixels).arg(width.pixels, 0, 'f', 1).arg(width.fromSeeing ? "seeing" : "test_flash")
+        .arg(autoTunePanel_->minPatchRecord()));
+    settings.minPixels = *minPixels;
+    settings.maxPixels = std::max(settings.maxPixels, settings.minPixels);
+    detectionPanel_->setSettings(settings);
+    session_->setDetectionSettings(detectionPanel_->settings());
+    saveDetectionSettings();
+    autoTunePanel_->clearMinPatch(QString("Applied minimum patch %1 px (it was %2 px).").arg(*minPixels).arg(before));
+    tuneHasMinPatch_ = false;
+    showMessage(QString("Auto-tune applied minimum patch %1 px.").arg(*minPixels), 6000);
     updateAutoTune();
 }

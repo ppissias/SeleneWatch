@@ -204,6 +204,55 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
     checkResult_->hide();
     kColumn->addWidget(checkResult_);
     column->addWidget(kBox);
+
+    // Feature-30, step 3: the minimum patch, for flashes only.
+    auto* minBox = new QGroupBox("3. Minimum patch (flashes)", this);
+    minPatchBox_ = minBox;
+    auto* minColumn = new QVBoxLayout(minBox);
+    auto* seeingForm = new QFormLayout;
+    seeing_ = new QDoubleSpinBox(minBox);
+    seeing_->setObjectName("autoTuneSeeing");
+    seeing_->setRange(0.5, 10);
+    seeing_->setDecimals(1);
+    seeing_->setSingleStep(0.1);
+    seeing_->setValue(2.5);
+    seeing_->setSuffix(" ″");
+    seeing_->setToolTip("Your typical seeing (the FWHM of a star). A flash is a point source, as wide as a star: its "
+        "width in pixels is the seeing over the image scale (Session → Site and instrument).");
+    seeingForm->addRow("Typical seeing", seeing_);
+    minColumn->addLayout(seeingForm);
+    flashWidth_ = wrapped(minBox, "autoTuneFlashWidth");
+    minColumn->addWidget(flashWidth_);
+    minPatchWatch_ = new QPushButton("Measure (about 70 s)", minBox);
+    minPatchWatch_->setObjectName("autoTuneMinPatchWatch");
+    minPatchWatch_->setToolTip("At the current K: injects one marked flash just above K, of the width above, and counts "
+        "the pixels it covers (the footprint); then watches for 60 s with the current minimum patch and about 2/3, 1/2 "
+        "and 1/3 of it. Suggests the smallest value with no events, no larger than the footprint.");
+    minColumn->addWidget(minPatchWatch_);
+    footprint_ = wrapped(minBox, "autoTuneFootprint");
+    minColumn->addWidget(footprint_);
+    minTable_ = new QTableWidget(0, 3, minBox);
+    minTable_->setObjectName("autoTuneMinPatchTable");
+    minTable_->setHorizontalHeaderLabels({"Minimum patch", "Events", "Measured"});
+    minTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    minTable_->horizontalHeader()->setStretchLastSection(true);
+    minTable_->verticalHeader()->hide();
+    minTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    minTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    minTable_->setToolTip("What each minimum patch would have triggered at the current K during the watch.");
+    minTable_->setMaximumHeight(130);
+    minColumn->addWidget(minTable_);
+    minVerdict_ = wrapped(minBox, "autoTuneMinPatchVerdict");
+    minColumn->addWidget(minVerdict_);
+    applyMinPatch_ = new QPushButton("Apply minimum patch", minBox);
+    applyMinPatch_->setObjectName("autoTuneApplyMinPatch");
+    applyMinPatch_->setToolTip("Sets the suggested minimum patch in the Detection panel. Refused when a camera or "
+        "detection setting has changed since the watch.");
+    minColumn->addWidget(applyMinPatch_);
+    column->addWidget(minBox);
+    connect(seeing_, &QDoubleSpinBox::valueChanged, this, &AutoTunePanel::seeingChanged);
+    connect(minPatchWatch_, &QPushButton::clicked, this, &AutoTunePanel::minPatchRequested);
+    connect(applyMinPatch_, &QPushButton::clicked, this, &AutoTunePanel::applyMinPatchRequested);
     connect(watch_, &QPushButton::clicked, this, [this] { emit watchRequested(false); });
     connect(higher_, &QPushButton::clicked, this, [this] { emit watchRequested(true); });
     connect(tryButton_, &QPushButton::clicked, this, [this] { emit tryKRequested(tryK_->value()); });
@@ -238,6 +287,7 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
 
     clearCamera({});
     clearK({});
+    clearMinPatch({});
     setSituation(situation_);
 }
 
@@ -250,11 +300,13 @@ void AutoTunePanel::setSituation(const Situation& situation)
     twilight_->setVisible(!situation.twilight.isEmpty());
     boxRow_->setVisible(situation.workflow == TuneWorkflow::MoonFlashes);
     skyMaxRow_->setVisible(situation.workflow == TuneWorkflow::Sky);
+    minPatchBox_->setVisible(situation.workflow == TuneWorkflow::MoonFlashes);
     // A result for another target or workflow no longer applies.
     if (workflowChanged)
     {
         clearCamera(camera_ ? "The target changed: measure again." : QString());
         clearK(kRows_.empty() ? QString() : "The target changed: watch again.");
+        clearMinPatch(minRows_.empty() ? QString() : "The target changed: measure again.");
     }
     if (!camera_ && situation.preview && !situation.camera)
         cameraVerdict_->setText("Not a camera: only the sensitivity (K) can be tuned.");
@@ -274,6 +326,8 @@ void AutoTunePanel::updateButtons()
     higher_->setEnabled(idle && !needBox && !kRows_.empty());
     tryButton_->setEnabled(idle && !needBox);
     applyK_->setEnabled(!s.busy && choice_.k.has_value());
+    minPatchWatch_->setEnabled(idle && !needBox && s.workflow == TuneWorkflow::MoonFlashes && !s.recording);
+    applyMinPatch_->setEnabled(!s.busy && minChoice_.minPixels.has_value());
     checkFlash_->setEnabled(idle && s.testingTools && !s.recording);
     checkFlash_->setVisible(s.testingTools);
     cancel_->setVisible(s.busy);
@@ -477,4 +531,67 @@ void AutoTunePanel::setCheckResult(const QString& text, std::optional<bool> caug
     checkResult_->setText(text);
     checkResult_->setStyleSheet(!caught ? QString() : *caught ? "color: #2e8b57;" : "color: #c0392b;");
     checkResult_->setVisible(!text.isEmpty());
+}
+
+double AutoTunePanel::seeingArcsec() const { return seeing_->value(); }
+
+void AutoTunePanel::setSeeingArcsec(double arcsec)
+{
+    const QSignalBlocker blocked(seeing_);
+    seeing_->setValue(arcsec);
+}
+
+void AutoTunePanel::setFlashWidthText(const QString& text) { flashWidth_->setText(text); }
+void AutoTunePanel::setFootprintText(const QString& text) { footprint_->setText(text); }
+
+void AutoTunePanel::setMinPatchResults(const TuneWatchStatus& status, std::optional<int> footprint)
+{
+    minRows_ = status.rows;
+    std::sort(minRows_.begin(), minRows_.end(), [](const KRowResult& a, const KRowResult& b) { return a.minPixels > b.minPixels; });
+    minWatchSeconds_ = status.requestedSeconds;
+    footprintPixels_ = footprint;
+    const auto groups = groupEvents(minRows_);
+    minChoice_ = chooseMinPatch(minRows_, groups, std::vector<bool>(groups.size(), false), minWatchSeconds_, footprint);
+    minTable_->setRowCount(static_cast<int>(minRows_.size()));
+    for (size_t i = 0; i < minRows_.size(); ++i)
+    {
+        const KRowResult& row = minRows_[i];
+        QString measured = QString("%1 s").arg(row.seconds, 0, 'f', 1);
+        if (!row.stopped.empty()) measured = QString::fromStdString(row.stopped);
+        else if (row.limitedFrames) measured += QString(", search skipped on %1 frame(s)").arg(row.limitedFrames);
+        const bool chosen = minChoice_.minPixels && *minChoice_.minPixels == row.minPixels;
+        const QStringList cells{QString("%1 px%2").arg(row.minPixels).arg(chosen ? " ✓" : ""), QString::number(row.events), measured};
+        for (int c = 0; c < cells.size(); ++c) minTable_->setItem(static_cast<int>(i), c, new QTableWidgetItem(cells[c]));
+    }
+    QString verdict = minChoice_.minPixels
+        ? QString("Suggested minimum patch %1 px. %2").arg(*minChoice_.minPixels).arg(QString::fromStdString(minChoice_.reason))
+        : QString::fromStdString(minChoice_.reason);
+    if (!status.note.empty()) verdict += "\n" + QString::fromStdString(status.note);
+    minVerdict_->setText(verdict);
+    minVerdict_->setStyleSheet(minChoice_.noiseLimited ? "color: #b37900;" : QString());
+    updateButtons();
+}
+
+void AutoTunePanel::clearMinPatch(const QString& why)
+{
+    minRows_.clear();
+    footprintPixels_.reset();
+    minChoice_ = {};
+    minTable_->setRowCount(0);
+    minVerdict_->setText(why);
+    minVerdict_->setStyleSheet({});
+    if (why.isEmpty()) footprint_->clear();
+    updateButtons();
+}
+
+std::optional<int> AutoTunePanel::suggestedMinPatch() const { return minChoice_.minPixels; }
+
+QString AutoTunePanel::minPatchRecord() const
+{
+    QStringList rows;
+    for (const KRowResult& row : minRows_)
+        rows << QString("%1:%2:%3s:%4skipped").arg(row.minPixels).arg(row.events).arg(row.seconds, 0, 'f', 1).arg(row.limitedFrames);
+    return QString("min_patch_tested=\"%1\" footprint_px=%2 noise_limited=%3 watch_s=%4").arg(rows.join(' '))
+        .arg(footprintPixels_ ? QString::number(*footprintPixels_) : QString("unmeasured"))
+        .arg(minChoice_.noiseLimited ? "yes" : "no").arg(minWatchSeconds_, 0, 'f', 0);
 }

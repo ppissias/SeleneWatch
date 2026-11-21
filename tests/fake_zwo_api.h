@@ -16,6 +16,7 @@ public:
     FakeZwoApi()
     {
         camera={0,128,64,12,"TEST ASI120 Mono",BayerPattern::None,{1,2},{PixelFormat::Mono8,PixelFormat::Mono16},false,false,true};
+        camera.pixelSizeUm=3.75; // As the ASI120 reports.
         settings.width=128; settings.height=64;
         caps={{ZwoControl::Exposure,"Exposure",64,2'000'000'000,1000,true,false},
             {ZwoControl::Gain,"Gain",0,100,10,true,false},{ZwoControl::Offset,"Offset",0,20,9,true,false},

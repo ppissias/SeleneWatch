@@ -146,6 +146,8 @@ struct TuneEvent
 struct KRowResult
 {
     double k{0};
+    // Feature-30: a minimum-patch watch varies this at one K; 0 in a K watch.
+    int minPixels{0};
     uint64_t frames{0};
     double seconds{0};
     // Frames whose patch search was skipped because too many pixels were at
@@ -174,6 +176,39 @@ struct TuneEventGroup
 // A row's candidates left after the excluded groups (the observer's real events).
 [[nodiscard]] uint64_t remainingEvents(const std::vector<KRowResult>& rows, size_t row,
     const std::vector<TuneEventGroup>& groups, const std::vector<bool>& excluded);
+
+// Feature-30: the minimum patch for flashes on the earthlit side.
+//
+// A real flash is a point source, as wide as a star: its FWHM in pixels is
+// the seeing over the image scale. Without an image scale, the Test flash
+// FWHM is used and said to be an assumption.
+struct FlashWidth
+{
+    double pixels{3};
+    bool fromSeeing{false};
+};
+[[nodiscard]] FlashWidth flashWidth(double seeingArcsec, std::optional<double> arcsecPerPixel, double fallbackPixels);
+
+// The values a minimum-patch watch compares: the current one, then about
+// two thirds, a half and a third of it, never below kMinimumPatch.
+constexpr int kMinimumPatch = 3;
+[[nodiscard]] std::vector<int> minPatchValuesToTest(int current);
+
+// The peak of the footprint flash: just above K, so it covers what a faint
+// flash covers at K.
+[[nodiscard]] inline double footprintAmplitude(double k, double noiseAdu) { return 1.5 * k * noiseAdu; }
+
+// The smallest tested minimum patch whose row covered the watch, was fully
+// searched and has no remaining events. With a footprint, a value above it
+// would drop faint flashes: the panel then says noise limits the choice.
+struct MinPatchChoice
+{
+    std::optional<int> minPixels;
+    bool noiseLimited{false};
+    std::string reason;
+};
+[[nodiscard]] MinPatchChoice chooseMinPatch(const std::vector<KRowResult>& rows, const std::vector<TuneEventGroup>& groups,
+    const std::vector<bool>& excluded, double watchSeconds, std::optional<int> footprint);
 
 // The lowest K whose row covered the watch, had no limited frames, and has
 // no remaining events. None, with the reason, otherwise.

@@ -525,7 +525,8 @@ uint64_t Session::startAutoTune(TuneWatchRequest request)
 {
     if (!running_ || sourceFinished_.load() || mode_.load() != Mode::Preview || modeChangePending()) return 0;
     // A flash check's test flash must never be written into a recording.
-    if (request.kind == TuneWatchRequest::Kind::FlashCheck && (recorder_.status().active || blip_.busy())) return 0;
+    if ((request.kind == TuneWatchRequest::Kind::FlashCheck || request.kind == TuneWatchRequest::Kind::Footprint)
+        && (recorder_.status().active || blip_.busy())) return 0;
     const uint64_t id = tuneWatch_.start(std::move(request));
     post(notifications_.autoTuneChanged);
     return id;

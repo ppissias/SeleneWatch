@@ -163,7 +163,121 @@ private slots:
     void theWatchWaitsForTheDetectorAndStopsOnAChange();
     void aLoopEndsTheWatchWithItsCoverage();
     void aTestFlashIsCaughtOrMissed();
+    void theFlashWidthComesFromSeeingOrTheTestFlash();
+    void theMinimumPatchIsTheSmallestQuietValueWithinTheFootprint();
+    void theFootprintOfAJustDetectableFlashIsMeasured();
+    void minimumPatchRowsCountWhatEachValueWould();
 };
+
+// Feature-30: a flash just above K covers a few pixels at K; a wider flash
+// of the same peak in K covers more. The peak is set from the noise there.
+void AutoTuneTest::theFootprintOfAJustDetectableFlashIsMeasured()
+{
+    int previous = 0;
+    for (const double fwhm : {3.0, 6.0})
+    {
+        const DetectionSettings settings = quickSettings();
+        Replay replay(settings);
+        replay.run(90);
+        TuneWatchRequest request;
+        request.kind = TuneWatchRequest::Kind::Footprint;
+        request.settings = settings;
+        request.flash = BlipSettings{64, 48, fwhm, 0, 2, BlipKind::BrightFlash};
+        replay.watch.start(request);
+        replay.run(20);
+        const TuneWatchStatus status = replay.watch.status();
+        QCOMPARE(status.state, TuneWatchStatus::State::Finished);
+        QVERIFY2(status.footprintPixels, status.checkText.c_str());
+        // About 0.46 × FWHM² for a peak of 1.5 K: 4 px at 3 px wide, 17 px at 6 px wide.
+        const double expected = 0.46 * fwhm * fwhm;
+        QVERIFY2(*status.footprintPixels >= expected * 0.4 && *status.footprintPixels <= expected * 2.5,
+            qPrintable(QString("FWHM %1: %2 px").arg(fwhm).arg(*status.footprintPixels)));
+        QVERIFY(*status.footprintPixels > previous);
+        previous = *status.footprintPixels;
+        // The peak was set from the noise at the flash: 1.5 × K × about 2 ADU.
+        QVERIFY(status.footprintPeakAdu > 1.5 * 6 * 1.5 && status.footprintPeakAdu < 1.5 * 6 * 3);
+    }
+}
+
+// Feature-30: rows at one K and different minimum patches each count what
+// that minimum patch alone would: a 5-pixel patch passes at 3 and 5, not at 8.
+void AutoTuneTest::minimumPatchRowsCountWhatEachValueWould()
+{
+    DetectionSettings settings = quickSettings();
+    settings.minPixels = 8;
+    Replay replay(settings);
+    replay.run(90);
+    TuneWatchRequest request = sensitivity(settings, {}, 1.0);
+    request.minPixelValues = minPatchValuesToTest(8);
+    replay.watch.start(request);
+    // A plus-shaped patch of 5 pixels, 15 sigma, on one frame.
+    replay.run(40, [](uint64_t index, int x, int y) {
+        if (index != 100) return 0.0;
+        const int dx = std::abs(x - 64), dy = std::abs(y - 48);
+        return (dx == 0 && dy <= 1) || (dy == 0 && dx <= 1) ? 30.0 : 0.0;
+    });
+    const TuneWatchStatus status = replay.watch.status();
+    QCOMPARE(status.state, TuneWatchStatus::State::Finished);
+    QCOMPARE(status.rows.size(), size_t{4});
+    for (const KRowResult& row : status.rows)
+    {
+        QCOMPARE(row.k, 6.0);
+        QCOMPARE(row.events, row.minPixels <= 5 ? uint64_t{1} : uint64_t{0});
+    }
+    const auto groups = groupEvents(status.rows);
+    const MinPatchChoice choice = chooseMinPatch(status.rows, groups, std::vector<bool>(groups.size(), false), 1.0, 6);
+    QVERIFY(choice.minPixels);
+    QCOMPARE(*choice.minPixels, 8);
+}
+
+// Feature-30: a point source is as wide as the seeing over the image scale;
+// without an image scale, the Test flash FWHM is the assumption.
+void AutoTuneTest::theFlashWidthComesFromSeeingOrTheTestFlash()
+{
+    const FlashWidth measured = flashWidth(2.5, 0.5, 3);
+    QVERIFY(measured.fromSeeing);
+    QCOMPARE(measured.pixels, 5.0);
+    const FlashWidth assumed = flashWidth(2.5, std::nullopt, 3);
+    QVERIFY(!assumed.fromSeeing);
+    QCOMPARE(assumed.pixels, 3.0);
+    QCOMPARE(minPatchValuesToTest(8), (std::vector<int>{8, 5, 4, 3}));
+    QCOMPARE(minPatchValuesToTest(20), (std::vector<int>{20, 13, 10, 7}));
+    QCOMPARE(minPatchValuesToTest(3), (std::vector<int>{3}));
+    QCOMPARE(footprintAmplitude(6, 2), 18.0);
+}
+
+void AutoTuneTest::theMinimumPatchIsTheSmallestQuietValueWithinTheFootprint()
+{
+    const auto row = [](int minPixels, uint64_t events) {
+        KRowResult r;
+        r.k = 6;
+        r.minPixels = minPixels;
+        r.frames = 1800;
+        r.seconds = 60;
+        r.events = events;
+        for (uint64_t e = 0; e < events; ++e)
+            r.kept.push_back({100 + e * 10, {}, ChangeKind::Rise, 10 * static_cast<int>(e), 10, 2, 2, minPixels, 7});
+        return r;
+    };
+    // 3 px triggers on noise, 4 px and more are quiet.
+    std::vector<KRowResult> rows{row(8, 0), row(5, 0), row(4, 0), row(3, 2)};
+    auto groups = groupEvents(rows);
+    std::vector<bool> none(groups.size(), false);
+    MinPatchChoice choice = chooseMinPatch(rows, groups, none, 60, 6);
+    QVERIFY(choice.minPixels && *choice.minPixels == 4 && !choice.noiseLimited);
+    // Excluding the real events makes 3 px quiet too.
+    std::vector<bool> all(groups.size(), true);
+    QCOMPARE(*chooseMinPatch(rows, groups, all, 60, 6).minPixels, 3);
+    // A footprint smaller than the smallest quiet value: noise limits the choice, and the panel says so.
+    choice = chooseMinPatch(rows, groups, none, 60, 3);
+    QVERIFY(choice.minPixels && *choice.minPixels == 4 && choice.noiseLimited);
+    QVERIFY(choice.reason.find("cannot be told from noise") != std::string::npos);
+    // A skipped patch search or a short watch is never quiet.
+    rows[2].limitedFrames = 1;
+    rows[1].seconds = 20;
+    groups = groupEvents(rows);
+    QCOMPARE(*chooseMinPatch(rows, groups, std::vector<bool>(groups.size(), false), 60, 6).minPixels, 8);
+}
 
 void AutoTuneTest::brightnessIsMeasuredOverTheArea()
 {

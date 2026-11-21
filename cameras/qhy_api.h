@@ -28,6 +28,8 @@ struct QhyCameraInfo
     BayerPattern bayer{BayerPattern::None};
     std::vector<PixelFormat> formats;
     bool testSource{false};
+    // Feature-30: the sensor's pixel in micrometres, unbinned; 0 when not reported.
+    double pixelSizeUm{0};
 };
 // Initial QHY qualification deliberately uses bin 1. ROI is independently read
 // back. The bin command has no independent getter in the inspected SDK API.

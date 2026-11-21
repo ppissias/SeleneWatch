@@ -87,6 +87,8 @@ std::optional<BlipSettings> AutoTuneWatch::onFrame(const Frame& frame, const Fla
             interval_ = 0;
             injecting_ = false;
             flashFirst_.reset(); flashLast_.reset();
+            footprint_.reset();
+            footprintMax_ = 0;
             changed_ = true;
         }
         if (cancelRequest_)
@@ -158,7 +160,7 @@ std::optional<BlipSettings> AutoTuneWatch::onFrame(const Frame& frame, const Fla
         }
         begin(frame, live, context);
         if (!request_) return std::nullopt;
-        if (request_->kind == TuneWatchRequest::Kind::FlashCheck)
+        if (request_->kind == TuneWatchRequest::Kind::FlashCheck || request_->kind == TuneWatchRequest::Kind::Footprint)
         {
             injecting_ = true;
             flashAsked_ = frame.timestamp;
@@ -178,6 +180,37 @@ void AutoTuneWatch::begin(const Frame& frame, const FlashDetector& live, const C
     working_.format = frame.format;
     working_.significantBits = frame.significantBits;
     changed_ = true;
+    if (request_->kind == TuneWatchRequest::Kind::Footprint)
+    {
+        // A copy that keeps patches of any size, so the flash's whole patch
+        // at K is reported; its peak is set from the noise at its pixel.
+        BlipSettings& flash = request_->flash;
+        const size_t at = static_cast<size_t>(flash.y) * frame.width + flash.x;
+        const double noise = live.pixelNoise(at);
+        if (flash.x < 0 || flash.y < 0 || flash.x >= frame.width || flash.y >= frame.height || noise <= 0)
+        {
+            finish(TuneWatchStatus::State::Cancelled, "The footprint flash has no measured noise at its place.");
+            return;
+        }
+        flash.amplitude = request_->footprintPeakInK * request_->settings.sigma * noise;
+        working_.footprintPeakAdu = flash.amplitude;
+        try
+        {
+            footprint_ = std::make_unique<FlashDetector>(live);
+            DetectionSettings settings = request_->settings;
+            settings.minPixels = 1;
+            settings.maxPixels = std::max(settings.maxPixels, 1000);
+            settings.oneFrame = true;
+            footprint_->setSettings(settings);
+            footprint_->rearm();
+        }
+        catch (const MemoryLimitError&)
+        {
+            finish(TuneWatchStatus::State::Cancelled, "The RAM ceiling leaves no room to measure the footprint.");
+        }
+        footprintMax_ = 0;
+        return;
+    }
     if (request_->kind != TuneWatchRequest::Kind::Sensitivity) return;
 
     const TuneArea& area = request_->area;
@@ -187,7 +220,9 @@ void AutoTuneWatch::begin(const Frame& frame, const FlashDetector& live, const C
         return;
     }
     working_.areaNoiseAdu = areaNoise(live, area, static_cast<size_t>(frame.width) * frame.height);
-    const size_t wanted = request_->kValues.size();
+    // Feature-30: the rows compare minimum patches at one K, or K values.
+    const bool minPatches = !request_->minPixelValues.empty();
+    const size_t wanted = minPatches ? request_->minPixelValues.size() : request_->kValues.size();
     const size_t pixels = static_cast<size_t>(frame.width) * frame.height;
     const size_t perRow = std::max<size_t>(1, FlashDetector::workingBytes(pixels, request_->settings));
     // The live detector already takes its time; the copies share what is left
@@ -205,12 +240,14 @@ void AutoTuneWatch::begin(const Frame& frame, const FlashDetector& live, const C
         {
             auto copy = std::make_unique<FlashDetector>(live);
             DetectionSettings settings = request_->settings;
-            settings.sigma = request_->kValues[i];
+            if (minPatches) settings.minPixels = request_->minPixelValues[i];
+            else settings.sigma = request_->kValues[i];
             copy->setSettings(settings);
             copy->rearm();
             Row row;
             row.detector = std::move(copy);
-            row.result.k = request_->kValues[i];
+            row.result.k = settings.sigma;
+            row.result.minPixels = minPatches ? settings.minPixels : 0;
             rows_.push_back(std::move(row));
         }
         catch (const MemoryLimitError&)
@@ -224,12 +261,16 @@ void AutoTuneWatch::begin(const Frame& frame, const FlashDetector& live, const C
         working_.liveOnly = true;
         Row row;
         row.result.k = request_->settings.sigma;
+        row.result.minPixels = minPatches ? request_->settings.minPixels : 0;
         rows_.push_back(std::move(row));
-        working_.note = std::format("Only the current K was measured: {} leaves no room for more detectors. "
-            "Use Try K for another value.", limit);
+        working_.note = minPatches
+            ? std::format("Only the current minimum patch was measured: {} leaves no room for more detectors.", limit)
+            : std::format("Only the current K was measured: {} leaves no room for more detectors. "
+                "Use Try K for another value.", limit);
     }
     else if (rows_.size() < wanted)
-        working_.note = std::format("{} of {} K values were compared: {} leaves no room for more.", rows_.size(), wanted, limit);
+        working_.note = std::format("{} of {} {} were compared: {} leaves no room for more.", rows_.size(), wanted,
+            minPatches ? "minimum patches" : "K values", limit);
 }
 
 void AutoTuneWatch::record(KRowResult& result, const FlashDetector& detector,
@@ -333,6 +374,48 @@ void AutoTuneWatch::measure(const Frame& frame, const FlashDetector& live, const
             finish(TuneWatchStatus::State::Cancelled, "The test flash was not injected; another flash may have been in progress.");
         return;
     }
+    case TuneWatchRequest::Kind::Footprint:
+    {
+        // Feature-30: the copy learns on every frame, and on the flash's
+        // frames reports the patch at its place: the pixels at K it covers.
+        const BlipSettings& flash = request.flash;
+        try
+        {
+            footprint_->analyze(frame);
+            if (frame.blip)
+            {
+                if (!flashFirst_) flashFirst_ = frame.frameIndex;
+                flashLast_ = frame.frameIndex;
+                const int reach = static_cast<int>(std::ceil(flash.fwhm)) + 1;
+                for (const DetectionSummary& c : footprint_->candidates())
+                    if (c.change == ChangeKind::Rise && flash.x >= c.boxX - reach && flash.x <= c.boxX + c.boxWidth - 1 + reach
+                        && flash.y >= c.boxY - reach && flash.y <= c.boxY + c.boxHeight - 1 + reach)
+                        footprintMax_ = std::max(footprintMax_, c.brightPixels);
+            }
+            footprint_->updateReference(frame);
+        }
+        catch (const MemoryLimitError&)
+        {
+            finish(TuneWatchStatus::State::Cancelled, "The RAM ceiling was reached while measuring the footprint.");
+            return;
+        }
+        if (flashLast_ && frame.frameIndex > *flashLast_ + 1)
+        {
+            if (footprintMax_ > 0)
+            {
+                working_.footprintPixels = footprintMax_;
+                working_.checkText = std::format("A flash {:.1f} px wide, peaking at {:.0f} ADU ({:.1f} × K), covers {} px at K "
+                    "{:.1f}.", flash.fwhm, flash.amplitude, request.footprintPeakInK, footprintMax_, request.settings.sigma);
+            }
+            else
+                working_.checkText = "The footprint flash was not found at its place: it may be masked, above Ignore brighter "
+                    "than, or too faint for the noise there.";
+            finish(TuneWatchStatus::State::Finished, {});
+        }
+        else if (!flashFirst_ && frame.timestamp - flashAsked_ > std::chrono::seconds{3})
+            finish(TuneWatchStatus::State::Cancelled, "The footprint flash was not injected; another flash may have been in progress.");
+        return;
+    }
     }
 
     if (working_.seconds >= request.seconds)
@@ -356,6 +439,7 @@ void AutoTuneWatch::finish(TuneWatchStatus::State state, const std::string& note
     working_.rows.clear();
     for (const Row& row : rows_) working_.rows.push_back(row.result);
     rows_.clear();
+    footprint_.reset();
     request_.reset();
     injecting_ = false;
     changed_ = true;

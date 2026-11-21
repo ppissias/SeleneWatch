@@ -36,6 +36,8 @@ struct ToupTekCameraInfo
     BayerPattern bayer{BayerPattern::None};
     std::vector<PixelFormat> formats;
     bool usb3{false}, testSource{false};
+    // Feature-30: the sensor's pixel in micrometres, unbinned; 0 when not reported.
+    double pixelSizeUm{0};
 };
 // ROI in sensor pixels; bin 1 only until binned raw data is qualified.
 struct ToupTekSettings

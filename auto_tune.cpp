@@ -497,3 +497,47 @@ KChoice chooseK(const std::vector<KRowResult>& rows, const std::vector<TuneEvent
             "so no quiet K can be recommended. Watch again, or test higher K values."};
     return {std::nullopt, "Every K value tested had events. Exclude any that were real, or test higher K values."};
 }
+
+FlashWidth flashWidth(double seeingArcsec, std::optional<double> arcsecPerPixel, double fallbackPixels)
+{
+    if (arcsecPerPixel && *arcsecPerPixel > 0 && seeingArcsec > 0) return {seeingArcsec / *arcsecPerPixel, true};
+    return {fallbackPixels, false};
+}
+
+std::vector<int> minPatchValuesToTest(int current)
+{
+    std::vector<int> values;
+    for (const double share : {1.0, 2.0 / 3, 1.0 / 2, 1.0 / 3})
+    {
+        const int value = std::max(kMinimumPatch, static_cast<int>(std::lround(current * share)));
+        if (std::find(values.begin(), values.end(), value) == values.end()) values.push_back(value);
+    }
+    return values;
+}
+
+MinPatchChoice chooseMinPatch(const std::vector<KRowResult>& rows, const std::vector<TuneEventGroup>& groups,
+    const std::vector<bool>& excluded, double watchSeconds, std::optional<int> footprint)
+{
+    std::vector<size_t> order(rows.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return rows[a].minPixels < rows[b].minPixels; });
+    std::optional<int> quiet;
+    bool anyEligible = false;
+    for (size_t i : order)
+    {
+        const KRowResult& row = rows[i];
+        if (row.frames == 0 || row.seconds < 0.8 * watchSeconds || row.limitedFrames > 0 || !row.stopped.empty()) continue;
+        anyEligible = true;
+        if (remainingEvents(rows, i, groups, excluded) == 0) { quiet = row.minPixels; break; }
+    }
+    if (!anyEligible)
+        return {std::nullopt, false, "No minimum patch was measured over the whole watch without a skipped patch search. "
+            "Watch again."};
+    if (!quiet)
+        return {std::nullopt, false, "Every minimum patch tested had events. Exclude any that were real, or raise K first."};
+    if (footprint && *quiet > *footprint)
+        return {quiet, true, std::format("Noise needs a minimum patch of {} px, but a just-detectable flash covers only {} px: "
+            "flashes that faint cannot be told from noise at this K.", *quiet, *footprint)};
+    return {quiet, false, footprint ? std::format("No events left in {:.0f} s, and a just-detectable flash covers {} px.",
+        watchSeconds, *footprint) : std::format("No events left in {:.0f} s. The flash footprint was not measured.", watchSeconds)};
+}

@@ -148,6 +148,7 @@ private slots:
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
     void autoTuneMeasuresAppliesAndChecks();
     void autoTuneOutlinesTheEarthshineBox();
+    void autoTuneSuggestsTheMinimumPatchForFlashes();
     void aDragDrawsOnlyWhatWasChosen();
     void sitePresetsSaveLoadAndDelete();
     void siteAndRecordingControls();
@@ -1334,6 +1335,63 @@ void UiTest::autoTuneOutlinesTheEarthshineBox()
     // and the exposure brought into 10-40 ms first.
     auto* exposureRow = panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Exposure)));
     QVERIFY(exposureRow && exposureRow->isChecked() && exposureRow->text().contains("→ 10 ms"));
+    window.findChild<QPushButton*>("stopButton")->click();
+}
+// Feature-30: for flashes, auto-tune measures the footprint of a flash just
+// above K, of the width assumed from the seeing (or the Test flash FWHM
+// without an image scale), watches smaller minimum patches at the current K,
+// suggests the smallest quiet one within the footprint, applies it and logs it.
+void UiTest::autoTuneSuggestsTheMinimumPatchForFlashes()
+{
+    QTemporaryDir dir;
+    QSettings().remove("autotune");
+    auto api = std::make_shared<FakeZwoApi>();
+    MainWindow window(nullptr, dir.path(), api);
+    window.show();
+    chooseSource(window, "zwo");
+    chooseWatch(window, Watch::MoonFlashes);
+    // The fake camera's frames are at 41 % of full scale: the ceiling is off.
+    window.findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(0);
+    window.findChild<QDoubleSpinBox*>("detectionReferenceTime")->setValue(0.5);
+    window.findChild<QPushButton*>("autoTuneButton")->click();
+    auto* panel = window.findChild<AutoTunePanel*>();
+    panel->setMinPatchSeconds(1);
+    auto* width = panel->findChild<QLabel*>("autoTuneFlashWidth");
+    QVERIFY2(width->text().contains("assumed 3.0 px"), qPrintable(width->text())); // No image scale.
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"), 5000);
+    window.setEarthshineBox(QRect(40, 20, 24, 16));
+    auto* measure = panel->findChild<QPushButton*>("autoTuneMinPatchWatch");
+    QTRY_VERIFY_WITH_TIMEOUT(measure->isEnabled(), 5000);
+    measure->click();
+    auto* verdict = panel->findChild<QLabel*>("autoTuneMinPatchVerdict");
+    QTRY_VERIFY2_WITH_TIMEOUT(verdict->text().startsWith("Suggested minimum patch"),
+        qPrintable(verdict->text() + " | " + panel->findChild<QLabel*>("autoTuneFootprint")->text()), 20000);
+    QVERIFY(panel->findChild<QLabel*>("autoTuneFootprint")->text().contains(" covers "));
+    QCOMPARE(panel->findChild<QTableWidget*>("autoTuneMinPatchTable")->rowCount(), 4);
+    // The fake camera has no noise: the smallest value, 3 px, is quiet and within the footprint.
+    QVERIFY2(verdict->text().startsWith("Suggested minimum patch 3 px"), qPrintable(verdict->text()));
+    auto* apply = panel->findChild<QPushButton*>("autoTuneApplyMinPatch");
+    QVERIFY(apply->isEnabled());
+    apply->click();
+    QCOMPARE(window.findChild<QSpinBox*>("detectionMinPixels")->value(), 3);
+    QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(dir.path(), Target::Moon) + "/candidates.txt").contains(
+        " autotune_min_patch target=moon k=6.0 min_from=8 min_to=3 "), 3000);
+    // With only the focal length, the camera's pixel size gives the scale:
+    // 3.75 µm at 1000 mm is 0.77″ per pixel, so 2.5″ seeing is 3.2 px.
+    ObservingSite focalOnly;
+    focalOnly.focalLengthMm = 1000;
+    window.applySite(focalOnly, false, "pool.ntp.org");
+    window.findChild<QPushButton*>("autoTuneButton")->click();
+    QVERIFY2(width->text().contains("about 3.2 px wide (2.5″ seeing at 0.77″ per pixel, with the pixel size the camera reports)"),
+        qPrintable(width->text()));
+    // With an image scale the width comes from the seeing: 2.5″ at 0.5″ per pixel is 5 px.
+    ObservingSite site;
+    site.focalLengthMm = 1196;
+    site.pixelSizeUm = 2.9;
+    window.applySite(site, false, "pool.ntp.org");
+    window.findChild<QPushButton*>("autoTuneButton")->click();
+    QVERIFY2(width->text().contains("about 5.0 px wide (2.5″ seeing at 0.50″ per pixel)"), qPrintable(width->text()));
     window.findChild<QPushButton*>("stopButton")->click();
 }
 // Feature-28: auto-tune opens in its own window, leaving the Detection dock as

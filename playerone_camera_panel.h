@@ -1,4 +1,6 @@
 #pragma once
+
+#include <algorithm>
 #include "camera_family_panel.h"
 #include "cameras/playerone_source.h"
 #include <optional>
@@ -28,6 +30,10 @@ public:
     bool readBack(std::string& error) override;
     void requestLiveControls() override;
     [[nodiscard]] CameraSettingsEditor* controls() const override { return editor_; }
+    [[nodiscard]] double pixelSizeUm() const override
+    {
+        return profile_ ? profile_->camera.pixelSizeUm * std::max(1, profile_->current.bin) : 0;
+    }
     [[nodiscard]] CameraSupport checkSupport() override;
     [[nodiscard]] QString installHint() const override;
     [[nodiscard]] RuntimeChooser* runtimeChooser() const override { return runtime_; }

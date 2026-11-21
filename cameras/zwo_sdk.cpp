@@ -62,6 +62,7 @@ public:
             ASI_CAMERA_INFO info{}; check(ASIGetCameraProperty(&info,i),"Reading ASI camera information");
             ZwoCameraInfo c; c.id=info.CameraID; c.name=info.Name;
             c.width=static_cast<int>(info.MaxWidth); c.height=static_cast<int>(info.MaxHeight); c.sensorBits=info.BitDepth;
+            c.pixelSizeUm=info.PixelSize;
             c.usb3=info.IsUSB3Camera==ASI_TRUE; c.triggerCamera=info.IsTriggerCam==ASI_TRUE;
             if (info.IsColorCam)
             {
