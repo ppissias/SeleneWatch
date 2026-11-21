@@ -96,9 +96,9 @@ Open **Session → Output folder…** (while stopped) to set the single remember
 ```text
 <output folder>/
     events/
-        moon/<UTC>/      Lunar flash & darkening clips, candidates.txt, guiding.txt
-        sky/<UTC>/       Sky watch clips, candidates.txt
-    recordings/<UTC>/    Manual (Preview or Monitoring) and scheduled continuous SER files
+        moon/session-<UTC start>/    One lunar monitoring watch, including report.html
+        sky/session-<UTC start>/     One sky monitoring watch, including report.html
+    recordings/<UTC>/    Standalone continuous SER started in Preview
     timelapses/<UTC>/    Lunar/planetary FITS stacks, sharpened FITS, MP4/GIF, timelapse.txt
 ```
 
@@ -231,7 +231,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
    - Alternatively watch **Peak sigma** and the 10-second trace for ~1 minute in Preview: set **K** comfortably above normal quiet seeing peaks (often `8–16 sigma` depending on seeing and limb proximity; `6.0 sigma` is the starting value).
 5. Turn on **Guiding** if using a mount, then press **Start monitoring**. If using a camera, SeleneWatch briefly reopens the camera with verified locked settings and relearns the reference (re-arm **Start guiding** after the reopen).
 6. Leave Monitoring running. If you spot a flash or anomaly by eye that fell under threshold, press **Save now** to force a manual clip of the pre-event ring + post-event tail.
-7. Press **Stop monitoring** then **Stop stream** when done, and review saved clips in `<output folder>/events/moon/<UTC>/` starting with `00_overview.png` and `04_event_preview.gif`.
+7. Press **Stop monitoring** then **Stop stream** when done, and choose **Open nightly report** to review the lunar clips and their previews.
 
 ### Screenshots
 
@@ -268,7 +268,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial aircraft, birds, bats) make pixels *darker* rather than brighter, while predicted events (**ISS transits**, **stellar/planetary occultations**, **grazes**) require every single frame captured continuously across a known UTC window. SeleneWatch supports **both**:
 
 1. **Automated Darkening Detection (`Also trigger on darkening`):** Analyzes negative pixel excursions (`fall ≥ K × noise`) through an independent patch pass that **never merges rising and falling pixels**. Dark patches use separate silhouette-sized limits (**Maximum dark patch** `20000 px`, **Maximum dark box / patch** `10.00 ×`) plus an optional **Large darkening** full-field trigger (`Off` by default) for close aircraft or birds filling the frame. Overviews draw darkened trails in **blue** and suggest `dark transit`, while `04_event_preview.gif` loops up to 10 frames showing the crossing motion.
-2. **Continuous & Scheduled Lossless SER Capture (`Record` / `Schedule a recording…`):** Streams every frame straight to `<output folder>/recordings/<UTC>/recording.ser` with per-frame `frames.txt` and `recording.txt` on a dedicated writer thread. Works manually in **Preview** or **Monitoring** with an **Unlimited** (`0`) or explicit **frame count limit** (`N frames`), or automatically at a predicted UTC start time and duration during **Monitoring** while flash/darkening detection continues uninterrupted.
+2. **Continuous & Scheduled Lossless SER Capture (`Record` / `Schedule a recording…`):** Streams every frame straight to `recordings/<UTC>/recording.ser` with per-frame `frames.txt` and `recording.txt` on a dedicated writer thread. Monitoring recordings belong to the active watch. Preview recordings belong to the output root. Works manually in **Preview** or **Monitoring** with an **Unlimited** (`0`) or explicit **frame count limit** (`N frames`), or automatically at a predicted UTC start time and duration during **Monitoring** while flash/darkening detection continues uninterrupted.
 
 ### Main Use Case
 
@@ -283,7 +283,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 2. Under **View → Detection**, ensure **Watching** is **The Moon**, then tick **Also trigger on darkening**.
 3. Set **Sensitivity K** to **`12.0 sigma` or higher** for sunlit lunar terrain. Archive measurements show `K = 6` triggers heavily on sunlit crater-rim seeing, whereas `K ≥ 12` stays completely quiet on normal seeing while catching ~90%-darkness ISS and plane silhouettes.
 4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds). *(With **View → Testing tools** on, you can rehearse this directly by choosing **Kind: Dark transit** in the **Test flash** bar, clicking the sunlit lunar disk, and pressing **Inject blip**).*
-5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
+5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/session-<UTC start>/clips/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
 
 #### Path B — Predicted ISS transit or occultation (Manual or Scheduled SER Recording)
 
@@ -408,7 +408,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
      - While Monitoring, each change saves the clip in hand and restarts Monitoring with the new settings, a gap of a few seconds.
    - **Auto-tune** (in full darkness): **Auto-tune…** at the top of the Detection dock measures the sky, suggests exposure and gain, fills in the follower's limits, and watches what each K would trigger ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
 5. Either press **Start monitoring** immediately—or stop/leave Preview ready and let the **Watch from dusk to dawn** schedule arm Monitoring automatically once dusk arrives.
-6. The next morning, open `events/sky/<UTC>/`: browse `04_event_preview.gif` and `00_overview.png` thumbnails plus `candidates.txt` (`suggested_kind=`) to review events quickly before opening full `event.ser` clips.
+6. The next morning, choose **Session → Open last nightly report**. Select a suggested kind, play a preview or open the original SER and metadata.
 
 ### Screenshots
 
@@ -446,26 +446,14 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
 ```text
 <output folder>/
     events/
-        moon/
+        moon/session-<UTC start>/     (the same structure under sky/)
+            report.html
+            session.txt              Monitoring starts, stops and reasons
             candidates.txt
-            guiding.txt
-            <UTC stamp>/          e.g. 20261115-143156-930/
-                event.ser
-                event.txt
-                00_overview.png
-                01_baseline.png
-                02_event_peak.png
-                03_diff_annotated.png
-                04_event_preview.gif
-        sky/
-            candidates.txt
-            <UTC stamp>/
-                (same files as above)
-    recordings/
-        <UTC stamp>/
-            recording.ser
-            frames.txt
-            recording.txt
+            guiding.txt              When guiding activity was logged
+            clips/<trigger UTC>/     event.ser, event.txt, PNG and GIF previews
+            recordings/<UTC>/        recording.ser, frames.txt, recording.txt
+    recordings/<UTC>/                Standalone recording started in Preview
     timelapses/
         <UTC start>/
             stacks/               0001_<UTC>.fits ... (unsharpened linear 32-bit float)
@@ -478,7 +466,13 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
             raw/*.ser             (optional raw burst archival)
 ```
 
-### Inside each event clip (`events/moon/<UTC>/` & `events/sky/<UTC>/`)
+### Nightly report
+
+Each intentional Moon or Sky watch gets a folder as soon as Monitoring begins, including watches with zero candidates. The same folder spans midnight and automatic sky-exposure restarts. An explicit stop and a fresh start create two watches. **Save now** produces a clip. Manual and scheduled continuous recordings made during Monitoring go under that watch's recordings folder.
+
+Once queued evidence finishes writing, choose **Open nightly report** or **Later**. The report also opens directly from disk and through **Session → Open last nightly report**. Review coverage and interruptions, filter clips by suggested kind or evidence flags, and expand a clip to see its individual trigger times or play its animation. A star marks a clip for follow-up in this browser. Use **Save marks** to keep a copy with the watch and **Load marks** when moving computers. All report links are relative to the watch folder.
+
+### Inside each event clip (`events/moon/session-<UTC start>/clips/<UTC>/` & `events/sky/session-<UTC start>/clips/<UTC>/`)
 
 | File | Purpose & Rule |
 | --- | --- |
@@ -488,7 +482,7 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
 | **`01_baseline.png`**, **`02_event_peak.png`**, **`03_diff_annotated.png`** | **Display only:** quick-look PNGs of the pre-onset frame, strongest peak frame, and pre-update positive reference difference. |
 | **`04_event_preview.gif`** | **Display only:** compact looping animation (`4 fps`) covering `2` frames before onset through peak to `2` frames after end, capped at **10 frames maximum**, anchored to steady auto-stretch levels, and downscaled (`≤ 512 px` long edge, `≤ 512 KiB`) for rapid inspection of both lunar and sky clips. FFmpeg gets `30 s`; past that it is stopped and `event.txt` records `preview_gif: not written: FFmpeg did not finish within 30 s`, without delaying later clips further. |
 
-- **`candidates.txt`:** Session log inside `events/moon/` and `events/sky/` recording every `session_start`, `candidate_pending`, final `clip=<folder>` or `not_saved=<reason>` outcome, `manual`, `contains_test_signal=yes`, `during_mount_correction=yes`, `recording_start`/`stop`, and `exposure_change`. Even if a clip is refused for RAM or disk reserve, its trigger remains logged.
+- **`candidates.txt`:** Journal inside each Moon or Sky watch recording every `session_start`, `candidate_pending`, final `clip=<folder>` or `not_saved=<reason>` outcome, `manual`, `contains_test_signal=yes`, `during_mount_correction=yes`, `recording_start`/`stop`, and `exposure_change`. Even if a clip is refused for RAM or disk reserve, its trigger remains logged.
 - **`guiding.txt`:** Lock initialization, 1-second offsets, calibration vectors, and every guide pulse issued during Monitoring.
 - **If SeleneWatch closes unexpectedly:** Completed clips (`complete: yes`), written `candidates.txt` lines, finished FITS stacks, and flushed continuous `recording.ser` headers up to the last second are preserved. Unfinished clips leave a `candidate_pending` record without `complete: yes`.
 

@@ -1,3 +1,4 @@
+#include "watch_folders.h"
 #include "tests/detector_observation.h"
 #include "event_capture.h"
 #include "frame_pool.h"
@@ -410,7 +411,7 @@ void DisplayCaptureTest::memoryCapSplitsTheRunAndLeavesRoomForItsDifference()
             // Fast playback can fill the active+queued allowance before
             // the first clip's previews finish. The continuation must be logged.
             QCOMPARE(result.notSaved, QString("writer busy"));
-            QFile log(QDir(eventsFolder(output.path(), Target::Moon)).filePath("candidates.txt"));
+            QFile log(QDir(latestWatch(eventsFolder(output.path(), Target::Moon))).filePath("candidates.txt"));
             QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
             const auto text = log.readAll();
             QVERIFY(text.contains("continues_previous_clip"));

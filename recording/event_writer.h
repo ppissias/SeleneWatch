@@ -117,7 +117,7 @@ public:
     // Any thread. Queues finished lines for candidates.txt that are not
     // about a clip: a recording's start and stop, a clock check, an exposure
     // change (Features 14 and 15). Only a failure to write them is reported.
-    void logRecord(QString lines);
+    void logRecord(QString lines, QString folder = {}, QString fileName = "candidates.txt");
 
     // Any thread. Queues finished lines for <outputRoot>/guiding.txt (none
     // when empty) and the records that go with them. The records are kept in
@@ -131,7 +131,9 @@ public:
     void setByteLimit(size_t bytes);
     // Any thread. Queues a folder switch so previously queued clips finish
     // writing to the old folder first.
-    void setOutputRoot(QString outputRoot);
+    void setOutputRoot(QString outputRoot, bool sessionLayout = false);
+    // Finish a specific watch after earlier evidence jobs have drained.
+    void finishReport(QString folder, std::function<void(QString, QString)> finished);
     // Before the first submit. Replaces the drive query, for tests.
     void setFreeSpace(FreeSpace freeSpace);
     [[nodiscard]] WriterUsage usage() const;
@@ -153,6 +155,9 @@ private:
     struct Job
     {
         std::optional<QString> setOutputRoot;
+        bool sessionLayout{false};
+        QString folder, fileName;
+        std::function<void(QString, QString)> reportFinished;
         std::optional<SessionStart> sessionStart;
         bool guiding{false};
         QString guidingLines;
@@ -182,12 +187,13 @@ private:
     bool belowDiskReserve(const Job& job, ClipWriteResult& result) const;
     bool appendCandidates(const Job& job, const ClipWriteResult& result, bool pending) const;
     bool appendSessionStart(const SessionStart& start) const;
-    bool appendLog(const QString& lines, const QString& fileName = "candidates.txt") const;
+    bool appendLog(const QString& lines, const QString& fileName = "candidates.txt", const QString& folder = {}) const;
     // Writer thread. Whether a trigger at this time falls inside a pulse or its settling.
     [[nodiscard]] bool duringMountCorrection(std::chrono::system_clock::time_point time) const;
 
     QObject* context_;
     QString outputRoot_;
+    bool sessionLayout_{false};
     size_t maxQueuedBytes_;
     Finished finished_;
     FreeSpace freeSpace_;

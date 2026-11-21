@@ -1,4 +1,5 @@
 #include "recording/event_writer.h"
+#include "recording/nightly_report.h"
 #include "preview_image.h"
 #include "recording/clip_overview.h"
 #include "recording/frame_timing.h"
@@ -393,12 +394,13 @@ void EventWriter::setByteLimit(size_t bytes)
     maxQueuedBytes_ = bytes;
 }
 
-void EventWriter::setOutputRoot(QString outputRoot)
+void EventWriter::setOutputRoot(QString outputRoot, bool sessionLayout)
 {
     {
         std::lock_guard lock(mutex_);
         if (ended_) return;
         Job job;
+        job.sessionLayout = sessionLayout;
         job.setOutputRoot = std::move(outputRoot);
         queue_.push_back(std::move(job));
     }
@@ -505,7 +507,17 @@ void EventWriter::logSessionStart(const StreamInfo& stream, const ObservingSite&
     ready_.notify_one();
 }
 
-void EventWriter::logRecord(QString lines)
+void EventWriter::finishReport(QString folder, std::function<void(QString, QString)> finished)
+{
+    std::lock_guard lock(mutex_);
+    Job job;
+    job.folder = std::move(folder);
+    job.reportFinished = std::move(finished);
+    queue_.push_back(std::move(job));
+    ready_.notify_one();
+}
+
+void EventWriter::logRecord(QString lines, QString folder, QString fileName)
 {
     bool ended = false;
     {
@@ -515,6 +527,8 @@ void EventWriter::logRecord(QString lines)
         {
             Job job;
             job.recordLines = std::move(lines);
+            job.folder = std::move(folder);
+            job.fileName = std::move(fileName);
             queue_.push_back(std::move(job));
         }
     }
@@ -636,8 +650,19 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             queue_.pop_front();
         }
 
+        if (job.reportFinished)
+        {
+            QString error;
+            const QString path = writeNightlyReport(job.folder, error);
+            QMetaObject::invokeMethod(context_, [done = std::move(job.reportFinished), path, error] {
+                done(path, error);
+            }, Qt::QueuedConnection);
+            continue;
+        }
+
         if (job.setOutputRoot)
         {
+            sessionLayout_ = job.sessionLayout;
             if (outputRoot_ != *job.setOutputRoot)
             {
                 outputRoot_ = std::move(*job.setOutputRoot);
@@ -669,7 +694,7 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
         // Record lines that are not about a clip; a failure breaks the record.
         if (!job.recordLines.isEmpty())
         {
-            if (!appendLog(job.recordLines)) deliver(ClipWriteResult{{}, {}, true});
+            if (!appendLog(job.recordLines, job.fileName, job.folder)) deliver(ClipWriteResult{{}, {}, true});
             continue;
         }
 
@@ -755,7 +780,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
         return {};
     }
 
-    const QString folder = createClipFolder(outputRoot_, utcStamp(clip.triggers.front().triggerTime), error);
+    const QString folder = createClipFolder(sessionLayout_ ? QDir(outputRoot_).filePath("clips") : outputRoot_, utcStamp(clip.triggers.front().triggerTime), error);
     if (folder.isEmpty())
     {
         return {};
@@ -1098,7 +1123,7 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
     // The outcome comes last on the line, because a reason can contain spaces.
     const QString outcome = result.folder.isEmpty()
         ? QString("not_saved=%1").arg(result.notSaved)
-        : QString("clip=%1").arg(QDir(result.folder).dirName());
+        : QString("clip=%1").arg(QDir(outputRoot_).relativeFilePath(QFileInfo(result.folder).absoluteFilePath()));
 
     QString lines;
     QTextStream out(&lines);
@@ -1152,14 +1177,15 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
 
 // Appends to candidates.txt, or to another log in the output folder. False
 // when the log cannot be written.
-bool EventWriter::appendLog(const QString& lines, const QString& fileName) const
+bool EventWriter::appendLog(const QString& lines, const QString& fileName, const QString& folder) const
 {
-    if (!QDir().mkpath(outputRoot_) && !QDir(outputRoot_).exists())
+    const QDir location(folder.isEmpty() ? outputRoot_ : folder);
+    if (!QDir().mkpath(location.path()))
     {
         return false;
     }
 
-    QFile log(QDir(outputRoot_).filePath(fileName));
+    QFile log(location.filePath(fileName));
     if (!log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
     {
         return false;

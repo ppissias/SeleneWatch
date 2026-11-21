@@ -100,6 +100,7 @@ private:
     // Feature-14: the Session menu (site and instrument, a scheduled
     // recording), the Record button, and the saved site and clock check.
     void setupSessionMenu();
+    QWidget* reportOffer_{nullptr};
     void setupHelpMenu();
     void showAcknowledgements();
     void onSiteAndInstrument();

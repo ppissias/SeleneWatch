@@ -6,6 +6,7 @@
 #include "selenewatch_version.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 
 #include <algorithm>
@@ -50,7 +51,8 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
           {
               writer_.logRecord(QString("%1 recording_stop name=%2 frames=%3 bytes=%4 seconds=%5 ended=\"%6\"\n")
                   .arg(utcText(std::chrono::system_clock::now()), status.name).arg(status.frames).arg(status.bytes)
-                  .arg(status.streamSeconds, 0, 'f', 3).arg(QString::fromStdString(status.endReason)));
+                  .arg(status.streamSeconds, 0, 'f', 3).arg(QString::fromStdString(status.endReason)),
+                QFileInfo(status.parentFolder).absolutePath());
           }
           post(notifications_.recordingChanged);
       })
@@ -60,6 +62,7 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
 Session::~Session()
 {
     stop();
+    finishInterruptedWatch();
     waitTimeLapseFinished();
     guider_.shutdown();
     // A recording still being written is finished before the record closes.
@@ -67,6 +70,56 @@ Session::~Session()
     recorder_.waitIdle();
     if (clockThread_.joinable()) clockThread_.join();
     writer_.shutdown();
+}
+
+bool Session::openWatch(QString& error)
+{
+    if (watchFolder_.isEmpty())
+    {
+        const QDir parent(eventsRoot());
+        const QString base = "session-" + utcStamp(std::chrono::system_clock::now());
+        if (QDir().mkpath(parent.path()))
+        {
+            for (int n = 1; n <= 999; ++n)
+            {
+                const QString name = n == 1 ? base : base + "-" + QString::number(n);
+                if (parent.mkdir(name)) { watchFolder_ = parent.filePath(name); break; }
+                if (!parent.exists(name)) break;
+            }
+        }
+        if (watchFolder_.isEmpty())
+        {
+            error = "Could not create a monitoring session under " + parent.absolutePath();
+            return false;
+        }
+    }
+    writer_.setOutputRoot(watchFolder_, true);
+    watchIntervalOpen_ = true;
+    watchStart_ = std::chrono::steady_clock::now();
+    writer_.logRecord(utcText(std::chrono::system_clock::now()) + " monitoring_start target="
+        + targetName(captureSettings_.target) + "\n", watchFolder_, "session.txt");
+    recordingKnown_ = false;
+    return true;
+}
+
+void Session::closeWatch(const QString& reason, bool resume)
+{
+    if (watchFolder_.isEmpty()) return;
+    if (watchIntervalOpen_)
+    {
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - watchStart_).count();
+        writer_.logRecord(utcText(std::chrono::system_clock::now()) + " monitoring_stop seconds="
+            + QString::number(seconds, 'f', 3) + " reason=" + reason + "\n", watchFolder_, "session.txt");
+        watchIntervalOpen_ = false;
+    }
+    if (resume) return;
+    const QString folder = std::exchange(watchFolder_, QString{});
+    // The recorder may still be flushing its SER. Its stop record and all
+    // earlier clip outcomes must reach the event writer before finalization.
+    recorder_.afterQueued([this, folder, done = notifications_.reportReady] {
+        writer_.finishReport(folder, [done](QString path, QString error) { if (done) done(path, error); });
+    });
+    writer_.setOutputRoot(eventsRoot());
 }
 
 void Session::setSite(const ObservingSite& site)
@@ -243,7 +296,7 @@ void Session::updateRecording(const FramePtr& frame)
 void Session::beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames)
 {
     RecordingWriter::Start start;
-    start.folder = recordingFolder();
+    start.folder = mode_.load() == Mode::Monitoring ? QDir(watchFolder_).filePath("recordings") : recordingFolder();
     start.stream = streamInfo_;
     {
         std::lock_guard lock(requestMutex_);
@@ -338,6 +391,12 @@ bool Session::start(QString& error, Mode mode)
     lastPreviewTime_ = {};
     (void)previewSlot_.take();
 
+    if (mode == Mode::Monitoring && !openWatch(error))
+    {
+        source_->stop();
+        mode_.store(Mode::Stopped);
+        return false;
+    }
     startClockCheck();
     if (mode == Mode::Monitoring)
     {
@@ -353,7 +412,7 @@ bool Session::start(QString& error, Mode mode)
     return true;
 }
 
-void Session::stop(std::string reason)
+void Session::stop(std::string reason, bool resumeWatch)
 {
     if (!running_)
     {
@@ -384,7 +443,8 @@ void Session::stop(std::string reason)
         tuneWatch_.stopped("the stream stopped");
         post(notifications_.autoTuneChanged);
     }
-    capture_.finishPartial(std::move(reason));
+    capture_.finishPartial(reason);
+    closeWatch(QString::fromStdString(reason), resumeWatch);
     blip_.reset();
     running_ = false;
     mode_.store(Mode::Stopped);
@@ -425,6 +485,17 @@ void Session::applyModeRequest()
         }
     }
     if (!request) return;
+    if (*request && mode_.load() != Mode::Monitoring)
+    {
+        QString error;
+        if (!openWatch(error))
+        {
+            { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
+            if (auto done = notifications_.reportReady) post([done, error] { done({}, error); });
+            post(notifications_.modeChanged);
+            return;
+        }
+    }
     if (recording_)
         endRecording(*request ? "monitoring started" : "monitoring stopped");
     applyManualSave();
@@ -434,6 +505,7 @@ void Session::applyModeRequest()
         std::lock_guard lock(requestMutex_);
         writer_.logSessionStart(streamInfo_, site_, clockRecord_, testingTools_);
     }
+    if (!*request) closeWatch("monitoring stopped");
     mode_.store(*request ? Mode::Monitoring : Mode::Preview);
     { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
     post(notifications_.modeChanged);
@@ -857,6 +929,7 @@ void Session::onEnded()
     applyManualSave();
     endRecording("the source ended");
     capture_.finishPartial("source ended");
+    closeWatch("source ended");
     if (tuneWatch_.busy())
     {
         tuneWatch_.sourceInterrupted("the recording ended");
@@ -877,6 +950,7 @@ void Session::onFailed(const std::string& message)
     applyManualSave();
     endRecording("source failure: " + message);
     capture_.finishPartial("source failure: " + message);
+    closeWatch("source failure: " + QString::fromStdString(message));
     const QString text = QString::fromStdString(message);
     if (notifications_.failed)
     {

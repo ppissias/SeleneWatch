@@ -401,6 +401,7 @@ try {
     # Start Monitoring and inject a bright flash -> verify clip on disk.
     Invoke-UiaClick $monitorBtn "Start Moon monitoring"
     Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Moon monitoring active"
+    $moonEventsDir = Join-Path (Get-ChildItem -LiteralPath $moonEventsDir -Filter "session-*" -Directory | Select-Object -Last 1).FullName "clips"
     Start-Sleep -Milliseconds 700
     Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Moon bright flash"
     Invoke-UiaClick $injectBtn "Inject Moon bright flash"
@@ -424,6 +425,10 @@ try {
     Invoke-UiaClick $stopBtn "Stop Moon stream"
     Wait-Until { $startBtn.Current.IsEnabled } "Moon stream stopped"
 
+    $moonWatch = Split-Path -Parent $moonEventsDir
+    Wait-Until { Test-Path -LiteralPath (Join-Path $moonWatch 'report.html') } "Moon report finalized"
+    $reportLater = Find-UiaElement -Root $mainWin -IdSuffix "deferNightlyReport"
+    Invoke-UiaClick $reportLater "Dismiss finished Moon report"
     $moonDirs = @(Get-ChildItem -Path $moonEventsDir -Directory)
     Assert-True ($moonDirs.Count -ge 2) "Expected >= 2 Moon event clips, found $($moonDirs.Count)"
     $sawMoonDark = $false
@@ -474,7 +479,7 @@ try {
     Wait-Until { $monitorBtn.Current.Name -like "*Stop monitoring*" } "Sky monitoring active"
     Start-Sleep -Milliseconds 800
 
-    $skyEventsDir = Join-Path $TempOut "events\sky"
+    $skyEventsDir = Join-Path (Get-ChildItem (Join-Path $TempOut "events\sky") -Filter "session-*" -Directory | Select-Object -Last 1).FullName "clips"
     Click-ElementAtFraction $previewEl 0.25 0.25
     Select-UiaComboItem -Combo $blipKindCombo -ItemText "Moving streak" -ProcessId $proc.Id
     Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Sky meteor streak"
@@ -648,10 +653,12 @@ try {
         Start-Sleep -Milliseconds 700
         Click-ElementAtFraction $previewEl 0.5 0.5
         Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready on real lunar AVI"
-        $moonCountBeforeReal = @(Get-ChildItem -Path $moonEventsDir -Directory).Count
+        $realWatch = Get-ChildItem -LiteralPath (Join-Path $TempOut "events\moon") -Directory -Filter "session-*" | Sort-Object Name | Select-Object -Last 1
+        $realClips = Join-Path $realWatch.FullName "clips"
         Invoke-UiaClick $injectBtn "Inject blip on real lunar AVI"
         Wait-Until {
-            @(Get-ChildItem -Path $moonEventsDir -Directory).Count -gt $moonCountBeforeReal
+            Get-ChildItem -Path "$realClips\*\event.txt" -File -ErrorAction SilentlyContinue |
+                Select-String -Pattern '^contains_test_signal: yes$' -Quiet
         } "Real lunar AVI blip clip written on disk" -TimeoutMs 15000
         Write-Host "  Real lunar AVI blip clip recorded on disk."
         Invoke-UiaClick $stopBtn "Stop real lunar AVI monitoring"

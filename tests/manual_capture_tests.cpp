@@ -1,6 +1,8 @@
+#include "watch_folders.h"
 #include "event_capture.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
+#include "recording/nightly_report.h"
 #include "recording/output_paths.h"
 #include "session.h"
 
@@ -286,8 +288,37 @@ private slots:
         }
         QCoreApplication::processEvents();
         QCOMPARE(handled.size(),size_t{1}); QVERIFY(!handled[0]);
-        QCOMPARE(QDir(eventsFolder(dir.path(), Target::Moon)).entryList(QDir::Dirs|QDir::NoDotAndDotDot).size(),0);
+        const QString watch = latestWatch(eventsFolder(dir.path(), Target::Moon));
+        QVERIFY(QFileInfo::exists(watch + "/report.html"));
+        QVERIFY(read(watch + "/session.txt").contains(" monitoring_stop "));
+        QVERIFY(read(watch + "/report.html").contains("No saved clips"));
+        QVERIFY(watchClips(eventsFolder(dir.path(), Target::Moon)).isEmpty());
     }
+    void reportReconcilesEachTriggerAndKeepsUnknownCoverage()
+    {
+        QTemporaryDir temp;
+        const QString folder = temp.filePath("sky/session-example");
+        QVERIFY(QDir().mkpath(folder));
+        QFile file(folder + "/candidates.txt");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray start = "2026-11-20T20:30:00.000Z ";
+        file.write(start + "session_start camera=\"A&B <camera>\"\n");
+        // Multiple triggers share one record_id. Only one has a final outcome.
+        for (int index : {10, 11})
+            file.write(start + "candidate_pending trigger_frame_index=" + QByteArray::number(index) + " kind=automatic record_id=shared\n");
+        file.write(start + "trigger_frame_index=10 kind=automatic record_id=shared not_saved=disk reserve\n");
+        file.close();
+        QString error;
+        const QString path = writeNightlyReport(folder, error);
+        QVERIFY2(!path.isEmpty(), qPrintable(error));
+        const auto html = read(path);
+        QVERIFY(html.contains("<strong>2</strong>Automatic candidates"));
+        QVERIFY(html.contains("<strong>2</strong>Unsaved or unresolved triggers"));
+        QVERIFY(html.contains("outcome unknown") && html.contains("disk reserve"));
+        QVERIFY(html.contains("A&amp;B &lt;camera&gt;"));
+        QVERIFY(html.contains("<strong>Unknown</strong>Monitoring time"));
+    }
+
     void nativeManualEvidenceAndRefusedRequestsStayOnRecord()
     {
         for (auto format:{PixelFormat::Mono8,PixelFormat::Mono16,PixelFormat::RGB888})

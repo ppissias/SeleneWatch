@@ -59,6 +59,7 @@ public:
         bool active{false};
         // The folder's name, once made.
         QString name;
+        QString parentFolder;
         std::string sessionMode;
         uint64_t frames{0};
         uint64_t frameLimit{0};
@@ -93,10 +94,14 @@ public:
     void setWriteDelay(std::chrono::milliseconds delay);
     // Waits until everything queued is written and finished.
     void waitIdle();
+    // Run on the writer thread after all preceding recordings have finished.
+    void afterQueued(std::function<void()> callback);
 
 private:
     struct Job
     {
+        uint64_t generation{0};
+        std::function<void()> callback;
         std::optional<Start> start;
         FramePtr frame;
         std::optional<std::string> end;
@@ -106,7 +111,7 @@ private:
 
     void run(std::stop_token stopToken);
     // Writer thread. Stops taking frames with this reason; the end follows the queue.
-    void endItself(const std::string& reason);
+    void endItself(uint64_t generation, const std::string& reason);
 
     Ended ended_;
     mutable std::mutex mutex_;
@@ -115,6 +120,7 @@ private:
     std::deque<Job> queue_;
     size_t queuedBytes_{0};
     size_t allowance_{0};
+    uint64_t generation_{0}; // The latest start; older SERs may still be draining.
     bool accepting_{false};
     bool busy_{false};
     Status status_;

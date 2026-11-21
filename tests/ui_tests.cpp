@@ -1,3 +1,4 @@
+#include "watch_folders.h"
 #include "detection_panel.h"
 #include "display_panel.h"
 #include "camera_panel.h"
@@ -222,7 +223,7 @@ void UiTest::testingToolsAndConnectAtStartup()
         window.setTestingTools(false); // refused while running
         QVERIFY(tools->isChecked());
         window.findChild<QPushButton*>("monitoringButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(dir.path(), Target::Moon) + "/candidates.txt").contains(" testing_tools=\"on\" "), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(text(latestWatch(eventsFolder(dir.path(), Target::Moon)) + "/candidates.txt").contains(" testing_tools=\"on\" "), 3000);
         stop->click();
         QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
         // Off again: the synthetic source goes, and nothing is chosen.
@@ -672,12 +673,12 @@ void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
     const QString moonDir=eventsFolder(dir.path(),Target::Moon);
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         int complete=0;
-        for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+        for (const auto& folder:watchClips(moonDir))
             complete+=text(moonDir+"/"+folder+"/event.txt").contains("complete: yes");
         return complete>=2;
     })(),5000);
     int before=0,after=0;
-    for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    for (const auto& folder:watchClips(moonDir))
     {
         const auto note=text(moonDir+"/"+folder+"/event.txt");
         if (note.contains("pixel_format: Mono8"))
@@ -779,12 +780,12 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     const QString moonDir=eventsFolder(dir.path(),Target::Moon);
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         int complete=0;
-        for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+        for (const auto& folder:watchClips(moonDir))
             complete+=text(moonDir+"/"+folder+"/event.txt").contains("complete: yes");
         return complete>=2;
     })(),5000);
     int old=0,changed=0;
-    for (const auto& folder:QDir(moonDir).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
+    for (const auto& folder:watchClips(moonDir))
     {
         const auto note=text(moonDir+"/"+folder+"/event.txt");
         if (note.contains("pixel_format: Mono16")) { QVERIFY(note.contains("collection_end: monitoring stopped")); QVERIFY(note.contains("gain: 12\n")); ++old; }
@@ -829,7 +830,7 @@ void UiTest::saveARecordingManuallyThroughTheWindow()
     window.findChild<QPushButton*>("monitoringButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QVERIFY(save->isEnabled()); save->click();
-    const QString moonOutput=eventsFolder(output,Target::Moon);
+    const QString moonOutput=latestWatch(eventsFolder(output,Target::Moon))+"/clips";
     QString folder;
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
         for (const auto& name:QDir(moonOutput).entryList(QDir::Dirs|QDir::NoDotAndDotDot))
@@ -1527,19 +1528,20 @@ void UiTest::siteAndRecordingControls()
         QTRY_VERIFY_WITH_TIMEOUT(!record->isEnabled(), 3000);
     };
     recordInMonitoring();
-    QCOMPARE(QDir(recordingsFolder(directory.path())).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), qsizetype{2});
+    QCOMPARE(QDir(recordingsFolder(directory.path())).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), qsizetype{1});
+    QCOMPARE(QDir(latestWatch(eventsFolder(directory.path(), Target::Moon)) + "/recordings").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), qsizetype{1});
 
     // A chosen output folder routes recordings, events/moon, and events/sky underneath it.
     QTemporaryDir elsewhere;
     const QString chosen = QDir(elsewhere.path()).filePath("long nights");
     QVERIFY(window.applyOutputFolder(chosen, error));
     recordInMonitoring();
-    const QStringList made = QDir(recordingsFolder(chosen)).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList made = QDir((latestWatch(eventsFolder(chosen, Target::Moon)) + "/recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     QCOMPARE(made.size(), qsizetype{1});
-    QVERIFY(QFile::exists(QDir(QDir(recordingsFolder(chosen)).filePath(made.front())).filePath("recording.ser")));
-    const QString moonLog = eventsFolder(chosen, Target::Moon) + "/candidates.txt";
+    QVERIFY(QFile::exists(QDir(QDir((latestWatch(eventsFolder(chosen, Target::Moon)) + "/recordings")).filePath(made.front())).filePath("recording.ser")));
+    const QString moonLog = latestWatch(eventsFolder(chosen, Target::Moon)) + "/candidates.txt";
     QTRY_VERIFY_WITH_TIMEOUT(text(moonLog).contains(" recording_start name=" + made.front() + " "), 3000);
-    QVERIFY(text(moonLog).contains("folder=\"" + QDir::toNativeSeparators(QDir::cleanPath(recordingsFolder(chosen))) + "\""));
+    QVERIFY(text(moonLog).contains("folder=\"" + QDir::toNativeSeparators(QDir::cleanPath((latestWatch(eventsFolder(chosen, Target::Moon)) + "/recordings"))) + "\""));
 }
 
 // The release (year.month-number) is in the title and the About text, with
@@ -1726,7 +1728,13 @@ void UiTest::nightScheduleAndExposureFollower()
         QTRY_COMPARE_WITH_TIMEOUT(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{500}, 5000);
         QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
         window.findChild<QPushButton*>("stopButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(directory.path(), Target::Sky) + "/candidates.txt").contains(" exposure_change exposure_ms=1 to 0.5 "), 3000);
+        const QDir targetDir(eventsFolder(directory.path(), Target::Sky));
+        QCOMPARE(targetDir.entryList({"session-*"}, QDir::Dirs).size(), qsizetype{1});
+        const QString watch = latestWatch(targetDir.path());
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(watch + "/report.html"), 5000);
+        QVERIFY(text(watch + "/candidates.txt").contains(" exposure_change exposure_ms=1 to 0.5 "));
+        QCOMPARE(text(watch + "/session.txt").count(" monitoring_start "), 2);
+        QCOMPARE(text(watch + "/session.txt").count(" monitoring_stop "), 2);
     }
 }
 
@@ -1897,7 +1905,7 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(1);
         inject->click();
         QString clipFolder;
-        const QString moonOut = eventsFolder(output.path(), Target::Moon);
+        const QString moonOut = latestWatch(eventsFolder(output.path(), Target::Moon))+"/clips";
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
             const auto dirs = QDir(moonOut).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
             for (const auto& dir : dirs)
@@ -2010,7 +2018,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         inject->click();
         QString folder;
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
-            QDir events(eventsFolder(QDir(output.path()).filePath("events"), Target::Moon));
+            QDir events(latestWatch(eventsFolder(QDir(output.path()).filePath("events"), Target::Moon))+"/clips");
             for (const auto& entry : events.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
                 if (text(events.filePath(entry + "/event.txt")).contains("complete: yes")) { folder = events.filePath(entry); return true; }
             return false;
@@ -2707,7 +2715,7 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
     injectBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(
-        QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
+        QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
         12000);
 
     // Enable darkening and inject a Dark transit across the sunlit Moon.
@@ -2717,21 +2725,21 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     clickFramePixel(260, 240);
     kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::DarkTransit)));
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
-    const int moonDirsBeforeDark = QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
+    const int moonDirsBeforeDark = QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
     injectBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(
-        QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > moonDirsBeforeDark,
+        QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > moonDirsBeforeDark,
         12000);
     stopBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
 
     // Verify both Moon bright and dark clips exist on disk with valid evidence & overview/GIF.
-    const QStringList moonClips = QDir(QDir(dir.path()).filePath("events/moon")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList moonClips = QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     QVERIFY(moonClips.size() >= 2);
     bool sawMoonRise = false, sawMoonDark = false;
     for (const QString& sub : moonClips)
     {
-        const QDir clipDir(QDir(QDir(dir.path()).filePath("events/moon")).filePath(sub));
+        const QDir clipDir(QDir(latestWatch(QDir(dir.path()).filePath("events/moon")) + "/clips").filePath(sub));
         // EventWriter writes event.txt/ser/PNGs and finally 04_event_preview.gif asynchronously.
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
         const QString ev = text(clipDir.filePath("event.txt"));
@@ -2765,7 +2773,7 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
     injectBtn->click();
     QTest::qWait(500);
-    QCOMPARE(QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
+    QCOMPARE(QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 
     // Moving streak (meteor) in the upper sky -> recorded on disk.
     clickFramePixel(140, 120);
@@ -2773,27 +2781,27 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
     injectBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(
-        QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
+        QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() >= 1,
         12000);
 
     // Lightning (no pixel selection needed) -> recorded on disk.
     kindCombo->setCurrentIndex(kindCombo->findData(static_cast<int>(BlipKind::Lightning)));
     QTRY_VERIFY_WITH_TIMEOUT(injectBtn->isEnabled(), 3000);
-    const int skyDirsBeforeLightning = QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
+    const int skyDirsBeforeLightning = QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size();
     injectBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(
-        QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > skyDirsBeforeLightning,
+        QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() > skyDirsBeforeLightning,
         12000);
 
     stopBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(!stopBtn->isEnabled(), 5000);
 
-    const QStringList skyClips = QDir(QDir(dir.path()).filePath("events/sky")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList skyClips = QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     QVERIFY(skyClips.size() >= 2);
     bool sawMeteor = false, sawLightning = false;
     for (const QString& sub : skyClips)
     {
-        const QDir clipDir(QDir(QDir(dir.path()).filePath("events/sky")).filePath(sub));
+        const QDir clipDir(QDir(latestWatch(QDir(dir.path()).filePath("events/sky")) + "/clips").filePath(sub));
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(clipDir.filePath("04_event_preview.gif")), 10000);
         const QString ev = text(clipDir.filePath("event.txt"));
         QVERIFY(ev.contains("mode: sky"));
@@ -2804,7 +2812,7 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
     }
     QVERIFY2(sawMeteor, "Expected Sky meteor streak clip on disk");
     QVERIFY2(sawLightning, "Expected Sky lightning clip on disk");
-    QVERIFY(text(QDir(dir.path()).filePath("events/sky/candidates.txt")).contains("mode=sky"));
+    QVERIFY(text(latestWatch(eventsFolder(dir.path(), Target::Sky)) + "/candidates.txt").contains("mode=sky"));
 }
 
 void UiTest::rawSerNeedsConfirmationAndIsNotRemembered()

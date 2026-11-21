@@ -1,3 +1,5 @@
+#include "watch_folders.h"
+#include <future>
 #include "clock_check.h"
 #include "recording/clip_overview.h"
 #include "recording/frame_timing.h"
@@ -156,6 +158,7 @@ class SessionRecordTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void consecutiveRecordingsKeepTheirOwnWatch();
     void aScheduledRecordingTakesEveryFrameInItsSpan();
     void aRecordingStartedByTheObserverIsComplete();
     void aSlowDiskStopsTheRecordingWithoutLosingFrames();
@@ -169,6 +172,42 @@ private slots:
 };
 
 // Done-when items 1 and 2: by frame time, on a played file, with a clip in it.
+void SessionRecordTest::consecutiveRecordingsKeepTheirOwnWatch()
+{
+    QTemporaryDir temp;
+    std::vector<RecordingWriter::Status> ended;
+    bool secondStillActive = false;
+    // The end callback runs outside the writer's lock, so it may read the
+    // writer's status; it reaches the writer through a pointer set after
+    // construction (a lambda cannot name the object it initializes).
+    RecordingWriter* self = nullptr;
+    RecordingWriter writer([&](const RecordingWriter::Status& status) {
+        ended.push_back(status);
+        if (ended.size() == 1) secondStillActive = self->status().active;
+    });
+    self = &writer;
+    std::promise<void> release;
+    auto gate = release.get_future();
+    writer.afterQueued([&] { gate.wait(); });
+    std::mt19937 random(7);
+    RecordingWriter::Start start;
+    start.folder = temp.filePath("first/recordings");
+    const bool first = writer.start(start, makeFrame(1, random));
+    writer.stop("first watch ended");
+    start.folder = temp.filePath("second/recordings");
+    const bool second = writer.start(start, makeFrame(2, random));
+    writer.stop("second watch ended");
+    release.set_value();
+    writer.waitIdle();
+    QVERIFY(first && second);
+    QCOMPARE(ended.size(), size_t{2});
+    QVERIFY(secondStillActive);
+    QCOMPARE(ended[0].parentFolder, temp.filePath("first/recordings"));
+    QCOMPARE(ended[1].parentFolder, temp.filePath("second/recordings"));
+    for (const auto& result : ended)
+        QVERIFY(contents(QDir(result.parentFolder).filePath(result.name + "/recording.txt")).contains("complete: yes"));
+}
+
 void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
 {
     QTemporaryDir directory;
@@ -196,7 +235,7 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
     session.recordingWriter().waitIdle();
     QVERIFY(!session.schedule());
 
-    const QDir folder = recordingFolder(output);
+    const QDir folder = recordingFolder(latestWatch(eventsFolder(output, Target::Moon)));
     QVERIFY(folder.exists());
     const QString note = contents(folder.filePath("recording.txt"));
     QVERIFY2(note.contains("started_by: a schedule from ") && note.contains("first_frame_index: 40\n")
@@ -218,21 +257,25 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
         QCOMPARE(recorded.data, played.data);
         QVERIFY(reader.frameTime(i) == timeOf(static_cast<uint64_t>(40 + i)));
     }
+    const QString report = latestWatch(eventsFolder(output, Target::Moon)) + "/report.html";
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(report), 10000);
+    QVERIFY(contents(report).contains("recordings/" + folder.dirName() + "/recording.ser"));
+    QVERIFY(contents(report).contains("46 frames"));
     const QStringList frames = contents(folder.filePath("frames.txt")).split('\n', Qt::SkipEmptyParts);
     QCOMPARE(frames.size(), qsizetype{46});
     QVERIFY(frames.front().startsWith("0 40 ") && frames.back().startsWith("45 85 "));
 
-    const QString moonEvents = eventsFolder(output, Target::Moon);
+    const QString moonEvents = latestWatch(eventsFolder(output, Target::Moon));
     QTRY_VERIFY2_WITH_TIMEOUT(([&] {
         const QString log = contents(QDir(moonEvents).filePath("candidates.txt"));
         return log.contains(" recording_start name=" + folder.dirName() + " first_frame_index=40")
             && log.contains(" recording_stop name=" + folder.dirName() + " frames=46");
     })(), qPrintable(contents(QDir(moonEvents).filePath("candidates.txt"))), 10000);
     // The flash on frame 60 made a clip that names the recording.
-    const QStringList clips = QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList clips = QDir(moonEvents + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     bool named = false;
     for (const QString& clip : clips)
-        named = named || contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("during_recording: " + folder.dirName() + "\n");
+        named = named || contents(QDir(QDir(moonEvents + "/clips").filePath(clip)).filePath("event.txt")).contains("during_recording: " + folder.dirName() + "\n");
     QVERIFY(named);
 }
 
@@ -260,7 +303,7 @@ void SessionRecordTest::aRecordingStartedByTheObserverIsComplete()
     session.stop();
     session.recordingWriter().waitIdle();
     QTRY_VERIFY_WITH_TIMEOUT(changes >= 2, 3000);
-    const QString note = contents(recordingFolder(output).filePath("recording.txt"));
+    const QString note = contents(recordingFolder(latestWatch(eventsFolder(output, Target::Moon))).filePath("recording.txt"));
     QVERIFY2(note.contains("started_by: the observer\n") && note.contains("ended: stopped by the observer\n")
         && note.contains("dropped_frame_gaps: 0 missing_frames=0\n") && note.endsWith("complete: yes\n"), qPrintable(note));
     // Recording needs Monitoring.
@@ -444,20 +487,20 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     session.stop();
     session.recordingWriter().waitIdle();
 
-    const QString moonEvents = eventsFolder(output, Target::Moon);
+    const QString moonEvents = latestWatch(eventsFolder(output, Target::Moon));
     QTRY_VERIFY2_WITH_TIMEOUT(([&] {
         return contents(QDir(moonEvents).filePath("candidates.txt"))
             .contains(" observer=\"A. Observer\" site=\"Test field\" latitude_deg=37.98000 longitude_deg=23.73000 height_m=100 telescope=\"C9.25\"");
     })(), qPrintable(contents(QDir(moonEvents).filePath("candidates.txt"))), 10000);
-    const QDir folder = recordingFolder(output);
+    const QDir folder = recordingFolder(latestWatch(eventsFolder(output, Target::Moon)));
     const QString note = contents(folder.filePath("recording.txt"));
     QVERIFY(note.contains("observer: A. Observer\n") && note.contains("image_scale_arcsec_per_pixel: 0.329\n"));
     QFile ser(folder.filePath("recording.ser"));
     QVERIFY(ser.open(QIODevice::ReadOnly));
     QCOMPARE(QByteArray(ser.read(178).constData() + 122), QByteArray("C9.25"));
     QTRY_VERIFY_WITH_TIMEOUT(([&] {
-        for (const QString& clip : QDir(moonEvents).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
-            if (contents(QDir(QDir(moonEvents).filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n"))
+        for (const QString& clip : QDir(moonEvents + "/clips").entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            if (contents(QDir(QDir(moonEvents + "/clips").filePath(clip)).filePath("event.txt")).contains("telescope: C9.25\n"))
                 return true;
         return false;
     })(), 10000);

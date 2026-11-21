@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "recording/nightly_report.h"
+#include <QtCore/QDebug>
 #include "recording/output_paths.h"
 
 #include <QtCore/QDir>
@@ -11,6 +13,13 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    const QStringList args = app.arguments();
+    if (args.size() == 3 && args[1] == "--nightly-report")
+    {
+        QString error;
+        if (writeNightlyReport(args[2], error).isEmpty()) { qCritical().noquote() << error; return 1; }
+        return 0;
+    }
     // These names identify the persistent Qt settings for camera, detection and display preferences.
     // SELENEWATCH_SETTINGS_NAME gives a run settings of its own: the package
     // check starts the packaged program without the observer's settings, so

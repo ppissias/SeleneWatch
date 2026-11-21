@@ -1,3 +1,4 @@
+#include "watch_folders.h"
 #include "tests/detector_observation.h"
 #include "event_capture.h"
 #include "blip_injector.h"
@@ -2396,13 +2397,13 @@ void SessionTest::serFileThroughSessionWritesAClip()
     QVERIFY(text.contains("trigger: onset_frame_index=20 trigger_frame_index=21 "));
     QVERIFY(text.trimmed().endsWith("complete: yes"));
 
-    const QStringList lines = candidateLines(eventsFolder(root, Target::Moon));
+    const QStringList lines = candidateLines(latestWatch(eventsFolder(root, Target::Moon)));
     QCOMPARE(lines.size(), static_cast<qsizetype>(2));
     QVERIFY2(lines[0].contains(" session_start camera=\"TestCam\" playback=\"whole file once, frames 0 to 59\" observer="),
         qPrintable(lines[0]));
     QVERIFY2(lines[0].endsWith(" source=\"" + path + "\""), qPrintable(lines[0]));
     QVERIFY(lines[1].startsWith(utcText(triggerTime) + " onset_frame_index=20 trigger_frame_index=21 "));
-    QVERIFY(lines[1].endsWith("clip=" + utcStamp(triggerTime)));
+    QVERIFY(lines[1].endsWith("clip=clips/" + utcStamp(triggerTime)));
 }
 
 // A flash near the end: the file ends while its clip is still collecting.
@@ -2495,8 +2496,8 @@ void SessionTest::loopJumpFiresNoCandidate()
 
     QCOMPARE(candidates, 0);
     QVERIFY(results.empty());
-    QVERIFY(clipFolders(eventsFolder(root, Target::Moon)).isEmpty());
-    const QStringList lines = candidateLines(eventsFolder(root, Target::Moon));
+    QVERIFY(watchClips(eventsFolder(root, Target::Moon)).isEmpty());
+    const QStringList lines = candidateLines(latestWatch(eventsFolder(root, Target::Moon)));
     QCOMPARE(lines.size(), static_cast<qsizetype>(1));
     QVERIFY(lines[0].contains(" session_start "));
 }
@@ -2637,7 +2638,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
             QCOMPARE(frame.data[0], 10);
         }
     }
-    QVERIFY(candidateLines(eventsFolder(root, Target::Moon)).back().contains("contains_test_signal=yes"));
+    QVERIFY(candidateLines(latestWatch(eventsFolder(root, Target::Moon))).back().contains("contains_test_signal=yes"));
     QVERIFY(original.open(QIODevice::ReadOnly));
     QCOMPARE(original.readAll(), originalBytes);
 }

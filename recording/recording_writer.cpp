@@ -52,6 +52,7 @@ struct RecordingWriter::Open
 {
     explicit Open(bool hostClock) : timing(hostClock) {}
     RecordingWriter::Start start;
+    uint64_t generation{0};
     QString folder;
     QFile serFile;
     std::unique_ptr<SerWriter> ser;
@@ -90,8 +91,10 @@ bool RecordingWriter::start(Start start, const FramePtr& first)
     status_ = {};
     status_.active = true;
     status_.sessionMode = start.sessionMode;
+    status_.parentFolder = start.folder;
     status_.frameLimit = start.maxFrames;
     Job job;
+    job.generation = ++generation_;
     job.start = std::move(start);
     job.frame = first;
     queuedBytes_ += first->data.capacity();
@@ -135,10 +138,10 @@ void RecordingWriter::stop(const std::string& reason)
     ready_.notify_one();
 }
 
-void RecordingWriter::endItself(const std::string& reason)
+void RecordingWriter::endItself(uint64_t generation, const std::string& reason)
 {
     std::lock_guard lock(mutex_);
-    if (!accepting_) return;
+    if (!accepting_ || generation != generation_) return;
     accepting_ = false;
     Job end;
     end.end = reason;
@@ -167,6 +170,15 @@ void RecordingWriter::setWriteDelay(std::chrono::milliseconds delay)
 {
     std::lock_guard lock(mutex_);
     delay_ = delay;
+}
+
+void RecordingWriter::afterQueued(std::function<void()> callback)
+{
+    std::lock_guard lock(mutex_);
+    Job job;
+    job.callback = std::move(callback);
+    queue_.push_back(std::move(job));
+    ready_.notify_one();
 }
 
 void RecordingWriter::waitIdle()
@@ -211,9 +223,19 @@ void RecordingWriter::run(std::stop_token stopToken)
         }
         {
             std::lock_guard lock(mutex_);
-            status_.active = false;
-            status_.endReason = reason;
-            ended = status_;
+            ended.endReason = reason;
+            if (open)
+            {
+                ended.sessionMode = open->start.sessionMode;
+                ended.parentFolder = open->start.folder;
+                ended.name = open->folder.isEmpty() ? QString() : QDir(open->folder).dirName();
+                ended.frames = open->position;
+                ended.bytes = open->bytes;
+                ended.streamSeconds = std::chrono::duration<double>(open->lastTime - open->firstTime).count();
+                ended.frameLimit = open->start.maxFrames;
+                ended.megabytesPerSecond = open->writeSeconds > 0 ? static_cast<double>(open->bytes) / open->writeSeconds / 1e6 : 0;
+                if (generation_ == open->generation) status_ = ended;
+            }
         }
         open.reset();
         if (ended_) ended_(ended);
@@ -243,6 +265,7 @@ void RecordingWriter::run(std::stop_token stopToken)
             freeSpace = freeSpace_;
         }
 
+        if (job.callback) { job.callback(); continue; }
         if (job.end)
         {
             finish(*job.end);
@@ -253,6 +276,7 @@ void RecordingWriter::run(std::stop_token stopToken)
             // A new recording; one left open had its end queued before.
             if (open) finish("a new recording started");
             open = std::make_unique<Open>(!job.start->stream.sdkVersion.empty());
+            open->generation = job.generation;
             open->start = *job.start;
             const Frame& first = *job.frame;
             QString error;
@@ -268,7 +292,7 @@ void RecordingWriter::run(std::stop_token stopToken)
                 || !open->ser->start(first, open->start.stream.camera, error, false, open->start.site.telescope))
             {
                 open->failed = true;
-                endItself(QString("the recording could not be created: %1").arg(error.isEmpty() ? "file error" : error).toStdString());
+                endItself(open->generation, QString("the recording could not be created: %1").arg(error.isEmpty() ? "file error" : error).toStdString());
                 continue;
             }
             QTextStream out(&open->noteFile);
@@ -291,7 +315,7 @@ void RecordingWriter::run(std::stop_token stopToken)
             open->nextUpdate = std::chrono::steady_clock::now() + kUpdateInterval;
             {
                 std::lock_guard lock(mutex_);
-                status_.name = dir.dirName();
+                if (generation_ == open->generation) status_.name = dir.dirName();
             }
         }
         if (!open || open->failed) continue;
@@ -304,7 +328,7 @@ void RecordingWriter::run(std::stop_token stopToken)
         if (!open->ser->append(frame, error))
         {
             open->failed = true;
-            endItself(QString("write error: %1").arg(error).toStdString());
+            endItself(open->generation, QString("write error: %1").arg(error).toStdString());
             continue;
         }
         QTextStream lines(&open->framesFile);
@@ -332,10 +356,13 @@ void RecordingWriter::run(std::stop_token stopToken)
         open->writeSeconds += std::chrono::duration<double>(now - writeStarted).count();
         {
             std::lock_guard lock(mutex_);
-            status_.frames = open->position;
-            status_.bytes = open->bytes;
-            status_.streamSeconds = std::chrono::duration<double>(open->lastTime - open->firstTime).count();
-            status_.megabytesPerSecond = open->writeSeconds > 0 ? static_cast<double>(open->bytes) / open->writeSeconds / 1e6 : 0;
+            if (generation_ == open->generation)
+            {
+                status_.frames = open->position;
+                status_.bytes = open->bytes;
+                status_.streamSeconds = std::chrono::duration<double>(open->lastTime - open->firstTime).count();
+                status_.megabytesPerSecond = open->writeSeconds > 0 ? static_cast<double>(open->bytes) / open->writeSeconds / 1e6 : 0;
+            }
         }
 
         // Once a second: a readable file so far, and room left on the drive.
@@ -345,13 +372,13 @@ void RecordingWriter::run(std::stop_token stopToken)
             if (!open->ser->updateCount(error) || !open->serFile.flush() || !open->framesFile.flush())
             {
                 open->failed = true;
-                endItself(QString("write error: %1").arg(error.isEmpty() ? "flush failed" : error).toStdString());
+                endItself(open->generation, QString("write error: %1").arg(error.isEmpty() ? "flush failed" : error).toStdString());
                 continue;
             }
             const uint64_t reserve = open->start.diskReserveBytes;
             const auto free = reserve > 0 && freeSpace ? freeSpace(open->folder) : std::nullopt;
             if (free && *free < reserve)
-                endItself(QString("disk reserve: %1 GiB free, below the reserve of %2 GiB")
+                endItself(open->generation, QString("disk reserve: %1 GiB free, below the reserve of %2 GiB")
                     .arg(static_cast<double>(*free) / kGiB, 0, 'f', 1).arg(static_cast<double>(reserve) / kGiB, 0, 'f', 0).toStdString());
         }
     }

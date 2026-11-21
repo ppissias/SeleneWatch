@@ -154,6 +154,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         updateControls();
         showMessage(saved ? "Manual capture marked; collecting following frames." : "Manual capture unavailable: no frames acquired.",5000);
     };
+    notifications.reportReady = [this](QString path, QString error) {
+        if (!error.isEmpty()) { showMessage(error); return; }
+        reportOffer_->setProperty("reportPath", path);
+        reportOffer_->show();
+        showMessage("Monitoring finished. Your nightly report is ready.");
+    };
     notifications.clipWritten = [this](const ClipWriteResult& result) { onClipWritten(result); };
     notifications.ended = [this] { onPlaybackEnded(); };
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
@@ -785,8 +791,9 @@ void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
         // A camera's settings are fixed while Monitoring: the clip in hand is
         // written and Monitoring starts again, with the new settings read back.
         bufferReadoutTimer_->stop();
-        session_->stop("the exposure follows the sky");
+        session_->stop("the exposure follows the sky", true);
         startStream(Session::Mode::Monitoring);
+        session_->finishInterruptedWatch();
     }
     else onApplyLiveCamera();
 }
@@ -1185,6 +1192,44 @@ void MainWindow::setupSessionMenu()
     folder->setObjectName("outputFolderAction");
     connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
     menu->addSeparator();
+    auto* lastReport = menu->addAction("Open last nightly report");
+    lastReport->setToolTip("Open the most recently finished monitoring report in your browser.");
+    connect(lastReport, &QAction::triggered, this, [this] {
+        QFileInfo newest;
+        for (Target target : {Target::Moon, Target::Sky})
+        {
+            const QDir parent(eventsFolder(session_->outputRoot(), target));
+            for (const auto& watch : parent.entryList({"session-*"}, QDir::Dirs, QDir::Name | QDir::Reversed))
+            {
+                const QFileInfo file(parent.filePath(watch + "/report.html"));
+                if (!file.isFile()) continue;
+                if (!newest.exists() || file.lastModified() > newest.lastModified()) newest = file;
+                break;
+            }
+        }
+        if (!newest.exists() || !QDesktopServices::openUrl(QUrl::fromLocalFile(newest.absoluteFilePath())))
+            showMessage("No nightly report could be opened in the selected output folder.");
+    });
+    reportOffer_ = new QWidget(this);
+    auto* reportRow = new QHBoxLayout(reportOffer_);
+    reportRow->setContentsMargins(0, 0, 0, 0);
+    auto* openReport = new QPushButton("Open nightly report", reportOffer_);
+    auto* later = new QPushButton("Later", reportOffer_);
+    openReport->setObjectName("openNightlyReport");
+    later->setObjectName("deferNightlyReport");
+    openReport->setToolTip("Open the finished monitoring report in your browser.");
+    later->setToolTip("Dismiss this offer. The report remains in the Session menu.");
+    reportRow->addWidget(openReport);
+    reportRow->addWidget(later);
+    statusBar()->addPermanentWidget(reportOffer_);
+    reportOffer_->hide();
+    connect(openReport, &QPushButton::clicked, this, [this] {
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(reportOffer_->property("reportPath").toString())))
+            showMessage("The nightly report could not be opened in the browser.");
+    });
+    connect(openReport, &QPushButton::clicked, reportOffer_, &QWidget::hide);
+    connect(later, &QPushButton::clicked, reportOffer_, &QWidget::hide);
+
     auto* events = menu->addAction("Open the output folder");
     events->setObjectName("openEventsAction");
     events->setToolTip("Events (moon, sky), recordings, and time-lapses");
@@ -1697,7 +1742,7 @@ void MainWindow::onRecordingChanged()
     else if (status.active)
         showMessage(QString("Recording %1to %2.")
             .arg(status.frameLimit > 0 ? QString("up to %1 frames ").arg(status.frameLimit) : QString("every frame "))
-            .arg(QDir::toNativeSeparators(session_->recordingFolder())));
+            .arg(QDir::toNativeSeparators(status.parentFolder)));
     updateControls();
     updateStatusLabel();
 }

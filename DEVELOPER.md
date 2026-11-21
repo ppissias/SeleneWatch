@@ -117,6 +117,12 @@ See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the license analysis 
 
 ## 5. Running tests and manual probes
 
+### Monitoring folders and nightly reports
+
+The Session allocates a unique watch directory on arming. The event writer puts journals at its root and clip folders under the clips directory. The recorder uses the watch's recordings directory during Monitoring and the output root's recordings directory during Preview. Report finalization follows both writers' queued work. Monitoring boundaries in session.txt use host UTC, with elapsed time measured on the steady clock. Candidate timestamps use source UTC, including during replay.
+
+To regenerate a report without starting acquisition, run `SeleneWatch.exe --nightly-report "<watch folder>"` with the usual Qt runtime. The generator reads the journal and sidecars and atomically replaces report.html. Legacy clips can be grouped under clips with their original candidates.txt at the watch root. Missing stop times appear as unknown coverage. [Report generator](recording/nightly_report.cpp)
+
 ### Automated suite (`CTest`)
 
 With Qt's `bin` directory on `PATH` and `QT_PLUGIN_PATH` set:

@@ -65,6 +65,7 @@ public:
         std::function<void(const TimelapseFinishResult&)> timeLapseFinished;
         // Feature-26: an auto-tune measurement changed. Read autoTuneStatus().
         std::function<void()> autoTuneChanged;
+        std::function<void(QString path, QString error)> reportReady;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -101,7 +102,8 @@ public:
     [[nodiscard]] bool modeChangePending() const;
 
     // Stops the source and hands off a clip still being collected. Safe when stopped.
-    void stop(std::string reason = "stopped");
+    void stop(std::string reason = "stopped", bool resumeWatch = false);
+    void finishInterruptedWatch() { if (!running_) closeWatch("camera restart failed"); }
 
     // Context thread. One request at a time, while running only. Settings
     // are copied; later control edits do not change an active injection.
@@ -135,9 +137,9 @@ public:
     // Feature-17. Context thread, while stopped only. Updates the single
     // output root used for events/<mode>/, recordings/, and timelapses/.
     void setOutputRoot(const QString& outputRoot);
-    // Where the next recording goes (<outputRoot>/recordings).
+    // Standalone Preview recordings. Monitoring uses the active watch.
     [[nodiscard]] QString recordingFolder() const;
-    // Where events and candidates.txt go for the active target (<outputRoot>/events/<mode>).
+    // Parent of the monitoring watch folders for the active target.
     [[nodiscard]] QString eventsRoot() const;
     // Where time-lapses go (<outputRoot>/timelapses).
     [[nodiscard]] QString timelapsesFolder() const;
@@ -214,6 +216,12 @@ private:
     void post(std::function<void()> call);
     void applyManualSave();
     void applyModeRequest();
+    bool openWatch(QString& error);
+    void closeWatch(const QString& reason, bool resume = false);
+    // Owned by the source thread during acquisition, otherwise by its caller.
+    QString watchFolder_;
+    bool watchIntervalOpen_{false};
+    std::chrono::steady_clock::time_point watchStart_{};
     // Source thread: starts, feeds and ends the continuous recording.
     void updateRecording(const FramePtr& frame);
     void beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames = 0);

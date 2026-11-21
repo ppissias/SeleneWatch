@@ -58,7 +58,7 @@ add_library(selenewatch_core STATIC
     cameras/playerone_source.cpp cameras/playerone_sdk.cpp cameras/touptek_source.cpp cameras/touptek_sdk.cpp
     recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
-    recording/metadata_text.cpp recording/output_paths.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
+    recording/metadata_text.cpp recording/output_paths.cpp recording/nightly_report.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
     timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
     timelapse/video_exporter.cpp timelapse/timelapse_session.cpp
     detection_mask.cpp detection_profiles.cpp sky_schedule.cpp sky_exposure.cpp auto_tune.cpp auto_tune_watch.cpp site_presets.cpp
