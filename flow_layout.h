@@ -5,9 +5,10 @@
 
 // Lays its items out left to right, like words in a paragraph: an item that
 // does not fit on the line starts the next one. Each item gets its preferred
-// size, and items on a line are centred on it. The minimum width is that of
-// the widest item, so a narrow window wraps the items instead of squeezing
-// their text (Feature-23). Hidden items take no space.
+// size, and items on a line are centred on it; the first item on a line that
+// expands horizontally also takes the line's spare width. The minimum width
+// is the widest item's minimum, so a narrow window wraps the items instead of
+// squeezing their text (Feature-23). Hidden items take no space.
 class FlowLayout final : public QLayout
 {
 public:

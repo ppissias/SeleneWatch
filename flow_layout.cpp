@@ -33,7 +33,7 @@ QSize FlowLayout::minimumSize() const
 {
     QSize size;
     for (const QLayoutItem* item : items_)
-        if (!item->isEmpty()) size = size.expandedTo(item->minimumSize().expandedTo(item->sizeHint()));
+        if (!item->isEmpty()) size = size.expandedTo(item->minimumSize());
     const QMargins margins = contentsMargins();
     return size + QSize(margins.left() + margins.right(), margins.top() + margins.bottom());
 }
@@ -70,6 +70,10 @@ int FlowLayout::arrange(const QRect& rect, bool apply) const
     const auto finishLine = [&] {
         if (apply)
         {
+            // The line's spare width goes to its first item that expands.
+            const auto grows = std::find_if(line.begin(), line.end(),
+                [](const auto& placed) { return placed.first->expandingDirections() & Qt::Horizontal; });
+            if (grows != line.end()) grows->second.rwidth() += std::max(0, area.width() - lineWidth);
             int x = area.x();
             for (const auto& [item, size] : line)
             {
@@ -84,7 +88,9 @@ int FlowLayout::arrange(const QRect& rect, bool apply) const
     for (QLayoutItem* item : items_)
     {
         if (item->isEmpty()) continue;
-        const QSize size = item->sizeHint().expandedTo(item->minimumSize());
+        QSize size = item->sizeHint().expandedTo(item->minimumSize());
+        // An item wider than the whole line is narrowed, down to its minimum.
+        size.setWidth(std::max(std::min(size.width(), area.width()), item->minimumSize().width()));
         const int needed = line.empty() ? size.width() : lineWidth + horizontalSpacing_ + size.width();
         if (!line.empty() && needed > area.width()) finishLine();
         lineWidth = line.empty() ? size.width() : lineWidth + horizontalSpacing_ + size.width();

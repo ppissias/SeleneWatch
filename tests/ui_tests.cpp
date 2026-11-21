@@ -1041,6 +1041,17 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
                 problems << where + problem;
         }
     }
+    // The window itself can be made well narrower than a laptop screen, for
+    // either target: it can be resized in width, not only in height.
+    for (const Target target : {Target::Moon, Target::Sky})
+    {
+        window.findChild<DetectionPanel*>()->targetRequested(target);
+        window.resize(400, 300);
+        QApplication::processEvents();
+        if (window.width() > 1150)
+            problems << QString("%1: the window cannot be narrower than %2 px")
+                .arg(target == Target::Sky ? "Sky" : "Moon").arg(window.width());
+    }
     problems.removeDuplicates();
     for (const QString& problem : problems) qWarning().noquote() << problem;
     QVERIFY2(problems.isEmpty(), qPrintable(QString("%1 problems").arg(problems.size())));
@@ -1356,6 +1367,7 @@ void UiTest::nightScheduleAndExposureFollower()
         window.checkNightSchedule();
         QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING"), 5000);
         QVERIFY2(reading->text().contains("Dawn stop at"), qPrintable(reading->text()));
+        QVERIFY2(reading->text().contains("local time (") && reading->text().contains(" UTC)."), qPrintable(reading->text()));
         // The observer stops in the night: the schedule leaves it stopped.
         stop->click();
         window.checkNightSchedule();

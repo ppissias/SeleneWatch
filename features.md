@@ -1415,6 +1415,7 @@ On a 1920 × 1200 laptop at 125 % scaling (1536 × 960 logical pixels) the text 
 - **Implemented:** `FlowLayout` (`flow_layout.h/.cpp`) wraps the stream buttons, Record, frame rate, speed and loop controls, and the test-flash controls; `MainWindow::arrangeTopControls()` groups controls that belong together. The recording name shortens with "…" instead of widening its row.
 - **Measured cause:** the single row of controls needed 1082 px, the right-hand docks about 380 px and a camera dock about 300 px: about 1780 px against 1536 px on the observer's laptop.
 - **Test:** `UiTest::everyControlFitsOnASmallLaptopScreen` (1366 × 700 and 1536 × 880, camera chosen, testing tools on, every dock tab). **Pending:** a look on the laptop itself.
+- **Width (observer's report, 21 November 2026):** the window could be resized in height but hardly in width. Before this feature its minimum width was 1484 px on a 1536 px screen. With the stream controls wrapping it was 1270 px; the source row (Source, Connect at startup, Open…, the recording name, the testing badge) now wraps too, the recording name taking the rest of its line, and the minimum is 1108 px for either target. `FlowLayout` gives a line's spare width to its first expanding item and narrows an item wider than the line down to its minimum. The UI test fails if the window cannot be narrower than 1150 px. The real-window test (`tests\gui_e2e_test.ps1`) passed with these changes.
 
 ---
 

@@ -277,9 +277,23 @@ void MainWindow::arrangeTopControls()
     auto* file = new ElidedLabel(ui_->fileLabel->text(), Qt::ElideMiddle, ui_->centralWidget);
     file->setObjectName("fileLabel");
     file->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    delete ui_->sourceLayout->replaceWidget(ui_->fileLabel, file);
     delete ui_->fileLabel;
     ui_->fileLabel = file;
+
+    // The source row wraps too: the recording's name takes the rest of its line.
+    auto* source = new QWidget(ui_->centralWidget);
+    source->setObjectName("sourceControls");
+    auto* sourceFlow = new FlowLayout(source, 16, 4);
+    sourceFlow->addWidget(together(source, {ui_->sourceLabel, ui_->sourceComboBox, connectAtStartup_}));
+    QWidget* recording = together(source, {ui_->openFileButton, file});
+    recording->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    sourceFlow->addWidget(recording);
+    sourceFlow->addWidget(testingBadge_);
+    const int sourceRow = ui_->verticalLayout->indexOf(ui_->sourceLayout);
+    ui_->verticalLayout->removeItem(ui_->sourceLayout);
+    delete ui_->sourceLayout;
+    ui_->sourceLayout = nullptr;
+    ui_->verticalLayout->insertWidget(sourceRow, source);
 
     auto* stream = new QWidget(ui_->centralWidget);
     stream->setObjectName("streamControls");
@@ -675,8 +689,12 @@ void MainWindow::checkNightSchedule()
     const auto next = nextSunCrossing(*site.latitudeDeg, *site.longitudeDeg, extras.sunLimitDeg, now);
     QString text = QString("Sun at %1°.").arg(altitude, 0, 'f', 1);
     if (next)
-        text += QString(" %1 at %2 UTC.").arg(altitude < extras.sunLimitDeg ? "Dawn stop" : "Dusk start",
-            utcDateTime(*next).toString("yyyy-MM-dd HH:mm"));
+    {
+        // The observer's clock first; UTC as the logs and files write it.
+        const QDateTime when = utcDateTime(*next);
+        text += QString(" %1 at %2 local time (%3 UTC).").arg(altitude < extras.sunLimitDeg ? "Dawn stop" : "Dusk start",
+            when.toLocalTime().toString("yyyy-MM-dd HH:mm"), when.toString("HH:mm"));
+    }
     else text += " It does not cross the limit in the next two days.";
     detectionPanel_->showNight(text);
 }
