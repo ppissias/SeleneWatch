@@ -376,7 +376,12 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
    - **Testing indoors:** With **View → Testing tools** enabled and **Watching** set to **The sky**, the **Synthetic** source generates a realistic starry sky and horizon silhouette, and **Test flash → Kind** lets you inject **Moving streak (meteor)**, **Blinking mover (aircraft)**, **Lightning** (whole frame), or **Bright flash** inside or outside your mask.
 4. Configure unattended options in **The sky** group:
    - Tick **Watch from dusk to dawn** and set **Sun below** (`−10.0°`). Below it the panel shows the Sun's altitude and when Monitoring next starts or stops, in the computer's local time with UTC in brackets (for example `Dawn stop at 2026-11-22 06:41 local time (05:41 UTC).`).
-   - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation.
+   - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation. Only these limits are yours to set. The rest is fixed, and the tooltip and the ⓘ beside **Exposure** repeat it:
+     - The sky's median outside the mask is kept between **8 % and 30 %** of full scale.
+     - Once it has been outside that band for **60 s**, one change is made. The exposure moves toward **15 %**, multiplied or divided by at most **2** per change. When the exposure is at your limit, gain moves by one step instead. A brighter sky lowers gain first, then shortens the exposure.
+     - Changes are at least **120 s** apart.
+     - With **Gain fixed** (the default), only the exposure changes.
+     - While Monitoring, each change saves the clip in hand and restarts Monitoring with the new settings, a gap of a few seconds.
 5. Either press **Start monitoring** immediately—or stop/leave Preview ready and let the **Watch from dusk to dawn** schedule arm Monitoring automatically once dusk arrives.
 6. The next morning, open `events/sky/<UTC>/`: browse `04_event_preview.gif` and `00_overview.png` thumbnails plus `candidates.txt` (`suggested_kind=`) to review events quickly before opening full `event.ser` clips.
 

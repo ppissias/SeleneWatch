@@ -2,6 +2,7 @@
 #include "detection_profiles.h"
 #include "preview_image.h"
 #include "readout_label.h"
+#include "sky_exposure.h"
 
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
@@ -295,18 +296,32 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     skyForm->addRow(nightReading_);
     follow_ = new QCheckBox("Follow the sky's brightness", sky_);
     follow_->setObjectName("followSky");
-    follow_->setToolTip("With a camera: keeps the sky's median outside the mask between 8% and 30% of full scale. After a "
-        "minute outside, Monitoring stops, the exposure (then the gain) changes, and Monitoring starts again.");
+    // The fixed rules come from the follower itself, so the help cannot disagree with it.
+    const SkyExposureRule rule;
+    const QString fixedRules = QString("Fixed rules, not editable: the sky's median outside the mask is kept between %1% and %2% "
+        "of full scale. Once it has been outside that band for %3 s, one change is made: the exposure moves toward %4%, "
+        "multiplied or divided by at most %5, within Exposure from … to …; when the exposure is at that limit, gain "
+        "moves by one step instead, up to Gain up to (a brighter sky lowers gain first, down to the camera's minimum, "
+        "then shortens the exposure). Changes are at least %6 s apart.")
+        .arg(100 * rule.low, 0, 'f', 0).arg(100 * rule.high, 0, 'f', 0).arg(rule.hold.count())
+        .arg(100 * rule.aim, 0, 'f', 0).arg(rule.maxFactor, 0, 'g', 3).arg(rule.spacing.count());
+    follow_->setToolTip("With a camera, keeps the sky at a useful brightness through the night: bright enough that faint "
+        "meteors stand above the camera's noise, dark enough that nothing saturates.<br><br>" + fixedRules
+        + "<br><br>While Monitoring, each change saves the clip in hand, stops Monitoring and starts it again with the new "
+        "settings (a gap of a few seconds), and is logged as exposure_change in candidates.txt.");
     minExposure_ = new QDoubleSpinBox(sky_);
     minExposure_->setObjectName("followMinExposure");
-    minExposure_->setToolTip("The shortest exposure the follower uses, at the brightest sky.");
+    minExposure_->setToolTip("The exposure range the follower may use: the shortest, for the brightest sky (dusk and "
+        "dawn), and the longest, before it raises gain.<br><br>" + fixedRules);
     maxExposure_ = new QDoubleSpinBox(sky_);
     maxExposure_->setObjectName("followMaxExposure");
-    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain.");
+    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain. Longer exposures reach "
+        "fainter meteors but blur fast ones.<br><br>" + fixedRules);
     for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); spin->setMaximumWidth(96); }
     maxGain_ = new QDoubleSpinBox(sky_);
     maxGain_->setObjectName("followMaxGain");
-    maxGain_->setToolTip("The highest gain the follower uses once the exposure is at its longest.");
+    maxGain_->setToolTip("The highest gain the follower uses once the exposure is at its longest. With Gain fixed "
+        "(a step of 0) the follower changes only the exposure.<br><br>" + fixedRules);
     gainStep_ = new QDoubleSpinBox(sky_);
     gainStep_->setObjectName("followGainStep");
     gainStep_->setToolTip("How much the follower changes gain at a time.");

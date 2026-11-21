@@ -1132,6 +1132,19 @@ void UiTest::everyControlHasHelp()
     QVERIFY(fps->text().startsWith("Target FPS:"));
     emit fps->linkActivated("help");
     QWhatsThis::hideText();
+
+    // The exposure follower's fixed rules are stated where its limits are
+    // entered, including on the ⓘ of the Exposure row.
+    for (const char* name : {"followSky", "followMinExposure", "followMaxExposure", "followMaxGain"})
+    {
+        const QString help = window.findChild<QWidget*>(name)->toolTip();
+        for (const char* rule : {"between 8% and 30%", "for 60 s", "toward 15%", "at most 2", "at least 120 s apart"})
+            QVERIFY2(help.contains(rule), qPrintable(QString("%1: %2").arg(name, rule)));
+    }
+    bool exposureRowHasHelp = false;
+    for (QLabel* label : window.findChildren<QLabel*>())
+        exposureRowHasHelp |= label->text().startsWith("Exposure <a") && label->buddy() == nullptr && label->text().contains("ⓘ");
+    QVERIFY(exposureRowHasHelp);
 }
 
 // Feature-25: a ranged camera control has a slider beside its box, and the

@@ -20,7 +20,7 @@ std::optional<SkyExposureChange> decideSkyExposure(double level, double exposure
     if (now - *state.outsideSince < rule.hold) return std::nullopt;
     if (state.lastChange && now - *state.lastChange < rule.spacing) return std::nullopt;
 
-    const double ratio = std::clamp(rule.aim / std::max(level, 1e-6), 0.5, 2.0);
+    const double ratio = std::clamp(rule.aim / std::max(level, 1e-6), 1.0 / rule.maxFactor, rule.maxFactor);
     SkyExposureChange change{exposureUs, gain, {}};
     const std::string measured = std::format("the sky at {:.1f}% of full scale, outside {:.0f}% to {:.0f}%",
         100 * level, 100 * rule.low, 100 * rule.high);

@@ -19,6 +19,8 @@
 struct SkyExposureRule
 {
     double low{0.08}, high{0.30}, aim{0.15};
+    // The most one change multiplies or divides the exposure by.
+    double maxFactor{2.0};
     double minExposureUs{1000}, maxExposureUs{2'000'000};
     double minGain{0}, maxGain{0}, gainStep{0};
     std::chrono::seconds hold{60};
