@@ -42,6 +42,9 @@ public:
     // The tolerance as a percentage of the frame's shorter side.
     [[nodiscard]] double tolerancePercent() const;
     void setTolerancePercent(double percent);
+    // Feature-42: higher drift limit before giving up if corrections cannot reduce it.
+    [[nodiscard]] double giveUpPercent() const;
+    void setGiveUpPercent(double percent);
     // Feature-40: correction aggressiveness (30-100 %) and max pulse duration (ms).
     [[nodiscard]] int aggressivenessPercent() const;
     void setAggressivenessPercent(int percent);
@@ -91,6 +94,8 @@ private:
     QLabel* calibration_;
     QDoubleSpinBox* tolerance_;
     QLabel* toleranceReadout_;
+    QDoubleSpinBox* giveUp_;
+    QLabel* giveUpReadout_;
     QSpinBox* aggressiveness_;
     QSpinBox* maxPulse_;
     QPushButton* guideButton_;

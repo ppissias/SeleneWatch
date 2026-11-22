@@ -891,6 +891,7 @@ void MainWindow::setupGuidingPanel()
     guidingPanel_->setMountKind(saved.value("guiding/mountKind", 0).toInt() == 1 && ascomAvailable()
             ? GuidingPanel::MountKind::Ascom : GuidingPanel::MountKind::Simulated);
     guidingPanel_->setTolerancePercent(std::clamp(saved.value("guiding/tolerancePercent", 3.0).toDouble(), 0.5, 20.0));
+    guidingPanel_->setGiveUpPercent(std::clamp(saved.value("guiding/giveUpPercent", 15.0).toDouble(), 5.0, 45.0));
     guidingPanel_->setAggressivenessPercent(std::clamp(saved.value("guiding/aggressivenessPercent",
         static_cast<int>(std::lround(GuideController::Settings{}.gain * 100.0))).toInt(), 30, 100));
     guidingPanel_->setMaxPulseMs(std::clamp(saved.value("guiding/maxPulseMs",
@@ -1138,6 +1139,7 @@ void MainWindow::saveGuidingSettings()
     saved.setValue("guiding/ascomDriver", ascomDriver_);
     saved.setValue("guiding/mountKind", guidingPanel_->mountKind() == GuidingPanel::MountKind::Ascom ? 1 : 0);
     saved.setValue("guiding/tolerancePercent", guidingPanel_->tolerancePercent());
+    saved.setValue("guiding/giveUpPercent", guidingPanel_->giveUpPercent());
     saved.setValue("guiding/aggressivenessPercent", guidingPanel_->aggressivenessPercent());
     saved.setValue("guiding/maxPulseMs", guidingPanel_->maxPulseMs());
     saved.setValue("guiding/lostAfterSeconds", guidingPanel_->lostAfterSeconds());
@@ -1762,6 +1764,7 @@ void MainWindow::sendTolerance()
 {
     if (frameShortSide_ <= 0) return;
     session_->guider().setTolerance(guidingPanel_->tolerancePercent() / 100.0 * frameShortSide_);
+    session_->guider().setGiveUpTolerance(guidingPanel_->giveUpPercent() / 100.0 * frameShortSide_);
 }
 
 void MainWindow::onChooseMountDriver()

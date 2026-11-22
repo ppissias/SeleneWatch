@@ -189,20 +189,37 @@ GuideDecision GuideController::step(const GuideObservation& o)
         raError_ = axes->raPx;
         decError_ = axes->decPx;
         // Judge effectiveness on the axis(es) actually pulsed, so drift on an
-        // unpulsed axis does not trigger a false stop.
-        const bool raImproved = pulsedRa_ && std::abs(raError_) < raErrorBefore_;
-        const bool decImproved = pulsedDec_ && std::abs(decError_) < decErrorBefore_;
+        // unpulsed axis does not trigger a false stop. While error stays within
+        // the higher give-up limit and is not actively running away (reversed
+        // calibration), holding or slowing strong polar-alignment drift is
+        // allowed to continue rather than giving up prematurely (Feature-42).
+        const double raAbs = std::abs(raError_);
+        const double decAbs = std::abs(decError_);
+        const bool raImproved = pulsedRa_ && raAbs < raErrorBefore_;
+        const bool decImproved = pulsedDec_ && decAbs < decErrorBefore_;
         if (decImproved) decBacklashPendingMs_ = 0;
         const bool improved = raImproved || decImproved;
         const bool clearingBacklash = !pulsedRa_ && pulsedDec_ && decBacklashUsedThisStep_ > 0;
-        if (improved) fruitless_ = 0;
-        else if (!clearingBacklash) ++fruitless_;
+        const double giveUpLimit = std::max({settings_.giveUpPixels, settings_.tolerancePixels * 1.5, settings_.tolerancePixels + 5.0});
+        const double effectiveGiveUp = settings_.giveUpPixels > 0 ? giveUpLimit
+            : std::max(settings_.tolerancePixels * 3.0, 40.0);
+        const bool pastGiveUp = (pulsedRa_ && raAbs >= effectiveGiveUp) || (pulsedDec_ && decAbs >= effectiveGiveUp);
+        const bool runaway = (pulsedRa_ && raExpectedMovePx_ > 1.0 && (raAbs - raErrorBefore_) >= 0.35 * raExpectedMovePx_)
+            || (pulsedDec_ && decExpectedMovePx_ > 1.0 && (decAbs - decErrorBefore_) >= 0.35 * decExpectedMovePx_);
+        if (improved)
+        {
+            fruitless_ = 0;
+        }
+        else if (!clearingBacklash && (pastGiveUp || runaway))
+        {
+            ++fruitless_;
+        }
         if (fruitless_ >= settings_.maxFruitlessCorrections)
         {
             const double error = std::hypot(o.estimateDx, o.estimateDy);
             stop(std::format("Guiding stopped: corrections have no effect. {} corrections in a row did not reduce the error "
-                "(now {:.1f} pixels). Check the calibration, the mount, and that the locked feature is still in view.",
-                fruitless_, error));
+                "(now {:.1f} pixels, give-up limit {:.1f} px). Check the calibration, polar alignment, and mount.",
+                fruitless_, error, effectiveGiveUp));
             return {};
         }
         watchSampleTime_ = o.now;
@@ -253,13 +270,15 @@ GuideDecision GuideController::decide(const GuideObservation& o)
     const double tolerance = settings_.tolerancePixels;
     queue_.clear();
     bool pulseRa = false, pulseDec = false;
+    double raExpectedMove = 0, decExpectedMove = 0;
     int pendingBacklashAfter = decBacklashPendingMs_;
     int backlashUsed = 0;
     if (std::abs(raError_) > tolerance)
     {
         pulseRa = true;
-        queue_.push_back({axes->raMs > 0 ? GuideDirection::East : GuideDirection::West,
-            pulseDurationMs(raError_, driftRaPxPerSec_, calibration_.west.length(), 0)});
+        const int ms = pulseDurationMs(raError_, driftRaPxPerSec_, calibration_.west.length(), 0);
+        raExpectedMove = ms * calibration_.west.length();
+        queue_.push_back({axes->raMs > 0 ? GuideDirection::East : GuideDirection::West, ms});
     }
     if (std::abs(decError_) > tolerance)
     {
@@ -281,6 +300,7 @@ GuideDecision GuideController::decide(const GuideObservation& o)
             const int ms = pulseDurationMs(decError_, driftDecPxPerSec_, calibration_.north.length(), pendingBacklashAfter);
             backlashUsed = std::min(pendingBacklashAfter, ms);
             pendingBacklashAfter -= backlashUsed;
+            decExpectedMove = std::max(0, ms - backlashUsed) * calibration_.north.length();
             queue_.push_back({direction, ms});
         }
     }
@@ -302,6 +322,8 @@ GuideDecision GuideController::decide(const GuideObservation& o)
     pulsedDec_ = pulseDec;
     raErrorBefore_ = std::abs(raError_);
     decErrorBefore_ = std::abs(decError_);
+    raExpectedMovePx_ = raExpectedMove;
+    decExpectedMovePx_ = decExpectedMove;
     decBacklashPendingMs_ = pendingBacklashAfter;
     decBacklashUsedThisStep_ = backlashUsed;
     watchSampleTime_.reset();

@@ -127,6 +127,7 @@ public:
     void requestCalibration();
     void requestGuiding(bool on);
     void setTolerance(double pixels);
+    void setGiveUpTolerance(double pixels);
     void setCorrectionTuning(double gain, int maxPulseMs);
     // Any thread. Ends calibration or guiding with the reason (safety rules 1 and 8).
     void endGuiding(std::string reason);
@@ -155,6 +156,7 @@ private:
         bool calibrate{false};
         std::optional<bool> guide;
         std::optional<double> tolerance;
+        std::optional<double> giveUpTolerance;
         std::optional<double> gain;
         std::optional<int> maxPulseMs;
         std::optional<std::string> end;
@@ -214,6 +216,7 @@ private:
     std::optional<GuideController> controller_;
     std::optional<GuideCalibration> calibration_;
     double tolerance_{10};
+    double giveUpTolerance_{0};
     double gain_{GuideController::Settings{}.gain};
     int maxPulseMs_{GuideController::Settings{}.maxPulseMs};
     std::string message_;

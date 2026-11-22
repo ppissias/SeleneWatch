@@ -173,6 +173,15 @@ void Guider::setTolerance(double pixels)
     wake_.notify_one();
 }
 
+void Guider::setGiveUpTolerance(double pixels)
+{
+    {
+        std::lock_guard lock(mutex_);
+        requests_.giveUpTolerance = pixels;
+    }
+    wake_.notify_one();
+}
+
 void Guider::setCorrectionTuning(double gain, int maxPulseMs)
 {
     {
@@ -419,6 +428,11 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
         tolerance_ = *requests.tolerance;
         if (controller_) controller_->setTolerance(tolerance_);
     }
+    if (requests.giveUpTolerance)
+    {
+        giveUpTolerance_ = *requests.giveUpTolerance;
+        if (controller_) controller_->setGiveUpPixels(giveUpTolerance_);
+    }
     if (requests.gain)
     {
         gain_ = *requests.gain;
@@ -480,6 +494,7 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
     }
     GuideController::Settings settings;
     settings.tolerancePixels = tolerance_;
+    settings.giveUpPixels = giveUpTolerance_;
     settings.gain = gain_;
     settings.maxPulseMs = maxPulseMs_;
     if (std::string refusal = GuideController::refusal(*calibration_, settings, o); !refusal.empty())
@@ -617,7 +632,7 @@ void Guider::run(std::stop_token stopToken)
             auto ready = [&] {
                 return pending_ != nullptr || requests_.unlock || requests_.discontinuity || requests_.connect
                     || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance
-                    || requests_.gain || requests_.maxPulseMs || requests_.end
+                    || requests_.giveUpTolerance || requests_.gain || requests_.maxPulseMs || requests_.end
                     || requests_.lostAfter || requests_.stopTracking;
             };
             // With a mount, the guider also wakes to follow pulses and read the mount's state.
@@ -635,6 +650,7 @@ void Guider::run(std::stop_token stopToken)
             requests.calibrate = std::exchange(requests_.calibrate, false);
             requests.guide = std::exchange(requests_.guide, std::nullopt);
             requests.tolerance = std::exchange(requests_.tolerance, std::nullopt);
+            requests.giveUpTolerance = std::exchange(requests_.giveUpTolerance, std::nullopt);
             requests.gain = std::exchange(requests_.gain, std::nullopt);
             requests.maxPulseMs = std::exchange(requests_.maxPulseMs, std::nullopt);
             requests.end = std::exchange(requests_.end, std::nullopt);

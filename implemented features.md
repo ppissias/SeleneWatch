@@ -46,6 +46,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-39 — Exposure range presets for the camera slider](#feature-39--exposure-range-presets-for-the-camera-slider)
 - [Feature-40 — Drift-aware guiding for imperfect polar alignment](#feature-40--drift-aware-guiding-for-imperfect-polar-alignment)
 - [Feature-41 — Live drift speed readout and drift-rate guiding feed-forward](#feature-41--live-drift-speed-readout-and-drift-rate-guiding-feed-forward)
+- [Feature-42 — Separate guiding correction tolerance and give-up drift limit](#feature-42--separate-guiding-correction-tolerance-and-give-up-drift-limit)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3326,3 +3327,18 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 3. **Direct feed-forward into `GuideController`:** `GuideObservation` carries `driftRateValid`, `driftRateDx`, `driftRateDy` from `LockTracker`, updating `GuideController`'s RA/Dec drift rates immediately on every unpulsed decision (falling back to calibration drift + Watching EMA between rapid pulses).
 
 **Status & verification (22 November 2026).** Implemented in `LockTracker`, `GuideObservation`, `GuideController`, `Guider`, and `GuidingPanel`, documented in `MANUAL.md`. Debug build (all targets), `dependency_rules`, `guiding` (including `lockTrackerMeasuresDriftSpeedAndFeedsGuideController`), and UI checks (`everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, `numberBoxesFitTheirWidestValue`) passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).
+
+## Feature-42 — Separate guiding correction tolerance and give-up drift limit
+
+*Proposed by the observer during live lunar guiding and built on 22 November 2026.*
+
+**Problem.** When guiding nearly cancelled strong Dec polar-alignment drift (holding or allowing only very slow creep), two things still stopped guiding within ~30–45 s:
+1. Counting any non-shrinking pulse as fruitless even when error was barely creeping well inside the frame.
+2. The `30 s/min` pulse cap and `1.0 s` settle time capping duty cycle around `65 %` (burning `30 s` of pulses in ~45 s during continuous Dec corrections).
+
+**What was built.**
+1. **Separate `Give up at` limit (`5–45 %` of field, default `15 %`):** Added beside `Tolerance` in `GuidingPanel` (with live pixel/arcsec readout and `QSettings` persistence under `guiding/giveUpPercent`), forwarded live to `GuideController::setGiveUpPixels`.
+2. **Hold-vs-runaway check in `GuideController`:** While both axes stay inside `Give up at` and a pulse is not actively pushing error the wrong way (`delta < 0.35 × expectedMovePx`), guiding keeps holding/slowing strong drift instead of counting fruitless corrections. A reversed axis still triggers runaway immediately and stops in `maxFruitlessCorrections` steps; once drift crosses `Give up at` without improving, guiding stops cleanly naming the give-up limit.
+3. **Higher duty-cycle headroom:** Reduced default `settleSeconds` from `1.0 s` to `0.6 s` and raised `maxPulseMsPerMinute` from `30 s` to `50 s` so continuous `3–5 s` Dec pulses can hold strong polar-alignment drift indefinitely without hitting a premature 30 s stop.
+
+**Status & verification (22 November 2026).** Implemented in `GuideController`, `Guider`, `GuidingPanel`, and `MainWindow`, documented in `MANUAL.md`. Debug build (all targets), `dependency_rules`, `guiding` (all 31 tests including `giveUpToleranceLetsGuidingHoldSlowCreepThenStopsPastLimit`, `mountThatMovesTheWrongWayStopsGuiding`, and `guidingHandlesStrongPolarDriftAndDecBacklash`), and UI layout/help/width checks passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).

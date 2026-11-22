@@ -32,12 +32,15 @@ public:
     struct Settings
     {
         double tolerancePixels{10};
+        // Feature-42: higher drift limit before giving up when corrections are
+        // holding or slowing strong drift (0 = automatic, 3x tolerance, min 40 px).
+        double giveUpPixels{0};
         double gain{0.85};
         int maxPulseMs{3000};
         int minPulseMs{20};
-        double settleSeconds{1.0};
+        double settleSeconds{0.6};
         int maxFruitlessCorrections{5};
-        int maxPulseMsPerMinute{30000};
+        int maxPulseMsPerMinute{50000};
         double maxGuideSpeedPixelsPerFrame{0.25};
     };
 
@@ -55,6 +58,7 @@ public:
 
     // Changes applied at the next decision.
     void setTolerance(double pixels) { settings_.tolerancePixels = pixels; }
+    void setGiveUpPixels(double pixels) { settings_.giveUpPixels = pixels; }
     void setGain(double gain) { settings_.gain = gain; }
     void setMaxPulseMs(int milliseconds) { settings_.maxPulseMs = milliseconds; }
 
@@ -102,6 +106,8 @@ private:
     bool pulsedDec_{false};
     double raErrorBefore_{0};
     double decErrorBefore_{0};
+    double raExpectedMovePx_{0};
+    double decExpectedMovePx_{0};
     double driftRaPxPerSec_{0};
     double driftDecPxPerSec_{0};
     bool driftEstimateSeeded_{false};

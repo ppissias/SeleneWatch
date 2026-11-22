@@ -344,6 +344,17 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     tolerance_->setToolTip("Nothing is sent while the drift stays within this distance on both mount axes. "
         "Make it several times the seeing's jitter.");
     toleranceReadout_ = wrapped(guideBox);
+    giveUp_ = new QDoubleSpinBox(guideBox);
+    giveUp_->setObjectName("giveUpSpinBox");
+    giveUp_->setRange(5.0, 45.0);
+    giveUp_->setSingleStep(1.0);
+    giveUp_->setDecimals(1);
+    giveUp_->setSuffix(" % of field");
+    giveUp_->setValue(15.0);
+    giveUp_->setToolTip("Higher drift limit before guiding gives up when strong polar-alignment drift is only being "
+        "held or slowed. Reversed axes still stop immediately; if drift crosses this limit and corrections cannot "
+        "reduce it, guiding stops safely.");
+    giveUpReadout_ = wrapped(guideBox);
     aggressiveness_ = new QSpinBox(guideBox);
     aggressiveness_->setObjectName("guideAggressivenessSpinBox");
     aggressiveness_->setRange(30, 100);
@@ -383,6 +394,9 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* toleranceRow = new QHBoxLayout;
     toleranceRow->addWidget(tolerance_);
     toleranceRow->addWidget(toleranceReadout_, 1);
+    auto* giveUpRow = new QHBoxLayout;
+    giveUpRow->addWidget(giveUp_);
+    giveUpRow->addWidget(giveUpReadout_, 1);
     auto* guideButtons = new QHBoxLayout;
     guideButtons->addWidget(calibrateButton_);
     guideButtons->addWidget(guideButton_);
@@ -390,6 +404,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* guideForm = new QFormLayout;
     guideForm->addRow("Calibration", calibration_);
     guideForm->addRow("Tolerance", toleranceRow);
+    guideForm->addRow("Give up at", giveUpRow);
     guideForm->addRow("Aggressiveness", aggressiveness_);
     guideForm->addRow("Max pulse", maxPulse_);
     guideForm->addRow("Lock lost after", lostAfter_);
@@ -427,6 +442,10 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     connect(calibrateButton_, &QPushButton::clicked, this, &GuidingPanel::calibrateRequested);
     connect(guideButton_, &QPushButton::clicked, this, [this] { emit guidingRequested(mode_ != GuideMode::Guiding); });
     connect(tolerance_, &QDoubleSpinBox::valueChanged, this, [this] {
+        updateTolerance();
+        emit toleranceChanged();
+    });
+    connect(giveUp_, &QDoubleSpinBox::valueChanged, this, [this] {
         updateTolerance();
         emit toleranceChanged();
     });
@@ -490,12 +509,17 @@ void GuidingPanel::updateTolerance()
     if (frameShortSide_ <= 0)
     {
         toleranceReadout_->setText("—");
+        giveUpReadout_->setText("—");
         return;
     }
-    const double pixels = tolerancePercent() / 100.0 * frameShortSide_;
-    QString text = QString("%1 px").arg(pixels, 0, 'f', 1);
-    if (arcsecPerPixel_) text += QString(", %1″").arg(pixels * *arcsecPerPixel_, 0, 'f', 1);
-    toleranceReadout_->setText(text);
+    auto format = [this](double percent) {
+        const double pixels = percent / 100.0 * frameShortSide_;
+        QString text = QString("%1 px").arg(pixels, 0, 'f', 1);
+        if (arcsecPerPixel_) text += QString(", %1″").arg(pixels * *arcsecPerPixel_, 0, 'f', 1);
+        return text;
+    };
+    toleranceReadout_->setText(format(tolerancePercent()));
+    giveUpReadout_->setText(format(giveUpPercent()));
 }
 
 void GuidingPanel::setAvailable(bool running, bool pixelSelected)
@@ -561,6 +585,16 @@ double GuidingPanel::tolerancePercent() const
 void GuidingPanel::setTolerancePercent(double percent)
 {
     tolerance_->setValue(percent);
+}
+
+double GuidingPanel::giveUpPercent() const
+{
+    return giveUp_->value();
+}
+
+void GuidingPanel::setGiveUpPercent(double percent)
+{
+    giveUp_->setValue(percent);
 }
 
 int GuidingPanel::aggressivenessPercent() const

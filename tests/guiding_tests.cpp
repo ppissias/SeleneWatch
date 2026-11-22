@@ -692,6 +692,62 @@ private slots:
             qPrintable(QString("without=%1 ms with=%2 ms").arg(d0.pulse->milliseconds).arg(d1.pulse->milliseconds)));
     }
 
+    // Feature-42: guiding keeps holding strong drift while inside the higher
+    // give-up limit (even when a pulse only slows/holds creep), and gives up
+    // safely once drift crosses the give-up limit without improving.
+    void giveUpToleranceLetsGuidingHoldSlowCreepThenStopsPastLimit()
+    {
+        GuideCalibration cal;
+        cal.west = {0.01, 0.0};
+        cal.north = {0.0, 0.01};
+        cal.pierSide = PierSide::West;
+        GuideController::Settings settings;
+        settings.tolerancePixels = 10;
+        settings.giveUpPixels = 50;
+        settings.maxFruitlessCorrections = 3;
+        settings.settleSeconds = 0.0;
+        GuideController controller(cal, settings);
+        auto now = SimulatedPointing::Clock::time_point{} + std::chrono::hours{1};
+        auto obs = [&](double decPx) {
+            GuideObservation o;
+            o.now = now;
+            o.locked = true;
+            o.estimateValid = true;
+            o.estimateSamples = 5;
+            o.estimateDy = decPx;
+            o.mount.connected = true;
+            o.mount.tracking = true;
+            o.mount.canPulseGuide = true;
+            o.mount.pierSide = PierSide::West;
+            o.frameInterval = 1.0 / 30.0;
+            return o;
+        };
+        // Slow creep (12 -> 12.5 -> 13 -> ... -> 16 px) inside giveUpPixels (50):
+        // pulses are nearly stopping the drift, so guiding must NOT stop.
+        double dec = 12.0;
+        GuideDecision d = controller.step(obs(dec));
+        for (int i = 0; i < 8; ++i)
+        {
+            QVERIFY(d.pulse.has_value());
+            now += std::chrono::milliseconds{d.pulse->milliseconds + 100};
+            dec += 0.5;
+            (void)controller.step(obs(dec)); // finish pulse -> Measuring (restartEstimate)
+            d = controller.step(obs(dec));   // evaluate Measuring -> next pulse
+            QVERIFY2(!controller.stopped(), controller.stopReason().c_str());
+        }
+        // Once drift crosses giveUpPixels (50) and still fails to shrink, guiding stops safely.
+        dec = 55.0;
+        for (int i = 0; i < 6 && !controller.stopped(); ++i)
+        {
+            if (d.pulse) now += std::chrono::milliseconds{d.pulse->milliseconds + 100};
+            dec += 1.0;
+            (void)controller.step(obs(dec)); // finish pulse -> Measuring
+            d = controller.step(obs(dec));   // evaluate Measuring -> counts fruitless or stops
+        }
+        QVERIFY(controller.stopped());
+        QVERIFY2(controller.stopReason().find("give-up limit") != std::string::npos, controller.stopReason().c_str());
+    }
+
     // Done-when 6: each safety rule stops guiding or withholds pulses.
     void safetyRulesStopOrWithholdPulses_data()
     {
