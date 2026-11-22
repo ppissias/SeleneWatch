@@ -58,6 +58,8 @@ Dependencies point one way: `ui` and `app` may use everything; `session` uses th
 
 **Checks run.** Debug build of every target after each commit; the full CTest suite on Debug, 24 of 24 suites passed (the 23 before and `dependency_rules`). **Not run:** the Release build and package, and the real-window E2E test. The Release build in `out\build\release` is the one used for observing, so it was left for the maintainer to rebuild.
 
+**Checks run later (2026-11-22), after Design-1 and Design-3's deferral (commit 0efff9a).** `packaging\make_release.ps1` on a clean tree: the Release build of every target, the full CTest suite on Release (25 of 25 passed, including the offscreen `ui` and `preview` window suites), and both packages (`.zip` and `.msi`) with their checks. The real-window E2E test (`tests\gui_e2e_test.ps1`) on the Release build: GUI E2E TEST PASSED, all four scenarios including the real lunar AVI; its screenshots were checked.
+
 ### Design-1. One owner for a watch's saved settings, and the code review's findings
 
 **Decided by the maintainer (2026-11-22).** A code review on 22 November 2026, against the principles in DEVELOPER.md, found these. Each keeps behaviour and every saved setting that an observer can have.
@@ -89,3 +91,5 @@ Dependencies point one way: `ui` and `app` may use everything; `session` uses th
 6. The guider uses `utcText` from `recording/metadata_text`.
 
 **Checks run.** Debug build of every target; the full CTest suite on Debug, 25 of 25 passed. The new `watch_settings` suite runs each test in the registry (the program's default store) and in a portable `.ini` (values come back as text): every watch's settings round-trip and stay apart; the keys earlier versions wrote are read unchanged; named profiles store the same fields and read back as saved; invalid values read as the watch's defaults. The window test that each watch keeps its own settings passed unchanged. **Not run:** the Release build and the real-window E2E test.
+
+**Checks run later (2026-11-22), after Design-1 and Design-3's deferral (commit 0efff9a).** `packaging\make_release.ps1` on a clean tree: the Release build of every target, the full CTest suite on Release (25 of 25 passed, including the offscreen `ui` and `preview` window suites), and both packages (`.zip` and `.msi`) with their checks. The real-window E2E test (`tests\gui_e2e_test.ps1`) on the Release build: GUI E2E TEST PASSED, all four scenarios including the real lunar AVI; its screenshots were checked.
