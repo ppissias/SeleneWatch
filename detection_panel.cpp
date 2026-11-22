@@ -234,11 +234,16 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     // Feature-31: the Moon's flashes and its shadows are watched apart.
     target_->addItem("The Moon: flashes on the earthlit side", static_cast<int>(Watch::MoonFlashes));
     target_->addItem("The Moon: shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
-    target_->addItem("The sky", static_cast<int>(Watch::Sky));
+    // Feature-35: the sky's fast events and its slow, faint ones are watched apart.
+    target_->addItem("The sky: fast events (meteors, lightning)", static_cast<int>(Watch::Sky));
+    target_->addItem("The sky: slow and faint (long exposures)", static_cast<int>(Watch::SkySlow));
     target_->setToolTip("What is watched. Each keeps its own detection settings and profiles; both Moon watches share "
         "the Moon's capture settings, folder and guiding. Flashes: sensitive, on the earthlit side, the sunlit side "
-        "left out. Shadows: planes, the ISS or birds against the sunlit side, insensitive to seeing. Changes only "
-        "while stopped.");
+        "left out. Shadows: planes, the ISS or birds against the sunlit side, insensitive to seeing. Sky, fast events: "
+        "short exposures (40 ms at most by default) for meteors, lightning and flares, their timing and trajectory; a "
+        "moving meteor leaves no more light in a pixel when exposed longer, only more sky. Sky, slow and faint: "
+        "exposures up to 2 s by default for aurora, airglow, slow satellites and long glows, with its own capture "
+        "settings and an optional time-lapse. Both sky watches use the sky's folder. Changes only while stopped.");
     targetRow->addWidget(target_, 1);
     column->addLayout(targetRow);
 
@@ -320,8 +325,9 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "dawn), and the longest, before it raises gain.<br><br>" + fixedRules);
     maxExposure_ = new QDoubleSpinBox(sky_);
     maxExposure_->setObjectName("followMaxExposure");
-    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain. Longer exposures reach "
-        "fainter meteors but blur fast ones.<br><br>" + fixedRules);
+    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain. A longer exposure shows "
+        "fainter still or slow light (aurora, airglow); a moving meteor leaves no more light in a pixel, only more sky. "
+        "Each sky watch keeps its own limits.<br><br>" + fixedRules);
     for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); spin->setMaximumWidth(96); }
     maxGain_ = new QDoubleSpinBox(sky_);
     maxGain_->setObjectName("followMaxGain");
@@ -348,6 +354,32 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     gainRow->addWidget(gainStep_);
     skyForm->addRow("Gain up to", gainRow);
     skyForm->addRow(followReading_);
+    // Feature-36: the slow sky's time-lapse.
+    timelapseRow_ = new QWidget(sky_);
+    auto* timelapseLayout = new QHBoxLayout(timelapseRow_);
+    timelapseLayout->setContentsMargins(0, 0, 0, 0);
+    timelapse_ = new QCheckBox("Time-lapse while monitoring, every", timelapseRow_);
+    timelapse_->setObjectName("watchTimelapse");
+    timelapseInterval_ = new QSpinBox(timelapseRow_);
+    timelapseInterval_->setObjectName("watchTimelapseInterval");
+    timelapseInterval_->setRange(1, 3600);
+    timelapseInterval_->setValue(30);
+    timelapseInterval_->setSuffix(" s");
+    timelapseInterval_->setMaximumWidth(96);
+    const QString timelapseHelp = "Alongside detection, keeps one frame every this many seconds of source time while "
+        "Monitoring, in the watch's timelapse folder: each as a PNG with the camera's samples unchanged (16-bit for "
+        "RAW16), with its time in frames.txt, and in timelapse.mp4 (25 frames a second, stretched for display like the "
+        "preview's auto-stretch). The video is written as the night goes, so it is ready when Monitoring stops. 30 s "
+        "keeps about 1 GB of PNG per hour for a 2-megapixel 16-bit camera. Set before Monitoring starts.";
+    timelapse_->setToolTip(timelapseHelp);
+    timelapseInterval_->setToolTip(timelapseHelp);
+    timelapseLayout->addWidget(timelapse_);
+    timelapseLayout->addWidget(timelapseInterval_);
+    timelapseLayout->addStretch(1);
+    skyForm->addRow(timelapseRow_);
+    timelapseRow_->hide();
+    connect(timelapse_, &QCheckBox::toggled, this, [this] { if (!updating_) emit watchTimelapseChanged(); });
+    connect(timelapseInterval_, &QSpinBox::valueChanged, this, [this] { if (!updating_) emit watchTimelapseChanged(); });
     column->addWidget(sky_);
     sky_->hide();
 
@@ -576,10 +608,11 @@ void DetectionPanel::setWatch(Watch watch)
     updating_ = true;
     target_->setCurrentIndex(std::max(0, target_->findData(static_cast<int>(watch))));
     updating_ = updating;
-    sky_->setVisible(watch == Watch::Sky);
+    sky_->setVisible(watchTarget(watch) == Target::Sky);
+    timelapseRow_->setVisible(watch == Watch::SkySlow);
     flashControls_->setVisible(watch == Watch::MoonFlashes);
     darkControls_->setVisible(watch == Watch::MoonShadows);
-    if (watch != Watch::Sky) drawMask_->setChecked(false);
+    if (watchTarget(watch) != Target::Sky) drawMask_->setChecked(false);
     reloadProfiles();
 }
 
@@ -626,6 +659,26 @@ void DetectionPanel::setSkyExtras(const SkyExtras& extras)
     updating_ = updating;
 }
 
+
+WatchTimelapse DetectionPanel::watchTimelapse() const
+{
+    return {timelapse_->isChecked(), timelapseInterval_->value()};
+}
+
+void DetectionPanel::setWatchTimelapse(const WatchTimelapse& timelapse)
+{
+    const bool updating = updating_;
+    updating_ = true;
+    timelapse_->setChecked(timelapse.on);
+    timelapseInterval_->setValue(timelapse.intervalSeconds);
+    updating_ = updating;
+}
+
+void DetectionPanel::setWatchTimelapseEditable(bool editable)
+{
+    timelapse_->setEnabled(editable);
+    timelapseInterval_->setEnabled(editable);
+}
 
 void DetectionPanel::showFollow(const QString& text)
 {
@@ -710,7 +763,7 @@ bool DetectionPanel::saveCurrentProfile(const QString& name, bool includeMask)
     profile.name = trimmed;
     profile.watch = watch_;
     profile.settings = settings();
-    profile.hasMask = (watch_ == Watch::Sky) && includeMask;
+    profile.hasMask = (watchTarget(watch_) == Target::Sky) && includeMask;
     if (profile.hasMask)
         profile.mask = mask_;
     else
@@ -736,7 +789,7 @@ bool DetectionPanel::applyProfile(const QString& name)
     {
         if (p.name.compare(trimmed, Qt::CaseInsensitive) != 0) continue;
         DetectionSettings next = p.settings;
-        if (watch_ == Watch::Sky)
+        if (watchTarget(watch_) == Target::Sky)
             next.mask = p.hasMask ? p.mask : mask_;
         else
             next.mask = {};
@@ -779,7 +832,7 @@ void DetectionPanel::onSaveProfileClicked()
     auto* form = new QFormLayout;
     auto* nameEdit = new QLineEdit(&dialog);
     nameEdit->setObjectName("detectionProfileNameEdit");
-    nameEdit->setPlaceholderText(watch_ == Watch::Sky
+    nameEdit->setPlaceholderText(watchTarget(watch_) == Target::Sky
         ? "e.g. Backyard meteors, Dark site sky"
         : "e.g. Moon dark side, Lunar transit");
     if (profileCombo_->currentIndex() > 0)
@@ -788,7 +841,7 @@ void DetectionPanel::onSaveProfileClicked()
     layout->addLayout(form);
 
     QCheckBox* includeMaskBox = nullptr;
-    if (watch_ == Watch::Sky)
+    if (watchTarget(watch_) == Target::Sky)
     {
         includeMaskBox = new QCheckBox(
             mask_.empty()

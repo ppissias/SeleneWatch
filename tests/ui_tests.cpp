@@ -147,6 +147,7 @@ private slots:
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
     void diskReserveStartsAtTenGiBAndIsRemembered();
+    void theSlowSkyKeepsATimelapseWhileMonitoring();
     void everyControlFitsOnASmallLaptopScreen();
     void darkeningIsForTheMoonOnly();
     void everyControlHasHelp();
@@ -942,7 +943,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     auto* choice = panel->findChild<QComboBox*>("targetChoice");
     auto* sigma = panel->findChild<QDoubleSpinBox*>("detectionSigma");
     QCOMPARE(panel->watch(), Watch::MoonFlashes);
-    QCOMPARE(choice->count(), 3);
+    QCOMPARE(choice->count(), 4);
     QVERIFY(choice->isEnabled());
     QVERIFY(guiding->isEnabled());
     QCOMPARE(panel->settings().brighteningShare, 0.0);
@@ -1010,7 +1011,86 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().sigma, 9.0);
     QCOMPARE(panel->settings().mask.count(), 1);
     QVERIFY(panel->settings().mask.shapes()[0] == DetectionMask::rectangle(0, 400, 640, 80));
+    QCOMPARE(QSettings().value("sky/watch").toString(), QString("fast"));
+    auto* follower = panel->findChild<QDoubleSpinBox*>("followMaxExposure");
+    QCOMPARE(follower->value(), 40.0); // Feature-35: the fast sky's follower stops at 40 ms.
+    display->findChild<QDoubleSpinBox*>("postSeconds")->setValue(6);
+
+    // Feature-35: the slow sky keeps its own detection, capture and follower
+    // settings, and the sky's mask is its own too.
+    chooseWatch(window, Watch::SkySlow);
+    QCOMPARE(panel->watch(), Watch::SkySlow);
+    QCOMPARE(panel->target(), Target::Sky);
+    QVERIFY(panel->findChild<QWidget*>("skySettings")->isVisibleTo(panel));
+    QCOMPARE(panel->settings().sigma, 6.0);
+    QCOMPARE(panel->settings().referenceTimeConstantSeconds, 10.0);
+    QCOMPARE(panel->settings().releaseSeconds, 60.0);
+    QVERIFY(panel->settings().mask.empty());
+    QCOMPARE(display->captureSettings().target, Target::Sky);
+    QCOMPARE(display->captureSettings().historySeconds, 20.0);
+    QCOMPARE(display->captureSettings().maxPostSeconds, 60.0);
+    QCOMPARE(follower->value(), 2000.0);
+    QVERIFY(!guiding->isEnabled());
+    QCOMPARE(QSettings().value("sky/watch").toString(), QString("slow"));
+    QCOMPARE(QSettings().value("sky/capture/post").toDouble(), 6.0);
+    sigma->setValue(8);
+    follower->setValue(1500);
+
+    chooseWatch(window, Watch::Sky);
+    QCOMPARE(panel->settings().sigma, 9.0);
+    QCOMPARE(display->captureSettings().postSeconds, 6.0);
+    QCOMPARE(follower->value(), 40.0);
+    chooseWatch(window, Watch::SkySlow);
+    QCOMPARE(panel->settings().sigma, 8.0);
+    QCOMPARE(follower->value(), 1500.0);
+    QCOMPARE(QSettings().value("skySlow/detection/sigma").toDouble(), 8.0);
 }
+// Feature-36: with the slow sky watched and its time-lapse on, Monitoring
+// keeps a frame every interval in the watch's timelapse folder and builds the
+// video as it goes; stopping finishes it and records it in session.txt. The
+// fast sky has no time-lapse.
+void UiTest::theSlowSkyKeepsATimelapseWhileMonitoring()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path());
+    useSynthetic(window);
+    auto* panel = window.findChild<DetectionPanel*>();
+    auto* timelapse = panel->findChild<QCheckBox*>("watchTimelapse");
+    auto* interval = panel->findChild<QSpinBox*>("watchTimelapseInterval");
+    chooseWatch(window, Watch::Sky);
+    QVERIFY(!timelapse->isVisibleTo(panel));
+    chooseWatch(window, Watch::SkySlow);
+    QVERIFY(timelapse->isVisibleTo(panel));
+    QCOMPARE(interval->value(), 30);
+    timelapse->setChecked(true);
+    interval->setValue(1);
+    QCOMPARE(QSettings().value("skySlow/timelapse/intervalSeconds").toInt(), 1);
+
+    window.findChild<QPushButton*>("startButton")->click();
+    auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    QTRY_VERIFY_WITH_TIMEOUT(monitoring->isEnabled(), 5000);
+    monitoring->click();
+    auto* mode = window.findChild<QLabel*>("captureModeLabel");
+    // Set before Monitoring starts.
+    QTRY_VERIFY_WITH_TIMEOUT(mode->text().contains("MONITORING") && !timelapse->isEnabled(), 5000);
+    QTRY_VERIFY2_WITH_TIMEOUT(mode->text().contains("Time-lapse: 3 frames kept, one every 1 s."), qPrintable(mode->text()), 10000);
+    monitoring->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!mode->text().contains("MONITORING") && timelapse->isEnabled(), 5000);
+
+    const QString watch = latestWatch(eventsFolder(directory.path(), Target::Sky));
+    const QDir folder(watch + "/timelapse");
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(folder.filePath("timelapse.txt")), 15000);
+    QVERIFY(folder.entryList({"frame_*.png"}, QDir::Files).size() >= 3);
+    QVERIFY(QFileInfo(folder.filePath("timelapse.mp4")).size() > 0);
+    QVERIFY(text(folder.filePath("timelapse.txt")).contains("end_reason: monitoring stopped"));
+    const QString session = watch + "/session.txt";
+    QTRY_VERIFY_WITH_TIMEOUT(text(session).contains(" timelapse_stop frames="), 5000);
+    QVERIFY(text(session).contains(" monitoring_start target=sky watch=sky_slow"));
+    QVERIFY(text(session).contains(" timelapse_start interval_s=1 folder=timelapse"));
+    QVERIFY(text(session).contains("video=timelapse/timelapse.mp4"));
+    window.findChild<QPushButton*>("stopButton")->click();
+}
+
 // The disk reserve stops clips, recordings and time-lapses before the drive
 // fills. It starts at 10 GiB for each target, and a changed value is kept for
 // that target the next time the program opens.
@@ -1229,13 +1309,13 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QTemporaryDir dir;
     auto api = std::make_shared<FakeZwoApi>();
     // Feature-34: a dark sky whose level follows the camera: 5 codes of black
-    // level plus 0.01 per millisecond of exposure, doubled every 20 gain units.
+    // level plus 0.1 per millisecond of exposure, doubled every 20 gain units.
     // Its noise: 20 electrons a code at gain 0, and a read noise of 6
-    // electrons that drops to 1.5 from gain 85 (a high-conversion-gain mode).
-    api->light = [](double exposureUs, double gain) { return 5 + 0.01 * exposureUs / 1000 * std::pow(2.0, gain / 20); };
+    // electrons that drops to 1.5 from gain 70 (a high-conversion-gain mode).
+    api->light = [](double exposureUs, double gain) { return 5 + 0.1 * exposureUs / 1000 * std::pow(2.0, gain / 20); };
     api->lightNoise = [](double exposureUs, double gain) {
-        const double electrons = 0.01 * exposureUs / 1000 * 20;
-        const double read = gain >= 85 ? 1.5 : 6;
+        const double electrons = 0.1 * exposureUs / 1000 * 20;
+        const double read = gain >= 70 ? 1.5 : 6;
         return std::pow(2.0, gain / 20) / 20 * std::sqrt(read * read + electrons);
     };
     MainWindow window(nullptr, dir.path(), api);
@@ -1262,10 +1342,10 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     auto* restore = panel->findChild<QPushButton*>("autoTuneRestoreCamera");
     QVERIFY(!restore->isEnabled());
 
-    // Step 1: one press. The dark sky lengthens the exposure to the longest
-    // for meteors (250 ms), then raises gain, live, until it is in the aim;
-    // then gains are compared by their noise, with dark rounds for the black
-    // level, and the chosen one is set at 250 ms.
+    // Step 1: one press. The dark sky lengthens the exposure to the fast
+    // sky's longest (40 ms, Feature-35), then raises gain, live, until it is
+    // in the aim; then gains are compared by their noise, with dark rounds
+    // for the black level, and the chosen one is set at 40 ms.
     tune->click();
     auto* status = panel->findChild<QLabel*>("autoTuneStatus");
     auto* rounds = panel->findChild<QLabel*>("autoTuneCameraRounds");
@@ -1274,7 +1354,7 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QVERIFY2(rounds->text().startsWith("1. The sky is at") && rounds->text().count('\n') >= 2, qPrintable(rounds->text()));
     auto* verdict = panel->findChild<QLabel*>("autoTuneCameraVerdict");
     QVERIFY2(verdict->text().contains("aim is 8-30 %") && verdict->text().contains("It is in the aim"), qPrintable(verdict->text()));
-    QCOMPARE(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{250'000});
+    QCOMPARE(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{40'000});
     QVERIFY(gainBox->value() > gainBefore);
     // The loop owns exposure and gain: no rows for them are left to apply.
     QVERIFY(!panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Gain))));
@@ -1283,7 +1363,7 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QVERIFY(text(log).contains(" autotune_readback exposure="));
     // The choice is logged with what was compared, and is the camera's gain now.
     const QString choice = text(log).section(" autotune_gain_choice ", 1).section('\n', 0, 0);
-    QVERIFY2(choice.startsWith("target=sky exposure_ms=250 gain=") && choice.contains(" snr="), qPrintable(choice));
+    QVERIFY2(choice.startsWith("target=sky exposure_ms=40 gain=") && choice.contains(" snr="), qPrintable(choice));
     QCOMPARE(gainBox->value(), choice.section("gain=", 1).section(' ', 0, 0).toDouble());
     QVERIFY(restore->isEnabled());
 

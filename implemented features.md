@@ -39,6 +39,8 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-32 — The end of a session](#feature-32--the-end-of-a-session)
 - [Feature-33 — A Record button that becomes Stop](#feature-33--a-record-button-that-becomes-stop)
 - [Feature-34 — Auto-tune sets the camera itself](#feature-34--auto-tune-sets-the-camera-itself)
+- [Feature-35 — Two ways to watch the sky](#feature-35--two-ways-to-watch-the-sky)
+- [Feature-36 — A time-lapse beside the slow sky watch](#feature-36--a-time-lapse-beside-the-slow-sky-watch)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3183,3 +3185,67 @@ Built on 22 November 2026.
 - A shot-noise-limited camera keeps the gain stage 1 reached.
 - The dark rounds give the black level.
 - In the window, stage 2 runs after stage 1, ends at the tuned exposure, and logs its choice.
+
+## Feature-35 — Two ways to watch the sky
+
+*Discussed with the observer and built on 22 November 2026, at the observer's request without a separate review.*
+
+**The question.** The observer asked what longest exposure auto-tune sets for the sky, and whether the sky's two uses should be told apart: a high frame rate to catch movement, and longer exposures to catch fainter detail.
+
+**What it was.** One sky watch. Auto-tune's **Longest exposure for meteors** was 250 ms by default (10 ms to 10 s), not remembered between launches. The exposure follower's own longest was 2 s by default.
+
+**What decides the split.** Whether the light moves across pixels during the exposure.
+- **A moving source** (a meteor, a satellite) crosses a pixel in a few milliseconds on a wide-field lens. Once the exposure is longer than that, each pixel holds the same light from it however long the exposure is; the sky's background grows with the exposure, and so does the noise each pixel is tested against. SeleneWatch's detector tests each pixel against K × its noise, so for meteors a longer exposure does not reach fainter ones, and past the point where sky noise passes read noise it makes them harder to catch. Short exposures also give timing and trajectory frame by frame; meteor networks run at 25–30 frames a second.
+- **A flash in place** (lightning, a sprite, a fireball's flare) gains light with the exposure up to the flash's own length, tens of milliseconds.
+- **Slow or still light** (aurora, airglow, slow satellites, long glows) keeps adding up, so longer exposures show fainter detail. Faint static detail (the Milky Way) is imaging rather than catching a change.
+
+**What was built.**
+1. **`Watch::SkySlow`** beside `Watch::Sky`. In the choice box they are **The sky: fast events (meteors, lightning)** and **The sky: slow and faint (long exposures)**. Both are the sky's target: its folder, mask behaviour, large brightening and release, no guiding.
+2. **Each keeps its own settings.**
+   - Detection settings and profiles: the fast sky keeps the sky's keys from before (`sky/detection/`, profiles under `sky`), so an observer's saved sky settings are the fast sky's; the slow sky uses `skySlow/`.
+   - Capture settings: `skySlow/capture/` for the slow sky; the fast sky keeps `sky/capture/`.
+   - The exposure follower's limits: `skySlow/follow/` and `sky/follow/`.
+   - Auto-tune's **Longest exposure**, now remembered per watch.
+   - Which sky watch was chosen last (`sky/watch`).
+3. **Defaults.**
+   - Longest exposure (auto-tune and the follower's upper limit): 40 ms for fast events, 2000 ms for slow and faint (`defaultLongestExposureMs`). Values saved before are kept.
+   - Slow and faint detection: the sky's, with the background learned over 10 s (about five frames of 2 s) and a patch learned after 60 s of firing.
+   - Slow and faint capture: 20 s of history, 10 s after a trigger, clips up to 60 s.
+   - These are first values, to be checked on the first nights.
+4. **The record.** `monitoring_start` lines in `session.txt` now name the watch: `target=sky watch=sky_slow`.
+5. **Wording.** The tooltips no longer say that longer exposures reach fainter meteors; the camera settings guide gives 20–40 ms for fast events and 0.25–2 s for slow and faint light.
+
+**Tests.** `ui`: `eachTargetKeepsItsOwnSettings` now has four watches and checks the slow sky's own detection, capture and follower settings and that each sky watch keeps its own; `autoTuneTunesTheCameraLiveThenWatchesK` runs the fast sky, whose exposure now stops at 40 ms.
+
+**Pending:** a night outside with each sky watch, to check the slow watch's detection defaults on real frames.
+
+## Feature-36 — A time-lapse beside the slow sky watch
+
+*Requested by the observer and built on 22 November 2026, without a separate review.*
+
+**The request.** When watching the sky at longer exposures, optionally make a time-lapse alongside detection: save an image every 30 or 60 s and make a video at the end.
+
+**What was built.**
+1. **The setting.** **Time-lapse while monitoring, every … s** in the slow sky's group of the Detection dock (1 s to 1 h, 30 s by default), off by default, remembered (`skySlow/timelapse/`). It is shown only for the slow sky and can be changed only outside Monitoring.
+2. **`SkyTimelapse`** (`timelapse/sky_timelapse.h`), owned by the session.
+   - **When:** it starts when a watch folder opens with the setting on, spans the watch's automatic restarts (the exposure follower's), and ends when the folder closes. The session offers it every frame in Monitoring; it keeps one every interval of source time, and a recording that loops starts the cadence again.
+   - **The source thread never waits.** A kept frame is copied, with its own memory so the camera's frame returns to its pool, into a queue of at most two; the time-lapse's own thread writes it. A frame due while two wait is skipped and counted.
+   - **What is kept, in `<watch>/timelapse/`:**
+     - `frame_00001.png` …: the camera's samples unchanged, 16-bit words for a 16-bit stream, the Bayer mosaic as delivered;
+     - `frames.txt`: a header with the format, significant bits, alignment and Bayer pattern, then each frame's file, UTC time, frame index, and `contains_test_signal=yes` when it held a test signal;
+     - `timelapse.mp4`: 25 frames a second, at most 1920 px on its long edge, stretched for display like the preview's auto-stretch, its levels eased from frame to frame (70 % the previous levels, 30 % the frame's) so the video does not flicker;
+     - `timelapse.txt`: start, end, the reason, the interval, frames kept and skipped, the video, and any problem.
+   - **The disk reserve:** before each frame, the free space must leave the **Disk reserve** and two frames; otherwise no more frames are kept and the reason is recorded.
+   - **The record:** `session.txt` gets `timelapse_start interval_s=… folder=timelapse` and `timelapse_stop frames=… skipped=… video=… reason="…"`.
+3. **The video is built as the night goes** rather than at the end. `Mp4Stream` (in `video_exporter`) keeps FFmpeg running for the whole watch and is given each frame as it is kept. Stopping only closes the file, so the video is ready at once and closing the program never waits for an encoding.
+   - **Crash safety.** It is a fragmented MP4 with a keyframe every 10 frames, and FFmpeg flushes every packet. While building, a first version without the flush left a 28-byte file after 35 frames; with it, a copy of the file taken while FFmpeg still ran decoded 30 of the 35 frames. A crash or power cut therefore loses at most the last few frames of video, and none of the PNGs.
+   - **Why per-frame stretch rather than one stretch for the night:** one fixed stretch chosen at the end needs all frames first, and a night from dusk to full dark would be black for most of it. The PNGs keep the true samples for any other rendering.
+4. **The window.** The mode banner shows `Time-lapse: N frames kept, one every 30 s.` while Monitoring, with any problem. At the end, a message says where the frames and video are.
+
+**Tests.**
+- `timelapse`: `skyTimelapseKeepsAFrameEveryIntervalAndItsVideo` (a frame every 30 s of source time over 200 s, a 12-bit stream's words unchanged in the PNG, `frames.txt`, a loop restarting the cadence, the MP4 decoding, `timelapse.txt`); `skyTimelapseStopsAtTheDiskReserve`; `anUnclosedVideoStillPlays`.
+- `ui`: `theSlowSkyKeepsATimelapseWhileMonitoring` (the setting only for the slow sky, locked during Monitoring, three frames at 1 s in the banner, the folder's PNGs, MP4 and record, and the `session.txt` lines).
+
+**Not done.** The real-window test `tests\gui_e2e_test.ps1` was not run.
+
+**Pending:** a night outside with the slow sky and the time-lapse on, ideally from dusk, with the exposure follower on.

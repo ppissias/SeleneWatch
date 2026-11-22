@@ -464,7 +464,7 @@ CameraSuggestion suggestCamera(const CameraTuneInput& in)
 
     const char* exposureWhy = in.workflow == TuneWorkflow::MoonFlashes ? "Kept between 10 and 40 ms: flashes last 15-100 ms"
         : in.workflow == TuneWorkflow::MoonTransits ? "At most 10 ms, so a fast transit stays sharp"
-        : "Longer first for a darker sky, up to the longest exposure for meteors";
+        : "Longer first for a darker sky, up to this sky watch's longest exposure";
     TuneRow exposureRow{TuneRow::Kind::Exposure, "Exposure", milliseconds(exposure.value), milliseconds(newExposure),
         newExposure != exposure.value ? exposureWhy : "Kept", newExposure, 0, newExposure != exposure.value};
     if (twoPoint && newExposure != exposure.value) exposureRow.why += " (the black level was measured)";

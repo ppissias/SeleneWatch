@@ -271,6 +271,130 @@ QSize boundedEvenSize(int srcW, int srcH, int maxLongEdge)
 
 } // namespace
 
+Mp4Stream::Mp4Stream() = default;
+
+Mp4Stream::~Mp4Stream()
+{
+    QString ignored;
+    close(ignored);
+}
+
+bool Mp4Stream::isOpen() const
+{
+    return process_ != nullptr;
+}
+
+bool Mp4Stream::open(const QString& path, int width, int height, int fps, QString& error)
+{
+    if (process_) return true;
+    width_ = std::max(2, width & ~1);
+    height_ = std::max(2, height & ~1);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    const int safeFps = std::clamp(fps, 1, 60);
+    const qint64 pixelsPerSec = static_cast<qint64>(width_) * height_ * safeFps;
+    const int targetKbps = static_cast<int>(std::clamp<qint64>(pixelsPerSec / 1800, 3000, 35000));
+    const QStringList args{
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "rawvideo",
+        "-pixel_format", "rgb24",
+        "-video_size", QString("%1x%2").arg(width_).arg(height_),
+        "-framerate", QString::number(safeFps),
+        "-i", "pipe:0",
+        "-c:v", "libopenh264",
+        "-profile:v", "high",
+        "-rc_mode", "quality",
+        "-b:v", QString("%1k").arg(targetKbps),
+        "-allow_skip_frames", "0",
+        "-g", "10",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+        "-flush_packets", "1",
+        path
+    };
+    process_ = std::make_unique<QProcess>();
+    process_->setProgram(findFfmpegExecutable());
+    process_->setArguments(args);
+    process_->start(QIODevice::ReadWrite);
+    if (!process_->waitForStarted(5000))
+    {
+        error = QString("Could not start FFmpeg (%1): %2").arg(process_->program(), process_->errorString());
+        process_.reset();
+        return false;
+    }
+    stderr_.clear();
+    return true;
+}
+
+bool Mp4Stream::write(const QImage& frame, QString& error)
+{
+    if (!process_)
+    {
+        error = "the video is not open";
+        return false;
+    }
+    drainStderr(*process_, stderr_);
+    if (process_->state() != QProcess::Running)
+    {
+        error = QString("FFmpeg stopped: %1").arg(QString::fromUtf8(stderr_).trimmed());
+        process_.reset();
+        return false;
+    }
+    const QImage rgb = (frame.format() == QImage::Format_RGB888 && frame.width() == width_ && frame.height() == height_)
+        ? frame
+        : frame.scaled(width_, height_, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB888);
+    const qint64 rowBytes = static_cast<qint64>(width_) * 3;
+    for (int y = 0; y < height_; ++y)
+    {
+        const char* row = reinterpret_cast<const char*>(rgb.constScanLine(y));
+        qint64 written = 0;
+        while (written < rowBytes)
+        {
+            const qint64 n = process_->write(row + written, rowBytes - written);
+            if (n < 0)
+            {
+                drainStderr(*process_, stderr_);
+                error = QString("FFmpeg pipe write failed: %1").arg(QString::fromUtf8(stderr_).trimmed());
+                process_->kill();
+                process_->waitForFinished(2000);
+                process_.reset();
+                return false;
+            }
+            written += n;
+        }
+    }
+    // The frame reaches FFmpeg now, not with the next one 30 s later.
+    while (process_->bytesToWrite() > 0)
+    {
+        drainStderr(*process_, stderr_);
+        if (!process_->waitForBytesWritten(5000) && process_->state() != QProcess::Running) break;
+    }
+    return true;
+}
+
+bool Mp4Stream::close(QString& error)
+{
+    if (!process_) return true;
+    process_->closeWriteChannel();
+    const QDeadlineTimer deadline(60'000);
+    while (!process_->waitForFinished(500))
+    {
+        drainStderr(*process_, stderr_);
+        if (deadline.hasExpired())
+        {
+            process_->kill();
+            process_->waitForFinished(2000);
+            process_.reset();
+            error = kFfmpegTimedOut;
+            return false;
+        }
+    }
+    drainStderr(*process_, stderr_);
+    const bool ok = process_->exitStatus() == QProcess::NormalExit && process_->exitCode() == 0;
+    if (!ok) error = QString("FFmpeg failed (code %1): %2").arg(process_->exitCode()).arg(QString::fromUtf8(stderr_).trimmed());
+    process_.reset();
+    return ok;
+}
+
 QString findFfmpegExecutable()
 {
     const QString env = qEnvironmentVariable("SELENEWATCH_FFMPEG_EXE");

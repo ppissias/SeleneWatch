@@ -18,6 +18,7 @@ QString watchKey(Watch watch)
     case Watch::MoonFlashes: return QStringLiteral("moon");
     case Watch::MoonShadows: return QStringLiteral("moonShadows");
     case Watch::Sky: return QStringLiteral("sky");
+    case Watch::SkySlow: return QStringLiteral("skySlow");
     }
     return QStringLiteral("moon");
 }
@@ -53,7 +54,7 @@ QJsonObject settingsToJson(const DetectionSettings& s, Watch watch)
     obj["maxDarkBoxRatio"] = s.maxDarkBoxRatio;
     obj["darkeningShare"] = s.darkeningShare;
     obj["ignoreAboveShare"] = s.ignoreAboveShare;
-    if (watch == Watch::Sky)
+    if (watchTarget(watch) == Target::Sky)
     {
         obj["brighteningShare"] = s.brighteningShare;
         obj["releaseSeconds"] = s.releaseSeconds;
@@ -75,7 +76,7 @@ DetectionSettings settingsFromJson(const QJsonObject& obj, Watch watch)
     s.maxDarkBoxRatio = obj["maxDarkBoxRatio"].toDouble(s.maxDarkBoxRatio);
     s.darkeningShare = obj["darkeningShare"].toDouble(s.darkeningShare);
     s.ignoreAboveShare = obj["ignoreAboveShare"].toDouble(s.ignoreAboveShare);
-    if (watch == Watch::Sky)
+    if (watchTarget(watch) == Target::Sky)
     {
         s.brighteningShare = obj["brighteningShare"].toDouble(s.brighteningShare);
         s.releaseSeconds = obj["releaseSeconds"].toDouble(s.releaseSeconds);
@@ -104,7 +105,7 @@ std::vector<SavedDetectionProfile> loadSavedDetectionProfiles(Watch watch)
             {
                 profile.watch = watch;
                 profile.settings = settingsFromJson(obj["settings"].toObject(), watch);
-                profile.hasMask = (watch == Watch::Sky) && obj["hasMask"].toBool(false);
+                profile.hasMask = (watchTarget(watch) == Target::Sky) && obj["hasMask"].toBool(false);
                 if (profile.hasMask)
                 {
                     profile.mask = DetectionMask::fromText(obj["mask"].toString().toStdString());
@@ -137,7 +138,7 @@ void saveNamedDetectionProfile(const SavedDetectionProfile& profile)
     root["name"] = trimmed;
     root["target"] = watchKey(profile.watch);
     root["settings"] = settingsToJson(profile.settings, profile.watch);
-    const bool storeMask = (profile.watch == Watch::Sky) && profile.hasMask;
+    const bool storeMask = (watchTarget(profile.watch) == Target::Sky) && profile.hasMask;
     root["hasMask"] = storeMask;
     if (storeMask)
         root["mask"] = QString::fromStdString(profile.mask.text());

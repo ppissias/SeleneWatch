@@ -1,4 +1,5 @@
 #include "timelapse/fits_io.h"
+#include "timelapse/sky_timelapse.h"
 #include "timelapse/stack_processor.h"
 #include "timelapse/timelapse_session.h"
 #include "timelapse/timelapse_settings.h"
@@ -28,6 +29,9 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
+#include <QtCore/QRegularExpression>
+#include <QtCore/QThread>
+#include <QtGui/QColor>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QThread>
 #include <QtCore/QTimeZone>
@@ -254,7 +258,110 @@ private slots:
     void stackingErrorsSkipOrStopTheSessionOnly();
     void cancelledExportKeepsStacksAndSaysHowToRebuild();
     void eventPreviewGifStopsFfmpegAtTimeLimit();
+    void skyTimelapseKeepsAFrameEveryIntervalAndItsVideo();
+    void skyTimelapseStopsAtTheDiskReserve();
+    void anUnclosedVideoStillPlays();
 };
+
+namespace {
+
+// Feature-36: a 12-bit frame in 16-bit words whose samples are all different,
+// at a second of source time per index.
+Frame skyFrame(int index)
+{
+    Frame frame;
+    frame.width = 64;
+    frame.height = 48;
+    frame.format = PixelFormat::Mono16;
+    frame.significantBits = 12;
+    frame.frameIndex = static_cast<uint64_t>(index);
+    frame.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1'790'000'000 + index};
+    frame.data.resize(static_cast<size_t>(frame.width) * frame.height * 2);
+    for (int i = 0; i < frame.width * frame.height; ++i)
+    {
+        const uint16_t value = static_cast<uint16_t>((200 + index * 3 + i) % 4096);
+        frame.data[2 * static_cast<size_t>(i)] = static_cast<uint8_t>(value & 255);
+        frame.data[2 * static_cast<size_t>(i) + 1] = static_cast<uint8_t>(value >> 8);
+    }
+    return frame;
+}
+
+} // namespace
+
+// Feature-36: one frame every 30 s of source time, its samples unchanged in a
+// 16-bit PNG, its time in frames.txt, and a video that decodes; a recording
+// that loops starts the cadence again.
+void TimelapseTests::skyTimelapseKeepsAFrameEveryIntervalAndItsVideo()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    std::optional<SkyTimelapse::Status> ended;
+    SkyTimelapse timelapse([&ended](const SkyTimelapse::Status& status) { ended = status; });
+    timelapse.start(tmp.path(), 30, 0);
+    for (int i = 0; i < 200; ++i)
+    {
+        timelapse.offer(skyFrame(i));
+        timelapse.waitIdle();
+    }
+    QCOMPARE(timelapse.status().frames, 7); // 0, 30, ... 180 s.
+    timelapse.offer(skyFrame(0));           // The recording looped.
+    timelapse.waitIdle();
+    QCOMPARE(timelapse.status().frames, 8);
+    timelapse.finish("monitoring stopped");
+    timelapse.waitIdle();
+    QVERIFY(ended && !ended->active);
+    QCOMPARE(ended->frames, 8);
+    QCOMPARE(ended->endReason, QString("monitoring stopped"));
+    QVERIFY2(ended->problem.isEmpty(), qPrintable(ended->problem));
+
+    const QDir folder(QDir(tmp.path()).filePath("timelapse"));
+    // The third frame kept is the one at 60 s, its words unchanged.
+    QImage third(folder.filePath("frame_00003.png"));
+    QCOMPARE(third.format(), QImage::Format_Grayscale16);
+    QCOMPARE(third.size(), QSize(64, 48));
+    const Frame expected = skyFrame(60);
+    for (int y = 0; y < 48; y += 7)
+        for (int x = 0; x < 64; x += 5)
+        {
+            const size_t i = static_cast<size_t>(y) * 64 + x;
+            const uint16_t word = static_cast<uint16_t>(expected.data[2 * i] | (expected.data[2 * i + 1] << 8));
+            QCOMPARE(reinterpret_cast<const uint16_t*>(third.constScanLine(y))[x], word);
+        }
+    QFile frames(folder.filePath("frames.txt"));
+    QVERIFY(frames.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QStringList lines = QString::fromUtf8(frames.readAll()).split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(lines.size(), 10); // Two header lines, eight frames.
+    QVERIFY2(lines[1].contains("format=Mono16 significant_bits=12"), qPrintable(lines[1]));
+    QVERIFY2(lines[4].startsWith("frame_00003.png utc=") && lines[4].endsWith(" frame=60"), qPrintable(lines[4]));
+    QVERIFY(decodeWithFfmpeg(folder.filePath("timelapse.mp4")));
+    QFile record(folder.filePath("timelapse.txt"));
+    QVERIFY(record.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString text = QString::fromUtf8(record.readAll());
+    QVERIFY2(text.contains("frames: 8") && text.contains("end_reason: monitoring stopped") && text.contains("interval_s: 30"),
+        qPrintable(text));
+    // A second finish changes nothing; a new start begins a new time-lapse.
+    timelapse.finish("again");
+    timelapse.waitIdle();
+    QCOMPARE(ended->endReason, QString("monitoring stopped"));
+}
+
+void TimelapseTests::skyTimelapseStopsAtTheDiskReserve()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    SkyTimelapse timelapse;
+    timelapse.start(tmp.path(), 1, std::numeric_limits<uint64_t>::max() / 4);
+    timelapse.offer(skyFrame(0));
+    timelapse.waitIdle();
+    timelapse.offer(skyFrame(5));
+    timelapse.waitIdle();
+    const SkyTimelapse::Status status = timelapse.status();
+    QCOMPARE(status.frames, 0);
+    QVERIFY2(status.problem.contains("disk reserve"), qPrintable(status.problem));
+    timelapse.finish("monitoring stopped");
+    timelapse.waitIdle();
+    QVERIFY(QFileInfo::exists(QDir(tmp.path()).filePath("timelapse/timelapse.txt")));
+}
 
 void TimelapseTests::fitsRoundTripMonoAndRgbAndExternal16Bit()
 {
@@ -2147,6 +2254,45 @@ void TimelapseTests::eventPreviewGifStopsFfmpegAtTimeLimit()
     options.timeoutMs = 30000;
     QVERIFY2(encodeEventPreviewGif(frames, gifPath, options, error), qPrintable(error));
     QVERIFY(checkFileHasGifSignature(gifPath));
+}
+
+// Feature-36: the time-lapse's video is fragmented and flushed as it goes, so
+// a night cut short by a crash or a power cut still plays up to its last
+// fragment (a keyframe every 10 frames).
+void TimelapseTests::anUnclosedVideoStillPlays()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    Mp4Stream stream;
+    QString error;
+    const QString path = QDir(tmp.path()).filePath("open.mp4");
+    QVERIFY2(stream.open(path, 320, 240, 25, error), qPrintable(error));
+    for (int i = 0; i < 35; ++i)
+    {
+        QImage image(320, 240, QImage::Format_RGB888);
+        image.fill(QColor(i * 7, 100, 200 - i * 5));
+        QVERIFY2(stream.write(image, error), qPrintable(error));
+    }
+    // A copy of the file as it is on disk while FFmpeg still runs.
+    const QString copy = QDir(tmp.path()).filePath("copy.mp4");
+    int decoded = 0;
+    for (int attempt = 0; attempt < 20 && decoded < 30; ++attempt)
+    {
+        QThread::msleep(250);
+        QFile::remove(copy);
+        QVERIFY(QFile::copy(path, copy));
+        QProcess probe;
+        probe.setProgram(findFfmpegExecutable());
+        probe.setArguments({"-v", "info", "-i", copy, "-map", "0:v", "-f", "null", "-"});
+        probe.start();
+        QVERIFY(probe.waitForFinished(10000));
+        const QByteArray out = probe.readAllStandardError();
+        QRegularExpressionMatchIterator frames = QRegularExpression(R"(frame=\s*(\d+))").globalMatch(QString::fromUtf8(out));
+        while (probe.exitCode() == 0 && frames.hasNext()) decoded = frames.next().captured(1).toInt();
+    }
+    QVERIFY2(decoded >= 30, qPrintable(QString::number(decoded)));
+    QVERIFY(stream.close(error));
+    QVERIFY(decodeWithFfmpeg(path));
 }
 
 QTEST_MAIN(TimelapseTests)

@@ -27,7 +27,7 @@ struct TuneAim
     // The brightest sunlit pixels (transits), or the area's median.
     bool brightest{false};
 };
-// skyMaxExposureUs is the longest exposure for meteors, the observer's choice.
+// skyMaxExposureUs is the sky watch's longest exposure, the observer's choice (Feature-35).
 [[nodiscard]] TuneAim tuneAim(TuneWorkflow workflow, double skyMaxExposureUs = 250'000);
 
 // Which pixels are measured: inside[y * width + x] != 0. Empty measures the

@@ -164,7 +164,7 @@ The aims follow what you are watching ([CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTING
 | --- | --- | --- | --- |
 | **The Moon: flashes on the earthlit side** | The earthshine area | 3–10 % of full scale | Gain; the exposure stays between 10 and 40 ms |
 | **The Moon: shadows on the sunlit side** | The brightest sunlit areas | 60–80 %, nothing saturated | Exposure up to 10 ms, gain as low as possible |
-| **The sky** | The sky outside the mask | 8–30 %, the exposure follower's band | A longer exposure first (up to **Longest exposure for meteors**, 250 ms), then gain; a brighter sky lowers gain first |
+| **The sky** (both sky watches) | The sky outside the mask | 8–30 %, the exposure follower's band | A longer exposure first (up to **Longest exposure**: 40 ms for fast events, 2000 ms for slow and faint, each remembered for its watch), then gain; a brighter sky lowers gain first |
 
 1. **The earthshine (Moon flashes only).** Press **Draw earthshine box** and drag a box on the earthshine. Auto-tune grows it to the whole earthshine area and outlines that on the preview in purple, with the share of the frame it covers. The box is labelled *Earthshine*, so it is never confused with the guiding lock box (cyan, *Guiding lock*). Drawing the earthshine box turns off **Draw lock box**, and the other way round; closing the window ends a box being drawn. Glare near the terminator, the sunlit side and the sky beyond the Moon's edge are left out. If no darker sky is in view (a tight crop), or the outline is wrong, only your box is measured; **Measure only my box** forces that. The box is remembered.
 2. **Step 1 — Camera.** Press **Tune camera**. Auto-tune sets the camera itself, live, in rounds. Each round measures the brightness for two seconds, changes one setting, and waits until the camera reports it back and Preview has settled. A round takes a few seconds, and most cameras reach the aim in two to six rounds.
@@ -422,7 +422,18 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
 
 ### Functionality
 
-Switching **Watching** (at the top of **Detection**) from **The Moon** to **The sky** activates an independent wide-field detector profile engineered for unattended multi-hour sky patrols without affecting Moon settings:
+Switching **Watching** (at the top of **Detection**) from **The Moon** to one of the two sky watches activates an independent wide-field detector profile engineered for unattended multi-hour sky patrols without affecting Moon settings.
+
+**Two ways to watch the sky** (Feature-35). They are different jobs, so each keeps its own detection settings, profiles, capture settings, exposure follower limits and auto-tune **Longest exposure**. Both use the sky's folder and mask behaviour.
+
+| Watch | For | Exposures | Why |
+| --- | --- | --- | --- |
+| **The sky: fast events (meteors, lightning)** | Meteors, fireballs, lightning, sprites, satellites and aircraft: timing and trajectory frame by frame | Up to **40 ms** by default (25 frames a second, as meteor networks use) | A meteor crosses a pixel in a few milliseconds on a wide-field lens. Exposed longer, it leaves no more light in each pixel; only the sky's background grows, and with it the noise each pixel is tested against. |
+| **The sky: slow and faint (long exposures)** | Aurora, airglow waves, slow satellites, long-lasting glows, and a time-lapse of the night | Up to **2 s** by default | Light that stays in place keeps adding up, so longer exposures show fainter detail. The background is learned over about 10 s (five frames of 2 s), a patch that keeps firing for 60 s is learned, and clips keep 20 s before and up to 60 s after a trigger. These are first values, to be checked on the first nights. |
+
+Faint *static* detail (the Milky Way, a comet's tail) is imaging rather than catching a change: the slow watch's time-lapse keeps it, and for stacking, **Time-lapse** mode does more.
+
+What both sky watches share:
 
 - **Streak-friendly limits:** Starting thresholds allow larger patches (**Maximum patch** `3000 px`) and elongated diagonal tracks (**Maximum box / patch** `30.00 ×`) with `3 s` pre-event history, `5 s` quiet tail, and `20 s` post-trigger clip cap. Long events (aircraft crossing for minutes) chain into contiguous linked clips without repeating pre-event history.
 - **Large brightening:** Triggers automatically as `kind=brightening` whenever at least **2 %** (editable) of *unmasked* pixels rise by `K` at once—catching lightning strokes and bright fireball flares while keeping noise statistics intact. Slow dusk/dawn brightness ramps adapt harmlessly.
@@ -438,7 +449,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 ### Step-by-Step Workflow
 
 1. Confirm **Position known** with accurate latitude/longitude under **Session → Site and instrument…** ([Section 2.3](#23-site-instrument--clock-accuracy)) and select your camera under **Source** (optionally tick **Connect at startup**).
-2. Under **View → Detection**, while stopped, switch **Watching** to **The sky** (Notice **Guiding** automatically shows `(Moon only)` and disables).
+2. Under **View → Detection**, while stopped, switch **Watching** to **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)** (Notice **Guiding** automatically shows `(Moon only)` and disables).
 3. Press **Start preview** briefly at twilight or night, tune initial exposure/gain, and exclude horizon clutter:
    - Toggle **Draw mask** ON: click corners around trees, roofs, or streetlights and **double-click** to close a polygon (or **drag** for a rectangle; up to `16` shapes of up to `32` corners). Turn **Draw mask** OFF when finished.
    - **Saving Sky detection profiles:** When you click **Save…** on the **Profile** row in Sky mode, the dialog offers an optional **Include horizon mask** checkbox (unchecked by default). Leave it unchecked for sensitivity-only profiles that preserve whatever horizon mask you currently have drawn, or check it (`(+mask)`) to save a site-specific profile that restores its own horizon mask when selected.
@@ -452,6 +463,11 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
      - With **Gain fixed** (the default), only the exposure changes.
      - While Monitoring, each change saves the clip in hand and restarts Monitoring with the new settings, a gap of a few seconds.
    - **Auto-tune** (in full darkness): **Auto-tune…** at the top of the Detection dock measures the sky, suggests exposure and gain, fills in the follower's limits, and watches what each K would trigger ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
+   - **Time-lapse while monitoring** (slow and faint only, Feature-36): tick it and set **every** (30 s by default; 60 s halves the files) before starting Monitoring. Alongside detection, one frame is kept every interval of source time in the watch's `timelapse/` folder:
+     - each as a PNG with the camera's samples unchanged (16-bit for RAW16, the Bayer mosaic as delivered), with its time in `frames.txt`;
+     - in `timelapse.mp4`, 25 frames a second, stretched for display like the preview's auto-stretch, its levels eased from frame to frame. The video is written as the night goes, so it is ready the moment Monitoring stops. It is a fragmented MP4: if the computer crashes or loses power, it still plays up to its last few frames.
+     - The mode banner shows the frames kept. At the end, `timelapse.txt` records what was kept and why it ended, and `session.txt` has `timelapse_start` and `timelapse_stop` lines.
+     - One time-lapse spans the whole watch, including the follower's automatic restarts. When the free space falls below the **Disk reserve**, no more frames are kept and the reason is recorded. As a guide, 30 s keeps about 1 GB of PNG an hour for a 2-megapixel 16-bit camera.
 5. Press **Start monitoring**. It runs until the **Ends** condition, then stops the stream by itself.
 6. The next morning, choose **Session → Open last nightly report**. Select a suggested kind, play a preview or open the original SER and metadata.
 
@@ -473,7 +489,8 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 
 | Control | Purpose | Sky Starting Value |
 | --- | --- | --- |
-| **Watching** | Must be **The sky** (changes while stopped; isolated from Moon settings) | `The Moon` initially |
+| **Watching** | **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)** (changes while stopped; each with its own settings, isolated from Moon settings) | `The Moon` initially |
+| **Time-lapse while monitoring, every** | Slow and faint only: a frame every interval as PNG and in `timelapse.mp4` (Feature-36) | `Off`, `30 s` |
 | **Large brightening** | Share of unmasked pixels rising by `K` in one frame (lightning / fireball flare) | `2.0 % of frame` |
 | **Learn a patch after** | Releases persistent patches (e.g. slowly drifting stars/planets) back to background learning | `20 s` |
 | **Mask** (`Draw mask` / `Clear`) | Polygon (click corners + double-click) or rectangle (drag) exclusion zones, up to 16 × 32 corners | None |
@@ -498,6 +515,8 @@ All outputs reside inside your single chosen **Output folder** (**Session → Ou
             guiding.txt              When guiding activity was logged
             clips/<trigger UTC>/     event.ser, event.txt, PNG and GIF previews
             recordings/<UTC>/        recording.ser, frames.txt, recording.txt
+            timelapse/               Slow sky time-lapse: frame_00001.png ..., frames.txt,
+                                     timelapse.mp4, timelapse.txt
     recordings/<UTC>/                Standalone recording started in Preview
     timelapses/
         <UTC start>/

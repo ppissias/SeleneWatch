@@ -54,8 +54,10 @@ public:
     void setAreaText(const QString& text);
     void setDrawingBox(bool on);
     [[nodiscard]] bool boxOnly() const;
-    // Sky: the longest exposure for meteors, in microseconds.
+    // Sky: the longest exposure auto-tune uses, in microseconds. Feature-35:
+    // each sky watch has its own, which the window sets and saves.
     [[nodiscard]] double skyMaxExposureUs() const;
+    void setSkyMaxExposureMs(double milliseconds);
     [[nodiscard]] double watchSeconds() const;
 
     // The current measurement's progress, or the last result's state.
@@ -110,6 +112,7 @@ signals:
     void minPatchRequested();
     void applyMinPatchRequested();
     void cancelRequested();
+    void skyMaxExposureChanged(double milliseconds);
 
 private:
     void showK();

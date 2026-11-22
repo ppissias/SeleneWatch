@@ -147,7 +147,7 @@ private:
     // Feature-11: each target's detection and capture settings are saved
     // apart. The Moon keeps the keys used before the choice existed.
     [[nodiscard]] static DetectionSettings savedDetectionSettings(Watch watch);
-    [[nodiscard]] static CaptureSettings savedCaptureSettings(Target target);
+    [[nodiscard]] static CaptureSettings savedCaptureSettings(Watch watch);
     // Save the panels' settings under the target they belong to.
     void saveDetectionSettings();
     void saveCaptureSettings();
@@ -180,6 +180,12 @@ public:
     [[nodiscard]] std::shared_ptr<SimulatedPointing> simulatedPointing() const { return simulatedPointing_; }
 private:
     void saveSkyExtras();
+    void loadSkyExtras();
+    // Feature-36: the slow sky's time-lapse setting, saved and given to the session.
+    void applyWatchTimelapse();
+    [[nodiscard]] QString watchTimelapseReadout() const;
+    // Feature-35: auto-tune's longest exposure for the sky watch shown, saved per watch.
+    void showAutoTuneLongestExposure();
     // Feature-26, in mainwindow_autotune.cpp. The panel holds the suggestions
     // and the K results; the window runs the measurements through the
     // session, applies what the observer accepts, and logs it.

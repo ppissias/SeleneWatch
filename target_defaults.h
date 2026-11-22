@@ -43,6 +43,15 @@
         settings.maxDarkPixels = 20000;
         settings.maxDarkBoxRatio = 10;
     }
+    if (watch == Watch::SkySlow)
+    {
+        // Feature-35: frames a second or more apart. The background learns
+        // over about five frames of 2 s, and a patch that keeps firing for a
+        // minute (a star drifting past a fixed camera) is learned. First
+        // values, to be checked on the first nights.
+        settings.referenceTimeConstantSeconds = 10;
+        settings.releaseSeconds = 60;
+    }
     return settings;
 }
 
@@ -55,7 +64,7 @@
     settings.darkening = shadows;
     if (!shadows) settings.darkeningShare = 0;
     if (watch != Watch::MoonFlashes) settings.ignoreAboveShare = 0;
-    if (watch != Watch::Sky)
+    if (watchTarget(watch) != Target::Sky)
     {
         settings.brighteningShare = 0;
         settings.releaseSeconds = 0;
@@ -79,4 +88,27 @@
         settings.maxPostSeconds = 20;
     }
     return settings;
+}
+
+// Feature-35: the slow sky's clips hold a few frames each side at exposures
+// of a second or more; the other watches use their target's.
+[[nodiscard]] inline CaptureSettings defaultCaptureSettings(Watch watch)
+{
+    CaptureSettings settings = defaultCaptureSettings(watchTarget(watch));
+    if (watch == Watch::SkySlow)
+    {
+        settings.historySeconds = 20;
+        settings.postSeconds = 10;
+        settings.maxPostSeconds = 60;
+    }
+    return settings;
+}
+
+// Feature-35: the longest exposure auto-tune uses for each sky watch, in
+// milliseconds, until the observer changes it. Fast events: 25 frames a
+// second, as meteor networks use; a moving meteor leaves no more light in a
+// pixel when exposed longer, only more sky. Slow and faint: 2 s.
+[[nodiscard]] constexpr double defaultLongestExposureMs(Watch watch)
+{
+    return watch == Watch::SkySlow ? 2000 : 40;
 }

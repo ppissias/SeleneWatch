@@ -2,7 +2,7 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 and Feature-34 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-36 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
@@ -94,5 +94,7 @@ What each implemented feature still needs outside the tests. Grouped by the kind
 | Moon, sunlit | Feature-14 | A predicted ISS transit recorded with a schedule. |
 | Night sky | Feature-26 | Auto-tune in full darkness: the follower's limits and gain ceiling. |
 | Moon, earthshine | Feature-34 | **Tune camera** on a real camera: the rounds it takes, the dark rounds, and the gain chosen by noise; ideally with a camera that has a high-conversion-gain mode. |
-| Night sky | Feature-34 | **Tune camera** in full darkness: exposure to the longest for meteors, then gain, then the comparison by noise. |
+| Night sky | Feature-34 | **Tune camera** in full darkness: exposure to the watch's longest, then gain, then the comparison by noise. |
+| Night sky | Feature-35 | A night with each sky watch: the fast one at 40 ms on meteors, the slow one's detection defaults (background over 10 s, release after 60 s) on real frames. |
+| Night sky | Feature-36 | The slow sky's time-lapse from dusk with the follower on: the frames, the video's stretch through the night, and the disk use. |
 | Overnight | Feature-18 | A Moon and a planet time-lapse at the telescope. |

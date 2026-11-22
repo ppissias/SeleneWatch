@@ -574,7 +574,7 @@ void AutoTuneTest::theSkyLengthensTheExposureThenRaisesGain()
     CameraSuggestion s = suggestCamera(input);
     QVERIFY(s.rows[0].ticked && s.rows[0].value > 100'000 && s.rows[0].value <= 250'000);
     QVERIFY(!s.rows[1].ticked);
-    // At the longest exposure for meteors, gain rises.
+    // At the sky's longest exposure, gain rises.
     input.camera.exposure->value = 250'000;
     s = suggestCamera(input);
     QVERIFY(!s.rows[0].ticked);
@@ -739,7 +739,7 @@ void AutoTuneTest::saturationOnlyBoundsTheLoopsMove()
 
 void AutoTuneTest::theLoopStopsWhenTheAimIsOutOfReach()
 {
-    // A sky too dark at the longest exposure for meteors and the highest gain.
+    // A sky too dark at the sky's longest exposure and the highest gain.
     ModelCamera camera;
     camera.perMillisecond = 0.0000001;
     camera.exposure.value = 100'000;

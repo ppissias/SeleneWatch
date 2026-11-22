@@ -95,14 +95,28 @@ QString settingsPrefix(Target target)
 // the Moon's keys, so the Moon's settings saved before are the flashes'.
 QString detectionKey(Watch watch)
 {
+    if (watch == Watch::SkySlow) return "skySlow/detection/";
     return watch == Watch::MoonShadows ? "moonShadows/detection/" : settingsPrefix(watchTarget(watch)) + "detection/";
+}
+
+// Feature-35: the slow sky keeps its own capture settings and exposure
+// follower; the fast sky keeps the sky's keys from before, both Moon watches
+// the Moon's capture settings.
+QString captureKey(Watch watch)
+{
+    return watch == Watch::SkySlow ? "skySlow/capture/" : settingsPrefix(watchTarget(watch)) + "capture/";
+}
+
+QString followKey(Watch watch)
+{
+    return watch == Watch::SkySlow ? "skySlow/follow/" : "sky/follow/";
 }
 
 // The watch that was chosen last.
 Watch savedWatch()
 {
     const QSettings saved;
-    if (saved.value("target", 0).toInt() == 1) return Watch::Sky;
+    if (saved.value("target", 0).toInt() == 1) return saved.value("sky/watch").toString() == "slow" ? Watch::SkySlow : Watch::Sky;
     return saved.value("moon/watch").toString() == "shadows" ? Watch::MoonShadows : Watch::MoonFlashes;
 }
 
@@ -211,6 +225,14 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     notifications.failed = [this](const QString& message) { onSourceFailed(message); };
     notifications.lockChanged = [this] { onLockChanged(); };
     notifications.recordingChanged = [this] { onRecordingChanged(); };
+    notifications.watchTimelapseEnded = [this](const SkyTimelapse::Status& status) {
+        // Feature-36: where the time-lapse is, and what it holds.
+        if (status.frames == 0) showMessage("The time-lapse kept no frames. " + status.problem, 10000);
+        else showMessage(QString("Time-lapse finished: %1 frames%2 in %3. %4").arg(status.frames)
+            .arg(status.videoPath.isEmpty() ? QString() : " and timelapse.mp4")
+            .arg(QDir::toNativeSeparators(status.folder), status.problem), 10000);
+        updateStatusLabel();
+    };
     notifications.timeLapseChanged = [this](const TimelapseStatus& status) {
         if (timelapsePanel_) timelapsePanel_->updateStatus(status);
         updateClosingProgress(status);
@@ -554,16 +576,23 @@ void MainWindow::setupDetectionPanel()
     connect(detectionPanel_, &DetectionPanel::watchRequested, this, &MainWindow::onWatchRequested);
 
     // Feature-15: the exposure follower.
+    loadSkyExtras();
+    // Feature-36: the slow sky's time-lapse.
     {
         const QSettings saved;
-        SkyExtras extras;
-        extras.follow = saved.value("sky/follow/enabled", extras.follow).toBool();
-        extras.minExposureMs = saved.value("sky/follow/minExposureMs", extras.minExposureMs).toDouble();
-        extras.maxExposureMs = saved.value("sky/follow/maxExposureMs", extras.maxExposureMs).toDouble();
-        extras.maxGain = saved.value("sky/follow/maxGain", extras.maxGain).toDouble();
-        extras.gainStep = saved.value("sky/follow/gainStep", extras.gainStep).toDouble();
-        detectionPanel_->setSkyExtras(extras);
+        WatchTimelapse timelapse;
+        timelapse.on = saved.value("skySlow/timelapse/enabled", timelapse.on).toBool();
+        timelapse.intervalSeconds = std::clamp(saved.value("skySlow/timelapse/intervalSeconds", timelapse.intervalSeconds).toInt(), 1, 3600);
+        detectionPanel_->setWatchTimelapse(timelapse);
     }
+    connect(detectionPanel_, &DetectionPanel::watchTimelapseChanged, this, [this] {
+        const WatchTimelapse timelapse = detectionPanel_->watchTimelapse();
+        QSettings saved;
+        saved.setValue("skySlow/timelapse/enabled", timelapse.on);
+        saved.setValue("skySlow/timelapse/intervalSeconds", timelapse.intervalSeconds);
+        applyWatchTimelapse();
+    });
+    applyWatchTimelapse();
     connect(detectionPanel_, &DetectionPanel::skyExtrasChanged, this, [this] {
         saveSkyExtras();
         skyExposureState_ = {};
@@ -602,7 +631,7 @@ DetectionSettings MainWindow::savedDetectionSettings(Watch watch)
     settings.maxDarkBoxRatio = saved.value(key + "maxDarkBoxRatio", settings.maxDarkBoxRatio).toDouble();
     settings.darkeningShare = saved.value(key + "darkeningShare", settings.darkeningShare).toDouble();
     settings.ignoreAboveShare = saved.value(key + "ignoreAboveShare", settings.ignoreAboveShare).toDouble();
-    if (watch == Watch::Sky)
+    if (watchTarget(watch) == Target::Sky)
     {
         settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
         settings.releaseSeconds = saved.value(key + "releaseSeconds", settings.releaseSeconds).toDouble();
@@ -640,25 +669,25 @@ void MainWindow::saveDetectionSettings()
     saved.sync();
 }
 
-CaptureSettings MainWindow::savedCaptureSettings(Target target)
+CaptureSettings MainWindow::savedCaptureSettings(Watch watch)
 {
     const QSettings saved;
-    const QString key = settingsPrefix(target) + "capture/";
-    CaptureSettings capture = defaultCaptureSettings(target);
+    const QString key = captureKey(watch);
+    CaptureSettings capture = defaultCaptureSettings(watch);
     capture.historySeconds = saved.value(key + "history", capture.historySeconds).toDouble();
     capture.postSeconds = saved.value(key + "post", capture.postSeconds).toDouble();
     capture.maxPostSeconds = saved.value(key + "maxPost", capture.maxPostSeconds).toDouble();
     capture.memoryBytes = static_cast<size_t>(std::clamp(saved.value(key + "memoryMiB", 2048).toInt(), 16, 65536)) * 1024 * 1024;
     capture.diskReserveBytes = static_cast<uint64_t>(std::clamp(
         saved.value(key + "diskReserveGiB", static_cast<qulonglong>(capture.diskReserveBytes / kGiB)).toLongLong(), 0LL, 100000LL)) * kGiB;
-    return capture.valid() ? capture : defaultCaptureSettings(target);
+    return capture.valid() ? capture : defaultCaptureSettings(watch);
 }
 
 void MainWindow::saveCaptureSettings()
 {
     if (!displayPanel_) return;
     const auto capture = displayPanel_->captureSettings();
-    const QString key = settingsPrefix(capture.target) + "capture/";
+    const QString key = captureKey(watch_);
     QSettings saved;
     saved.setValue(key + "history", capture.historySeconds);
     saved.setValue(key + "post", capture.postSeconds);
@@ -677,38 +706,80 @@ void MainWindow::onWatchRequested(Watch watch)
         return;
     }
     // Keep the old watch's settings before the panels take the new ones. The
-    // capture settings change only with the target: both Moon watches share them.
+    // capture settings change with their key: both Moon watches share them.
     saveDetectionSettings();
-    const bool targetChanges = watchTarget(watch) != target_;
-    if (targetChanges) saveCaptureSettings();
+    const bool captureChanges = captureKey(watch) != captureKey(watch_);
+    if (captureChanges) saveCaptureSettings();
+    if (target_ == Target::Sky) saveSkyExtras();
     watch_ = watch;
     target_ = watchTarget(watch);
     QSettings saved;
     saved.setValue("target", target_ == Target::Sky ? 1 : 0);
-    if (watch != Watch::Sky) saved.setValue("moon/watch", watch == Watch::MoonShadows ? "shadows" : "flashes");
+    if (target_ == Target::Moon) saved.setValue("moon/watch", watch == Watch::MoonShadows ? "shadows" : "flashes");
+    else saved.setValue("sky/watch", watch == Watch::SkySlow ? "slow" : "fast");
     detectionPanel_->setWatch(watch_);
     detectionPanel_->setSettings(savedDetectionSettings(watch_));
-    if (targetChanges)
+    if (captureChanges)
     {
-        displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+        displayPanel_->setCaptureSettings(savedCaptureSettings(watch_));
         session_->setCaptureSettings(displayPanel_->captureSettings());
     }
+    session_->setWatch(watch_);
     session_->setDetectionSettings(detectionPanel_->settings());
+    loadSkyExtras();
+    applyWatchTimelapse();
+    skyExposureState_ = {};
+    showAutoTuneLongestExposure();
     applyTarget();
-    showMessage(watch_ == Watch::Sky ? "Watching the sky: the sky's settings are loaded. Guiding is for the Moon and is off."
+    showMessage(watch_ == Watch::Sky ? "Watching the sky for fast events: their settings are loaded. Guiding is for the Moon and is off."
+        : watch_ == Watch::SkySlow ? "Watching the sky for slow and faint light: its settings are loaded. Guiding is for the Moon and is off."
         : watch_ == Watch::MoonShadows ? "Watching the Moon for shadows on the sunlit side: their settings are loaded."
         : "Watching the Moon for flashes on the earthlit side: their settings are loaded.", 6000);
 }
 
+void MainWindow::applyWatchTimelapse()
+{
+    const WatchTimelapse timelapse = detectionPanel_->watchTimelapse();
+    session_->setWatchTimelapse(watch_ == Watch::SkySlow && timelapse.on ? timelapse.intervalSeconds : 0);
+}
+
+QString MainWindow::watchTimelapseReadout() const
+{
+    const SkyTimelapse::Status status = session_->watchTimelapseStatus();
+    if (!status.active) return {};
+    QString text = QString("Time-lapse: %1 frame%2 kept, one every %3 s.").arg(status.frames)
+        .arg(status.frames == 1 ? "" : "s").arg(status.intervalSeconds, 0, 'g', 6);
+    if (!status.problem.isEmpty()) text += " " + status.problem;
+    return text;
+}
+
+// Feature-15, Feature-35: each sky watch's exposure follower. Its longest
+// exposure starts at the watch's longest for auto-tune.
+void MainWindow::loadSkyExtras()
+{
+    const QSettings saved;
+    const QString key = followKey(watch_);
+    SkyExtras extras;
+    extras.maxExposureMs = defaultLongestExposureMs(watch_);
+    extras.follow = saved.value(key + "enabled", extras.follow).toBool();
+    extras.minExposureMs = saved.value(key + "minExposureMs", extras.minExposureMs).toDouble();
+    extras.maxExposureMs = saved.value(key + "maxExposureMs", extras.maxExposureMs).toDouble();
+    extras.maxGain = saved.value(key + "maxGain", extras.maxGain).toDouble();
+    extras.gainStep = saved.value(key + "gainStep", extras.gainStep).toDouble();
+    detectionPanel_->setSkyExtras(extras);
+}
+
 void MainWindow::saveSkyExtras()
 {
+    if (target_ != Target::Sky) return;
     const SkyExtras extras = detectionPanel_->skyExtras();
+    const QString key = followKey(watch_);
     QSettings saved;
-    saved.setValue("sky/follow/enabled", extras.follow);
-    saved.setValue("sky/follow/minExposureMs", extras.minExposureMs);
-    saved.setValue("sky/follow/maxExposureMs", extras.maxExposureMs);
-    saved.setValue("sky/follow/maxGain", extras.maxGain);
-    saved.setValue("sky/follow/gainStep", extras.gainStep);
+    saved.setValue(key + "enabled", extras.follow);
+    saved.setValue(key + "minExposureMs", extras.minExposureMs);
+    saved.setValue(key + "maxExposureMs", extras.maxExposureMs);
+    saved.setValue(key + "maxGain", extras.maxGain);
+    saved.setValue(key + "gainStep", extras.gainStep);
 }
 
 void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
@@ -855,8 +926,9 @@ void MainWindow::setupDisplayPanel()
     display.black = saved.value("display/black", 0).toDouble(); display.white = saved.value("display/white", 1).toDouble();
     display.invert = saved.value("display/invert", false).toBool(); display.debayer = saved.value("display/debayer", true).toBool();
     displayPanel_->setDisplaySettings(display.valid() ? display : DisplaySettings{});
-    displayPanel_->setCaptureSettings(savedCaptureSettings(target_));
+    displayPanel_->setCaptureSettings(savedCaptureSettings(watch_));
     session_->setCaptureSettings(displayPanel_->captureSettings());
+    session_->setWatch(watch_);
     connect(displayPanel_, &DisplayPanel::displayChanged, this, &MainWindow::renderPreview);
     displayDock_->raise();
     updateBufferReadout();
@@ -2137,6 +2209,7 @@ void MainWindow::updateControls()
 
     ui_->sourceComboBox->setEnabled(!busy);
     if (detectionPanel_) detectionPanel_->setTargetEditable(!busy);
+    if (detectionPanel_) detectionPanel_->setWatchTimelapseEditable(!monitoring);
     ui_->openFileButton->setEnabled(!busy && recording);
     ui_->loopCheckBox->setEnabled(!busy && recording);
     ui_->loopSecondsSpinBox->setEnabled(!busy && recording && ui_->loopCheckBox->isChecked());
@@ -2184,7 +2257,7 @@ void MainWindow::updateStreamReadout()
     updateBufferReadout();
     updateBlipReadout();
     if (session_->recordingStatus().active) updateRecordButton();
-    if (session_->recordingStatus().active || session_->schedule()) updateStatusLabel();
+    if (session_->recordingStatus().active || session_->schedule() || session_->watchTimelapseStatus().active) updateStatusLabel();
 
     const auto now = std::chrono::steady_clock::now();
     const uint64_t acquired = session_->acquiredFrames();
@@ -2265,6 +2338,8 @@ void MainWindow::updateStatusLabel()
         modeLabel_->setText("PREVIEW — capture OFF. Tune the camera and detector, then start monitoring. Previously queued clips can finish writing.");
     if (const QString recording = recordingReadout(); !recording.isEmpty())
         modeLabel_->setText(modeLabel_->text() + "\n" + recording);
+    if (const QString timelapse = watchTimelapseReadout(); !timelapse.isEmpty())
+        modeLabel_->setText(modeLabel_->text() + "\n" + timelapse);
 }
 
 void MainWindow::updateFrameLabel(const Frame& frame)

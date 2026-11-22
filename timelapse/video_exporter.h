@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <vector>
 
 struct TimelapseExportResult
@@ -22,6 +23,34 @@ struct TimelapseExportResult
 };
 
 [[nodiscard]] QString findFfmpegExecutable();
+
+class QProcess;
+
+// Feature-36: an MP4 written a frame at a time, for a time-lapse built while
+// it is taken. FFmpeg runs for the whole stream, on a QProcess owned by the
+// one thread that uses this. The file is fragmented MP4 with a keyframe every
+// 10 frames, so a stream that is never closed (a crash, a power cut) still
+// plays up to its last fragment.
+class Mp4Stream
+{
+public:
+    Mp4Stream();
+    ~Mp4Stream();
+    Mp4Stream(const Mp4Stream&) = delete;
+    Mp4Stream& operator=(const Mp4Stream&) = delete;
+    // width and height are made even.
+    bool open(const QString& path, int width, int height, int fps, QString& error);
+    // Scaled to the stream's size when it differs.
+    bool write(const QImage& frame, QString& error);
+    // Waits for FFmpeg to finish the file; true when it did.
+    bool close(QString& error);
+    [[nodiscard]] bool isOpen() const;
+
+private:
+    std::unique_ptr<QProcess> process_;
+    QByteArray stderr_;
+    int width_{0}, height_{0};
+};
 
 // Streams RGB888 frames directly to FFmpeg over stdin (no temporary PNG files).
 // Writes MP4 (libopenh264, yuv420p) and/or palette-optimized GIF when paths

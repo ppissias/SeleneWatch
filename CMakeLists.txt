@@ -60,7 +60,7 @@ add_library(selenewatch_core STATIC
     recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
     recording/metadata_text.cpp recording/output_paths.cpp recording/nightly_report.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
     timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
-    timelapse/video_exporter.cpp timelapse/timelapse_session.cpp
+    timelapse/video_exporter.cpp timelapse/timelapse_session.cpp timelapse/sky_timelapse.cpp
     detection_mask.cpp detection_profiles.cpp sky_schedule.cpp session_end.cpp sky_exposure.cpp auto_tune.cpp auto_tune_watch.cpp site_presets.cpp
     guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
     guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp

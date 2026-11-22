@@ -17,16 +17,29 @@ enum class Target { Moon, Sky };
 // shadows on the sunlit side need opposite settings, so they are watched one
 // at a time, each with its own detection settings and profiles. Both are the
 // Moon's target: its folder, capture settings, guiding and time-lapse.
-enum class Watch { MoonFlashes, MoonShadows, Sky };
+//
+// Feature-35: the sky is watched two ways. Sky is fast events (meteors,
+// lightning, a fireball's flare): short exposures, timing and trajectory.
+// SkySlow is slow and faint (aurora, airglow, slow satellites, long glows):
+// long exposures, with its own detection, capture and exposure settings and
+// a time-lapse beside it (Feature-36). Both are the sky's target and folder.
+enum class Watch { MoonFlashes, MoonShadows, Sky, SkySlow };
 
 [[nodiscard]] constexpr Target watchTarget(Watch watch)
 {
-    return watch == Watch::Sky ? Target::Sky : Target::Moon;
+    return watch == Watch::Sky || watch == Watch::SkySlow ? Target::Sky : Target::Moon;
 }
 
 [[nodiscard]] constexpr const char* watchName(Watch watch)
 {
-    return watch == Watch::Sky ? "sky" : watch == Watch::MoonShadows ? "moon_shadows" : "moon_flashes";
+    switch (watch)
+    {
+    case Watch::MoonFlashes: return "moon_flashes";
+    case Watch::MoonShadows: return "moon_shadows";
+    case Watch::Sky: return "sky";
+    case Watch::SkySlow: return "sky_slow";
+    }
+    return "moon_flashes";
 }
 
 // Capture durations use source time, not playback speed or frame counts.

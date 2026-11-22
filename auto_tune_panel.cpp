@@ -110,9 +110,12 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
     skyMax_->setDecimals(0);
     skyMax_->setValue(250);
     skyMax_->setSuffix(" ms");
-    skyMax_->setToolTip("The longest exposure auto-tune suggests for the sky, and the follower's longest. Longer "
-        "exposures reach fainter meteors but blur fast ones; 250 ms is a usual limit.");
-    skyMaxForm->addRow("Longest exposure for meteors", skyMax_);
+    skyMax_->setToolTip("The longest exposure auto-tune uses for this sky watch, and the follower's longest when its "
+        "limits are applied. Each sky watch keeps its own: 40 ms by default for fast events (25 frames a second, as "
+        "meteor networks use; a moving meteor leaves no more light in a pixel when exposed longer, only more sky), "
+        "2000 ms for slow and faint light.");
+    skyMaxForm->addRow("Longest exposure", skyMax_);
+    connect(skyMax_, &QDoubleSpinBox::valueChanged, this, &AutoTunePanel::skyMaxExposureChanged);
     cameraColumn->addWidget(skyMaxRow_);
     cameraRounds_ = wrapped(cameraBox, "autoTuneCameraRounds");
     cameraRounds_->hide();
@@ -369,6 +372,12 @@ void AutoTunePanel::setDrawingBox(bool on)
 
 bool AutoTunePanel::boxOnly() const { return boxOnly_->isChecked(); }
 double AutoTunePanel::skyMaxExposureUs() const { return skyMax_->value() * 1000; }
+
+void AutoTunePanel::setSkyMaxExposureMs(double milliseconds)
+{
+    const QSignalBlocker blocked(skyMax_);
+    skyMax_->setValue(milliseconds);
+}
 double AutoTunePanel::watchSeconds() const { return length_->currentData().toDouble(); }
 
 void AutoTunePanel::setProgress(const QString& text, double progress, bool running)

@@ -57,6 +57,15 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
           }
           post(notifications_.recordingChanged);
       })
+    , skyTimelapse_([this](const SkyTimelapse::Status& status) {
+          // Its writer thread: the time-lapse ended.
+          const QString watchFolder = QFileInfo(status.folder).absolutePath();
+          addToRecord(watchFolder, "session.txt", QString("%1 timelapse_stop frames=%2 skipped=%3 video=%4 reason=\"%5\"%6\n")
+              .arg(utcText(std::chrono::system_clock::now())).arg(status.frames).arg(status.skipped)
+              .arg(status.videoPath.isEmpty() ? "none" : "timelapse/timelapse.mp4", status.endReason,
+                  status.problem.isEmpty() ? QString() : " problem=\"" + status.problem + "\""), false);
+          if (auto ended = notifications_.watchTimelapseEnded) post([ended, status] { ended(status); });
+      })
 {
 }
 
@@ -67,6 +76,8 @@ Session::~Session()
     waitTimeLapseFinished();
     guider_.shutdown();
     // A recording still being written is finished before the record closes.
+    skyTimelapse_.finish("the program closed");
+    skyTimelapse_.waitIdle();
     recorder_.stop("the program closed");
     recorder_.waitIdle();
     if (clockThread_.joinable()) clockThread_.join();
@@ -75,6 +86,7 @@ Session::~Session()
 
 bool Session::openWatch(QString& error)
 {
+    const bool newFolder = watchFolder_.isEmpty();
     if (watchFolder_.isEmpty())
     {
         const QDir parent(eventsRoot());
@@ -97,8 +109,22 @@ bool Session::openWatch(QString& error)
     writer_.setOutputRoot(watchFolder_, true);
     watchIntervalOpen_ = true;
     watchStart_ = std::chrono::steady_clock::now();
+    Watch watch;
+    double timelapseSeconds = 0;
+    {
+        std::lock_guard lock(requestMutex_);
+        watch = watch_;
+        timelapseSeconds = watchTimelapseSeconds_;
+    }
     writer_.logRecord(utcText(std::chrono::system_clock::now()) + " monitoring_start target="
-        + targetName(captureSettings_.target) + "\n", watchFolder_, "session.txt");
+        + targetName(captureSettings_.target) + " watch=" + watchName(watch) + "\n", watchFolder_, "session.txt");
+    // Feature-36: one time-lapse per watch folder, across its restarts.
+    if (newFolder && timelapseSeconds > 0)
+    {
+        skyTimelapse_.start(watchFolder_, timelapseSeconds, captureSettings_.diskReserveBytes);
+        writer_.logRecord(utcText(std::chrono::system_clock::now()) + " timelapse_start interval_s="
+            + QString::number(timelapseSeconds, 'g', 6) + " folder=timelapse\n", watchFolder_, "session.txt");
+    }
     recordingKnown_ = false;
     return true;
 }
@@ -114,6 +140,7 @@ void Session::closeWatch(const QString& reason, bool resume)
         watchIntervalOpen_ = false;
     }
     if (resume) return;
+    skyTimelapse_.finish(reason);
     const QString folder = std::exchange(watchFolder_, QString{});
     {
         std::lock_guard lock(lastWatchMutex_);
@@ -166,6 +193,18 @@ void Session::setTestingTools(bool on)
 {
     std::lock_guard lock(requestMutex_);
     testingTools_ = on;
+}
+
+void Session::setWatch(Watch watch)
+{
+    std::lock_guard lock(requestMutex_);
+    watch_ = watch;
+}
+
+void Session::setWatchTimelapse(double intervalSeconds)
+{
+    std::lock_guard lock(requestMutex_);
+    watchTimelapseSeconds_ = std::max(0.0, intervalSeconds);
 }
 
 void Session::setOutputRoot(const QString& outputRoot)
@@ -873,6 +912,7 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     blip_.apply(*frame);
     const FramePtr published = std::move(frame);
     updateRecording(published);
+    if (mode_.load() == Mode::Monitoring) skyTimelapse_.offer(*published);
 
     DetectionSettings settings;
     DetectionDisplayRequest display;

@@ -11,6 +11,7 @@
 #include "sources/frame_source.h"
 #include "latest_frame_slot.h"
 #include "stream_info.h"
+#include "timelapse/sky_timelapse.h"
 #include "timelapse/timelapse_session.h"
 
 #include <QtCore/QObject>
@@ -66,6 +67,8 @@ public:
         // Feature-26: an auto-tune measurement changed. Read autoTuneStatus().
         std::function<void()> autoTuneChanged;
         std::function<void(QString path, QString error)> reportReady;
+        // Feature-36: the time-lapse beside the slow sky watch ended.
+        std::function<void(const SkyTimelapse::Status&)> watchTimelapseEnded;
 
         // The recording has no more frames. Call stop() to finish.
         std::function<void()> ended;
@@ -140,6 +143,13 @@ public:
     // Context thread. Whether the window's testing tools (synthetic source,
     // test flash) are on; recorded on each session_start line.
     void setTestingTools(bool on);
+    // Feature-35: which watch, recorded on monitoring_start. Context thread.
+    void setWatch(Watch watch);
+    // Feature-36: while Monitoring, keep a frame every this many seconds of
+    // source time for a time-lapse in the watch folder; 0 is off. Context
+    // thread; taken when a watch folder opens.
+    void setWatchTimelapse(double intervalSeconds);
+    [[nodiscard]] SkyTimelapse::Status watchTimelapseStatus() const { return skyTimelapse_.status(); }
     // Feature-17. Context thread, while stopped only. Updates the single
     // output root used for events/<mode>/, recordings/, and timelapses/.
     void setOutputRoot(const QString& outputRoot);
@@ -279,6 +289,8 @@ private:
     // requestMutex_; the recording's state is the source thread's.
     QString outputRoot_;
     bool testingTools_{false};
+    Watch watch_{Watch::MoonFlashes};
+    double watchTimelapseSeconds_{0};
     ObservingSite site_;
     std::string clockRecord_;
     bool clockCheck_{false};
@@ -289,6 +301,9 @@ private:
     uint64_t recordMaxFrames_{0};
     std::optional<Schedule> schedule_;
     RecordingWriter recorder_;
+    // Feature-36. After the recorder and the writer, which record its end;
+    // finished before they shut down.
+    SkyTimelapse skyTimelapse_;
     bool recording_{false};
     bool scheduledRecording_{false};
     std::string recordingName_;

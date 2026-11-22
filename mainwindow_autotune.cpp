@@ -12,6 +12,7 @@
 #include "detection_panel.h"
 #include "recording/metadata_text.h"
 #include "sky_schedule.h"
+#include "target_defaults.h"
 
 #include <QtCore/QSettings>
 #include <QtCore/QTimer>
@@ -74,6 +75,11 @@ void MainWindow::setupAutoTune()
         updateAutoTune();
     });
     if (const QRect saved = QSettings().value("autotune/earthshineBox").toRect(); saved.isValid()) earthshineBox_ = saved;
+    // Feature-35: each sky watch's longest exposure.
+    showAutoTuneLongestExposure();
+    connect(autoTunePanel_, &AutoTunePanel::skyMaxExposureChanged, this, [this](double milliseconds) {
+        if (target_ == Target::Sky) QSettings().setValue(QString(watchName(watch_)) + "/autotune/longestExposureMs", milliseconds);
+    });
 
     connect(detectionPanel_, &DetectionPanel::autoTuneRequested, this, [this] {
         autoTuneWindow_->show();
@@ -119,6 +125,13 @@ void MainWindow::setupAutoTune()
         updateAutoTune();
     });
     updateAutoTune();
+}
+
+void MainWindow::showAutoTuneLongestExposure()
+{
+    if (!autoTunePanel_ || target_ != Target::Sky) return;
+    autoTunePanel_->setSkyMaxExposureMs(QSettings().value(QString(watchName(watch_)) + "/autotune/longestExposureMs",
+        defaultLongestExposureMs(watch_)).toDouble());
 }
 
 TuneWorkflow MainWindow::autoTuneWorkflow() const

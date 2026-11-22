@@ -29,6 +29,14 @@ struct SkyExtras
     bool operator==(const SkyExtras&) const = default;
 };
 
+// Feature-36: a time-lapse beside the slow sky watch while Monitoring.
+struct WatchTimelapse
+{
+    bool on{false};
+    int intervalSeconds{30};
+    bool operator==(const WatchTimelapse&) const = default;
+};
+
 // The observer's trigger controls and a read-only view of source-thread
 // measurements. It never calls the detector or accesses its live buffers.
 //
@@ -71,6 +79,10 @@ public:
     void setSkyExtras(const SkyExtras& extras);
     // What the exposure follower found; empty hides it.
     void showFollow(const QString& text);
+    // Feature-36: shown for the slow sky watch; changed only outside Monitoring.
+    [[nodiscard]] WatchTimelapse watchTimelapse() const;
+    void setWatchTimelapse(const WatchTimelapse& timelapse);
+    void setWatchTimelapseEditable(bool editable);
 
     // Named detection profiles (saved per target; Sky horizon mask is optional).
     void reloadProfiles();
@@ -80,6 +92,7 @@ public:
 
 signals:
     void skyExtrasChanged();
+    void watchTimelapseChanged();
     void settingsChanged();
     void displayChanged();
     // The observer chose another watch in the choice box.
@@ -130,6 +143,10 @@ private:
     QDoubleSpinBox* maxGain_;
     QDoubleSpinBox* gainStep_;
     QLabel* followReading_;
+    // Feature-36.
+    QWidget* timelapseRow_;
+    QCheckBox* timelapse_;
+    QSpinBox* timelapseInterval_;
     // Feature-31: the flashes' ceiling, shown only for the flashes.
     QWidget* flashControls_;
     QDoubleSpinBox* ignoreAbove_;
