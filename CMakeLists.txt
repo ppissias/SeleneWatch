@@ -62,7 +62,7 @@ add_library(selenewatch_core STATIC
     src/capture/frame_ring_buffer.cpp src/capture/event_capture.cpp
     src/recording/firecapture_log.cpp src/recording/recording_reader.cpp src/recording/ser_reader.cpp src/recording/ser_writer.cpp
     src/recording/avi_reader.cpp src/recording/event_writer.cpp src/recording/clip_overview.cpp
-    src/recording/metadata_text.cpp src/recording/output_paths.cpp src/recording/nightly_report.cpp
+    src/recording/metadata_text.cpp src/recording/output_paths.cpp src/recording/nightly_report.cpp src/recording/ffmpeg_video.cpp
     src/recording/frame_timing.cpp src/recording/recording_writer.cpp
     src/sky/sky_schedule.cpp src/sky/sky_exposure.cpp src/sky/site_presets.cpp
     src/autotune/auto_tune.cpp src/autotune/auto_tune_watch.cpp
@@ -262,6 +262,13 @@ target_link_libraries(SeleneWatchPreviewTests PRIVATE Qt6::Widgets Qt6::Test)
 selenewatch_compile_options(SeleneWatchPreviewTests)
 add_test(NAME preview COMMAND SeleneWatchPreviewTests -o -,tap)
 set_tests_properties(preview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Design-2: the folders under src/ include only the folders they may.
+add_executable(SeleneWatchDependencyTests tests/dependency_rules_tests.cpp)
+target_compile_definitions(SeleneWatchDependencyTests PRIVATE SELENEWATCH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(SeleneWatchDependencyTests PRIVATE Qt6::Core Qt6::Test)
+selenewatch_compile_options(SeleneWatchDependencyTests)
+add_test(NAME dependency_rules COMMAND SeleneWatchDependencyTests -o -,tap)
 
 add_executable(SeleneWatchSerTests tests/ser_writer_tests.cpp)
 target_link_libraries(SeleneWatchSerTests PRIVATE selenewatch_core Qt6::Test)

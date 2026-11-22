@@ -11,7 +11,6 @@ When an item is completed, move its whole section, unchanged, to [Completed](#co
 | ID | Change | Size |
 | --- | --- | --- |
 | [Design-1](#design-1-one-owner-for-a-watchs-saved-settings-and-the-code-review-findings) | One owner for a watch's saved settings, and the code review's findings | Medium |
-| [Design-2](#design-2-source-folders-by-job) | Source folders by job, with the dependency directions checked by a test | Medium (mechanical) |
 | [Design-3](#design-3-one-flow-for-the-camera-panels-that-load-the-observers-dll) | One flow for the camera panels that load the observer's DLL | Medium; for decision |
 
 ### Design-1. One owner for a watch's saved settings, and the code review's findings
@@ -34,6 +33,14 @@ When an item is completed, move its whole section, unchanged, to [Completed](#co
 **Considered and not proposed.** Splitting `MainWindow` into more files by size (the "Avoid" list); a settings framework over QSettings; moving the time-lapse panel's own saved settings out of the panel (it is their only reader and writer).
 
 **Checks.** The full CTest suite; the window test that each watch keeps its own settings; a new round-trip test of every watch's keys.
+
+### Design-3. One flow for the camera panels that load the observer's DLL
+
+**For decision; not implemented.** `QhyCameraPanel`, `PlayerOneCameraPanel` and `ToupTekCameraPanel` (170–210 lines each) build the same widgets and run the same refresh, inspect, read-back and enable flow; Player One and ToupTek differ in about 50 lines once the names are swapped. A change to that flow must be made three times (principle 5).
+
+**Possible change.** A base panel for families whose DLL the observer installs, holding the widgets and the flow, with each family supplying its listing, inspection, settings and read-back text (the template method pattern, which DEVELOPER.md does not list yet). **Against it:** the three families' profile and settings types differ, so the base needs either per-family hooks for nearly every step or a template; the ZWO panel would stay outside it; and the window tests check each panel's controls by name. Worth deciding when a fourth family that loads its DLL is added, or when the flow next changes.
+
+## Completed
 
 ### Design-2. Source folders by job
 
@@ -64,12 +71,12 @@ Dependencies point one way: `ui` and `app` may use everything; `session` uses th
 
 **Checks.** A pure move: `git mv` and include paths only, no other code change, so history follows each file. The full CTest suite on Debug, the Release build and package, and the new dependency test.
 
-### Design-3. One flow for the camera panels that load the observer's DLL
+**Outcome (2026-11-22).** Done in two commits. The first is the pure move: `git mv` of 185 files into the folders above, the include paths rewritten from the new root, test helpers included from their own folder, and the CMake lists; no other code change. The second:
 
-**For decision; not implemented.** `QhyCameraPanel`, `PlayerOneCameraPanel` and `ToupTekCameraPanel` (170–210 lines each) build the same widgets and run the same refresh, inspect, read-back and enable flow; Player One and ToupTek differ in about 50 lines once the names are swapped. A change to that flow must be made three times (principle 5).
+- **A cycle the move made visible.** `recording/event_writer.cpp` used `timelapse/video_exporter` for the event preview GIF, while `timelapse` uses `recording`. The FFmpeg encoding that is not about time-lapses (`findFfmpegExecutable`, `Mp4Stream`, `encodeStreamWithFfmpeg`, `encodeImagesWithFfmpeg`, `encodeEventPreviewGif`) moved, unchanged, to `recording/ffmpeg_video`; `timelapse/video_exporter` keeps the time-lapse video and re-sharpen. `guiding` uses `recording` (the guide log goes through the event writer), which the table allows.
+- **The `dependency_rules` test** reads every `#include` under `src/` and fails on an include its table does not allow, on a folder missing from the table, and on Qt Widgets outside `ui/` and `app/`. A deliberately wrong include (`core/blip.h` including `ui/mainwindow.h`) made it fail with that line named.
+- **The table** is in DEVELOPER.md, *Code organization*, with each folder's allowed dependencies; PROJECT_DESCRIPTION.md §11 shows the layout.
+- `tools/` and `tests/` stay at the root; the probes include each other as `tools/…` from the repository root.
 
-**Possible change.** A base panel for families whose DLL the observer installs, holding the widgets and the flow, with each family supplying its listing, inspection, settings and read-back text (the template method pattern, which DEVELOPER.md does not list yet). **Against it:** the three families' profile and settings types differ, so the base needs either per-family hooks for nearly every step or a template; the ZWO panel would stay outside it; and the window tests check each panel's controls by name. Worth deciding when a fourth family that loads its DLL is added, or when the flow next changes.
+**Checks run.** Debug build of every target after each commit; the full CTest suite on Debug, 24 of 24 suites passed (the 23 before and `dependency_rules`). **Not run:** the Release build and package, and the real-window E2E test. The Release build in `out\build\release` is the one used for observing, so it was left for the maintainer to rebuild.
 
-## Completed
-
-None yet.

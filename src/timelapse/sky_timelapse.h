@@ -2,7 +2,7 @@
 
 #include "core/frame.h"
 #include "display/preview_image.h"
-#include "timelapse/video_exporter.h"
+#include "recording/ffmpeg_video.h"
 
 #include <QtCore/QString>
 

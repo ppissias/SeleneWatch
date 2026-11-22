@@ -6,7 +6,7 @@
 #include "recording/metadata_text.h"
 #include "recording/ser_writer.h"
 #include "selenewatch_version.h"
-#include "timelapse/video_exporter.h"
+#include "recording/ffmpeg_video.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>

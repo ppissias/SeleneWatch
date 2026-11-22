@@ -4,6 +4,7 @@
 #include "timelapse/timelapse_session.h"
 #include "timelapse/timelapse_settings.h"
 #include "timelapse/video_exporter.h"
+#include "recording/ffmpeg_video.h"
 
 #include "cameras/zwo_source.h"
 #include "core/memory_budget.h"

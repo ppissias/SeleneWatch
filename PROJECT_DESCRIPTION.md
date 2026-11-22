@@ -267,32 +267,39 @@ No fixed resolution, frame rate, buffer duration, or performance guarantee is pr
 
 ## 11. Code Organization
 
-Synthetic acquisition and playback live in `sources/`; camera acquisition and the vendor boundary live in `cameras/`; format readers, evidence writing, and session logs live in `recording/`. Release packaging lives in `packaging/`: the install rules and package settings, the check run on every package, the release script, and the Qt notices shipped with a release ([DEVELOPER.md](DEVELOPER.md), *Building a release*). The remaining core and UI files sit at the root, with tests in `tests/`.
+All application code is under `src/`, one folder per job (Design-2, 22 November 2026). Release packaging lives in `packaging/`: the install rules and package settings, the check run on every package, the release script, and the Qt notices shipped with a release ([DEVELOPER.md](DEVELOPER.md), *Building a release*). Tests are in `tests/`, manual probes in `tools/`.
 
 The release number (`YYYY.MM-NN`, set once in `CMakeLists.txt`) and the Git revision are generated into `selenewatch_version.h` at build time and recorded on every `event.txt` and `recording.txt`, so each piece of evidence names the program that wrote it.
 
-A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. Feature-16 added Player One and ToupTek there, and `cameras/vendor_runtime` for loading a vendor DLL the observer installs (QHY, Player One, ToupTek). The window sees each camera family through `CameraFamilyPanel` (`camera_family_panel.h`): its Source entry, discovery, requested settings, the source it makes, readbacks and live controls. Each family is one implementation, and the window names none of them. Currently `sources/`, `cameras/`, `guiding/`, and `recording/` sit at the repository root alongside the remaining core and UI files; a plausible target future layout follows.
+A directory is introduced when several files share one job and the dependency direction is clear. Feature-6 introduced `sources/` and `recording/`. Feature-10 introduced `cameras/` for the ZWO and QHY SDK boundaries, frame sources and shared raw-layout helper. Feature-16 added Player One and ToupTek there, and `cameras/vendor_runtime` for loading a vendor DLL the observer installs (QHY, Player One, ToupTek). The window sees each camera family through `CameraFamilyPanel` (`ui/cameras/camera_family_panel.h`): its Source entry, discovery, requested settings, the source it makes, readbacks and live controls. Each family is one implementation, and the window names none of them. Design-2 moved the remaining root files into folders by job:
 
 ```text
 SeleneWatch/
 ├── CMakeLists.txt
 ├── src/
-│   ├── main.cpp
-│   ├── ui/          # Qt windows, preview conversion and stretch, controls, review
+│   ├── app/         # main.cpp and the Windows resource script
+│   ├── ui/          # The window, its docks and dialogs; ui/cameras/ and ui/widgets/
 │   ├── session/     # Session: the frame path from source to capture, preview, and guider
-│   ├── sources/     # Synthetic and recording sources
-│   ├── cameras/     # One adapter per camera family, each optional at build time
-│   ├── capture/     # Ring buffer, event capture, clip assembly
-│   ├── detection/   # Candidate detection algorithms
+│   ├── settings/    # What is saved between launches
+│   ├── timelapse/   # Lunar and planetary time-lapses, the sky time-lapse
 │   ├── guiding/     # Feature lock, guider, calibration
 │   ├── mounts/      # One adapter per mount family, and the simulated mount
-│   ├── recording/   # SER and metadata writing, continuous recording, session logs
+│   ├── autotune/    # Auto-tune's decisions and measuring watches
+│   ├── sky/         # Sun and Moon times, the exposure follower, site presets
+│   ├── cameras/     # One adapter per camera family, each optional at build time
+│   ├── sources/     # Synthetic and recording sources
+│   ├── recording/   # SER and metadata writing, continuous recording, session logs, FFmpeg
+│   ├── capture/     # Ring buffer, event capture, clip assembly
+│   ├── detection/   # Candidate detection, its settings and defaults
+│   ├── display/     # Frames to images for the screen and the clip overviews
 │   └── core/        # Frame, FramePool, and other shared plain types
 ├── tests/
+├── tools/
+├── packaging/
 └── docs/
 ```
 
-Dependencies point one way: `ui` depends on everything below it; nothing below depends on the window or Qt Widgets. The current recording writer uses Qt Gui's image and painting classes for display previews. `guiding` depends on `mounts` and `core`, and not on `capture` or `detection`; the detector and the capture do not know that a mount exists.
+Dependencies point one way, down this list: `ui` depends on everything below it; nothing below depends on the window or Qt Widgets. The recording writer uses Qt Gui's image and painting classes for display previews. `guiding` depends on `mounts`, `recording` (the guide log goes through the event writer) and `core`, and not on `capture` or `detection`; the detector and the capture do not know that a mount exists. The allowed dependencies of each folder are listed in [DEVELOPER.md](DEVELOPER.md), *Code organization*, and checked by the `dependency_rules` test.
 
 `selenewatch_core` is a static library shared by the application, processing tests, and manual recording probe. It has no Qt Widgets dependency. `selenewatch_ui` contains the window, preview widget, and detection panel and is shared by the application and window tests. Qt itself remains dynamically linked. Tests no longer list core sources a second time.
 
