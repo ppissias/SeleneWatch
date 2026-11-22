@@ -1,10 +1,10 @@
 #include "watch_folders.h"
-#include "event_capture.h"
+#include "capture/event_capture.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/nightly_report.h"
 #include "recording/output_paths.h"
-#include "session.h"
+#include "session/session.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>

@@ -1,11 +1,11 @@
 #include "watch_folders.h"
-#include "tests/fake_zwo_api.h"
+#include "fake_zwo_api.h"
 #include "cameras/zwo_source.h"
-#include "session.h"
+#include "session/session.h"
 #include "recording/output_paths.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
-#include "tests/detector_observation.h"
+#include "detector_observation.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>

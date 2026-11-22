@@ -1,9 +1,9 @@
 #include "tools/detection_probe.h"
 #include "tools/translation_estimator.h"
 
-#include "blip_injector.h"
-#include "event_capture.h"
-#include "preview_image.h"
+#include "session/blip_injector.h"
+#include "capture/event_capture.h"
+#include "display/preview_image.h"
 #include "recording/event_writer.h"
 #include "recording/recording_reader.h"
 #include "recording/ser_writer.h"

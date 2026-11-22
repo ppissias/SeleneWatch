@@ -1,6 +1,6 @@
 #include "tools/pulse_probe.h"
 
-#include "flash_detector.h"
+#include "detection/flash_detector.h"
 #include "guiding/guide_controller.h"
 #include "recording/recording_reader.h"
 #include "tools/translation_estimator.h"

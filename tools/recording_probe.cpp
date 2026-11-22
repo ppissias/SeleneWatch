@@ -2,7 +2,7 @@
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "recording/recording_reader.h"
-#include "session.h"
+#include "session/session.h"
 #include "sources/recording_source.h"
 #include "tools/detection_probe.h"
 #include "tools/lock_probe.h"

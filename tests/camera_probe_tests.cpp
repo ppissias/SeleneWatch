@@ -1,6 +1,6 @@
 #include "tools/camera_probe.h"
-#include "tests/fake_zwo_api.h"
-#include "tests/fake_qhy_api.h"
+#include "fake_zwo_api.h"
+#include "fake_qhy_api.h"
 #include "tools/qhy_probe.h"
 #include "recording/ser_reader.h"
 #include <QtCore/QFile>

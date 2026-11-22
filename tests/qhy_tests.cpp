@@ -1,6 +1,6 @@
-#include "tests/fake_qhy_api.h"
+#include "fake_qhy_api.h"
 #include "cameras/qhy_source.h"
-#include "session.h"
+#include "session/session.h"
 #include "recording/ser_reader.h"
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>

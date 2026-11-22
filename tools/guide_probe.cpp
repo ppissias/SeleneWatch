@@ -1,8 +1,8 @@
 #include "tools/guide_probe.h"
 
-#include "guiding/ascom_mount.h"
-#include "guiding/simulated_mount.h"
-#include "session.h"
+#include "mounts/ascom_mount.h"
+#include "mounts/simulated_mount.h"
+#include "session/session.h"
 #include "sources/synthetic_frame_source.h"
 #include "sources/synthetic_scene.h"
 #include "tools/lock_probe.h"

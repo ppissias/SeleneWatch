@@ -1,5 +1,5 @@
-#include "tests/detector_observation.h"
-#include "event_capture.h"
+#include "detector_observation.h"
+#include "capture/event_capture.h"
 #include "recording/clip_overview.h"
 #include "recording/event_writer.h"
 

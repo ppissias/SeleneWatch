@@ -1,4 +1,4 @@
-#include "preview_widget.h"
+#include "ui/preview_widget.h"
 
 #include <QtGui/QWheelEvent>
 #include <QtTest/QSignalSpy>

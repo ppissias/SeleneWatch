@@ -1,13 +1,13 @@
 #include "watch_folders.h"
 #include <future>
-#include "clock_check.h"
+#include "session/clock_check.h"
 #include "recording/clip_overview.h"
 #include "recording/frame_timing.h"
 #include "recording/output_paths.h"
 #include "recording/recording_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
-#include "session.h"
+#include "session/session.h"
 #include "sources/recording_source.h"
 
 #include <QtCore/QDir>

@@ -1,6 +1,6 @@
 #include "tools/darkening_probe.h"
 
-#include "flash_detector.h"
+#include "detection/flash_detector.h"
 #include "recording/recording_reader.h"
 
 #include <QtCore/QFile>

@@ -1,11 +1,11 @@
 #include "watch_folders.h"
-#include "tests/detector_observation.h"
-#include "event_capture.h"
-#include "frame_pool.h"
-#include "preview_image.h"
+#include "detector_observation.h"
+#include "capture/event_capture.h"
+#include "core/frame_pool.h"
+#include "display/preview_image.h"
 #include "recording/ser_writer.h"
 #include "recording/output_paths.h"
-#include "session.h"
+#include "session/session.h"
 #include "sources/synthetic_frame_source.h"
 
 #include <QtCore/QBuffer>

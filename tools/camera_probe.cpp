@@ -4,7 +4,7 @@
 #include "tools/camera_probe.h"
 #include "cameras/zwo_source.h"
 #include "cameras/raw_camera_layout.h"
-#include "session.h"
+#include "session/session.h"
 #include "recording/ser_reader.h"
 
 #include <QtCore/QCryptographicHash>

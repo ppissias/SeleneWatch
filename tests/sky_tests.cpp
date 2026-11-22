@@ -1,10 +1,10 @@
-#include "blip_injector.h"
-#include "event_capture.h"
+#include "session/blip_injector.h"
+#include "capture/event_capture.h"
 #include "recording/clip_overview.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "sources/synthetic_scene.h"
-#include "target_defaults.h"
+#include "detection/target_defaults.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>

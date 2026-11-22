@@ -49,23 +49,32 @@ if(SELENEWATCH_CFITSIO_DIR AND NOT cfitsio_DIR)
 endif()
 find_package(cfitsio CONFIG REQUIRED)
 
+# The code is under src/, one folder per job (DEVELOPER.md, Code organization);
+# includes name the folder, as in "cameras/zwo_api.h".
 add_library(selenewatch_core STATIC
-    blip_injector.cpp frame_pool.cpp memory_budget.cpp preview_image.cpp session.cpp
-    frame_ring_buffer.cpp flash_detector.cpp event_capture.cpp
-    sources/fine_sleep.cpp sources/synthetic_scene.cpp
-    sources/synthetic_frame_source.cpp sources/recording_source.cpp
-    cameras/zwo_source.cpp cameras/zwo_sdk.cpp cameras/qhy_source.cpp cameras/qhy_sdk.cpp cameras/vendor_runtime.cpp
-    cameras/playerone_source.cpp cameras/playerone_sdk.cpp cameras/touptek_source.cpp cameras/touptek_sdk.cpp
-    recording/firecapture_log.cpp recording/recording_reader.cpp recording/ser_reader.cpp recording/ser_writer.cpp
-    recording/avi_reader.cpp recording/event_writer.cpp recording/clip_overview.cpp
-    recording/metadata_text.cpp recording/output_paths.cpp recording/nightly_report.cpp recording/frame_timing.cpp recording/recording_writer.cpp clock_check.cpp
-    timelapse/timelapse_settings.cpp timelapse/fits_io.cpp timelapse/stack_processor.cpp
-    timelapse/video_exporter.cpp timelapse/timelapse_session.cpp timelapse/sky_timelapse.cpp
-    detection_mask.cpp detection_profiles.cpp sky_schedule.cpp session_end.cpp sky_exposure.cpp auto_tune.cpp auto_tune_watch.cpp site_presets.cpp
-    guiding/feature_lock.cpp guiding/lock_tracker.cpp guiding/guider.cpp
-    guiding/simulated_mount.cpp guiding/calibrator.cpp guiding/guide_controller.cpp guiding/ascom_mount.cpp
+    src/core/frame_pool.cpp src/core/memory_budget.cpp
+    src/display/preview_image.cpp
+    src/detection/flash_detector.cpp src/detection/detection_mask.cpp
+    src/sources/fine_sleep.cpp src/sources/synthetic_scene.cpp
+    src/sources/synthetic_frame_source.cpp src/sources/recording_source.cpp
+    src/cameras/zwo_source.cpp src/cameras/zwo_sdk.cpp src/cameras/qhy_source.cpp src/cameras/qhy_sdk.cpp src/cameras/vendor_runtime.cpp
+    src/cameras/playerone_source.cpp src/cameras/playerone_sdk.cpp src/cameras/touptek_source.cpp src/cameras/touptek_sdk.cpp
+    src/capture/frame_ring_buffer.cpp src/capture/event_capture.cpp
+    src/recording/firecapture_log.cpp src/recording/recording_reader.cpp src/recording/ser_reader.cpp src/recording/ser_writer.cpp
+    src/recording/avi_reader.cpp src/recording/event_writer.cpp src/recording/clip_overview.cpp
+    src/recording/metadata_text.cpp src/recording/output_paths.cpp src/recording/nightly_report.cpp
+    src/recording/frame_timing.cpp src/recording/recording_writer.cpp
+    src/sky/sky_schedule.cpp src/sky/sky_exposure.cpp src/sky/site_presets.cpp
+    src/autotune/auto_tune.cpp src/autotune/auto_tune_watch.cpp
+    src/mounts/simulated_mount.cpp src/mounts/ascom_mount.cpp
+    src/guiding/feature_lock.cpp src/guiding/lock_tracker.cpp src/guiding/guider.cpp
+    src/guiding/calibrator.cpp src/guiding/guide_controller.cpp
+    src/timelapse/timelapse_settings.cpp src/timelapse/fits_io.cpp src/timelapse/stack_processor.cpp
+    src/timelapse/video_exporter.cpp src/timelapse/timelapse_session.cpp src/timelapse/sky_timelapse.cpp
+    src/settings/detection_profiles.cpp
+    src/session/session.cpp src/session/blip_injector.cpp src/session/clock_check.cpp src/session/session_end.cpp
 )
-target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(selenewatch_core SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
 if(SELENEWATCH_CFITSIO_DIR)
@@ -192,18 +201,27 @@ if(SELENEWATCH_TOUPTEK_SDK_DIR)
         SELENEWATCH_TOUPTEK_HEADER="${touptek_header}")
 endif()
 
-add_library(selenewatch_ui STATIC mainwindow.ui mainwindow.h mainwindow.cpp mainwindow_autotune.cpp
-    mainwindow_session_end.cpp session_end_dialog.h session_end_dialog.cpp wheel_guard.h
-    auto_tune_panel.h auto_tune_panel.cpp
-    preview_widget.h preview_widget.cpp detection_panel.h detection_panel.cpp display_panel.h display_panel.cpp camera_panel.h camera_panel.cpp
-    histogram_panel.h histogram_panel.cpp guiding_panel.h guiding_panel.cpp timelapse_panel.h timelapse_panel.cpp resharpen_dialog.h resharpen_dialog.cpp
-    manual_dialog.h manual_dialog.cpp startup_tips.h startup_tips.cpp tips_dialog.h tips_dialog.cpp
-    release_checker.h release_checker.cpp
-    elided_label.h elided_label.cpp flow_layout.h flow_layout.cpp control_help.h control_help.cpp readout_label.h readout_label.cpp site_dialog.h site_dialog.cpp
-    camera_settings_editor.h camera_settings_editor.cpp qhy_camera_panel.h qhy_camera_panel.cpp
-    camera_family_panel.h runtime_chooser.h runtime_chooser.cpp camera_support_dialog.h camera_support_dialog.cpp
-    playerone_camera_panel.h playerone_camera_panel.cpp touptek_camera_panel.h touptek_camera_panel.cpp)
-target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(selenewatch_ui STATIC
+    src/ui/mainwindow.ui src/ui/mainwindow.h src/ui/mainwindow.cpp src/ui/mainwindow_autotune.cpp src/ui/mainwindow_session_end.cpp
+    src/ui/auto_tune_panel.h src/ui/auto_tune_panel.cpp src/ui/detection_panel.h src/ui/detection_panel.cpp
+    src/ui/display_panel.h src/ui/display_panel.cpp src/ui/guiding_panel.h src/ui/guiding_panel.cpp
+    src/ui/histogram_panel.h src/ui/histogram_panel.cpp src/ui/timelapse_panel.h src/ui/timelapse_panel.cpp
+    src/ui/preview_widget.h src/ui/preview_widget.cpp
+    src/ui/session_end_dialog.h src/ui/session_end_dialog.cpp src/ui/site_dialog.h src/ui/site_dialog.cpp
+    src/ui/resharpen_dialog.h src/ui/resharpen_dialog.cpp src/ui/manual_dialog.h src/ui/manual_dialog.cpp
+    src/ui/startup_tips.h src/ui/startup_tips.cpp src/ui/tips_dialog.h src/ui/tips_dialog.cpp
+    src/ui/release_checker.h src/ui/release_checker.cpp
+    src/ui/widgets/elided_label.h src/ui/widgets/elided_label.cpp src/ui/widgets/flow_layout.h src/ui/widgets/flow_layout.cpp
+    src/ui/widgets/control_help.h src/ui/widgets/control_help.cpp src/ui/widgets/readout_label.h src/ui/widgets/readout_label.cpp
+    src/ui/widgets/wheel_guard.h
+    src/ui/cameras/camera_family_panel.h src/ui/cameras/camera_panel.h src/ui/cameras/camera_panel.cpp
+    src/ui/cameras/camera_settings_editor.h src/ui/cameras/camera_settings_editor.cpp
+    src/ui/cameras/camera_support_dialog.h src/ui/cameras/camera_support_dialog.cpp
+    src/ui/cameras/runtime_chooser.h src/ui/cameras/runtime_chooser.cpp
+    src/ui/cameras/qhy_camera_panel.h src/ui/cameras/qhy_camera_panel.cpp
+    src/ui/cameras/playerone_camera_panel.h src/ui/cameras/playerone_camera_panel.cpp
+    src/ui/cameras/touptek_camera_panel.h src/ui/cameras/touptek_camera_panel.cpp)
+target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 # Help → Acknowledgements shows the same file that the repository holds.
 qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES ACKNOWLEDGEMENTS.md)
@@ -211,11 +229,12 @@ target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
 target_link_libraries(selenewatch_ui PRIVATE Qt6::Network)
 add_dependencies(selenewatch_ui selenewatch_version)
 selenewatch_compile_options(selenewatch_ui)
-qt_add_executable(SeleneWatch main.cpp)
+qt_add_executable(SeleneWatch src/app/main.cpp)
 if(WIN32)
-    # The resource script includes selenewatch_version.h for the file's version.
-    target_sources(SeleneWatch PRIVATE selenewatch.rc)
-    target_include_directories(SeleneWatch PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    # The resource script includes selenewatch_version.h for the file's version,
+    # and names the icon from the repository root.
+    target_sources(SeleneWatch PRIVATE src/app/selenewatch.rc)
+    target_include_directories(SeleneWatch PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
     add_dependencies(SeleneWatch selenewatch_version)
 endif()
 qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
@@ -237,8 +256,8 @@ selenewatch_compile_options(SeleneWatchTests)
 # TAP reaches stdout on Windows even when CTest starts without a console.
 add_test(NAME core COMMAND SeleneWatchTests -o -,tap)
 
-qt_add_executable(SeleneWatchPreviewTests tests/preview_tests.cpp preview_widget.cpp preview_widget.h)
-target_include_directories(SeleneWatchPreviewTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+qt_add_executable(SeleneWatchPreviewTests tests/preview_tests.cpp src/ui/preview_widget.cpp src/ui/preview_widget.h)
+target_include_directories(SeleneWatchPreviewTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(SeleneWatchPreviewTests PRIVATE Qt6::Widgets Qt6::Test)
 selenewatch_compile_options(SeleneWatchPreviewTests)
 add_test(NAME preview COMMAND SeleneWatchPreviewTests -o -,tap)
@@ -265,8 +284,8 @@ selenewatch_compile_options(SeleneWatchUiTests)
 add_test(NAME ui COMMAND SeleneWatchUiTests -o -,tap)
 set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-add_executable(SeleneWatchReleaseTests tests/release_checker_tests.cpp release_checker.h release_checker.cpp)
-target_include_directories(SeleneWatchReleaseTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(SeleneWatchReleaseTests tests/release_checker_tests.cpp src/ui/release_checker.h src/ui/release_checker.cpp)
+target_include_directories(SeleneWatchReleaseTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(SeleneWatchReleaseTests PRIVATE Qt6::Network Qt6::Test)
 selenewatch_compile_options(SeleneWatchReleaseTests)
 add_test(NAME release_check COMMAND SeleneWatchReleaseTests -o -,tap)
@@ -315,6 +334,7 @@ add_test(NAME session_record COMMAND SeleneWatchSessionRecordTests -o -,tap)
 set_tests_properties(session_record PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(SeleneWatchRegistrationTests tests/registration_tests.cpp tools/translation_estimator.cpp)
+target_include_directories(SeleneWatchRegistrationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(SeleneWatchRegistrationTests PRIVATE selenewatch_core Qt6::Test)
 selenewatch_compile_options(SeleneWatchRegistrationTests)
 add_test(NAME registration COMMAND SeleneWatchRegistrationTests -o -,tap)
@@ -361,10 +381,13 @@ add_test(NAME touptek COMMAND SeleneWatchToupTekTests -o -,tap)
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
     tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp tools/darkening_probe.cpp)
+# The probes include each other as "tools/…", from the repository root.
+target_include_directories(SeleneWatchProbe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
 selenewatch_compile_options(SeleneWatchProbe)
 
 add_library(selenewatch_camera_probe STATIC tools/camera_probe.cpp tools/qhy_probe.cpp)
+target_include_directories(selenewatch_camera_probe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(selenewatch_camera_probe PUBLIC selenewatch_core)
 if(WIN32)
     target_link_libraries(selenewatch_camera_probe PRIVATE psapi)

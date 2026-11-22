@@ -1,7 +1,7 @@
-#include "tests/fake_touptek_api.h"
+#include "fake_touptek_api.h"
 #include "cameras/touptek_source.h"
 #include "recording/ser_reader.h"
-#include "session.h"
+#include "session/session.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>

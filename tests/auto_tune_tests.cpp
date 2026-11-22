@@ -1,7 +1,7 @@
-#include "auto_tune.h"
-#include "auto_tune_watch.h"
-#include "blip_injector.h"
-#include "flash_detector.h"
+#include "autotune/auto_tune.h"
+#include "autotune/auto_tune_watch.h"
+#include "session/blip_injector.h"
+#include "detection/flash_detector.h"
 
 #include <QtTest/QTest>
 

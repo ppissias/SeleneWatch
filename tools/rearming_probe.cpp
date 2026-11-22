@@ -1,6 +1,6 @@
 #include "tools/detection_probe.h"
-#include "blip_injector.h"
-#include "event_capture.h"
+#include "session/blip_injector.h"
+#include "capture/event_capture.h"
 #include "recording/recording_reader.h"
 
 #include <QtCore/QDir>

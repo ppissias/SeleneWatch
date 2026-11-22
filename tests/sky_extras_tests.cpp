@@ -1,8 +1,8 @@
-#include "tests/detector_observation.h"
+#include "detector_observation.h"
 #include "recording/clip_overview.h"
-#include "sky_exposure.h"
-#include "session_end.h"
-#include "sky_schedule.h"
+#include "sky/sky_exposure.h"
+#include "session/session_end.h"
+#include "sky/sky_schedule.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtTest/QTest>

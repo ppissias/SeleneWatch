@@ -1,4 +1,4 @@
-#include "release_checker.h"
+#include "ui/release_checker.h"
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>

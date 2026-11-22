@@ -1,6 +1,6 @@
 #pragma once
 
-#include "flash_detector.h"
+#include "detection/flash_detector.h"
 
 // Direct detector tests use both phases. Capture retains its pre-update
 // difference between these phases; tests needing that snapshot call them apart.

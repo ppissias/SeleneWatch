@@ -3,7 +3,7 @@
 #include "guiding/guide_controller.h"
 #include "guiding/guider.h"
 #include "guiding/lock_tracker.h"
-#include "guiding/simulated_mount.h"
+#include "mounts/simulated_mount.h"
 #include "recording/event_writer.h"
 
 #include <QtCore/QCoreApplication>

@@ -6,12 +6,12 @@
 #include "timelapse/video_exporter.h"
 
 #include "cameras/zwo_source.h"
-#include "memory_budget.h"
+#include "core/memory_budget.h"
 #include "recording/ser_writer.h"
-#include "session.h"
+#include "session/session.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
-#include "tests/fake_zwo_api.h"
+#include "fake_zwo_api.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX

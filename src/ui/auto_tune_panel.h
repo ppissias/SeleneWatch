@@ -1,0 +1,179 @@
+#pragma once
+
+#include "autotune/auto_tune.h"
+#include "autotune/auto_tune_watch.h"
+
+#include <QtWidgets/QWidget>
+
+#include <optional>
+#include <vector>
+
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
+class QListWidget;
+class QProgressBar;
+class QPushButton;
+class QTableWidget;
+class QToolButton;
+class QVBoxLayout;
+
+// Feature-26: the auto-tune panel, in its own window (Feature-28), opened by
+// the Auto-tune button at the top of the Detection dock.
+//
+// Step 1 tunes the camera: once asked, the window sets exposure and gain live
+// until the brightness is in the aim (Feature-34), and the panel lists each
+// round. The later steps, K and the minimum patch, end in suggestions the
+// observer ticks and applies. The panel holds the latest suggestions and the
+// K results it shows, and which events the observer excluded; it measures
+// nothing itself. The window runs the measurements, applies what is asked,
+// and tells the panel what is allowed now.
+class AutoTunePanel final : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit AutoTunePanel(QWidget* parent = nullptr);
+
+    // What the window allows now, and what is being tuned.
+    struct Situation
+    {
+        TuneWorkflow workflow{TuneWorkflow::MoonFlashes};
+        bool preview{false};      // Preview is running.
+        bool camera{false};       // The source is a camera, not a recording.
+        bool recording{false};    // A manual recording is running.
+        bool testingTools{false};
+        bool busy{false};         // A measurement is waiting or running.
+        bool haveBox{false};      // Moon flashes: an earthshine box is drawn.
+        bool canRestore{false};   // The camera loop changed settings that can be set back.
+        QString twilight;         // Advice about the Sun's altitude; empty when none.
+    };
+    void setSituation(const Situation& situation);
+
+    // Moon flashes: what the earthshine area is, or why only the box is measured.
+    void setAreaText(const QString& text);
+    void setDrawingBox(bool on);
+    [[nodiscard]] bool boxOnly() const;
+    // Sky: the longest exposure auto-tune uses, in microseconds. Feature-35:
+    // each sky watch has its own, which the window sets and saves.
+    [[nodiscard]] double skyMaxExposureUs() const;
+    void setSkyMaxExposureMs(double milliseconds);
+    [[nodiscard]] double watchSeconds() const;
+
+    // The current measurement's progress, or the last result's state.
+    void setProgress(const QString& text, double progress, bool running);
+
+    // Step 1: the camera. The loop's rounds, one line each; then the verdict,
+    // warnings, and the rows left for the observer (Offset, the follower).
+    void clearCameraRounds();
+    void addCameraRound(const QString& text);
+    void setCameraSuggestion(const CameraSuggestion& suggestion);
+    void clearCamera(const QString& why);
+    [[nodiscard]] std::vector<TuneRow> tickedCameraRows() const;
+
+    // Step 2: K. A watch's rows replace the table; with only the live
+    // detector measured, each Try K adds its row to the earlier ones.
+    void setKResults(const TuneWatchStatus& status);
+    void clearK(const QString& why);
+    [[nodiscard]] std::optional<double> suggestedK() const;
+    [[nodiscard]] double highestTestedK() const;
+    // For the log line: the K values tested, their raw and remaining counts.
+    [[nodiscard]] QString kRecord() const;
+
+    // The flash check's result.
+    void setCheckResult(const QString& text, std::optional<bool> caught);
+
+    // Feature-30, step 3: the minimum patch, for flashes on the earthlit side.
+    [[nodiscard]] double seeingArcsec() const;
+    void setSeeingArcsec(double arcsec);
+    // How wide a flash is taken to be, and from what.
+    void setFlashWidthText(const QString& text);
+    void setFootprintText(const QString& text);
+    void setMinPatchResults(const TuneWatchStatus& status, std::optional<int> footprint);
+    void clearMinPatch(const QString& why);
+    [[nodiscard]] std::optional<int> suggestedMinPatch() const;
+    // How long the minimum-patch watch runs: 60 s; the window test shortens it.
+    [[nodiscard]] double minPatchSeconds() const { return minPatchSeconds_; }
+    void setMinPatchSeconds(double seconds) { minPatchSeconds_ = seconds; }
+    // For the log line: the values tested and their counts.
+    [[nodiscard]] QString minPatchRecord() const;
+
+signals:
+    void drawBoxToggled(bool on);
+    void boxOnlyToggled(bool on);
+    void tuneCameraRequested();
+    void restoreCameraRequested();
+    void applyCameraRequested();
+    void watchRequested(bool higher);
+    void tryKRequested(double k);
+    void applyKRequested();
+    void checkFlashRequested();
+    void seeingChanged(double arcsec);
+    void minPatchRequested();
+    void applyMinPatchRequested();
+    void cancelRequested();
+    void skyMaxExposureChanged(double milliseconds);
+
+private:
+    void showK();
+    void updateButtons();
+
+    Situation situation_;
+    QLabel* aim_;
+    QLabel* twilight_;
+    QWidget* boxRow_;
+    QToolButton* drawBox_;
+    QCheckBox* boxOnly_;
+    QLabel* area_;
+    QPushButton* tuneCamera_;
+    QPushButton* restoreCamera_;
+    QLabel* cameraRounds_;
+    QWidget* skyMaxRow_;
+    QDoubleSpinBox* skyMax_;
+    QLabel* cameraVerdict_;
+    QVBoxLayout* cameraRowsLayout_;
+    std::vector<std::pair<QCheckBox*, TuneRow>> cameraRows_;
+    QLabel* cameraWarnings_;
+    QPushButton* applyCamera_;
+    QComboBox* length_;
+    QPushButton* watch_;
+    QPushButton* higher_;
+    QWidget* tryRow_;
+    QDoubleSpinBox* tryK_;
+    QPushButton* tryButton_;
+    QTableWidget* kTable_;
+    QListWidget* events_;
+    QLabel* kVerdict_;
+    QPushButton* applyK_;
+    QPushButton* checkFlash_;
+    QLabel* checkResult_;
+    QWidget* minPatchBox_;
+    QDoubleSpinBox* seeing_;
+    QLabel* flashWidth_;
+    QPushButton* minPatchWatch_;
+    QLabel* footprint_;
+    QTableWidget* minTable_;
+    QLabel* minVerdict_;
+    QPushButton* applyMinPatch_;
+    QLabel* status_;
+    QProgressBar* progress_;
+    QPushButton* cancel_;
+
+    std::optional<CameraSuggestion> camera_;
+    // Step 2's results: the rows shown, the watch length they are judged
+    // against, and the observer's exclusions.
+    std::vector<KRowResult> kRows_;
+    double kWatchSeconds_{0};
+    bool liveOnly_{false};
+    double areaNoise_{0};
+    PixelFormat format_{PixelFormat::Mono8};
+    std::vector<TuneEventGroup> groups_;
+    std::vector<bool> excluded_;
+    KChoice choice_;
+    // Step 3's results.
+    std::vector<KRowResult> minRows_;
+    double minWatchSeconds_{0};
+    std::optional<int> footprintPixels_;
+    MinPatchChoice minChoice_;
+    double minPatchSeconds_{60};
+};

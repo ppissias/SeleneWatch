@@ -1,11 +1,11 @@
-#include "tests/detector_observation.h"
-#include "blip_injector.h"
-#include "event_capture.h"
-#include "flash_detector.h"
+#include "detector_observation.h"
+#include "session/blip_injector.h"
+#include "capture/event_capture.h"
+#include "detection/flash_detector.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
-#include "session.h"
+#include "session/session.h"
 #include "sources/recording_source.h"
 
 #include <QtCore/QDir>
