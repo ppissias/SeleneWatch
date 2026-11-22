@@ -1,27 +1,122 @@
 # SeleneWatch Developer Guide
 
-This guide covers building SeleneWatch from source, running automated tests and manual hardware probes, understanding the code layout, and packaging a release.
+This guide covers the principles the code follows, the design rules and patterns that come from them, building SeleneWatch from source, running automated tests and manual hardware probes, the code layout, and packaging a release. It is for developers and coding agents. The principles guide changes; the other sections describe the current code. Pending design and refactoring work is in [DESIGN-IMPROVEMENTS.md](DESIGN-IMPROVEMENTS.md), and pending functionality in [features.md](features.md).
 
 The user-facing feature name is **Time-lapse** or **lunar and planetary time-lapses**. Introductions may describe planetary rotation and changing lunar shadows; technical instructions describe frame selection, alignment, and stacking directly.
 
 - For what the application does, see [README.md](README.md).
 - For operating instructions at the telescope, see [MANUAL.md](MANUAL.md).
-- For architectural rules, the time model, thread ownership, and scientific evidence constraints, read [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) and [AGENTS.md](AGENTS.md) before changing the codebase.
+- For the architecture, the evidence rules, the time model and thread ownership, read [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) before changing the codebase. The rules below link to its sections rather than repeat them.
+- For licensing and feature tracking, see [AGENTS.md](AGENTS.md).
 - For concrete paths, tool versions, connected hardware, and local archive data on the maintainer's workstation, see [local environment.txt](local%20environment.txt).
 
 ## Contents
 
-1. [Technology stack](#1-technology-stack)
-2. [Prerequisites](#2-prerequisites)
-3. [Configuring and building](#3-configuring-and-building)
-4. [Camera SDK and mount build options](#4-camera-sdk-and-mount-build-options)
-5. [Running tests and manual probes](#5-running-tests-and-manual-probes)
-6. [Code organization and extension boundaries](#6-code-organization-and-extension-boundaries)
-7. [Building a release](#7-building-a-release)
+1. [Principles and design rules](#1-principles-and-design-rules)
+2. [Design patterns in use](#2-design-patterns-in-use)
+3. [How to add](#3-how-to-add)
+4. [Working rules](#4-working-rules)
+5. [Technology stack](#5-technology-stack)
+6. [Prerequisites](#6-prerequisites)
+7. [Configuring and building](#7-configuring-and-building)
+8. [Camera SDK and mount build options](#8-camera-sdk-and-mount-build-options)
+9. [Running tests and manual probes](#9-running-tests-and-manual-probes)
+10. [Code organization and extension boundaries](#10-code-organization-and-extension-boundaries)
+11. [Building a release](#11-building-a-release)
 
 ---
 
-## 1. Technology stack
+## 1. Principles and design rules
+
+Scientific correctness and preservation of valid results constrain every design change: the [evidence rules](PROJECT_DESCRIPTION.md#4-evidence-rules) change only by an explicit, recorded decision. Within that constraint, the maintainer's goals for the code, in order:
+
+1. **Readable code.** A reader should understand a class from its name, its header comment, and its fields. Prefer plain, direct code over clever generality.
+2. **A clear application design with clear boundaries.** Each piece of mutable state has one authoritative owner. Each directory has one job, and its dependencies point one way.
+3. **No abstraction or engineering without a real need.** An interface normally needs two implementations or a test seam that is actually used; an explicit listener or ownership boundary can also justify one. A layer needs a responsibility of its own. A compatibility path needs a caller that still uses it. Remove unused machinery after identifying the contracts it protects. Fewer classes or files alone do not make a design simpler.
+4. **A few chosen design patterns, applied consistently.** They are listed in [Design patterns in use](#2-design-patterns-in-use), with when to use each. Reach for one of them before inventing a structure; consistency does not justify an unnecessary abstraction.
+5. **One implementation of each behaviour.** Code that must give the same result is written once and called from every place that needs it: the preview's "Would trigger" and auto-tune measure with the detector's own code, not a copy. A second implementation is acceptable when it has a reason of its own, such as bounded memory, speed or a different measurement; it then gives that reason in its header comment, and a test pins the two together where they must agree. Share the step, not a framework.
+
+The design rules that follow from them, each with what checks it: the build or a test where one exists, otherwise review. The tests check selected boundaries and outcomes; they do not prove thread confinement or every ownership rule.
+
+| Rule | Checked by |
+| --- | --- |
+| **The evidence rules hold.** A frame is stored as it arrived, with what is known and unknown about its time and loss ([§4](PROJECT_DESCRIPTION.md#4-evidence-rules)). | Review; the SER, session-record and camera tests check what each file records |
+| **A published frame is never changed:** one writer, then many readers ([Frame ownership](PROJECT_DESCRIPTION.md#frame-ownership)). | The compiler: `FramePtr` points to a `const Frame` |
+| **Nothing on the frame path waits** for the disk, the window or the mount ([Threads and ownership](PROJECT_DESCRIPTION.md#threads-and-ownership)). | The overload, writer-failure and full-disk tests; otherwise review |
+| **Overload is counted and shown, never skipped silently** ([Overload policy](PROJECT_DESCRIPTION.md#overload-policy)). | The capture and overload tests |
+| **One owner for each piece of mutable state,** and a worker uses settings copied when it takes them (each trigger keeps the values it used). | The detection and session tests; otherwise review |
+| **The processing core has no Qt Widgets.** Everything below the window builds and tests without one. | The build: `selenewatch_core` links only Qt Core and Qt Gui |
+| **Vendor SDK headers stay in one `*_sdk.cpp`** behind the family's `*_api.h`. | Review, and the builds without SDKs |
+| **The mount is sent only guide pulses,** and a stop of tracking at the end of a session the observer chose; nothing SeleneWatch sends can leave it moving ([Mount guiding](PROJECT_DESCRIPTION.md#mount-guiding)). | The guiding tests with `SimulatedMount` |
+| **Collaborators are passed in and listeners are explicit.** No singletons, service locator, global event bus or mutable static application state. | Review |
+| **Evidence is written as it arrives; derived files are replaced only when complete.** SER files, the fragmented MP4 and the text journals grow frame by frame and line by line, so a crash or power cut keeps what was captured. A report or summary that is rewritten (`report.html`) is written beside and swapped in (`QSaveFile`). | The SER, time-lapse (an unclosed MP4 still plays) and report tests |
+| **Every output names the program that wrote it** (`software:` in `event.txt`, `recording.txt` and `timelapse.txt`). | The session-record tests |
+| **Logic is testable without the window.** A decision with several steps is a pure function the window or a worker carries out. | The core suites run without a window; the `ui` suite drives the real window offscreen |
+| **Tests never touch the observer's settings or output.** | The `ui` suite uses its own settings name and temporary folders; the E2E script sets `SELENEWATCH_SETTINGS_NAME` |
+| **One implementation of each behaviour** (principle 5). | Review. The Preview's "Would trigger" readout is the live detector's own summary, and auto-tune's watches run `FlashDetector` itself |
+
+**Avoid:** splitting a class or file by line count; replacing a large window with an equally large controller; a generic event bus or making every object observable; moving detection off the source thread before a measurement shows the need; copying pixel buffers to hand frames on; an interface before its second implementation; keeping large image buffers for later convenience; a compatibility path for settings nobody has saved.
+
+## 2. Design patterns in use
+
+Reach for one of these before inventing a structure.
+
+| Pattern | Use it when | Where |
+| --- | --- | --- |
+| Adapter behind a narrow API, with a fake | Code talks to hardware or a vendor SDK | `ZwoApi`, `QhyApi`, `PlayerOneApi`, `ToupTekApi` (each with a `Fake…Api` in `tests/`); `Mount` with `SimulatedMount` and `AscomMount`; `FrameSource` |
+| Family panel | The window must handle a camera family without naming it | `CameraFamilyPanel`: Source entry, discovery, requested settings, the source it makes, readbacks and live controls |
+| Publish once, read-only after | Data crosses threads | `FramePtr` (`std::shared_ptr<const Frame>`) from a `FramePool`; a clip copies pointers, not pixels |
+| Newest value wins | A slow reader follows a fast stream | `LatestFrameSlot` for the preview; the guider's one-slot mailbox |
+| Bounded queue to one worker | Slow work (disk, encoding) must not hold up the frame path | `EventWriter`, `RecordingWriter`, `SkyTimelapse` (two frames); what does not fit is counted and reported |
+| Explicit notifications | The core tells the window something | `Session::Notifications`: named callbacks, queued to the window's thread |
+| Status snapshot | The window shows a worker's state | `status()` returns a value struct taken under the worker's lock: `RecordingWriter::Status`, `SkyTimelapse::Status`, `GuiderStatus`, `TuneWatchStatus`, `TimelapseStatus` |
+| Pure decision function | A procedure of several steps decides its next move | `nextCameraStep` and `refineGain` (auto-tune), `decideSkyExposure` (the exposure follower), the guide step, `sky_schedule`: the window or a worker carries the step out, and tests run the decision without a camera |
+| Settings copied at admission | A worker uses settings the observer can change | The detector's settings are copied before each frame, a trigger keeps the values it used, a time-lapse keeps its interval |
+| Plain-text record of every output | Anything is saved | `event.txt`, `recording.txt`, `timelapse.txt` as `key: value` lines; `session.txt` as `<UTC> <event> key=value` lines, written through `metadata_text` |
+| Vendor header isolation | A vendor SDK is used | Its header is included in one `*_sdk.cpp`; the rest of the code sees the family's `*_api.h` |
+
+## 3. How to add
+
+Short recipes for the common additions. Each follows a pattern above.
+
+**A camera family.**
+1. Write the family's `*_api.h` boundary and its `*_sdk.cpp`, the only file that includes the vendor header; load an observer-installed DLL through `cameras/vendor_runtime`.
+2. Write its `FrameSource` in `cameras/`, reporting what the camera can and cannot say about time, loss and sample packing ([Camera support](PROJECT_DESCRIPTION.md#camera-support)).
+3. Write a `Fake…Api` in `tests/` and a test suite against it; the tests never open hardware.
+4. Write its `CameraFamilyPanel` and register it with `addCameraFamily`; the window names no family.
+5. Add the CMake option, [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), [Section 8](#8-camera-sdk-and-mount-build-options) and MANUAL.md.
+
+**A detection setting.**
+1. Add the field to `DetectionSettings` with its default in `target_defaults.h`, and its check in `valid()`.
+2. Use it in `FlashDetector`; a trigger records the value it used.
+3. Save it with the watch's settings and in named profiles, and give it a control in the Detection panel.
+4. Test it in the detection suite, and describe it in MANUAL.md.
+
+**A watch** (something to look for, such as the slow sky of Feature-35).
+1. Add it to `Watch` with its target, name and defaults (`target_defaults.h`).
+2. Give it its own saved settings and its entry in the Detection panel's list.
+3. Record it on `monitoring_start` in `session.txt`, and extend the window test that checks each watch keeps its own settings.
+
+**An output file or a `session.txt` line.**
+1. Write it through the writer that owns that folder, never from the window or the frame path.
+2. Use the plain-text record: `key: value` lines, the `software:` line, UTC from `metadata_text`.
+3. List it in MANUAL.md, and check it in a session-record or capture test.
+
+## 4. Working rules
+
+These apply to everyone, including coding agents.
+
+- **Never overwrite the observer's saved settings or output.** Tests use their own settings name and temporary folders. An observing run may be live from `out\build\release`: check before building or running anything there.
+- **Discuss a fix before implementing it,** and show its effect on real data or a real camera where it touches detection or capture.
+- **Separate refactoring from behaviour changes.** A refactoring keeps behaviour, saved settings and file formats; a change to them needs an explicit decision and its own commit.
+- **Document every new type** with a header comment covering its responsibility, and any ownership, units or threading contract; update it when behaviour changes.
+- **Keep documentation current in the same change:** behaviour in MANUAL.md, design in this guide or PROJECT_DESCRIPTION.md, pending work only in features.md or DESIGN-IMPROVEMENTS.md.
+- **Diagnostic programs and test output** go in a scratch folder or the ignored `out\`, never in tracked files. Manual probes that are kept belong in `tools/`.
+- **Commits:** descriptive messages with the validation in the body; stage only your own changes; never put private details or the observer's location in a commit message, a screenshot or a tracked file.
+
+---
+
+## 5. Technology stack
 
 | Area | Choice |
 | --- | --- |
@@ -40,17 +135,17 @@ The processing core (`selenewatch_core`) links only `Qt6::Core` and `Qt6::Gui`, 
 
 ---
 
-## 2. Prerequisites
+## 6. Prerequisites
 
 1. **Visual Studio** with the **Desktop development with C++** workload and CMake support.
 2. **Qt 6** built for your **MSVC 64-bit** toolchain, including **Qt Widgets** (do not use a MinGW Qt kit).
 3. **Ninja** (supplied with Visual Studio or Qt Tools).
-4. **Optional camera SDKs** (kept outside the repository; see [Section 4](#4-camera-sdk-and-mount-build-options)). Without any camera SDK configured, SeleneWatch still builds and runs with the Synthetic source and SER/AVI recordings.
+4. **Optional camera SDKs** (kept outside the repository; see [Section 8](#8-camera-sdk-and-mount-build-options)). Without any camera SDK configured, SeleneWatch still builds and runs with the Synthetic source and SER/AVI recordings.
 5. **Optional WiX Toolset 3** binaries (`bin\candle.exe`, `bin\light.exe`), required only to generate the `.msi` installer during release packaging.
 
 ---
 
-## 3. Configuring and building
+## 7. Configuring and building
 
 ### Using CMake presets (Visual Studio or CLI)
 
@@ -95,7 +190,7 @@ ctest --test-dir out/build/zwo-release --output-on-failure
 
 ---
 
-## 4. Camera SDK and mount build options
+## 8. Camera SDK and mount build options
 
 Camera SDKs stay outside the repository. Each adapter is enabled when its CMake cache variable is non-empty:
 
@@ -115,7 +210,7 @@ See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the license analysis 
 
 ---
 
-## 5. Running tests and manual probes
+## 9. Running tests and manual probes
 
 ### Monitoring folders and nightly reports
 
@@ -168,7 +263,7 @@ These targets are built alongside the application and are never executed by CTes
 
 ---
 
-## 6. Code organization and extension boundaries
+## 10. Code organization and extension boundaries
 
 ### Build targets and directories
 
@@ -189,16 +284,13 @@ These targets are built alongside the application and are never executed by CTes
 | `tools/` | Manual probe executables and experimental prototypes (such as `translation_estimator`) |
 | `docs/` | Feature validation reports, soak tool documentation, and machine-readable benchmark JSON files |
 
-### Key patterns when adding code
+### Patterns and third-party obligations
 
-- **Frame ownership:** Sources write into a pooled `Frame` and `Session` publishes a `FramePtr` (`std::shared_ptr<const Frame>`). Downstream consumers never mutate pixel buffers.
-- **Camera family panels:** The main window interacts with camera families solely through `CameraFamilyPanel` (`camera_family_panel.h`)—covering Source selection, device discovery, requested settings, source creation, live readbacks, and preview controls—so adding a new family does not require vendor-specific branches in `MainWindow`.
-- **Vendor header isolation:** Keep third-party SDK headers confined to a single `*_sdk.cpp` translation unit behind a clean `*_api.h` boundary so tests stay deterministic and vendor preprocessor quirks do not leak.
-- **Third-party obligations:** Preserve BSD-2-Clause licensing for SeleneWatch code, keep Qt 6 dynamically linked, keep un-redistributable vendor SDKs out of the repository and release packages, and update [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) whenever a dependency changes.
+The patterns to follow when adding code (frame ownership, camera family panels, vendor header isolation and the others) are in [Design patterns in use](#2-design-patterns-in-use). Preserve BSD-2-Clause licensing for SeleneWatch code, keep Qt 6 dynamically linked, keep un-redistributable vendor SDKs out of the repository and release packages, and update [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) whenever a dependency changes ([AGENTS.md](AGENTS.md)).
 
 ---
 
-## 7. Building a release
+## 11. Building a release
 
 ### Versioning
 
