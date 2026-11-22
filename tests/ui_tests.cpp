@@ -1230,7 +1230,14 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     auto api = std::make_shared<FakeZwoApi>();
     // Feature-34: a dark sky whose level follows the camera: 5 codes of black
     // level plus 0.01 per millisecond of exposure, doubled every 20 gain units.
+    // Its noise: 20 electrons a code at gain 0, and a read noise of 6
+    // electrons that drops to 1.5 from gain 85 (a high-conversion-gain mode).
     api->light = [](double exposureUs, double gain) { return 5 + 0.01 * exposureUs / 1000 * std::pow(2.0, gain / 20); };
+    api->lightNoise = [](double exposureUs, double gain) {
+        const double electrons = 0.01 * exposureUs / 1000 * 20;
+        const double read = gain >= 85 ? 1.5 : 6;
+        return std::pow(2.0, gain / 20) / 20 * std::sqrt(read * read + electrons);
+    };
     MainWindow window(nullptr, dir.path(), api);
     window.findChild<QAction*>("testingToolsAction")->setChecked(true);
     window.show();
@@ -1256,11 +1263,14 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QVERIFY(!restore->isEnabled());
 
     // Step 1: one press. The dark sky lengthens the exposure to the longest
-    // for meteors (250 ms), then raises gain, live, until it is in the aim.
+    // for meteors (250 ms), then raises gain, live, until it is in the aim;
+    // then gains are compared by their noise, with dark rounds for the black
+    // level, and the chosen one is set at 250 ms.
     tune->click();
     auto* status = panel->findChild<QLabel*>("autoTuneStatus");
     auto* rounds = panel->findChild<QLabel*>("autoTuneCameraRounds");
-    QTRY_VERIFY2_WITH_TIMEOUT(status->text().startsWith("Tuned in"), qPrintable(status->text() + " | " + rounds->text()), 60000);
+    QTRY_VERIFY2_WITH_TIMEOUT(status->text().startsWith("Tuned in"), qPrintable(status->text() + " | " + rounds->text()), 120000);
+    QVERIFY2(status->text().contains("faintest threshold") && rounds->text().contains(", dark ("), qPrintable(rounds->text()));
     QVERIFY2(rounds->text().startsWith("1. The sky is at") && rounds->text().count('\n') >= 2, qPrintable(rounds->text()));
     auto* verdict = panel->findChild<QLabel*>("autoTuneCameraVerdict");
     QVERIFY2(verdict->text().contains("aim is 8-30 %") && verdict->text().contains("It is in the aim"), qPrintable(verdict->text()));
@@ -1271,6 +1281,10 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     const QString log = eventsFolder(dir.path(), Target::Sky) + "/candidates.txt";
     QTRY_VERIFY_WITH_TIMEOUT(text(log).contains(" autotune_camera target=sky round=1 measured_level="), 3000);
     QVERIFY(text(log).contains(" autotune_readback exposure="));
+    // The choice is logged with what was compared, and is the camera's gain now.
+    const QString choice = text(log).section(" autotune_gain_choice ", 1).section('\n', 0, 0);
+    QVERIFY2(choice.startsWith("target=sky exposure_ms=250 gain=") && choice.contains(" snr="), qPrintable(choice));
+    QCOMPARE(gainBox->value(), choice.section("gain=", 1).section(' ', 0, 0).toDouble());
     QVERIFY(restore->isEnabled());
 
     // Step 2: the K watch, shortened for the test.

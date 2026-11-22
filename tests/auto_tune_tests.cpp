@@ -110,6 +110,25 @@ struct ModelCamera
         return std::min(1.0, pedestal + perMillisecond * brightnessScale * exposure.value / 1000
             * std::pow(2.0, gain.value / gainPerStop));
     }
+    // Feature-34: the temporal noise, as a share of a 12-bit full scale. At
+    // gain 0 one electron gives adcPerElectron ADU; the read noise in
+    // electrons falls from readNoiseLow towards readNoiseHigh as gain rises,
+    // as on CMOS cameras; with highConversionAt set, it drops from one to the
+    // other at that gain instead (a high-conversion-gain mode). Never below
+    // half a code.
+    double adcPerElectron{0.25}, readNoiseLow{6}, readNoiseHigh{1.2};
+    double highConversionAt{-1};
+    static constexpr double kFullScale = 4095;
+    [[nodiscard]] double noise() const
+    {
+        const double amplify = std::pow(2.0, gain.value / gainPerStop);
+        const double perElectron = adcPerElectron * amplify / kFullScale;
+        const double electrons = perMillisecond * exposure.value / 1000 * kFullScale / adcPerElectron;
+        const double read = highConversionAt >= 0 ? (gain.value >= highConversionAt ? readNoiseHigh : readNoiseLow)
+                                                  : readNoiseHigh + (readNoiseLow - readNoiseHigh) / amplify;
+        return std::max(0.5 / kFullScale, perElectron * std::sqrt(read * read + electrons));
+    }
+    [[nodiscard]] double signalToNoise() const { return (level() - pedestal) / noise(); }
 };
 
 // Feature-34: the camera loop as the window runs it. Each round measures,
@@ -135,6 +154,7 @@ LoopRun runLoop(TuneWorkflow workflow, ModelCamera camera)
         measured.level = camera.level();
         measured.atMax = measured.level >= 1 ? 0.01 : 0;
         measured.samples = 1000;
+        measured.noise = camera.noise();
         history.push_back({camera.exposure.value, camera.gain.value, measured});
         const CameraStep step = nextCameraStep(workflow, TuneCamera{camera.exposure, camera.gain, std::nullopt}, history);
         run.rounds = round;
@@ -154,6 +174,78 @@ LoopRun runLoop(TuneWorkflow workflow, ModelCamera camera)
     }
     run.camera = camera;
     return run;
+}
+
+// Feature-34: both stages as the window runs them: the loop to the aim, then
+// refining the gain at the tuned exposure until a gain is chosen, which is set.
+struct TuneRun
+{
+    CameraStep::Outcome reached{CameraStep::Outcome::Move};
+    GainRefinement choice;
+    int rounds{0};
+    double reachedGain{0}, tunedExposure{0};
+    ModelCamera camera;
+    bool withinLimits{true};
+};
+TuneRun runTune(TuneWorkflow workflow, ModelCamera camera)
+{
+    std::vector<TuneMeasurement> history;
+    TuneRun run;
+    const auto measure = [&] {
+        BrightnessSample measured;
+        measured.level = camera.level();
+        measured.atMax = measured.level >= 1 ? 0.01 : 0;
+        measured.samples = 1000;
+        measured.noise = camera.noise();
+        history.push_back({camera.exposure.value, camera.gain.value, measured});
+        ++run.rounds;
+    };
+    const auto settings = [&] { return TuneCamera{camera.exposure, camera.gain, std::nullopt}; };
+    for (;;)
+    {
+        measure();
+        const CameraStep step = nextCameraStep(workflow, settings(), history);
+        if (step.outcome != CameraStep::Outcome::Move || run.rounds >= kMaxCameraRounds)
+        {
+            run.reached = step.outcome;
+            break;
+        }
+        camera.exposure.value = step.exposureUs;
+        camera.gain.value = step.gain;
+    }
+    run.reachedGain = camera.gain.value;
+    run.tunedExposure = camera.exposure.value;
+    if (run.reached == CameraStep::Outcome::InAim && refinesGain(workflow))
+    {
+        for (int round = 0; round <= kMaxRefineRounds; ++round)
+        {
+            run.choice = refineGain(workflow, settings(), run.tunedExposure, history);
+            if (run.choice.action == GainRefinement::Action::Choose) break;
+            camera.exposure.value = run.choice.exposureUs;
+            camera.gain.value = run.choice.gain;
+            if (camera.gain.value < camera.gain.minimum || camera.gain.value > camera.gain.maximum
+                || camera.exposure.value < camera.exposure.minimum) run.withinLimits = false;
+            measure();
+        }
+        camera.exposure.value = run.choice.exposureUs;
+        camera.gain.value = run.choice.gain;
+    }
+    run.camera = camera;
+    return run;
+}
+
+// The best background signal-to-noise any gain in the aim gives at the
+// camera's exposure, found by trying every gain unit.
+double bestInAim(TuneWorkflow workflow, ModelCamera camera)
+{
+    const TuneAim aim = tuneAim(workflow);
+    double best = 0;
+    for (double g = camera.gain.minimum; g <= camera.gain.maximum; g += 1)
+    {
+        camera.gain.value = g;
+        if (camera.level() >= aim.low && camera.level() <= aim.high) best = std::max(best, camera.signalToNoise());
+    }
+    return best;
 }
 
 // Measure, apply the ticked rows, measure again: as the observer would.
@@ -207,6 +299,10 @@ private slots:
     void theLoopLearnsAnyGainCurve();
     void saturationOnlyBoundsTheLoopsMove();
     void theLoopStopsWhenTheAimIsOutOfReach();
+    void temporalNoiseIsEachPixelsSpreadOverTime();
+    void theRefinedGainHasTheFaintestThreshold();
+    void aShotNoiseLimitedSceneKeepsItsHeadroom();
+    void theDarkMeasurementGivesTheBlackLevel();
     void kValuesAreTestedAroundTheCurrentOne();
     void eachKRowCountsWhatThatKAloneWould();
     void aSkippedSearchIsNeverAQuietK();
@@ -656,6 +752,88 @@ void AutoTuneTest::theLoopStopsWhenTheAimIsOutOfReach()
     // Without a camera nothing moves.
     std::vector<TuneMeasurement> history{{30'000, 0, BrightnessSample{0.01, 0, 0, 1000}}};
     QCOMPARE(nextCameraStep(TuneWorkflow::Sky, TuneCamera{}, history).outcome, CameraStep::Outcome::OutOfReach);
+}
+
+void AutoTuneTest::temporalNoiseIsEachPixelsSpreadOverTime()
+{
+    // Frames with Gaussian noise of 2 ADU: the median spread is about 2 codes.
+    std::mt19937 random(3);
+    TemporalNoise noise;
+    const TuneArea whole;
+    QVERIFY(!noise.median());
+    for (uint64_t i = 0; i < 40; ++i) noise.add(*frame(i, random), whole);
+    const double measured = *noise.median() * 255;
+    QVERIFY2(std::abs(measured - 2) < 0.2, qPrintable(QString::number(measured)));
+    // Frames that never change are at the floor of half a code.
+    TemporalNoise still;
+    const auto same = flat([](int, int) { return 60.0; });
+    for (int i = 0; i < 5; ++i) still.add(*same, whole);
+    QCOMPARE(*still.median(), 0.5 / 255);
+}
+
+void AutoTuneTest::theRefinedGainHasTheFaintestThreshold()
+{
+    // Faint earthshine (about 20 electrons a pixel) on a camera whose read
+    // noise drops from 6 to 1.2 electrons in its high-conversion-gain mode,
+    // from gain 340, inside the aim: the threshold in photons is lower there.
+    ModelCamera camera;
+    camera.pedestal = 0.01;
+    camera.perMillisecond = 0.00004;
+    camera.gain.value = 0;
+    camera.highConversionAt = 340;
+    const TuneRun run = runTune(TuneWorkflow::MoonFlashes, camera);
+    QCOMPARE(run.reached, CameraStep::Outcome::InAim);
+    QCOMPARE(run.choice.action, GainRefinement::Action::Choose);
+    QVERIFY(run.withinLimits);
+    const TuneAim aim = tuneAim(TuneWorkflow::MoonFlashes);
+    QVERIFY2(run.camera.level() >= aim.low && run.camera.level() <= aim.high, qPrintable(QString::number(run.camera.level())));
+    QCOMPARE(run.camera.exposure.value, run.tunedExposure);
+    QVERIFY2(run.camera.gain.value >= 340, qPrintable(QString("reached %1: %2").arg(run.reachedGain)
+        .arg(QString::fromStdString(run.choice.text))));
+    const double best = bestInAim(TuneWorkflow::MoonFlashes, run.camera);
+    QVERIFY2(run.camera.signalToNoise() >= 0.9 * best, qPrintable(QString("%1 of %2: %3").arg(run.camera.signalToNoise())
+        .arg(best).arg(QString::fromStdString(run.choice.text))));
+    QVERIFY2(run.rounds <= 10, qPrintable(QString::number(run.rounds)));
+    // The sky, the same way.
+    ModelCamera sky;
+    sky.perMillisecond = 0.0002;
+    sky.exposure.value = 100'000;
+    sky.gain.value = 0;
+    const TuneRun skyRun = runTune(TuneWorkflow::Sky, sky);
+    QCOMPARE(skyRun.choice.action, GainRefinement::Action::Choose);
+    QVERIFY(skyRun.camera.signalToNoise() >= 0.9 * bestInAim(TuneWorkflow::Sky, skyRun.camera));
+    // Transits keep the gain as low as the exposure allows.
+    QVERIFY(!refinesGain(TuneWorkflow::MoonTransits));
+}
+
+void AutoTuneTest::aShotNoiseLimitedSceneKeepsItsHeadroom()
+{
+    // Many electrons per ADU: the background's own noise dominates, more
+    // gain changes nothing, and the lower gain is kept.
+    ModelCamera camera;
+    camera.adcPerElectron = 0.01;
+    camera.readNoiseLow = 2;
+    camera.readNoiseHigh = 1;
+    camera.perMillisecond = 0.0004;
+    camera.gain.value = 0;
+    const TuneRun run = runTune(TuneWorkflow::MoonFlashes, camera);
+    QCOMPARE(run.choice.action, GainRefinement::Action::Choose);
+    QVERIFY2(run.choice.candidates.size() >= 2, qPrintable(QString::fromStdString(run.choice.text)));
+    QCOMPARE(run.camera.gain.value, run.reachedGain);
+    QVERIFY2(run.choice.text.find("headroom") != std::string::npos, run.choice.text.c_str());
+}
+
+void AutoTuneTest::theDarkMeasurementGivesTheBlackLevel()
+{
+    ModelCamera camera;
+    camera.pedestal = 0.03;
+    camera.perMillisecond = 0.00004;
+    camera.gain.value = 0;
+    const TuneRun run = runTune(TuneWorkflow::MoonFlashes, camera);
+    QVERIFY2(run.choice.action == GainRefinement::Action::Choose, qPrintable(QString("%1 rounds, reached %2 at %3: %4").arg(run.rounds)
+        .arg(run.reachedGain).arg(run.tunedExposure).arg(QString::fromStdString(run.choice.text))));
+    for (const GainCandidate& c : run.choice.candidates)
+        QVERIFY2(std::abs(c.black - 0.03) < 0.0005, qPrintable(QString("gain %1: %2").arg(c.gain).arg(c.black)));
 }
 
 void AutoTuneTest::kValuesAreTestedAroundTheCurrentOne()

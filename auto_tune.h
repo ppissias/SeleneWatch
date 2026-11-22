@@ -49,9 +49,31 @@ struct BrightnessSample
     double atZero{0};   // Share of the area's samples at 0.
     double atMax{0};    // Share at the maximum code.
     size_t samples{0};
+    // Feature-34: the area's temporal noise over the measurement's frames
+    // (TemporalNoise), as a share of full scale; 0 when not measured.
+    double noise{0};
 };
 // None when the area has no samples in this frame (a fully masked sky).
 [[nodiscard]] std::optional<BrightnessSample> measureBrightness(const Frame& frame, const TuneArea& area, bool brightest);
+
+// Feature-34: the area's temporal noise. Each sampled pixel's standard
+// deviation over the frames added, and the median over the pixels, as a
+// share of full scale. At most about 4096 pixels, spread evenly over the
+// area. Never below half a code: the detector's own noise floor (0.5 ADU by
+// default), which is also about the rounding of each sample.
+class TemporalNoise
+{
+public:
+    void add(const Frame& frame, const TuneArea& area);
+    // None before three frames.
+    [[nodiscard]] std::optional<double> median() const;
+
+private:
+    std::vector<size_t> pixels_;
+    std::vector<double> mean_, m2_;
+    double maxCode_{255};
+    int frames_{0};
+};
 
 // Feature-26: the earthshine area grown from the observer's box, on a grid of
 // cells. A cell is in it when it is connected to the box, closer to the box's
@@ -155,6 +177,50 @@ struct CameraStep
     const std::vector<TuneMeasurement>& history, double skyMaxExposureUs = 250'000);
 // Rounds after which the loop gives up: the brightness may be changing.
 constexpr int kMaxCameraRounds = 12;
+
+// Feature-34, stage 2: the gain that lets the faintest flash or meteor through.
+//
+// At a fixed exposure the background puts the same number of electrons in a
+// pixel whatever the gain. The threshold in photons, K × noise / (ADU per
+// electron), is therefore proportional to noise / signal, both in ADU: the
+// gain with the highest background signal-to-noise has the lowest threshold,
+// with no need to know the camera's conversion factor. The signal is the
+// level above the black level, which a very short ("dark") exposure at that
+// gain measures. Only the Moon's flashes and the sky are refined; for
+// transits the gain stays as low as the exposure allows.
+[[nodiscard]] bool refinesGain(TuneWorkflow workflow);
+
+// One gain compared at the tuned exposure, levels and noise as shares of full scale.
+struct GainCandidate
+{
+    double gain{0}, level{0}, black{0}, noise{0};
+    [[nodiscard]] double signalToNoise() const { return noise > 0 ? std::max(0.0, level - black) / noise : 0; }
+};
+
+// What refining does next, from the loop's measurements. Two gains are
+// compared at the exposure stage 1 reached: the gain it reached, and the
+// highest gain measured in the aim. Dark measurements are taken at a
+// hundredth of that exposure.
+//  - MeasureDark: a compared gain has no black level yet; the reached gain's
+//    comes first, so the probe aims at the signal above it.
+//  - ProbeGain: no gain was measured near the top of the aim, so a higher one
+//    is measured (never past a gain already found above the aim).
+//  - Choose: the lower gain unless the higher one's signal-to-noise is more
+//    than 5 % better; a little more gain that changes nothing keeps headroom.
+struct GainRefinement
+{
+    enum class Action { ProbeGain, MeasureDark, Choose };
+    Action action{Action::Choose};
+    // The settings for the next round, or the chosen ones.
+    double exposureUs{0}, gain{0};
+    // Every candidate with its black level, by gain (Choose).
+    std::vector<GainCandidate> candidates;
+    std::string text;
+};
+[[nodiscard]] GainRefinement refineGain(TuneWorkflow workflow, const TuneCamera& camera, double tunedExposureUs,
+    const std::vector<TuneMeasurement>& history, double skyMaxExposureUs = 250'000);
+// Rounds of refining after which the best so far is chosen.
+constexpr int kMaxRefineRounds = 8;
 
 // What one K would have done during a watch.
 struct TuneEvent

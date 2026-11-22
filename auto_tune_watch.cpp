@@ -82,6 +82,7 @@ std::optional<BlipSettings> AutoTuneWatch::onFrame(const Frame& frame, const Fla
             working_ = published_;
             rows_.clear();
             levels_.clear(); atZero_.clear(); atMax_.clear();
+            noise_ = {};
             started_ = {};
             haveLast_ = false;
             interval_ = 0;
@@ -303,6 +304,7 @@ void AutoTuneWatch::measure(const Frame& frame, const FlashDetector& live, const
             levels_.push_back(sample->level);
             atZero_.push_back(sample->atZero);
             atMax_.push_back(sample->atMax);
+            noise_.add(frame, request.area);
         }
         break;
     case TuneWatchRequest::Kind::Sensitivity:
@@ -434,7 +436,8 @@ void AutoTuneWatch::finish(TuneWatchStatus::State state, const std::string& note
     working_.state = state;
     working_.note = note;
     if (!levels_.empty())
-        working_.brightness = BrightnessSample{median(levels_), median(atZero_), median(atMax_), levels_.size()};
+        working_.brightness = BrightnessSample{median(levels_), median(atZero_), median(atMax_), levels_.size(),
+            noise_.median().value_or(0)};
 
     working_.rows.clear();
     for (const Row& row : rows_) working_.rows.push_back(row.result);

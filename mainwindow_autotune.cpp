@@ -68,6 +68,7 @@ void MainWindow::setupAutoTune()
     connect(tuneReadbackTimer_, &QTimer::timeout, this, [this] {
         if (tunePhase_ != TunePhase::WaitingForCamera) return;
         tunePhase_ = TunePhase::Idle;
+        leaveRefining();
         autoTunePanel_->setProgress("The camera did not report its new settings within 10 s. Tune again when the "
             "preview has settled.", 0, false);
         updateAutoTune();
@@ -111,6 +112,7 @@ void MainWindow::setupAutoTune()
     connect(autoTunePanel_, &AutoTunePanel::applyMinPatchRequested, this, &MainWindow::applyAutoTuneMinPatch);
     connect(autoTunePanel_, &AutoTunePanel::cancelRequested, this, [this] {
         tuneReadbackTimer_->stop();
+        if (tunePhase_ == TunePhase::MeasuringCamera || tunePhase_ == TunePhase::WaitingForCamera) leaveRefining();
         if (tunePhase_ == TunePhase::WaitingForCamera) autoTunePanel_->setProgress("Cancelled.", 0, false);
         tunePhase_ = TunePhase::Idle;
         session_->cancelAutoTune("Cancelled by the observer. Nothing was changed by the measurement.");
@@ -305,6 +307,9 @@ void MainWindow::startCameraTune()
 {
     if (!latestFrame_ || session_->recordingStatus().active) return;
     tuneHistory_.clear();
+    tuneStage_ = CameraStage::Reaching;
+    updateEarthshineArea();
+    tuneArea_ = autoTuneArea();
     if (!tuneRestore_) tuneRestore_ = tuneCamera();
     autoTunePanel_->clearCameraRounds();
     autoTunePanel_->clearCamera({});
@@ -315,11 +320,10 @@ void MainWindow::startCameraTune()
 void MainWindow::startCameraMeasurement()
 {
     if (!latestFrame_) return;
-    updateEarthshineArea();
     TuneWatchRequest request;
     request.kind = TuneWatchRequest::Kind::Brightness;
     request.seconds = 2;
-    request.area = autoTuneArea();
+    request.area = tuneArea_;
     request.brightest = autoTuneWorkflow() == TuneWorkflow::MoonTransits;
     request.settings = detectionPanel_->settings();
     const uint64_t id = session_->startAutoTune(std::move(request));
@@ -344,29 +348,132 @@ void MainWindow::onCameraMeasured(const TuneWatchStatus& status)
     const TuneCamera camera = tuneCamera();
     if (camera != tuneMeasuredCamera_)
     {
+        tuneStage_ = CameraStage::Reaching;
         autoTunePanel_->clearCamera("The camera settings changed during the measurement: tuning stopped.");
         autoTunePanel_->setProgress({}, 0, false);
         return;
     }
-    std::optional<CameraStep> step;
-    if (status.brightness && camera.exposure)
+    if (!status.brightness || !camera.exposure)
     {
-        tuneHistory_.push_back(TuneMeasurement{camera.exposure->value, camera.gain ? camera.gain->value : 0, *status.brightness});
-        step = nextCameraStep(autoTuneWorkflow(), camera, tuneHistory_, autoTunePanel_->skyMaxExposureUs());
-        autoTunePanel_->addCameraRound(QString("%1. %2").arg(tuneHistory_.size()).arg(QString::fromStdString(step->text)));
+        finishCameraTune(status, "Nothing to tune: see above.");
+        return;
     }
-    const int rounds = static_cast<int>(tuneHistory_.size());
-    if (step && step->outcome == CameraStep::Outcome::Move && rounds < kMaxCameraRounds)
+    tuneHistory_.push_back(TuneMeasurement{camera.exposure->value, camera.gain ? camera.gain->value : 0, *status.brightness});
+    const int round = static_cast<int>(tuneHistory_.size());
+    const QString measured = QString("round=%1 measured_level=%2% measured_noise=%3%").arg(round)
+        .arg(100 * status.brightness->level, 0, 'f', 2).arg(100 * status.brightness->noise, 0, 'f', 3);
+    if (tuneStage_ == CameraStage::Confirming)
     {
-        setCameraLive(step->exposureUs, step->gain,
-            QString("round=%1 measured_level=%2%").arg(rounds).arg(100 * status.brightness->level, 0, 'f', 2));
+        autoTunePanel_->addCameraRound(QString("%1. The chosen settings: level %2 %.").arg(round)
+            .arg(100 * status.brightness->level, 0, 'f', 1));
+        finishCameraTune(status, tuneResult_);
+        return;
+    }
+    if (tuneStage_ == CameraStage::Refining)
+    {
+        refineCameraGain(status, measured);
         return;
     }
 
+    const CameraStep step = nextCameraStep(autoTuneWorkflow(), camera, tuneHistory_, autoTunePanel_->skyMaxExposureUs());
+    autoTunePanel_->addCameraRound(QString("%1. %2").arg(round).arg(QString::fromStdString(step.text)));
+    if (step.outcome == CameraStep::Outcome::Move && round < kMaxCameraRounds)
+    {
+        setCameraLive(step.exposureUs, step.gain, measured);
+        return;
+    }
+    if (step.outcome == CameraStep::Outcome::Move)
+    {
+        finishCameraTune(status, "Stopped after %1 without reaching the aim: the brightness may be changing (clouds, "
+            "twilight). Tune again later.");
+        return;
+    }
+    if (step.outcome == CameraStep::Outcome::OutOfReach)
+    {
+        finishCameraTune(status, "Stopped after %1: the closest the camera can get. Go on to step 2, or change the setup.");
+        return;
+    }
+    // In the aim. Stage 2 compares gains by their noise, where that applies.
+    if (!refinesGain(autoTuneWorkflow()) || !camera.gain || camera.gain->maximum <= camera.gain->minimum
+        || status.brightness->noise <= 0)
+    {
+        finishCameraTune(status, "Tuned in %1: in the aim. Go on to step 2.");
+        return;
+    }
+    tuneStage_ = CameraStage::Refining;
+    tuneExposureUs_ = camera.exposure->value;
+    tuneReachedGain_ = camera.gain->value;
+    tuneRefineRounds_ = 0;
+    refineCameraGain(status, measured);
+}
+
+// Feature-34, stage 2: the gain that lets the faintest flash or meteor
+// through, by comparing the background's signal-to-noise at the tuned
+// exposure; then the chosen settings are set and measured once more.
+void MainWindow::refineCameraGain(const TuneWatchStatus& status, const QString& measured)
+{
+    const GainRefinement refinement = refineGain(autoTuneWorkflow(), tuneCamera(), tuneExposureUs_, tuneHistory_,
+        autoTunePanel_->skyMaxExposureUs());
+    // The round that reached the aim is already listed: stage 2 starts from it.
+    autoTunePanel_->addCameraRound((tuneRefineRounds_ == 0 ? QString("Stage 2, comparing gains by their noise. ")
+        : QString("%1. ").arg(tuneHistory_.size())) + QString::fromStdString(refinement.text));
+    if (refinement.action != GainRefinement::Action::Choose && tuneRefineRounds_ < kMaxRefineRounds)
+    {
+        ++tuneRefineRounds_;
+        setCameraLive(refinement.exposureUs, refinement.gain, measured + " stage=refine");
+        return;
+    }
+    double gain = tuneReachedGain_;
+    if (refinement.action == GainRefinement::Action::Choose)
+    {
+        gain = refinement.gain;
+        QStringList compared;
+        for (const GainCandidate& c : refinement.candidates)
+            compared << QString("gain=%1 level=%2% black=%3% noise=%4% snr=%5").arg(c.gain, 0, 'g', 6)
+                .arg(100 * c.level, 0, 'f', 2).arg(100 * c.black, 0, 'f', 2).arg(100 * c.noise, 0, 'f', 3)
+                .arg(c.signalToNoise(), 0, 'f', 1);
+        session_->logRecord(QString("%1 autotune_gain_choice target=%2 exposure_ms=%3 gain=%4 compared=\"%5\"\n")
+            .arg(utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon")
+            .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(gain, 0, 'g', 6).arg(compared.join("; ")));
+        tuneResult_ = "Tuned in %1: in the aim, at the gain with the faintest threshold. Go on to step 2.";
+    }
+    else
+        tuneResult_ = "Tuned in %1: in the aim. Comparing gains took too many rounds, so the gain first found in the aim "
+            "is kept. Go on to step 2.";
+    const TuneCamera camera = tuneCamera();
+    tuneStage_ = CameraStage::Confirming;
+    if (camera.exposure && camera.exposure->value == tuneExposureUs_ && camera.gain && camera.gain->value == gain)
+    {
+        finishCameraTune(status, tuneResult_);
+        return;
+    }
+    setCameraLive(tuneExposureUs_, gain, measured + " stage=chosen");
+}
+
+// Feature-34: a loop stopped while refining leaves the camera at the
+// settings stage 1 reached, not at a dark or probe round's.
+void MainWindow::leaveRefining()
+{
+    if (tuneStage_ == CameraStage::Reaching) return;
+    tuneStage_ = CameraStage::Reaching;
+    CameraSettingsEditor* controls = activeCamera() ? activeCamera()->controls() : nullptr;
+    if (!controls || session_->mode() != Session::Mode::Preview) return;
+    const TuneCamera camera = tuneCamera();
+    if (camera.exposure && camera.exposure->value != tuneExposureUs_) controls->setControlValue(kExposureControl, tuneExposureUs_);
+    if (camera.gain && camera.gain->value != tuneReachedGain_) controls->setControlValue(kGainControl, tuneReachedGain_);
+    session_->logRecord(QString("%1 autotune_camera target=%2 stage=stopped applied=\"Exposure=%3 ms; Gain=%4\"\n")
+        .arg(utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon")
+        .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(tuneReachedGain_, 0, 'g', 6));
+}
+
+// The loop ends: the verdict, warnings, and the rows left for the observer.
+void MainWindow::finishCameraTune(const TuneWatchStatus& status, const QString& result)
+{
+    tuneStage_ = CameraStage::Reaching;
     const SkyExtras extras = detectionPanel_->skyExtras();
     CameraTuneInput input;
     input.workflow = autoTuneWorkflow();
-    input.camera = camera;
+    input.camera = tuneCamera();
     input.measured = status.brightness;
     input.skyMaxExposureUs = autoTunePanel_->skyMaxExposureUs();
     input.follow = extras.follow;
@@ -381,15 +488,10 @@ void MainWindow::onCameraMeasured(const TuneWatchStatus& status)
     });
     for (std::string& warning : guidingWarnings()) suggestion.warnings.push_back(std::move(warning));
     autoTunePanel_->setCameraSuggestion(suggestion);
-    const QString count = QString("%1 round%2").arg(rounds).arg(rounds == 1 ? "" : "s");
-    QString result;
-    if (!step) result = "Nothing to tune: see above.";
-    else if (step->outcome == CameraStep::Outcome::InAim) result = QString("Tuned in %1: in the aim. Go on to step 2.").arg(count);
-    else if (step->outcome == CameraStep::Outcome::Move)
-        result = QString("Stopped after %1 without reaching the aim: the brightness may be changing (clouds, twilight). "
-            "Tune again later.").arg(count);
-    else result = QString("Stopped after %1: the closest the camera can get. Go on to step 2, or change the setup.").arg(count);
-    autoTunePanel_->setProgress(result, 1, false);
+    const int rounds = static_cast<int>(tuneHistory_.size());
+    autoTunePanel_->setProgress(result.contains("%1") ? result.arg(QString("%1 round%2").arg(rounds).arg(rounds == 1 ? "" : "s"))
+        : result, 1, false);
+    updateAutoTune();
 }
 
 // Feature-34: sets the loop's next exposure and gain through the camera
@@ -444,6 +546,7 @@ void MainWindow::stopCameraTune(const QString& why)
     if (tunePhase_ != TunePhase::MeasuringCamera && tunePhase_ != TunePhase::WaitingForCamera) return;
     tuneReadbackTimer_->stop();
     tunePhase_ = TunePhase::Idle;
+    leaveRefining();
     session_->cancelAutoTune(why.toStdString());
     autoTunePanel_->setProgress(why, 0, false);
 }
@@ -470,6 +573,7 @@ void MainWindow::restoreAutoTuneCamera()
         utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon", applied.join("; ")));
     tuneRestore_.reset();
     tuneHistory_.clear();
+    tuneStage_ = CameraStage::Reaching;
     autoTunePanel_->clearCameraRounds();
     autoTunePanel_->clearCamera("Restored: " + applied.join(", ") + ".");
     autoTunePanel_->clearK("The camera settings changed: watch again.");
@@ -532,6 +636,7 @@ void MainWindow::applyAutoTuneCamera()
     {
         // The earlier measurements were taken at the old black level.
         tuneHistory_.clear();
+        tuneStage_ = CameraStage::Reaching;
         autoTunePanel_->addCameraRound("Applied " + applied.join(", ") + ": tuning again.");
         tunePhase_ = TunePhase::WaitingForCamera;
         tuneReadbackTimer_->start();

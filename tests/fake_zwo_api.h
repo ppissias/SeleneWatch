@@ -7,6 +7,7 @@
 #include <cmath>
 #include <functional>
 #include <mutex>
+#include <random>
 #include <stdexcept>
 #include <thread>
 
@@ -38,6 +39,9 @@ public:
     // exposure (microseconds) and gain the camera holds, clipped at full
     // scale; otherwise they are fixed.
     std::function<double(double exposureUs, double gain)> light;
+    // With light: the frames' temporal noise, as a standard deviation in
+    // 8-bit codes, from the same exposure and gain; none when unset.
+    std::function<double(double exposureUs, double gain)> lightNoise;
     // Read after stop/join: verifies that live writes and reads share a worker.
     std::thread::id liveControlThread, readThread;
     std::string version() const override { return "TEST SDK 1"; }
@@ -68,14 +72,18 @@ public:
         if (!connected || (disconnectAt>=0 && delivered>=disconnectAt)) throw std::runtime_error("TEST camera disconnected");
         if (timeouts) return false;
         if (bytes.size()!=frameBytes(settings.width,settings.height,settings.format)) throw std::runtime_error("Wrong SDK destination buffer size");
-        const double level=light?light(controlValue(ZwoControl::Exposure),controlValue(ZwoControl::Gain)):-1;
+        const double exposure=controlValue(ZwoControl::Exposure), gain=controlValue(ZwoControl::Gain);
+        const double level=light?light(exposure,gain):-1;
+        const double sigma=lightNoise?lightNoise(exposure,gain):0;
+        std::normal_distribution<double> unit(0,1);
         for (size_t i=0;i<static_cast<size_t>(settings.width)*settings.height;++i)
         {
+            const double noise=level<0||sigma<=0?0:sigma*unit(random_);
             if (settings.format==PixelFormat::Mono8)
-                bytes[i]=static_cast<uint8_t>(level<0?100+i%13:std::clamp(std::lround(level)+static_cast<long>(i%13),0L,255L));
+                bytes[i]=static_cast<uint8_t>(level<0?100+i%13:std::clamp(std::lround(level+noise)+static_cast<long>(i%13),0L,255L));
             else
             {
-                const long sample=level<0?static_cast<long>(400+i%13):std::clamp(std::lround(level*16)+static_cast<long>(i%13),0L,4095L);
+                const long sample=level<0?static_cast<long>(400+i%13):std::clamp(std::lround((level+noise)*16)+static_cast<long>(i%13),0L,4095L);
                 const int word=static_cast<int>(sample<<4); bytes[2*i]=static_cast<uint8_t>(word&255); bytes[2*i+1]=static_cast<uint8_t>(word>>8);
             }
         }
@@ -99,4 +107,5 @@ private:
         if (operation==failOperation) throw std::runtime_error("TEST "+operation+" failed");
     }
     std::mutex mutex_;
+    std::mt19937 random_{11};
 };

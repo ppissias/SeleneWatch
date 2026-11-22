@@ -150,6 +150,8 @@ private:
     TuneWatchStatus working_;
     std::vector<Row> rows_;
     std::vector<double> levels_, atZero_, atMax_;
+    // Feature-34: Brightness also measures the area's temporal noise.
+    TemporalNoise noise_;
     std::chrono::system_clock::time_point started_{}, lastTime_{};
     uint64_t lastIndex_{0};
     bool haveLast_{false};

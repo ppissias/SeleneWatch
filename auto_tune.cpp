@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <map>
 
 namespace {
 
@@ -173,6 +174,48 @@ std::optional<BrightnessSample> measureBrightness(const Frame& frame, const Tune
     result.atMax = static_cast<double>(atMax) / static_cast<double>(values.size());
     result.level = percentile(values, brightest ? 0.999 : 0.5) / samples.maxCode;
     return result;
+}
+
+void TemporalNoise::add(const Frame& frame, const TuneArea& area)
+{
+    if (!frameIsWhole(frame) || !area.fits(frame)) return;
+    const Samples samples(frame);
+    const size_t count = static_cast<size_t>(frame.width) * frame.height;
+    if (pixels_.empty() || pixels_.back() >= count)
+    {
+        // The sampled pixels, chosen on the first frame.
+        pixels_.clear();
+        const size_t inside = area.wholeFrame() ? count
+            : static_cast<size_t>(std::count_if(area.inside.begin(), area.inside.end(), [](uint8_t v) { return v != 0; }));
+        const size_t step = std::max(size_t{1}, inside / 4096);
+        size_t seen = 0;
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (!area.wholeFrame() && !area.inside[i]) continue;
+            if (seen++ % step == 0) pixels_.push_back(i);
+        }
+        mean_.assign(pixels_.size(), 0);
+        m2_.assign(pixels_.size(), 0);
+        maxCode_ = samples.maxCode;
+        frames_ = 0;
+    }
+    ++frames_;
+    for (size_t k = 0; k < pixels_.size(); ++k)
+    {
+        // Welford's running mean and sum of squared deviations.
+        const double value = samples.at(pixels_[k]);
+        const double delta = value - mean_[k];
+        mean_[k] += delta / frames_;
+        m2_[k] += delta * (value - mean_[k]);
+    }
+}
+
+std::optional<double> TemporalNoise::median() const
+{
+    if (frames_ < 3 || pixels_.empty()) return std::nullopt;
+    std::vector<double> deviations(m2_.size());
+    for (size_t k = 0; k < m2_.size(); ++k) deviations[k] = std::sqrt(m2_[k] / (frames_ - 1));
+    return std::max(0.5, percentile(deviations, 0.5)) / maxCode_;
 }
 
 TuneArea EarthshineArea::pixels(int width, int height) const
@@ -626,6 +669,144 @@ CameraStep nextCameraStep(TuneWorkflow workflow, const TuneCamera& camera,
         step.text = std::format("{}. Exposure {} → {}.", measured, milliseconds(exposure.value), milliseconds(value));
     }
     return step;
+}
+
+bool refinesGain(TuneWorkflow workflow)
+{
+    return workflow != TuneWorkflow::MoonTransits;
+}
+
+GainRefinement refineGain(TuneWorkflow workflow, const TuneCamera& camera, double tunedExposureUs,
+    const std::vector<TuneMeasurement>& history, double skyMaxExposureUs)
+{
+    GainRefinement out;
+    out.exposureUs = tunedExposureUs;
+    out.gain = camera.gain ? camera.gain->value : 0;
+    if (!camera.exposure || !camera.gain || camera.gain->maximum <= camera.gain->minimum || history.empty())
+    {
+        out.text = "No gain to compare.";
+        return out;
+    }
+    const TuneAim aim = tuneAim(workflow, skyMaxExposureUs);
+    const TuneControl gain = *camera.gain;
+    const double range = gain.maximum - gain.minimum;
+    // A dark measurement at a hundredth of the exposure still holds a
+    // hundredth of the light; that share is taken out of its level.
+    const double darkUs = std::max(camera.exposure->minimum, tunedExposureUs / 100);
+    const double lightShare = darkUs / tunedExposureUs;
+    const bool darkPossible = lightShare <= 0.1;
+    const auto near = [](double a, double b) { return std::abs(a - b) <= 1e-6 * std::max(1.0, std::abs(b)); };
+
+    // The latest measurement at the tuned exposure, and the latest dark one, at each gain.
+    std::map<double, const TuneMeasurement*> tuned, dark;
+    for (const TuneMeasurement& m : history)
+    {
+        if (near(m.exposureUs, tunedExposureUs)) tuned[m.gain] = &m;
+        else if (darkPossible && near(m.exposureUs, darkUs)) dark[m.gain] = &m;
+    }
+    const TuneMeasurement& last = history.back();
+    const std::string said = near(last.exposureUs, tunedExposureUs)
+        ? std::format("Gain {}: level {}, noise {}", number(last.gain), percent(last.brightness.level),
+              std::format("{:.2f} %", 100 * last.brightness.noise))
+        : std::format("Gain {}, dark ({}): level {}", number(last.gain), milliseconds(last.exposureUs),
+              percent(last.brightness.level));
+    const auto blackAt = [&](double g) {
+        const auto found = dark.find(g);
+        if (found == dark.end()) return 0.0;
+        const double darkLevel = found->second->brightness.level;
+        return std::max(0.0, darkLevel - (tuned.at(g)->brightness.level - darkLevel) * lightShare / (1 - lightShare));
+    };
+
+    // The candidates: the gain stage 1 reached (the first measured in the
+    // aim at this exposure) and the highest gain measured in the aim. The
+    // lowest gain found above the aim bounds the probes.
+    std::optional<GainCandidate> reached, top;
+    std::optional<double> over;
+    for (const TuneMeasurement& m : history)
+        if (near(m.exposureUs, tunedExposureUs) && !reached && m.brightness.noise > 0 && !clipped(m.brightness, aim)
+            && m.brightness.level >= aim.low && m.brightness.level <= aim.high)
+            reached = GainCandidate{m.gain, m.brightness.level, 0, m.brightness.noise};
+    for (const auto& [g, m] : tuned)
+    {
+        if (clipped(m->brightness, aim) || m->brightness.level > aim.high)
+        {
+            if (!over) over = g;
+            continue;
+        }
+        if (m->brightness.level >= aim.low && m->brightness.noise > 0) top = GainCandidate{g, m->brightness.level, 0, m->brightness.noise};
+    }
+    if (!reached || !top)
+    {
+        out.gain = tuned.empty() ? out.gain : tuned.rbegin()->first;
+        out.text = said + ". No measurement in the aim with its noise: the gain stays.";
+        return out;
+    }
+    const auto darkRound = [&](double g) {
+        out.action = GainRefinement::Action::MeasureDark;
+        out.exposureUs = darkUs;
+        out.gain = g;
+        out.text = std::format("{}. Next: the black level at gain {}, with a {} exposure.", said, number(g), milliseconds(darkUs));
+        return out;
+    };
+
+    // 1. The black level at the reached gain, so the probe aims at the signal.
+    if (darkPossible && !dark.contains(reached->gain)) return darkRound(reached->gain);
+
+    // 2. A gain near the top of the aim, when none was measured there.
+    if (top->level < 0.7 * aim.high && top->gain < gain.maximum && (!over || *over - top->gain > 0.05 * range))
+    {
+        // From the response measured at this exposure above the black level;
+        // else a stop per tenth of the range.
+        const double black = dark.contains(top->gain) ? blackAt(top->gain) : blackAt(reached->gain);
+        const auto ln = [black](double level) { return std::log(std::max(level - black, 1e-6)); };
+        const double wanted = 0.85 * aim.high;
+        std::optional<double> next;
+        const TuneMeasurement* other = nullptr;
+        for (const auto& [g, m] : tuned)
+            if (g != top->gain && !clipped(m->brightness, aim) && m->brightness.level > black
+                && (!other || std::abs(g - top->gain) < std::abs(other->gain - top->gain))) other = m;
+        if (other)
+        {
+            const double slope = (ln(top->level) - ln(other->brightness.level)) / (top->gain - other->gain);
+            if (slope > 0) next = top->gain + (ln(wanted) - ln(top->level)) / slope;
+        }
+        if (!next) next = top->gain + (ln(wanted) - ln(top->level)) / std::log(2.0) * range / 10;
+        double probe = std::min(*next, gain.maximum);
+        if (over) probe = std::min(probe, (top->gain + *over) / 2);
+        if (range >= 20) probe = std::round(probe);
+        if (probe > top->gain && !tuned.contains(probe))
+        {
+            out.action = GainRefinement::Action::ProbeGain;
+            out.exposureUs = tunedExposureUs;
+            out.gain = probe;
+            out.text = std::format("{}. Next: gain {}, near the top of the aim, to compare its noise.", said, number(probe));
+            return out;
+        }
+    }
+
+    // 3. The black level at the top gain too.
+    if (darkPossible && !dark.contains(top->gain)) return darkRound(top->gain);
+
+    std::vector<GainCandidate> candidates{*reached};
+    if (top->gain != reached->gain) candidates.push_back(*top);
+    std::sort(candidates.begin(), candidates.end(), [](const GainCandidate& a, const GainCandidate& b) { return a.gain < b.gain; });
+    // 4. The lower gain unless the higher one is more than 5 % better.
+    for (GainCandidate& c : candidates) c.black = blackAt(c.gain);
+    const double best = std::max_element(candidates.begin(), candidates.end(), [](const GainCandidate& a, const GainCandidate& b) {
+        return a.signalToNoise() < b.signalToNoise();
+    })->signalToNoise();
+    const GainCandidate& chosen = *std::find_if(candidates.begin(), candidates.end(),
+        [best](const GainCandidate& c) { return c.signalToNoise() >= 0.95 * best; });
+    out.candidates = candidates;
+    out.gain = chosen.gain;
+    std::string compared;
+    for (const GainCandidate& c : candidates)
+        if (c.gain != chosen.gain) compared += std::format("; gain {}: {:.1f}", number(c.gain), c.signalToNoise());
+    out.text = std::format("{}. Chosen: gain {}, background signal-to-noise {:.1f}{}{}.", said, number(chosen.gain),
+        chosen.signalToNoise(), compared,
+        chosen.signalToNoise() < best ? " (more gain would improve it by less than 5 %, so the headroom is kept)" : "");
+    if (!darkPossible) out.text += " The exposure is too short for a dark measurement: the black level is taken as 0.";
+    return out;
 }
 
 std::vector<double> kValuesToTest(double centre, int count)

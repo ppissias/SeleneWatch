@@ -38,6 +38,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-31 — The Moon's flashes and shadows watched apart](#feature-31--the-moons-flashes-and-shadows-watched-apart)
 - [Feature-32 — The end of a session](#feature-32--the-end-of-a-session)
 - [Feature-33 — A Record button that becomes Stop](#feature-33--a-record-button-that-becomes-stop)
+- [Feature-34 — Auto-tune sets the camera itself](#feature-34--auto-tune-sets-the-camera-itself)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3090,3 +3091,95 @@ The observer asked for manual recording to work like a recorder: a **Record** bu
 **Tests:** `UiTest::siteAndRecordingControls` checks that the button reads **Stop m:ss** with the red style while recording in Monitoring, and **Record** with the normal style after it stops. The `ui`, `preview`, `session_record` and `manual_capture` suites pass on the Debug build. Both states were checked in offscreen screenshots.
 
 **Pending:** a look at the real window on the observing laptop (1920×1200 at 125 %).
+
+## Feature-34 — Auto-tune sets the camera itself
+
+*Proposed and agreed on 22 November 2026, from a discussion with the observer.*
+
+**What the observer saw.** Step 1 of auto-tune (Feature-26) moved in small steps. Each **Measure camera** → **Apply** → check round changed the gain by at most a quarter of the camera's range (usually one to three twentieths), and the exposure by at most ×4 before the black level was known. The observer then had to press **Apply** again. Earthshine ten times too dark took three or four rounds of clicks. The observer asked for auto-tune to change exposure and gain live, taking as long as it needs, to find the settings for each case.
+
+**Why the steps were small.** Gain units differ between cameras (tenths of a decibel on ZWO, arbitrary steps on others), and Feature-26 suggested one bounded step at a time because every suggestion waited for the observer. Once the observer has asked auto-tune to set the camera, nothing is gained by stopping between rounds, and each measurement shows how this camera answers.
+
+### Stage 1 — the live loop
+
+1. **One explicit start.** **Tune camera** in step 1 replaces **Measure camera**. It runs only in Preview with a camera, never in Monitoring or during a recording, as the camera settings themselves.
+2. **Measure, change, settle, measure again.** Each round measures the area's brightness for two seconds, as before. It then sets the next exposure or gain live through the camera settings editor, waits for the camera to report the values back and for Preview to settle, and measures again. It goes on until the brightness is in the aim, or the camera cannot get closer, or 12 rounds have passed (the brightness may then be changing: clouds or twilight).
+3. **One control at a time, in each workflow's order** (as Feature-26):
+   - **Moon, flashes:** an exposure outside 10–40 ms is first brought into it; then gain; the exposure moves within 10–40 ms only when the gain is at its limit.
+   - **Moon, transits, and the sky:** a darker scene lengthens the exposure first (up to 10 ms for transits, the longest exposure for meteors for the sky), then raises gain; a brighter scene lowers gain first, then shortens the exposure.
+4. **Steps from the measurements, not fixed caps.**
+   - **Exposure** moves on a logarithmic scale. The first move is in proportion to the brightness. With a black level that move falls short and never overshoots, so the next round corrects it.
+   - **The black level** *(added while building)*: once two measurements at the same gain and different exposures differ by more than quantisation, they give the camera's black level, and every later move, exposure or gain, aims at the signal above it. Without it, a gain move after a dark sky's exposure moves overshot to the end of the range and came back.
+   - **No answer** *(added while building)*: when the brightness did not change after a move (the signal still hidden under the black level), the next move goes twice as far.
+   - **Gain:** the first move assumes one stop for every tenth of the camera's gain range. After that, each move uses the measured response of the last two measurements (a secant step on the logarithm of the brightness).
+   - **Never past what was measured:** the measurements on each side of the aim bound the next move. A move that would leave those bounds halves the interval instead, so the loop cannot swing back and forth.
+   - **Saturation** hides the true level. A saturated measurement only bounds the move. The next move is a quarter of the exposure, or a quarter of the gain range down.
+   - It stops when the next setting would equal the current one, for example when the aim lies between two gain units.
+5. **Shown as it goes.** The panel lists each round: the measured level, and the control moved, from and to. The preview shows each change live.
+6. **Safe as before.**
+   - The camera's own range and each workflow's limits are never exceeded.
+   - Changing a camera control by hand, the target, the mask or the measured area stops the loop, and so does **Cancel**.
+   - **Restore previous settings** sets the exposure and gain that were in use before the loop began.
+   - Every change the loop makes is logged in `candidates.txt` as an `autotune_camera` line with its round, the measured level and the values set. The camera's readback is logged as an `autotune_readback` line, as before.
+7. **What stays from Feature-26.** At the end the panel shows the verdict and warnings, as before. The Offset (pixels at 0) and, for the sky, the exposure follower's limits remain rows the observer ticks and applies; applying an Offset runs the loop again, since it shifts the black level.
+
+### Stage 2 — the camera's best gain from its measured noise
+
+*As proposed:* "In the aim" is a stand-in. What decides the faintest flash that can be caught is the threshold, K × the noise, counted in photons rather than ADU. While the loop steps through gains, it could measure, per gain, the variance of each pixel over time against its mean (a photon-transfer measurement). This gives the camera's conversion factor (ADU per electron) and read noise at each gain, from the camera itself. The loop would then choose, within the aim, the gain whose threshold in photons is lowest. It would be a measured optimum for the observer's camera and sky on the night, not a rule of thumb. It needs stage 1 first, and the per-pixel temporal variance that the detector already keeps.
+
+*As built (22 November 2026; the observer asked for both stages without waiting for review):*
+
+1. **No conversion factor is needed.** At a fixed exposure the background puts the same number of electrons into a pixel whatever the gain. The threshold in photons, K × noise ÷ (ADU per electron), is therefore proportional to noise ÷ signal, both measured in ADU. The gain with the highest **background signal-to-noise** has the lowest threshold. A full photon-transfer fit would give the same ranking with more measurements and more assumptions, so it was left out.
+2. **What is measured.** Each brightness measurement now also gives the area's temporal noise: for up to about 4096 pixels spread over the area, the standard deviation of each pixel over the measurement's frames, and the median over the pixels (`TemporalNoise`). It is never taken below half a code, the detector's own noise floor (0.5 ADU by default) and about the rounding of each sample. The signal is the level above the black level. A **dark round** measures the black level at a gain: one round at a hundredth of the tuned exposure, with the hundredth of light it still holds taken out. It is skipped, and the black level taken as 0, when the camera cannot go that short.
+3. **Which gains are compared:** two, at the exposure stage 1 reached.
+   - **The reached gain:** the gain stage 1 found in the aim.
+   - **The top gain:** the highest gain measured in the aim. When none was measured above 70 % of the top of the aim, a probe aims at 85 % of it, from the response measured at this exposure above the black level. A probe never goes past a gain already found above the aim; after an overshoot, it halves the interval.
+   - **The order:** the reached gain's dark round comes first, so the probe aims at the signal; then the probe; then the top gain's dark round.
+   - Comparing only these two keeps stage 2 to about three or four rounds. While building, comparing every gain measured in the aim needed a dark round each and ran out of rounds when the black level alone was in the aim.
+4. **The choice.** The higher gain is chosen only when its signal-to-noise is more than 5 % better. A little more gain that changes nothing keeps its headroom, and fewer hot pixels are amplified. Then the chosen settings are set at the tuned exposure and measured once more. After 8 rounds of stage 2 without a choice, the reached gain is kept.
+5. **Where it applies:** the Moon's flashes and the sky. For transits, the gain stays as low as the exposure allows (Feature-26).
+6. **What to expect.** On most cameras the read noise in electrons is already near its floor at the gain that puts faint earthshine or a dark sky in the aim. The background's own shot noise then dominates, and stage 2 keeps the reached gain. It changes the gain where the read noise still falls inside the aim. The clearest case is a camera with a high-conversion-gain mode (for example the IMX462 and IMX585 sensors around gain 252 on ZWO), where the read noise drops sharply at one gain. It also matters for 8-bit streams, where half a code is a large part of the noise.
+7. **The record.**
+   - The panel lists each round of stage 2: the level and noise measured, or the dark level, and what comes next.
+   - The rounds are logged as `autotune_camera` lines with `stage=refine`, and the chosen settings with `stage=chosen`.
+   - The choice is logged as an `autotune_gain_choice` line with the exposure, the gain and, for each gain compared, its level, black level, noise and signal-to-noise.
+   - Each `autotune_camera` line carries `measured_noise`.
+8. **Stopping.** Cancel, a change of the measured area or of a detection setting, or a readback that does not come during stage 2 returns the camera to the settings stage 1 reached, never leaving it at a dark or probe round's. That return is logged with `stage=stopped`. A change the observer makes to a camera setting is left as it is.
+9. **The measured area is fixed for the whole loop**, stages 1 and 2. A dark round's frame would otherwise move the earthshine's outline.
+
+### Stage 1 status & verification
+
+Built on 22 November 2026.
+
+- **Core:** `nextCameraStep` in `auto_tune.cpp` is a plain function over the loop's measurements, like the rest of auto-tune. `suggestCamera` still gives the final verdict, warnings and the Offset and follower rows; the loop removes its exposure and gain rows.
+- **Window:** `mainwindow_autotune.cpp` runs the rounds: measure, `nextCameraStep`, set through the camera settings editor, wait for the readback, measure again. **Measure camera** and the check after Apply are replaced by **Tune camera**; the panel lists the rounds and has **Restore previous settings**.
+- **Rounds on model cameras** (counting the final measurement in the aim): dark earthshine 4, bright earthshine 3, an exposure outside 10–40 ms 3, a saturated Moon for transits 5, the night sky 1, the dusk sky 3; gain curves from 5 to 60 units per stop on ranges of 100 and 600, 2 to 5. The fake camera of the window test, a dark sky under an 8-bit black level, takes 6: three exposure moves to 250 ms, then two gain moves.
+- **Tests:** `auto_tune` (`theLoopReachesEachAimInAFewRounds`, `theLoopLearnsAnyGainCurve`, `saturationOnlyBoundsTheLoopsMove`, `theLoopStopsWhenTheAimIsOutOfReach`); `ui` (`autoTuneTunesTheCameraLiveThenWatchesK` with a fake camera whose frames follow exposure and gain, including Restore; `autoTuneOutlinesTheEarthshineBox` ending out of reach).
+- **Not run:** the real-window test `tests\gui_e2e_test.ps1` (its element name was updated).
+- **Pending:** a night with a real camera on the earthshine and on the sky.
+
+### Stage 2 status & verification
+
+Built on 22 November 2026.
+
+- **Core:** `TemporalNoise` and `refineGain` in `auto_tune.cpp`; `AutoTuneWatch` measures the noise with the brightness.
+- **Window:** `mainwindow_autotune.cpp` runs stage 2 after stage 1 reaches the aim (`refineCameraGain`, `leaveRefining`, `finishCameraTune`).
+- **Model cameras** (`auto_tune`): a 12-bit camera whose read noise drops from 6 to 1.2 electrons at gain 340 reaches the aim at gain 282, and stage 2 chooses gain 358, with background signal-to-noise 4.3 against 2.6, in 7 rounds in all. A shot-noise-limited camera and the night sky keep the reached gain (70.1 against 70.1; 28.4 against 28.5). The dark rounds give the black level to within 0.05 % of full scale.
+- **Window test** (`ui`, `autoTuneTunesTheCameraLiveThenWatchesK`): the fake camera now has Gaussian noise from a read noise that drops at gain 85. The loop reaches the aim at gain 77 in 6 rounds. Stage 2 then takes a dark round, probes gain 89, takes its dark round, and chooses gain 89 (6.9 against 5.5). It sets it back at 250 ms and confirms, 10 rounds in all.
+- **Tests added:** `temporalNoiseIsEachPixelsSpreadOverTime`, `theRefinedGainHasTheFaintestThreshold`, `aShotNoiseLimitedSceneKeepsItsHeadroom`, `theDarkMeasurementGivesTheBlackLevel`.
+- **Not run:** the real-window test `tests\gui_e2e_test.ps1`.
+- **Pending:** a night with a real camera, ideally one with a high-conversion-gain mode, on the earthshine and on the sky.
+
+### Done when (stage 1)
+
+- A model camera with a black level and an unknown gain curve reaches the aim in each workflow in a few rounds, from far too dark, from far too bright and from saturation, and never beyond the camera's or the workflow's limits.
+- The loop stops with the reason when the aim is out of reach, and when the aim lies between two settings.
+- A window test with a fake camera whose brightness follows exposure and gain: one press of **Tune camera** brings it into the aim through live changes, logs each round, and **Restore previous settings** sets the earlier values back.
+- MANUAL, the camera settings guide and this record describe the loop.
+
+### Done when (stage 2)
+
+- On a model camera whose read noise drops inside the aim, the chosen gain is in the lower-noise range, and its signal-to-noise is within 10 % of the best any gain in the aim gives.
+- A shot-noise-limited camera keeps the gain stage 1 reached.
+- The dark rounds give the black level.
+- In the window, stage 2 runs after stage 1, ends at the tuned exposure, and logs its choice.

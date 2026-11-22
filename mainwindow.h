@@ -193,6 +193,11 @@ private:
     void startCameraTune();
     void startCameraMeasurement();
     void onCameraMeasured(const TuneWatchStatus& status);
+    // Stage 2: compare gains at the tuned exposure, then confirm the choice.
+    void refineCameraGain(const TuneWatchStatus& status, const QString& measured);
+    void leaveRefining();
+    // result holds %1 for the number of rounds.
+    void finishCameraTune(const TuneWatchStatus& status, const QString& result);
     void setCameraLive(double exposureUs, double gain, const QString& record);
     void stopCameraTune(const QString& why);
     void restoreAutoTuneCamera();
@@ -368,6 +373,17 @@ private:
     // settings, and the exposure and gain from before it changed them.
     std::vector<TuneMeasurement> tuneHistory_;
     std::optional<TuneCamera> tuneRestore_;
+    // Where the loop is: reaching the aim, refining the gain (stage 2), or
+    // measuring the chosen settings once more.
+    enum class CameraStage { Reaching, Refining, Confirming };
+    CameraStage tuneStage_{CameraStage::Reaching};
+    // The measured area, fixed for the whole loop: a dark round's frame
+    // would move the earthshine's outline.
+    TuneArea tuneArea_;
+    // Stage 2: the exposure and gain stage 1 reached, and the rounds so far.
+    double tuneExposureUs_{0}, tuneReachedGain_{0};
+    int tuneRefineRounds_{0};
+    QString tuneResult_;
     bool tuneHasK_{false};
     bool tuneHasMinPatch_{false};
     std::optional<int> tuneFootprint_;
