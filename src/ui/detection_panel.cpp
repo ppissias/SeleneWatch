@@ -328,7 +328,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain. A longer exposure shows "
         "fainter still or slow light (aurora, airglow); a moving meteor leaves no more light in a pixel, only more sky. "
         "Each sky watch keeps its own limits.<br><br>" + fixedRules);
-    for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); spin->setMaximumWidth(96); }
+    for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); }
     maxGain_ = new QDoubleSpinBox(sky_);
     maxGain_->setObjectName("followMaxGain");
     maxGain_->setToolTip("The highest gain the follower uses once the exposure is at its longest. With Gain fixed "
@@ -336,7 +336,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     gainStep_ = new QDoubleSpinBox(sky_);
     gainStep_->setObjectName("followGainStep");
     gainStep_->setToolTip("How much the follower changes gain at a time.");
-    for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); spin->setMaximumWidth(96); }
+    for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); }
     gainStep_->setSpecialValueText("Gain fixed");
     followReading_ = new QLabel(sky_);
     followReading_->setObjectName("followReading");
@@ -347,11 +347,14 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     exposureRow->addWidget(minExposure_);
     exposureRow->addWidget(new QLabel("to", sky_));
     exposureRow->addWidget(maxExposure_);
+    // Each box is as wide as its widest value; the rest of the row stays empty.
+    exposureRow->addStretch(1);
     skyForm->addRow("Exposure", exposureRow);
     auto* gainRow = new QHBoxLayout;
     gainRow->addWidget(maxGain_);
     gainRow->addWidget(new QLabel("in steps of", sky_));
     gainRow->addWidget(gainStep_);
+    gainRow->addStretch(1);
     skyForm->addRow("Gain up to", gainRow);
     skyForm->addRow(followReading_);
     // Feature-36: the slow sky's time-lapse.
@@ -365,7 +368,6 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     timelapseInterval_->setRange(1, 3600);
     timelapseInterval_->setValue(30);
     timelapseInterval_->setSuffix(" s");
-    timelapseInterval_->setMaximumWidth(96);
     const QString timelapseHelp = "Alongside detection, keeps one frame every this many seconds of source time while "
         "Monitoring, in the watch's timelapse folder: each as a PNG with the camera's samples unchanged (16-bit for "
         "RAW16), with its time in frames.txt, and in timelapse.mp4 (25 frames a second, stretched for display like the "

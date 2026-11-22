@@ -68,6 +68,7 @@
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QToolTip>
 #include <QtWidgets/QWhatsThis>
+#include <QtWidgets/QStyleFactory>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -151,6 +152,7 @@ private slots:
     void everyControlFitsOnASmallLaptopScreen();
     void darkeningIsForTheMoonOnly();
     void everyControlHasHelp();
+    void numberBoxesFitTheirWidestValue();
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
     void autoTuneTunesTheCameraLiveThenWatchesK();
     void autoTuneOutlinesTheEarthshineBox();
@@ -1297,6 +1299,32 @@ void UiTest::everyControlHasHelp()
     for (QLabel* label : window.findChildren<QLabel*>())
         exposureRowHasHelp |= label->text().startsWith("Exposure <a") && label->buddy() == nullptr && label->text().contains("ⓘ");
     QVERIFY(exposureRowHasHelp);
+}
+
+// A number box is never capped narrower than its widest value with its
+// suffix ("40.00 ms" was cut to "40.00 r" in the sky's exposure follower).
+void UiTest::numberBoxesFitTheirWidestValue()
+{
+    // Checked in the tests' Fusion style and in Windows 11's, whose boxes are
+    // wider and which the observer sees.
+    const QString testsStyle = QApplication::style()->name();
+    QStringList clipped;
+    for (const QString& style : {QString("fusion"), QString("windows11")})
+    {
+        if (!QStyleFactory::keys().contains(style, Qt::CaseInsensitive)) continue;
+        QApplication::setStyle(style);
+        QTemporaryDir directory;
+        MainWindow window(nullptr, directory.path(), std::make_shared<FakeZwoApi>());
+        window.findChild<QAction*>("testingToolsAction")->setChecked(true);
+        chooseSource(window, "zwo");
+        for (QAbstractSpinBox* box : window.findChildren<QAbstractSpinBox*>())
+            if (box->maximumWidth() < box->sizeHint().width())
+                clipped << QString("%1, %2: at most %3 px, needs %4").arg(style, box->objectName())
+                               .arg(box->maximumWidth()).arg(box->sizeHint().width());
+    }
+    QApplication::setStyle(testsStyle);
+    for (const QString& line : clipped) qWarning().noquote() << "clipped:" << line;
+    QVERIFY2(clipped.isEmpty(), qPrintable(QString("%1 number boxes narrower than their values").arg(clipped.size())));
 }
 
 // Feature-26: with a camera in Preview, auto-tune measures the brightness,
