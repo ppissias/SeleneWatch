@@ -10,11 +10,11 @@ When an item is completed, move its whole section, unchanged, to [Completed](#co
 
 | ID | Change | Size |
 | --- | --- | --- |
-| [Design-3](#design-3-one-flow-for-the-camera-panels-that-load-the-observers-dll) | One flow for the camera panels that load the observer's DLL | Medium; for decision |
+| [Design-3](#design-3-one-flow-for-the-camera-panels-that-load-the-observers-dll) | One flow for the camera panels that load the observer's DLL | Medium; deferred until a fourth such camera family |
 
 ### Design-3. One flow for the camera panels that load the observer's DLL
 
-**For decision; not implemented.** `QhyCameraPanel`, `PlayerOneCameraPanel` and `ToupTekCameraPanel` (170–210 lines each) build the same widgets and run the same refresh, inspect, read-back and enable flow; Player One and ToupTek differ in about 50 lines once the names are swapped. A change to that flow must be made three times (principle 5).
+**Deferred by the maintainer (2026-11-22): not now; revisit when a fourth camera family that loads the observer's DLL is added.** `QhyCameraPanel`, `PlayerOneCameraPanel` and `ToupTekCameraPanel` (170–210 lines each) build the same widgets and run the same refresh, inspect, read-back and enable flow; Player One and ToupTek differ in about 50 lines once the names are swapped. A change to that flow must be made three times (principle 5).
 
 **Possible change.** A base panel for families whose DLL the observer installs, holding the widgets and the flow, with each family supplying its listing, inspection, settings and read-back text (the template method pattern, which DEVELOPER.md does not list yet). **Against it:** the three families' profile and settings types differ, so the base needs either per-family hooks for nearly every step or a template; the ZWO panel would stay outside it; and the window tests check each panel's controls by name. Worth deciding when a fourth family that loads its DLL is added, or when the flow next changes.
 
