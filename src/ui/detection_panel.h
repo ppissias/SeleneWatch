@@ -2,6 +2,7 @@
 
 #include "core/capture_settings.h"
 #include "detection/detection_result.h"
+#include "settings/watch_settings.h"
 
 #include <QtCore/QRect>
 #include <QtGui/QImage>
@@ -16,26 +17,6 @@ class QSpinBox;
 class QToolButton;
 class MeterSlider;
 class PeakHistory;
-
-// Feature-15: the Sky group's exposure follower. The window acts on it; the
-// panel only holds and shows it. (The dusk-to-dawn start was removed in
-// Feature-32; a session's end is the Ends setting.)
-struct SkyExtras
-{
-    // Follow the sky's brightness within these limits.
-    bool follow{false};
-    double minExposureMs{1}, maxExposureMs{2000};
-    double maxGain{0}, gainStep{0};
-    bool operator==(const SkyExtras&) const = default;
-};
-
-// Feature-36: a time-lapse beside the slow sky watch while Monitoring.
-struct WatchTimelapse
-{
-    bool on{false};
-    int intervalSeconds{30};
-    bool operator==(const WatchTimelapse&) const = default;
-};
 
 // The observer's trigger controls and a read-only view of source-thread
 // measurements. It never calls the detector or accesses its live buffers.

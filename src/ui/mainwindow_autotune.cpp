@@ -13,6 +13,7 @@
 #include "recording/metadata_text.h"
 #include "sky/sky_schedule.h"
 #include "detection/target_defaults.h"
+#include "settings/watch_settings.h"
 
 #include <QtCore/QSettings>
 #include <QtCore/QTimer>
@@ -78,7 +79,7 @@ void MainWindow::setupAutoTune()
     // Feature-35: each sky watch's longest exposure.
     showAutoTuneLongestExposure();
     connect(autoTunePanel_, &AutoTunePanel::skyMaxExposureChanged, this, [this](double milliseconds) {
-        if (target_ == Target::Sky) QSettings().setValue(QString(watchName(watch_)) + "/autotune/longestExposureMs", milliseconds);
+        saveLongestExposureMs(watch_, milliseconds);
     });
 
     connect(detectionPanel_, &DetectionPanel::autoTuneRequested, this, [this] {
@@ -129,14 +130,13 @@ void MainWindow::setupAutoTune()
 
 void MainWindow::showAutoTuneLongestExposure()
 {
-    if (!autoTunePanel_ || target_ != Target::Sky) return;
-    autoTunePanel_->setSkyMaxExposureMs(QSettings().value(QString(watchName(watch_)) + "/autotune/longestExposureMs",
-        defaultLongestExposureMs(watch_)).toDouble());
+    if (!autoTunePanel_ || target() != Target::Sky) return;
+    autoTunePanel_->setSkyMaxExposureMs(savedLongestExposureMs(watch_));
 }
 
 TuneWorkflow MainWindow::autoTuneWorkflow() const
 {
-    return tuneWorkflow(target_, detectionPanel_->settings());
+    return tuneWorkflow(target(), detectionPanel_->settings());
 }
 
 bool MainWindow::autoTuneShown() const
@@ -298,7 +298,7 @@ TuneArea MainWindow::autoTuneArea() const
 // Moon: a saturated lock box cannot be followed (design point 9).
 std::vector<std::string> MainWindow::guidingWarnings() const
 {
-    if (target_ != Target::Moon || !latestFrame_) return {};
+    if (target() != Target::Moon || !latestFrame_) return {};
     const LockStatus lock = session_->guider().status().lock;
     if (lock.state == LockState::Off || lock.region.width <= 0 || lock.region.height <= 0) return {};
     TuneArea region;
@@ -446,7 +446,7 @@ void MainWindow::refineCameraGain(const TuneWatchStatus& status, const QString& 
                 .arg(100 * c.level, 0, 'f', 2).arg(100 * c.black, 0, 'f', 2).arg(100 * c.noise, 0, 'f', 3)
                 .arg(c.signalToNoise(), 0, 'f', 1);
         session_->logRecord(QString("%1 autotune_gain_choice target=%2 exposure_ms=%3 gain=%4 compared=\"%5\"\n")
-            .arg(utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon")
+            .arg(utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon")
             .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(gain, 0, 'g', 6).arg(compared.join("; ")));
         tuneResult_ = "Tuned in %1: in the aim, at the gain with the faintest threshold. Go on to step 2.";
     }
@@ -475,7 +475,7 @@ void MainWindow::leaveRefining()
     if (camera.exposure && camera.exposure->value != tuneExposureUs_) controls->setControlValue(kExposureControl, tuneExposureUs_);
     if (camera.gain && camera.gain->value != tuneReachedGain_) controls->setControlValue(kGainControl, tuneReachedGain_);
     session_->logRecord(QString("%1 autotune_camera target=%2 stage=stopped applied=\"Exposure=%3 ms; Gain=%4\"\n")
-        .arg(utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon")
+        .arg(utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon")
         .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(tuneReachedGain_, 0, 'g', 6));
 }
 
@@ -534,7 +534,7 @@ void MainWindow::setCameraLive(double exposureUs, double gain, const QString& re
         applied << QString("Gain=%1").arg(gain, 0, 'g', 6);
     }
     session_->logRecord(QString("%1 autotune_camera target=%2 %3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
-        target_ == Target::Sky ? "sky" : "moon", record, applied.join("; ")));
+        target() == Target::Sky ? "sky" : "moon", record, applied.join("; ")));
     if (!changed)
     {
         autoTunePanel_->setProgress("Tuning stopped: the camera did not take the new setting.", 0, false);
@@ -583,7 +583,7 @@ void MainWindow::restoreAutoTuneCamera()
         applied << QString("Gain=%1").arg(tuneRestore_->gain->value, 0, 'g', 6);
     }
     session_->logRecord(QString("%1 autotune_camera target=%2 restore=yes applied=\"%3\"\n").arg(
-        utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon", applied.join("; ")));
+        utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon", applied.join("; ")));
     tuneRestore_.reset();
     tuneHistory_.clear();
     tuneStage_ = CameraStage::Reaching;
@@ -638,13 +638,13 @@ void MainWindow::applyAutoTuneCamera()
     if (followerChanged)
     {
         detectionPanel_->setSkyExtras(extras);
-        saveSkyExtras();
+        saveSkyExtrasPanel();
         skyExposureState_ = {};
     }
     const QString measured = tuneHistory_.empty() ? QString()
         : QString(" measured_level=%1%").arg(100 * tuneHistory_.back().brightness.level, 0, 'f', 2);
     session_->logRecord(QString("%1 autotune_camera target=%2%3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
-        target_ == Target::Sky ? "sky" : "moon", measured, applied.join("; ")));
+        target() == Target::Sky ? "sky" : "moon", measured, applied.join("; ")));
     if (cameraChanged)
     {
         // The earlier measurements were taken at the old black level.
@@ -728,7 +728,7 @@ void MainWindow::startKWatch(bool higher, std::optional<double> onlyK)
         settings.sigma = *onlyK;
         detectionPanel_->setSettings(settings);
         session_->setDetectionSettings(detectionPanel_->settings());
-        saveDetectionSettings();
+        saveDetectionPanel();
     }
     updateEarthshineArea();
     const DetectionSettings settings = detectionPanel_->settings();
@@ -766,12 +766,12 @@ void MainWindow::applyAutoTuneK()
     }
     const double before = detectionPanel_->settings().sigma;
     session_->logRecord(QString("%1 autotune_k target=%2 k_from=%3 k_to=%4 %5\n").arg(utcText(std::chrono::system_clock::now()),
-        target_ == Target::Sky ? "sky" : "moon").arg(before, 0, 'f', 1).arg(*k, 0, 'f', 1).arg(autoTunePanel_->kRecord()));
+        target() == Target::Sky ? "sky" : "moon").arg(before, 0, 'f', 1).arg(*k, 0, 'f', 1).arg(autoTunePanel_->kRecord()));
     DetectionSettings settings = detectionPanel_->settings();
     settings.sigma = *k;
     detectionPanel_->setSettings(settings);
     session_->setDetectionSettings(detectionPanel_->settings());
-    saveDetectionSettings();
+    saveDetectionPanel();
     autoTunePanel_->clearK(QString("Applied K %1 (it was %2).").arg(*k, 0, 'f', 1).arg(before, 0, 'f', 1));
     tuneHasK_ = false;
     showMessage(QString("Auto-tune applied K %1.").arg(*k, 0, 'f', 1), 6000);
@@ -997,7 +997,7 @@ void MainWindow::applyAutoTuneMinPatch()
     settings.maxPixels = std::max(settings.maxPixels, settings.minPixels);
     detectionPanel_->setSettings(settings);
     session_->setDetectionSettings(detectionPanel_->settings());
-    saveDetectionSettings();
+    saveDetectionPanel();
     autoTunePanel_->clearMinPatch(QString("Applied minimum patch %1 px (it was %2 px).").arg(*minPixels).arg(before));
     tuneHasMinPatch_ = false;
     showMessage(QString("Auto-tune applied minimum patch %1 px.").arg(*minPixels), 6000);

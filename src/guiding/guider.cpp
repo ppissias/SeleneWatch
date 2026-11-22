@@ -1,9 +1,7 @@
 #include "guiding/guider.h"
 
 #include "recording/event_writer.h"
-
-#include <QtCore/QDateTime>
-#include <QtCore/QTimeZone>
+#include "recording/metadata_text.h"
 
 #include <algorithm>
 #include <exception>
@@ -11,12 +9,6 @@
 #include <vector>
 
 namespace {
-
-QString utcText(std::chrono::system_clock::time_point time)
-{
-    const qint64 epochMs = std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count();
-    return QDateTime::fromMSecsSinceEpoch(epochMs, QTimeZone::UTC).toString(Qt::ISODateWithMs);
-}
 
 QString hostTime()
 {

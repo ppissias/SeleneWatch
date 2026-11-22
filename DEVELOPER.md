@@ -45,6 +45,7 @@ The design rules that follow from them, each with what checks it: the build or a
 | **Nothing on the frame path waits** for the disk, the window or the mount ([Threads and ownership](PROJECT_DESCRIPTION.md#threads-and-ownership)). | The overload, writer-failure and full-disk tests; otherwise review |
 | **Overload is counted and shown, never skipped silently** ([Overload policy](PROJECT_DESCRIPTION.md#overload-policy)). | The capture and overload tests |
 | **One owner for each piece of mutable state,** and a worker uses settings copied when it takes them (each trigger keeps the values it used). | The detection and session tests; otherwise review |
+| **A watch's saved settings are read and written only through `settings/watch_settings`,** the one place that knows their QSettings keys; the detection settings' fields are listed once there, for the watch and for named profiles. | The `watch_settings` test, in the registry and in a portable `.ini`, including the keys earlier versions wrote |
 | **The processing core has no Qt Widgets.** Everything below the window builds and tests without one. | The build: `selenewatch_core` links only Qt Core and Qt Gui; the `dependency_rules` test |
 | **Each folder under `src/` has one job, and its dependencies point one way** ([Code organization](#10-code-organization-and-extension-boundaries)). | The `dependency_rules` test |
 | **Vendor SDK headers stay in one `*_sdk.cpp`** behind the family's `*_api.h`. | Review, and the builds without SDKs |
@@ -72,6 +73,7 @@ Reach for one of these before inventing a structure.
 | Explicit notifications | The core tells the window something | `Session::Notifications`: named callbacks, queued to the window's thread |
 | Status snapshot | The window shows a worker's state | `status()` returns a value struct taken under the worker's lock: `RecordingWriter::Status`, `SkyTimelapse::Status`, `GuiderStatus`, `TuneWatchStatus`, `TimelapseStatus` |
 | Pure decision function | A procedure of several steps decides its next move | `nextCameraStep` and `refineGain` (auto-tune), `decideSkyExposure` (the exposure follower), the guide step, `sky_schedule`: the window or a worker carries the step out, and tests run the decision without a camera |
+| Settings of a watch | A value is saved per watch | `settings/watch_settings`: one function pair per kind of setting (`savedDetectionSettings` / `saveDetectionSettings`, …); the window asks it and hands the values to the panels and the session |
 | Settings copied at admission | A worker uses settings the observer can change | The detector's settings are copied before each frame, a trigger keeps the values it used, a time-lapse keeps its interval |
 | Plain-text record of every output | Anything is saved | `event.txt`, `recording.txt`, `timelapse.txt` as `key: value` lines; `session.txt` as `<UTC> <event> key=value` lines, written through `metadata_text` |
 | Vendor header isolation | A vendor SDK is used | Its header is included in one `*_sdk.cpp`; the rest of the code sees the family's `*_api.h` |
@@ -90,12 +92,12 @@ Short recipes for the common additions. Each follows a pattern above.
 **A detection setting.**
 1. Add the field to `DetectionSettings` with its default in `target_defaults.h`, and its check in `valid()`.
 2. Use it in `FlashDetector`; a trigger records the value it used.
-3. Save it with the watch's settings and in named profiles, and give it a control in the Detection panel.
+3. Add it to the one field list in `settings/watch_settings.cpp` (`detectionFields` and `detectionFromFields`), which saves it with the watch and in named profiles; give it a control in the Detection panel.
 4. Test it in the detection suite, and describe it in MANUAL.md.
 
 **A watch** (something to look for, such as the slow sky of Feature-35).
 1. Add it to `Watch` with its target, name and defaults (`target_defaults.h`).
-2. Give it its own saved settings and its entry in the Detection panel's list.
+2. Give it its group of saved settings in `settings/watch_settings.cpp` (and say there which settings it shares), its named-profiles group, and its entry in the Detection panel's list.
 3. Record it on `monitoring_start` in `session.txt`, and extend the window test that checks each watch keeps its own settings.
 
 **An output file or a `session.txt` line.**
@@ -227,7 +229,7 @@ With Qt's `bin` directory on `PATH` and `QT_PLUGIN_PATH` set:
 ctest --test-dir out/build/debug --output-on-failure
 ```
 
-- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for the source folders' dependency directions (`dependency_rules`), core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`, `auto_tune`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
+- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for the source folders' dependency directions (`dependency_rules`), each watch's saved settings (`watch_settings`), core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`, `auto_tune`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
 - Camera tests run against deterministic boundary implementations (`FakeZwoApi`, `FakeQhyApi`, `FakePlayerOneApi`, `FakeToupTekApi`) and never open physical hardware.
 - Window and offscreen rendering tests set `QT_QPA_PLATFORM=offscreen` and isolate QSettings under a test namespace.
 - CTest invokes Qt Test targets with `-o -,tap` so test output reaches stdout on Windows even when launched without an attached console.
@@ -288,7 +290,7 @@ All application code is under `src/`, one folder per job (Design-2). `src/` is t
 | `mounts/` | The `Mount` boundary, `SimulatedMount`, `AscomMount` | core |
 | `guiding/` | `FeatureLock`, `LockTracker`, `Calibrator`, `Guider`, `GuideController` | core, mounts, recording |
 | `timelapse/` | `TimelapseSession`, CFITSIO 32-bit float FITS I/O (`fits_io`), OpenCV burst stacking/alignment/sharpening (`stack_processor`), the time-lapse video and re-sharpen (`video_exporter`), `timelapse_settings`, the slow sky's `SkyTimelapse` | core, display, guiding, recording |
-| `settings/` | What is saved between launches: named detection profiles | core, detection |
+| `settings/` | What is saved between launches: each watch's settings and the watch chosen last (`watch_settings`, the only code that knows their QSettings keys), named detection profiles | core, detection |
 | `session/` | `Session` (the frame path from source to capture, preview and guider), test-signal injection, the clock check, the end of a session | all of the above |
 | `ui/widgets/` | Small reusable widgets (`ElidedLabel`, `FlowLayout`, `ReadoutLabel`, `WheelGuard`, control help) | core |
 | `ui/cameras/` | `CameraFamilyPanel` and one panel per family, the shared settings editor, the runtime chooser | core, sources, cameras, ui/widgets |

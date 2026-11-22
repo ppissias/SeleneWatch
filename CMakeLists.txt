@@ -71,7 +71,7 @@ add_library(selenewatch_core STATIC
     src/guiding/calibrator.cpp src/guiding/guide_controller.cpp
     src/timelapse/timelapse_settings.cpp src/timelapse/fits_io.cpp src/timelapse/stack_processor.cpp
     src/timelapse/video_exporter.cpp src/timelapse/timelapse_session.cpp src/timelapse/sky_timelapse.cpp
-    src/settings/detection_profiles.cpp
+    src/settings/detection_profiles.cpp src/settings/watch_settings.cpp
     src/session/session.cpp src/session/blip_injector.cpp src/session/clock_check.cpp src/session/session_end.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -269,6 +269,12 @@ target_compile_definitions(SeleneWatchDependencyTests PRIVATE SELENEWATCH_SOURCE
 target_link_libraries(SeleneWatchDependencyTests PRIVATE Qt6::Core Qt6::Test)
 selenewatch_compile_options(SeleneWatchDependencyTests)
 add_test(NAME dependency_rules COMMAND SeleneWatchDependencyTests -o -,tap)
+
+# Design-1: each watch's saved settings and the keys earlier versions wrote.
+add_executable(SeleneWatchSettingsTests tests/watch_settings_tests.cpp)
+target_link_libraries(SeleneWatchSettingsTests PRIVATE selenewatch_core Qt6::Test)
+selenewatch_compile_options(SeleneWatchSettingsTests)
+add_test(NAME watch_settings COMMAND SeleneWatchSettingsTests -o -,tap)
 
 add_executable(SeleneWatchSerTests tests/ser_writer_tests.cpp)
 target_link_libraries(SeleneWatchSerTests PRIVATE selenewatch_core Qt6::Test)

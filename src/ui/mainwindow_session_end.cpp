@@ -111,7 +111,7 @@ void MainWindow::applySessionEnd(const SessionEndSettings& settings, MountAtEnd 
 // The Moon's condition applies to the Moon and its time-lapse, not to a planet's.
 bool MainWindow::moonEnds() const
 {
-    if (target_ != Target::Moon) return false;
+    if (target() != Target::Moon) return false;
     if (session_->mode() == Session::Mode::TimeLapse || (sessionRun_ && sessionRun_->timeLapse))
         return timelapsePanel_->settings().preset == TimelapsePreset::Moon;
     return true;
@@ -120,7 +120,7 @@ bool MainWindow::moonEnds() const
 // The mount is the Moon's: the sky is watched with a fixed camera.
 bool MainWindow::mountForEnd() const
 {
-    return target_ == Target::Moon && session_->guider().status().guide.mountConnected;
+    return target() == Target::Moon && session_->guider().status().guide.mountConnected;
 }
 
 void MainWindow::onChangeSessionEnd()

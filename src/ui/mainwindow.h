@@ -144,13 +144,10 @@ public:
 private:
     void setupDetectionPanel();
     void updateDetectionDisplay();
-    // Feature-11: each target's detection and capture settings are saved
-    // apart. The Moon keeps the keys used before the choice existed.
-    [[nodiscard]] static DetectionSettings savedDetectionSettings(Watch watch);
-    [[nodiscard]] static CaptureSettings savedCaptureSettings(Watch watch);
-    // Save the panels' settings under the target they belong to.
-    void saveDetectionSettings();
-    void saveCaptureSettings();
+    // Save the panels' settings under the watch they belong to
+    // (settings/watch_settings.h keeps each watch's apart).
+    void saveDetectionPanel();
+    void saveCapturePanel();
     void onWatchRequested(Watch watch);
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
@@ -179,8 +176,9 @@ public:
     // test stops its tracking.
     [[nodiscard]] std::shared_ptr<SimulatedPointing> simulatedPointing() const { return simulatedPointing_; }
 private:
-    void saveSkyExtras();
-    void loadSkyExtras();
+    // Feature-15: the exposure follower of the watch, shown and saved.
+    void saveSkyExtrasPanel();
+    void showSkyExtras();
     // Feature-36: the slow sky's time-lapse setting, saved and given to the session.
     void applyWatchTimelapse();
     [[nodiscard]] QString watchTimelapseReadout() const;
@@ -336,10 +334,11 @@ private:
     ReleaseChecker* releaseChecker_{nullptr};
     DetectionPanel* detectionPanel_{nullptr};
     QDockWidget* detectionDock_{nullptr};
-    // What is watched. The detection and display panels hold its settings.
-    Target target_{Target::Moon};
-    // Feature-31: the Moon's flashes, its shadows, or the sky; target_ is its target.
+    // Feature-31, Feature-35: what is watched. The detection and display
+    // panels hold its settings.
     Watch watch_{Watch::MoonFlashes};
+    // The Moon or the sky: the watch's target.
+    [[nodiscard]] Target target() const { return watchTarget(watch_); }
     // The corners of a mask shape being drawn (Feature-15).
     std::vector<MaskPoint> pendingShape_;
     // Feature-15: the exposure follower's timer and memory.

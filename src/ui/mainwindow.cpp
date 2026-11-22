@@ -29,6 +29,7 @@
 #include "selenewatch_version.h"
 #include "ui/site_dialog.h"
 #include "detection/target_defaults.h"
+#include "settings/watch_settings.h"
 #include "sources/recording_source.h"
 #include "sources/synthetic_frame_source.h"
 
@@ -83,42 +84,6 @@ constexpr uint64_t kGiB = uint64_t{1024} * 1024 * 1024;
 
 constexpr const char* kRecordTip = "In Preview or Monitoring, writes every frame to one SER file in recordings/ "
                                    "until stopped (or the optional frame limit is reached).";
-
-// Where a target's settings are saved. The Moon keeps the keys used before
-// Sky mode existed, so an observer who never picks Sky sees no change.
-QString settingsPrefix(Target target)
-{
-    return target == Target::Sky ? "sky/" : "";
-}
-
-// Feature-31: where a watch's detection settings are saved. The flashes keep
-// the Moon's keys, so the Moon's settings saved before are the flashes'.
-QString detectionKey(Watch watch)
-{
-    if (watch == Watch::SkySlow) return "skySlow/detection/";
-    return watch == Watch::MoonShadows ? "moonShadows/detection/" : settingsPrefix(watchTarget(watch)) + "detection/";
-}
-
-// Feature-35: the slow sky keeps its own capture settings and exposure
-// follower; the fast sky keeps the sky's keys from before, both Moon watches
-// the Moon's capture settings.
-QString captureKey(Watch watch)
-{
-    return watch == Watch::SkySlow ? "skySlow/capture/" : settingsPrefix(watchTarget(watch)) + "capture/";
-}
-
-QString followKey(Watch watch)
-{
-    return watch == Watch::SkySlow ? "skySlow/follow/" : "sky/follow/";
-}
-
-// The watch that was chosen last.
-Watch savedWatch()
-{
-    const QSettings saved;
-    if (saved.value("target", 0).toInt() == 1) return saved.value("sky/watch").toString() == "slow" ? Watch::SkySlow : Watch::Sky;
-    return saved.value("moon/watch").toString() == "shadows" ? Watch::MoonShadows : Watch::MoonFlashes;
-}
 
 // The mask's shapes for the preview.
 std::vector<QPolygon> maskRects(const DetectionMask& mask)
@@ -318,12 +283,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         if (guidingPanel_ && guidingPanel_->drawingLock())
         {
             guidingPanel_->setDrawingLock(false);
-            if (target_ == Target::Sky || !session_->isRunning()) return;
+            if (target() == Target::Sky || !session_->isRunning()) return;
             session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
             showMessage("Locking on the selected region…", 3000);
             return;
         }
-        showMessage(target_ == Target::Sky
+        showMessage(target() == Target::Sky
             ? "A drag draws nothing until you choose what to draw: Draw mask in Detection."
             : "A drag draws nothing until you choose what to draw: Draw lock box in Guiding, Draw earthshine box in "
               "Auto-tune, or Select lunar anchor in Time-lapse.", 6000);
@@ -544,7 +509,7 @@ MainWindow::~MainWindow()
     // A recording being read is let finish; its result is dropped.
     if (preparing_.valid()) preparing_.wait();
     saveGuidingSettings();
-    saveDetectionSettings();
+    saveDetectionPanel();
     saveDisplaySettings();
     if (bufferReadoutTimer_)
     {
@@ -564,7 +529,6 @@ void MainWindow::setupDetectionPanel()
     viewMenu_ = menuBar()->addMenu("View");
     viewMenu_->addAction(detectionDock_->toggleViewAction());
     watch_ = savedWatch();
-    target_ = watchTarget(watch_);
     detectionPanel_->setWatch(watch_);
     detectionPanel_->setSettings(savedDetectionSettings(watch_));
     session_->setDetectionSettings(detectionPanel_->settings());
@@ -576,25 +540,16 @@ void MainWindow::setupDetectionPanel()
     connect(detectionPanel_, &DetectionPanel::watchRequested, this, &MainWindow::onWatchRequested);
 
     // Feature-15: the exposure follower.
-    loadSkyExtras();
+    showSkyExtras();
     // Feature-36: the slow sky's time-lapse.
-    {
-        const QSettings saved;
-        WatchTimelapse timelapse;
-        timelapse.on = saved.value("skySlow/timelapse/enabled", timelapse.on).toBool();
-        timelapse.intervalSeconds = std::clamp(saved.value("skySlow/timelapse/intervalSeconds", timelapse.intervalSeconds).toInt(), 1, 3600);
-        detectionPanel_->setWatchTimelapse(timelapse);
-    }
+    detectionPanel_->setWatchTimelapse(savedWatchTimelapse());
     connect(detectionPanel_, &DetectionPanel::watchTimelapseChanged, this, [this] {
-        const WatchTimelapse timelapse = detectionPanel_->watchTimelapse();
-        QSettings saved;
-        saved.setValue("skySlow/timelapse/enabled", timelapse.on);
-        saved.setValue("skySlow/timelapse/intervalSeconds", timelapse.intervalSeconds);
+        saveWatchTimelapse(detectionPanel_->watchTimelapse());
         applyWatchTimelapse();
     });
     applyWatchTimelapse();
     connect(detectionPanel_, &DetectionPanel::skyExtrasChanged, this, [this] {
-        saveSkyExtras();
+        saveSkyExtrasPanel();
         skyExposureState_ = {};
     });
     skyTimer_ = new QTimer(this);
@@ -614,87 +569,14 @@ void MainWindow::setupDetectionPanel()
     resize(1340, 820);
 }
 
-DetectionSettings MainWindow::savedDetectionSettings(Watch watch)
+void MainWindow::saveDetectionPanel()
 {
-    const QSettings saved;
-    const QString key = detectionKey(watch);
-    DetectionSettings settings = defaultDetectionSettings(watch);
-    settings.sigma = saved.value(key + "sigma", settings.sigma).toDouble();
-    settings.minPixels = saved.value(key + "minPixels", settings.minPixels).toInt();
-    settings.maxPixels = saved.value(key + "maxPixels", settings.maxPixels).toInt();
-    settings.oneFrame = saved.value(key + "oneFrame", settings.oneFrame).toBool();
-    settings.maxPatchBoxRatio = saved.value(key + "maxPatchBoxRatio", settings.maxPatchBoxRatio).toDouble();
-    settings.referenceTimeConstantSeconds = saved.value(key + "referenceTimeConstantSeconds", settings.referenceTimeConstantSeconds).toDouble();
-    settings.minNoiseAdu = saved.value(key + "minNoiseAdu", settings.minNoiseAdu).toDouble();
-    settings.darkening = saved.value(key + "darkening", settings.darkening).toBool();
-    settings.maxDarkPixels = saved.value(key + "maxDarkPixels", settings.maxDarkPixels).toInt();
-    settings.maxDarkBoxRatio = saved.value(key + "maxDarkBoxRatio", settings.maxDarkBoxRatio).toDouble();
-    settings.darkeningShare = saved.value(key + "darkeningShare", settings.darkeningShare).toDouble();
-    settings.ignoreAboveShare = saved.value(key + "ignoreAboveShare", settings.ignoreAboveShare).toDouble();
-    if (watchTarget(watch) == Target::Sky)
-    {
-        settings.brighteningShare = saved.value(key + "brighteningShare", settings.brighteningShare).toDouble();
-        settings.releaseSeconds = saved.value(key + "releaseSeconds", settings.releaseSeconds).toDouble();
-        settings.mask = DetectionMask::fromText(saved.value(key + "mask").toString().toStdString());
-    }
-    // Feature-31: whatever an older version saved, darkening is the shadows'.
-    settings = settingsForWatch(settings, watch);
-    return settings.valid() ? settings : defaultDetectionSettings(watch);
+    if (detectionPanel_) saveDetectionSettings(detectionPanel_->watch(), detectionPanel_->settings());
 }
 
-void MainWindow::saveDetectionSettings()
+void MainWindow::saveCapturePanel()
 {
-    if (!detectionPanel_) return;
-    const auto values = detectionPanel_->settings();
-    const QString key = detectionKey(detectionPanel_->watch());
-    QSettings saved;
-    saved.setValue(key + "sigma", values.sigma);
-    saved.setValue(key + "minPixels", values.minPixels);
-    saved.setValue(key + "maxPixels", values.maxPixels);
-    saved.setValue(key + "oneFrame", values.oneFrame);
-    saved.setValue(key + "maxPatchBoxRatio", values.maxPatchBoxRatio);
-    saved.setValue(key + "referenceTimeConstantSeconds", values.referenceTimeConstantSeconds);
-    saved.setValue(key + "minNoiseAdu", values.minNoiseAdu);
-    saved.setValue(key + "darkening", values.darkening);
-    saved.setValue(key + "maxDarkPixels", values.maxDarkPixels);
-    saved.setValue(key + "maxDarkBoxRatio", values.maxDarkBoxRatio);
-    saved.setValue(key + "darkeningShare", values.darkeningShare);
-    saved.setValue(key + "ignoreAboveShare", values.ignoreAboveShare);
-    if (detectionPanel_->target() == Target::Sky)
-    {
-        saved.setValue(key + "brighteningShare", values.brighteningShare);
-        saved.setValue(key + "releaseSeconds", values.releaseSeconds);
-        saved.setValue(key + "mask", QString::fromStdString(values.mask.text()));
-    }
-    saved.sync();
-}
-
-CaptureSettings MainWindow::savedCaptureSettings(Watch watch)
-{
-    const QSettings saved;
-    const QString key = captureKey(watch);
-    CaptureSettings capture = defaultCaptureSettings(watch);
-    capture.historySeconds = saved.value(key + "history", capture.historySeconds).toDouble();
-    capture.postSeconds = saved.value(key + "post", capture.postSeconds).toDouble();
-    capture.maxPostSeconds = saved.value(key + "maxPost", capture.maxPostSeconds).toDouble();
-    capture.memoryBytes = static_cast<size_t>(std::clamp(saved.value(key + "memoryMiB", 2048).toInt(), 16, 65536)) * 1024 * 1024;
-    capture.diskReserveBytes = static_cast<uint64_t>(std::clamp(
-        saved.value(key + "diskReserveGiB", static_cast<qulonglong>(capture.diskReserveBytes / kGiB)).toLongLong(), 0LL, 100000LL)) * kGiB;
-    return capture.valid() ? capture : defaultCaptureSettings(watch);
-}
-
-void MainWindow::saveCaptureSettings()
-{
-    if (!displayPanel_) return;
-    const auto capture = displayPanel_->captureSettings();
-    const QString key = captureKey(watch_);
-    QSettings saved;
-    saved.setValue(key + "history", capture.historySeconds);
-    saved.setValue(key + "post", capture.postSeconds);
-    saved.setValue(key + "maxPost", capture.maxPostSeconds);
-    saved.setValue(key + "memoryMiB", static_cast<int>(capture.memoryBytes / (1024 * 1024)));
-    saved.setValue(key + "diskReserveGiB", static_cast<qulonglong>(capture.diskReserveBytes / kGiB));
-    saved.sync();
+    if (displayPanel_) saveCaptureSettings(watch_, displayPanel_->captureSettings());
 }
 
 void MainWindow::onWatchRequested(Watch watch)
@@ -707,16 +589,12 @@ void MainWindow::onWatchRequested(Watch watch)
     }
     // Keep the old watch's settings before the panels take the new ones. The
     // capture settings change with their key: both Moon watches share them.
-    saveDetectionSettings();
-    const bool captureChanges = captureKey(watch) != captureKey(watch_);
-    if (captureChanges) saveCaptureSettings();
-    if (target_ == Target::Sky) saveSkyExtras();
+    saveDetectionPanel();
+    const bool captureChanges = !sameCaptureSettings(watch, watch_);
+    if (captureChanges) saveCapturePanel();
+    saveSkyExtrasPanel();
     watch_ = watch;
-    target_ = watchTarget(watch);
-    QSettings saved;
-    saved.setValue("target", target_ == Target::Sky ? 1 : 0);
-    if (target_ == Target::Moon) saved.setValue("moon/watch", watch == Watch::MoonShadows ? "shadows" : "flashes");
-    else saved.setValue("sky/watch", watch == Watch::SkySlow ? "slow" : "fast");
+    saveWatch(watch_);
     detectionPanel_->setWatch(watch_);
     detectionPanel_->setSettings(savedDetectionSettings(watch_));
     if (captureChanges)
@@ -726,7 +604,7 @@ void MainWindow::onWatchRequested(Watch watch)
     }
     session_->setWatch(watch_);
     session_->setDetectionSettings(detectionPanel_->settings());
-    loadSkyExtras();
+    showSkyExtras();
     applyWatchTimelapse();
     skyExposureState_ = {};
     showAutoTuneLongestExposure();
@@ -753,39 +631,21 @@ QString MainWindow::watchTimelapseReadout() const
     return text;
 }
 
-// Feature-15, Feature-35: each sky watch's exposure follower. Its longest
-// exposure starts at the watch's longest for auto-tune.
-void MainWindow::loadSkyExtras()
+// Feature-15, Feature-35: each sky watch's exposure follower.
+void MainWindow::showSkyExtras()
 {
-    const QSettings saved;
-    const QString key = followKey(watch_);
-    SkyExtras extras;
-    extras.maxExposureMs = defaultLongestExposureMs(watch_);
-    extras.follow = saved.value(key + "enabled", extras.follow).toBool();
-    extras.minExposureMs = saved.value(key + "minExposureMs", extras.minExposureMs).toDouble();
-    extras.maxExposureMs = saved.value(key + "maxExposureMs", extras.maxExposureMs).toDouble();
-    extras.maxGain = saved.value(key + "maxGain", extras.maxGain).toDouble();
-    extras.gainStep = saved.value(key + "gainStep", extras.gainStep).toDouble();
-    detectionPanel_->setSkyExtras(extras);
+    detectionPanel_->setSkyExtras(savedSkyExtras(watch_));
 }
 
-void MainWindow::saveSkyExtras()
+void MainWindow::saveSkyExtrasPanel()
 {
-    if (target_ != Target::Sky) return;
-    const SkyExtras extras = detectionPanel_->skyExtras();
-    const QString key = followKey(watch_);
-    QSettings saved;
-    saved.setValue(key + "enabled", extras.follow);
-    saved.setValue(key + "minExposureMs", extras.minExposureMs);
-    saved.setValue(key + "maxExposureMs", extras.maxExposureMs);
-    saved.setValue(key + "maxGain", extras.maxGain);
-    saved.setValue(key + "gainStep", extras.gainStep);
+    if (target() == Target::Sky) saveSkyExtras(watch_, detectionPanel_->skyExtras());
 }
 
 void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
 {
     const SkyExtras extras = detectionPanel_->skyExtras();
-    if (target_ != Target::Sky || !extras.follow)
+    if (target() != Target::Sky || !extras.follow)
     {
         detectionPanel_->showFollow({});
         return;
@@ -886,7 +746,7 @@ void MainWindow::chooseDrawing(Drawing drawing)
 
 void MainWindow::applyTarget()
 {
-    const bool sky = target_ == Target::Sky;
+    const bool sky = target() == Target::Sky;
     ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
     if (guidingPanel_)
     {
@@ -946,7 +806,7 @@ void MainWindow::saveDisplaySettings()
     saved.setValue("histogram/fitRange", histogramPanel_->fitRange());
     saved.setValue("histogram/logCounts", histogramPanel_->logCounts());
     saved.sync();
-    saveCaptureSettings();
+    saveCapturePanel();
 }
 
 void MainWindow::setupHistogramPanel()
@@ -2440,7 +2300,7 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     if (kind == "synthetic")
     {
         auto source = std::make_unique<SyntheticFrameSource>(kSyntheticWidth, kSyntheticHeight, fps);
-        source->setScene(target_ == Target::Sky ? SyntheticScene::Sky : SyntheticScene::Moon);
+        source->setScene(target() == Target::Sky ? SyntheticScene::Sky : SyntheticScene::Moon);
         // The simulated mount moves the painted Moon; it stays put while that mount is not connected.
         source->setSceneOffset([pointing = simulatedPointing_] {
             const auto offset = pointing->imageOffset(SimulatedPointing::Clock::now());
@@ -2587,7 +2447,7 @@ void MainWindow::finishStream(const std::string& reason)
 {
     bufferReadoutTimer_->stop();
     session_->stop(reason);
-    saveDetectionSettings();
+    saveDetectionPanel();
     saveDisplaySettings();
 
     updateStreamReadout();
