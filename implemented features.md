@@ -43,6 +43,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-36 — A time-lapse beside the slow sky watch](#feature-36--a-time-lapse-beside-the-slow-sky-watch)
 - [Feature-37 — Transit watch between lunar time-lapse bursts](#feature-37--transit-watch-between-lunar-time-lapse-bursts)
 - [Feature-38 — Switch observing watches during Preview](#feature-38--switch-observing-watches-during-preview)
+- [Feature-39 — Exposure range presets for the camera slider](#feature-39--exposure-range-presets-for-the-camera-slider)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3274,3 +3275,20 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 **Acceptance.** Switch Moon → sky → Moon shadows on a running Preview, check the loaded settings, source continuity and control availability, and confirm the next Monitoring run uses the chosen watch. Verify the locks during recording, Monitoring and time-lapse.
 
 **Status & verification (22 November 2026).** Implemented in `Session::requestPreviewWatch` / `applyPreviewWatch` and `MainWindow::onWatchRequested` / `updateControls`. Debug build and full 25/25 CTest suite passed (`UiTest::watchesCanChangeInPreviewAndTransitControlsFollowTheMoon`). Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).
+
+## Feature-39 — Exposure range presets for the camera slider
+
+*Discussed with the observer and built on 22 November 2026.*
+
+**Problem.** Spanning the camera SDK's full exposure range (e.g. `0.03 ms` to `2000 s`) on one logarithmic slider squeezed the useful `1–40 ms` working zone into a narrow sliver, produced awkward decimal values, and risked accidentally commanding multi-minute exposures during live Preview.
+
+**What was built.**
+1. **Three exposure ranges in `CameraSettingsEditor`** (shared by ZWO, QHY, Player One, and ToupTek):
+   - **Planetary (≤ 20 ms):** `0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20 ms`, spin-box arrow step `0.1 ms`.
+   - **Fast (5–100 ms):** `5, 8, 10, 12, 15, 16, 20, 25, 30, 33, 40, 50, 60, 75, 100 ms`, spin-box arrow step `1 ms`.
+   - **Sky (50 ms–5 s):** `50, 75, 100, 150, 200, 250, 350, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000 ms`, spin-box arrow step `50 ms`.
+   Each table is filtered to the connected camera's actual `[min, max]` exposure limits, and each arrow step stays at least the camera's native minimum step.
+2. **Fine tuning & full hardware range preserved.** The numeric spin box keeps the camera's full hardware exposure range so typed values, up/down arrow fine-tuning, `controlRange()`, Auto-tune, and the sky exposure follower work unchanged. Changing the range dropdown updates the slider stops and arrow step without mutating the current live exposure value.
+3. **Automatic switching with `Watching`.** `MainWindow` selects **Planetary** for *The Moon: shadows on the sunlit side*, **Fast** for *The Moon: flashes* and *The sky: fast events*, and **Sky** for *The sky: slow and faint* (both on startup and on live Preview watch changes), while allowing manual override in the Camera dock at any time.
+
+**Status & verification (22 November 2026).** Implemented in `CameraSettingsEditor` and `MainWindow`, documented in `MANUAL.md`. Debug build and full CTest suite passed (25/25: `dependency_rules`, all 50 `ui` tests including `cameraSlidersSetTheBoxAndReachTheCameraOnce`, `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, and `numberBoxesFitTheirWidestValue`, plus the 23 core/camera/timelapse suites). Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).

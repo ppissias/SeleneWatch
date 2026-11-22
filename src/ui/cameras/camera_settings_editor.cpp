@@ -1,5 +1,6 @@
 #include "ui/cameras/camera_settings_editor.h"
 #include "ui/widgets/control_help.h"
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
@@ -9,9 +10,64 @@
 #include <QtWidgets/QSpinBox>
 #include <algorithm>
 #include <cmath>
+#include <span>
 namespace {
 // Slider positions when the box's own steps are too many to give each one.
 constexpr int kSliderPositions=1000;
+// Feature-39: fixed preset stops (ms) for each Exposure range. Small overlaps
+// avoid back-and-forth range switching near 15 ms or 60 ms.
+constexpr double kPlanetaryPresets[]={0.05,0.1,0.2,0.5,1,1.5,2,3,4,5,6,8,10,12,15,20};
+constexpr double kFastPresets[]={5,8,10,12,15,16,20,25,30,33,40,50,60,75,100};
+constexpr double kSkyPresets[]={50,75,100,150,200,250,350,500,750,1000,1500,2000,3000,4000,5000};
+std::span<const double> exposurePresetTable(ExposureRange range)
+{
+    switch (range)
+    {
+    case ExposureRange::Planetary: return kPlanetaryPresets;
+    case ExposureRange::Fast: return kFastPresets;
+    case ExposureRange::Sky: return kSkyPresets;
+    }
+    return kFastPresets;
+}
+double exposureRangeStepMs(ExposureRange range)
+{
+    switch (range)
+    {
+    case ExposureRange::Planetary: return 0.1;
+    case ExposureRange::Fast: return 1.0;
+    case ExposureRange::Sky: return 50.0;
+    }
+    return 1.0;
+}
+std::vector<double> filteredExposurePresets(ExposureRange range,double low,double high)
+{
+    const auto table=exposurePresetTable(range);
+    std::vector<double> stops;
+    stops.reserve(table.size());
+    for (double ms : table)
+        if (ms>=low-1e-9 && ms<=high+1e-9) stops.push_back(std::clamp(ms,low,high));
+    if (stops.size()<2)
+    {
+        stops.clear();
+        const double first=std::clamp(table.front(),low,high);
+        const double last=std::clamp(table.back(),low,high);
+        stops.push_back(first);
+        if (std::abs(last-first)>1e-9) stops.push_back(last);
+    }
+    return stops;
+}
+int nearestPresetIndex(const std::vector<double>& stops,double value)
+{
+    if (stops.empty()) return 0;
+    int best=0;
+    double bestDist=std::abs(stops[0]-value);
+    for (size_t i=1;i<stops.size();++i)
+    {
+        const double dist=std::abs(stops[i]-value);
+        if (dist<bestDist) { bestDist=dist; best=static_cast<int>(i); }
+    }
+    return best;
+}
 // A logarithmic slider starts at the smallest positive step, so its first
 // position is the control's minimum and the rest spread evenly in ratio.
 double sliderValue(const QDoubleSpinBox& input,bool logarithmic,int position,int positions)
@@ -113,6 +169,10 @@ void CameraSettingsEditor::clearControls()
     liveTimer_->stop();
     while(controlForm_->rowCount()) controlForm_->removeRow(0);
     controls_.clear();
+    exposureRangeBox_=nullptr;
+    exposureId_.reset();
+    exposureNativeStep_=0;
+    exposurePresets_.clear();
 }
 void CameraSettingsEditor::addControl(int id,const QString& name,double minimum,double maximum,double step,double value,
     double scale,const QString& suffix,bool writable)
@@ -131,26 +191,96 @@ void CameraSettingsEditor::addControl(int id,const QString& name,double minimum,
     input->setKeyboardTracking(false);
     input->setToolTip(cameraControlHelp(name));
     connect(input,&QDoubleSpinBox::valueChanged,this,[this] { if (liveEditing_) liveTimer_->start(); });
-    // Feature-25: a slider for a control with at least ten steps; on/off and
-    // few-valued controls keep only the box.
+    // Feature-25/39: a slider for a control with at least ten steps; Exposure
+    // uses fixed presets in the chosen ExposureRange while the box keeps the
+    // full hardware range for fine-tuning and typed values.
     const double low=input->minimum(),high=input->maximum(),stepSize=input->singleStep();
+    const bool isExposure=writable && !exposureId_
+        && suffix.trimmed().compare("ms",Qt::CaseInsensitive)==0
+        && name.contains("exposure",Qt::CaseInsensitive);
     if (writable && stepSize>0 && (high-low)/stepSize>=10)
     {
-        const bool logarithmic=low>=0 && high/std::max(low,stepSize)>1000;
-        auto* row=new QWidget(this);
-        auto* line=new QHBoxLayout(row);line->setContentsMargins(0,0,0,0);
-        QSlider* slider=addSlider(input,logarithmic);
-        slider->setObjectName(QString("cameraControlSlider%1").arg(id));
-        slider->setToolTip(input->toolTip()+(logarithmic?" The slider is logarithmic; the box takes an exact value."
-            :" The box takes an exact value."));
-        line->addWidget(slider,1);line->addWidget(input);
-        controlForm_->addRow(name,row);controls_[id]={input,scale,slider};
+        if (isExposure)
+        {
+            exposureRangeBox_=new QComboBox(this);
+            exposureRangeBox_->setObjectName("cameraExposureRange");
+            exposureRangeBox_->addItem("Planetary (≤ 20 ms)",static_cast<int>(ExposureRange::Planetary));
+            exposureRangeBox_->addItem("Fast (5–100 ms)",static_cast<int>(ExposureRange::Fast));
+            exposureRangeBox_->addItem("Sky (50 ms–5 s)",static_cast<int>(ExposureRange::Sky));
+            exposureRangeBox_->setToolTip("Preset range for the Exposure slider and its up/down arrow step. "
+                "The box still accepts any exposure the camera supports.");
+            controlForm_->addRow("Exposure range",exposureRangeBox_);
+            connect(exposureRangeBox_,&QComboBox::currentIndexChanged,this,[this](int index) {
+                if (index<0) return;
+                setExposureRange(static_cast<ExposureRange>(exposureRangeBox_->itemData(index).toInt()));
+            });
+            auto* row=new QWidget(this);
+            auto* line=new QHBoxLayout(row);line->setContentsMargins(0,0,0,0);
+            auto* slider=new QSlider(Qt::Horizontal,this);
+            slider->setObjectName(QString("cameraControlSlider%1").arg(id));
+            slider->setTickPosition(QSlider::TicksBelow);
+            slider->setTickInterval(1);
+            slider->setPageStep(1);
+            slider->setToolTip(input->toolTip()+" The slider steps through presets in the chosen range; "
+                "use the arrows or box to fine-tune.");
+            connect(slider,&QSlider::valueChanged,input,[this,input](int position) {
+                if (position>=0 && static_cast<size_t>(position)<exposurePresets_.size())
+                    input->setValue(exposurePresets_[static_cast<size_t>(position)]);
+            });
+            connect(input,&QDoubleSpinBox::valueChanged,slider,[this,slider](double current) {
+                const QSignalBlocker blocked(slider);
+                slider->setValue(nearestPresetIndex(exposurePresets_,current));
+            });
+            line->addWidget(slider,1);line->addWidget(input);
+            controlForm_->addRow(name,row);controls_[id]={input,scale,slider};
+            exposureId_=id;
+            exposureNativeStep_=stepSize;
+            updateExposureRange();
+        }
+        else
+        {
+            const bool logarithmic=low>=0 && high/std::max(low,stepSize)>1000;
+            auto* row=new QWidget(this);
+            auto* line=new QHBoxLayout(row);line->setContentsMargins(0,0,0,0);
+            QSlider* slider=addSlider(input,logarithmic);
+            slider->setObjectName(QString("cameraControlSlider%1").arg(id));
+            slider->setToolTip(input->toolTip()+(logarithmic?" The slider is logarithmic; the box takes an exact value."
+                :" The box takes an exact value."));
+            line->addWidget(slider,1);line->addWidget(input);
+            controlForm_->addRow(name,row);controls_[id]={input,scale,slider};
+        }
     }
     else
     {
         controlForm_->addRow(name,input);controls_[id]={input,scale};
     }
     installControlHelp(this);
+}
+void CameraSettingsEditor::setExposureRange(ExposureRange range)
+{
+    exposureRange_=range;
+    updateExposureRange();
+}
+// Updates the exposure slider's preset stops and arrow step without mutating
+// the box's current value (so switching ranges never sends an unintended live edit).
+void CameraSettingsEditor::updateExposureRange()
+{
+    if (exposureRangeBox_)
+    {
+        const QSignalBlocker blocked(exposureRangeBox_);
+        const int idx=exposureRangeBox_->findData(static_cast<int>(exposureRange_));
+        if (idx>=0) exposureRangeBox_->setCurrentIndex(idx);
+    }
+    if (!exposureId_) return;
+    const auto found=controls_.find(*exposureId_);
+    if (found==controls_.end() || !found->second.slider) return;
+    QDoubleSpinBox* input=found->second.widget;
+    QSlider* slider=found->second.slider;
+    exposurePresets_=filteredExposurePresets(exposureRange_,input->minimum(),input->maximum());
+    input->setSingleStep(std::max(exposureNativeStep_,exposureRangeStepMs(exposureRange_)));
+    const QSignalBlocker blocked(slider);
+    slider->setRange(0,std::max(0,static_cast<int>(exposurePresets_.size())-1));
+    slider->setValue(nearestPresetIndex(exposurePresets_,input->value()));
 }
 // The slider sets the box; the box moves the slider. A change reaches the
 // camera through the box, after the same pause as a typed value.

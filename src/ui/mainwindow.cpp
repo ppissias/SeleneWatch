@@ -795,6 +795,12 @@ void MainWindow::applyTarget()
     // Feature-26: each target has its own aim; the earthshine outline is the Moon's.
     updateEarthshineArea();
     updateAutoTune();
+    // Feature-39: match each camera panel's Exposure preset range to the active watch.
+    const ExposureRange exposureRange = watch_ == Watch::MoonShadows ? ExposureRange::Planetary
+        : watch_ == Watch::SkySlow ? ExposureRange::Sky : ExposureRange::Fast;
+    for (const auto& family : cameraFamilies_)
+        if (CameraSettingsEditor* controls = family.panel->controls())
+            controls->setExposureRange(exposureRange);
 }
 
 void MainWindow::setupDisplayPanel()
@@ -2047,6 +2053,9 @@ void MainWindow::addCameraFamily(CameraFamilyPanel* panel,const QString& dockTit
     connect(panel,&CameraFamilyPanel::applyRequested,this,&MainWindow::onApplyCamera);
     connect(panel,&CameraFamilyPanel::liveControlsRequested,this,&MainWindow::onApplyLiveCamera);
     connect(panel,&CameraFamilyPanel::availabilityChanged,this,&MainWindow::updateControls);
+    if (CameraSettingsEditor* controls = panel->controls())
+        controls->setExposureRange(watch_ == Watch::MoonShadows ? ExposureRange::Planetary
+            : watch_ == Watch::SkySlow ? ExposureRange::Sky : ExposureRange::Fast);
     cameraFamilies_.push_back({panel,dock});
 }
 CameraFamilyPanel* MainWindow::selectedCamera() const

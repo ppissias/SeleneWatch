@@ -741,7 +741,7 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     auto* fps=window.findChild<QSpinBox*>("targetFpsSpinBox"); QVERIFY(!fps->isEnabled());
     QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl0"));
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->decimals(),3);
-    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->singleStep(),0.1);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->singleStep(),1.0);
     QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl4")); // Unsupported high-speed control is absent.
     auto* start=window.findChild<QPushButton*>("startButton");
     auto* stop=window.findChild<QPushButton*>("stopButton");
@@ -1664,22 +1664,26 @@ void UiTest::sitePresetsSaveLoadAndDelete()
     QCOMPARE(combo->count(), 2);
     QSettings().remove("site/presets");
 }
-// Feature-25: a ranged camera control has a slider beside its box, and the
-// exposure's is logarithmic. The slider sets the box, the box moves the
-// slider, and in Preview a drag reaches the camera once, after the pause.
+// Feature-25/39: a ranged camera control has a slider beside its box; Exposure
+// steps through fixed presets in three ranges (Planetary, Fast, Sky) while the
+// box keeps the camera's full range and fine-tuning arrows. In Preview a drag
+// reaches the camera once, after the pause, and Watching selects the range.
 void UiTest::cameraSlidersSetTheBoxAndReachTheCameraOnce()
 {
     CameraSettingsEditor editor(2, 2, nullptr);
     editor.addControl(1, "Gain", 0, 600, 1, 100, 1, "");
-    editor.addControl(2, "Exposure", 32, 2'000'000'000, 1, 10'000, 1000, " ms");
+    editor.addControl(2, "Exposure", 32, 2'000'000'000, 100, 10'000, 1000, " ms");
     editor.addControl(3, "High speed mode", 0, 1, 1, 0, 1, "");
     editor.addControl(4, "Temperature", -500, 500, 1, 200, 1, "", false);
     auto* gain = editor.findChild<QSlider*>("cameraControlSlider1");
     auto* exposure = editor.findChild<QSlider*>("cameraControlSlider2");
-    QVERIFY(gain && exposure);
+    auto* exposureBox = editor.findChild<QDoubleSpinBox*>("cameraControl2");
+    auto* rangeBox = editor.findChild<QComboBox*>("cameraExposureRange");
+    QVERIFY(gain && exposure && exposureBox && rangeBox);
     QVERIFY(!editor.findChild<QSlider*>("cameraControlSlider3"));
     QVERIFY(!editor.findChild<QSlider*>("cameraControlSlider4"));
     QVERIFY(!gain->toolTip().isEmpty());
+    QVERIFY(!rangeBox->toolTip().isEmpty());
 
     // Gain: one slider position per step.
     QCOMPARE(gain->maximum(), 600);
@@ -1689,22 +1693,97 @@ void UiTest::cameraSlidersSetTheBoxAndReachTheCameraOnce()
     QVERIFY(editor.setControlValue(1, 400));
     QCOMPARE(gain->value(), 400);
 
-    // Exposure: logarithmic, from the camera's minimum to its maximum; the
-    // middle position is the geometric middle, 0.25 s, not 1000 s.
+    // Exposure defaults to Fast (5-100 ms) with 1 ms arrow step, while the box
+    // keeps the full hardware range for auto-tune, follower, and typed values.
+    QCOMPARE(editor.exposureRange(), ExposureRange::Fast);
+    QCOMPARE(exposureBox->singleStep(), 1.0);
+    const auto fullRange = editor.controlRange(2);
+    QVERIFY(fullRange.has_value());
+    QCOMPARE(fullRange->first, 32.0);
+    QCOMPARE(fullRange->second, 2e9);
     exposure->setValue(0);
-    QCOMPARE(*editor.controlValue(2), 32.0);
+    QCOMPARE(*editor.controlValue(2), 5'000.0);
     exposure->setValue(exposure->maximum());
-    QCOMPARE(*editor.controlValue(2), 2e9);
-    exposure->setValue(exposure->maximum() / 2);
-    QVERIFY(*editor.controlValue(2) > 2e5 && *editor.controlValue(2) < 3e5);
+    QCOMPARE(*editor.controlValue(2), 100'000.0);
+    // Fine-tuning via spin-box arrows keeps the exact value without snapping back.
+    exposureBox->setValue(16.0);
+    exposureBox->stepUp();
+    QCOMPARE(*editor.controlValue(2), 17'000.0);
 
+    // Switching range updates preset stops and arrow step without changing the
+    // live exposure value or firing a live camera request.
     editor.setLiveEditing(true);
     QSignalSpy requested(&editor, &CameraSettingsEditor::liveControlsRequested);
+    rangeBox->setCurrentIndex(rangeBox->findData(static_cast<int>(ExposureRange::Planetary)));
+    QCOMPARE(editor.exposureRange(), ExposureRange::Planetary);
+    QCOMPARE(exposureBox->singleStep(), 0.1);
+    QCOMPARE(*editor.controlValue(2), 17'000.0);
+    QTest::qWait(250);
+    QCOMPARE(requested.count(), 0);
+    exposure->setValue(0);
+    QCOMPARE(*editor.controlValue(2), 50.0);
+    exposure->setValue(exposure->maximum());
+    QCOMPARE(*editor.controlValue(2), 20'000.0);
+
+    rangeBox->setCurrentIndex(rangeBox->findData(static_cast<int>(ExposureRange::Sky)));
+    QCOMPARE(editor.exposureRange(), ExposureRange::Sky);
+    QCOMPARE(exposureBox->singleStep(), 50.0);
+    // Current value (20 ms) stays untouched until the slider moves.
+    QCOMPARE(*editor.controlValue(2), 20'000.0);
+    exposure->setValue(exposure->maximum());
+    QCOMPARE(*editor.controlValue(2), 5'000'000.0);
+    exposure->setValue(0);
+    QCOMPARE(*editor.controlValue(2), 50'000.0);
+    // Typed values above 5 s still work in the box.
+    exposureBox->setValue(10'000.0);
+    QCOMPARE(*editor.controlValue(2), 10'000'000.0);
+
+    // Coalescing: a slider drag reaches the camera once, after the pause.
+    requested.clear();
+    QTest::qWait(250);
+    requested.clear();
     for (int value = 300; value <= 340; value += 4) gain->setValue(value);
     QTRY_COMPARE(requested.count(), 1);
     QTest::qWait(400);
     QCOMPARE(requested.count(), 1);
     QCOMPARE(*editor.controlValue(1), 340.0);
+
+    // Narrow hardware exposure limits filter the preset tables cleanly.
+    editor.clearControls();
+    editor.setExposureRange(ExposureRange::Planetary);
+    editor.addControl(2, "Exposure", 1'000, 2'000'000, 100, 5'000, 1000, " ms");
+    exposure = editor.findChild<QSlider*>("cameraControlSlider2");
+    QVERIFY(exposure);
+    exposure->setValue(0);
+    QCOMPARE(*editor.controlValue(2), 1'000.0);
+    editor.setExposureRange(ExposureRange::Sky);
+    exposure->setValue(exposure->maximum());
+    QCOMPARE(*editor.controlValue(2), 2'000'000.0);
+
+    // MainWindow automatically matches the camera Exposure range to Watching,
+    // both while stopped and during live Preview, without altering exposure.
+    QTemporaryDir dir;
+    auto api = std::make_shared<FakeZwoApi>();
+    MainWindow window(nullptr, dir.path(), api);
+    chooseSource(window, "zwo");
+    auto* camPanel = window.findChild<CameraPanel*>();
+    QVERIFY(camPanel && camPanel->controls());
+    QCOMPARE(camPanel->controls()->exposureRange(), ExposureRange::Fast);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(api->delivered >= 2, 3000);
+    const double initialExposure = *camPanel->controls()->controlValue(0);
+    chooseWatch(window, Watch::MoonShadows);
+    QTRY_VERIFY(window.findChild<QComboBox*>("targetChoice")->isEnabled());
+    QCOMPARE(camPanel->controls()->exposureRange(), ExposureRange::Planetary);
+    QCOMPARE(*camPanel->controls()->controlValue(0), initialExposure);
+    chooseWatch(window, Watch::SkySlow);
+    QTRY_VERIFY(window.findChild<QComboBox*>("targetChoice")->isEnabled());
+    QCOMPARE(camPanel->controls()->exposureRange(), ExposureRange::Sky);
+    QCOMPARE(*camPanel->controls()->controlValue(0), initialExposure);
+    chooseWatch(window, Watch::Sky);
+    QTRY_VERIFY(window.findChild<QComboBox*>("targetChoice")->isEnabled());
+    QCOMPARE(camPanel->controls()->exposureRange(), ExposureRange::Fast);
+    window.findChild<QPushButton*>("stopButton")->click();
 }
 
 // Feature-14: the site dialog keeps what is entered, the window saves it,
