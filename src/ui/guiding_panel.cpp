@@ -69,6 +69,49 @@ QString driftText(const LockStatus& lock, std::optional<double> arcsecPerPixel)
     return lock.state == LockState::Locked ? "Collecting measurements" : "No estimate while the lock is lost";
 }
 
+// Feature-41: live drift speed over recent unpulsed matches, decomposed along
+// RA and Dec once calibrated so the observer can tune polar alignment live.
+QString driftSpeedText(const LockStatus& lock, const std::optional<GuideCalibration>& calibration)
+{
+    if (lock.state == LockState::Off) return "—";
+    if (!lock.driftRateValid)
+        return lock.state == LockState::Locked ? "Measuring…" : "—";
+    const double speedPx = std::hypot(lock.driftRateDx, lock.driftRateDy);
+    if (calibration)
+    {
+        const ImageVector& w = calibration->west;
+        const ImageVector& n = calibration->north;
+        const double det = w.x * n.y - w.y * n.x;
+        if (std::abs(det) >= 1e-12)
+        {
+            const double raPx = (lock.driftRateDx * n.y - lock.driftRateDy * n.x) / det * w.length();
+            const double decPx = (w.x * lock.driftRateDy - w.y * lock.driftRateDx) / det * n.length();
+            QString text;
+            if (calibration->arcsecPerPixel)
+            {
+                const double scale = *calibration->arcsecPerPixel;
+                text = QString("%1 px/s (RA %2″/s, Dec %3″/s)")
+                           .arg(speedPx, 0, 'f', 2)
+                           .arg(signedPixels(raPx * scale), signedPixels(decPx * scale));
+            }
+            else
+            {
+                text = QString("%1 px/s (RA %2, Dec %3 px/s)")
+                           .arg(speedPx, 0, 'f', 2)
+                           .arg(signedPixels(raPx), signedPixels(decPx));
+            }
+            const double raSpeed = w.length() * 1000.0;
+            const double decSpeed = n.length() * 1000.0;
+            if ((raSpeed > 0 && std::abs(raPx) > 0.7 * raSpeed) || (decSpeed > 0 && std::abs(decPx) > 0.7 * decSpeed))
+                text += " — fast";
+            return text;
+        }
+    }
+    return QString("%1 px/s (dx %2, dy %3)")
+        .arg(speedPx, 0, 'f', 2)
+        .arg(signedPixels(lock.driftRateDx), signedPixels(lock.driftRateDy));
+}
+
 QString matchText(const std::optional<LockMatch>& match)
 {
     if (!match) return "—";
@@ -163,6 +206,8 @@ GuiderStatus widestStatus()
     lock.estimateValid = true;
     lock.estimateDx = lock.estimateDy = -99.99;
     lock.estimateSamples = 99;
+    lock.driftRateValid = true;
+    lock.driftRateDx = lock.driftRateDy = -9.99;
     // The longest reason FeatureLock gives for a match it does not use.
     lock.lastMatch = LockMatch{-99.99, -99.99, 0.999, false, "the best match is on the edge of the search window"};
 
@@ -205,6 +250,10 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     drift_ = readout(lockBox, "lockDriftLabel", {driftText(widest.lock, widest.guide.calibration->arcsecPerPixel)});
     drift_->setToolTip("Median of the valid offsets of the last few seconds of source time, "
         "relative to where the feature was locked. Positive is right and down in the frame.");
+    driftSpeed_ = readout(lockBox, "lockDriftSpeedLabel", {driftSpeedText(widest.lock, widest.guide.calibration)});
+    driftSpeed_->setToolTip("Live drift speed fitted over up to 20 s of unpulsed lock. "
+        "Once calibrated, splits drift along RA and Dec so you can tune polar alignment live "
+        "(note: the Moon itself moves up to ~0.25″/s in Dec). Resets after each guide pulse and feeds drift compensation.");
     match_ = readout(lockBox, "lockMatchLabel", {matchText(widest.lock.lastMatch)});
     region_ = readout(lockBox, nullptr, {regionText(widest.lock)});
     message_ = readout(lockBox, "lockMessageLabel", {ReadoutLabel::blankLines(2)});
@@ -216,6 +265,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* lockForm = new QFormLayout;
     lockForm->addRow("State", state_);
     lockForm->addRow("Drift", drift_);
+    lockForm->addRow("Drift speed", driftSpeed_);
     lockForm->addRow("Last match", match_);
     lockForm->addRow("Region", region_);
     // Feature-28: a drag on the preview locks only after this is pressed, so
@@ -407,6 +457,7 @@ void GuidingPanel::setStatus(const GuiderStatus& status)
     state[0] = state[0].toUpper();
     state_->setText("<b>" + state + "</b>");
     drift_->setText(driftText(lock, arcsecPerPixel_));
+    driftSpeed_->setText(driftSpeedText(lock, guide.calibration));
     match_->setText(matchText(lock.lastMatch));
     region_->setText(regionText(lock));
     message_->setText(QString::fromStdString(lock.message));

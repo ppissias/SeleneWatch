@@ -59,6 +59,9 @@ struct GuideObservation
     bool estimateValid{false};
     int estimateSamples{0};
     double estimateDx{0}, estimateDy{0};
+    // Live drift speed (image px/s), fitted over recent unpulsed matches.
+    bool driftRateValid{false};
+    double driftRateDx{0}, driftRateDy{0};
     MountState mount;
     // Seconds between frames; 0 when not yet known.
     double frameInterval{0};

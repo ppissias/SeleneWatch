@@ -303,6 +303,9 @@ GuideObservation Guider::observation(const MountState& state) const
     o.estimateSamples = lock.estimateSamples;
     o.estimateDx = lock.estimateDx;
     o.estimateDy = lock.estimateDy;
+    o.driftRateValid = lock.driftRateValid;
+    o.driftRateDx = lock.driftRateDx;
+    o.driftRateDy = lock.driftRateDy;
     o.mount = state;
     o.frameInterval = frameInterval_;
     return o;

@@ -120,6 +120,7 @@ bool LockTracker::step(const Frame& frame)
             status_.foundDy = match.dy;
             lastValid_ = now;
             offsets_.push_back({now, match.dx, match.dy});
+            driftOffsets_.push_back({now, match.dx, match.dy});
         }
         else if (seconds(now - lastValid_) > kLockLostSeconds)
         {
@@ -141,6 +142,7 @@ bool LockTracker::step(const Frame& frame)
             status_.message.clear();
             lastValid_ = now;
             offsets_.push_back({now, match.dx, match.dy});
+            driftOffsets_.push_back({now, match.dx, match.dy});
             candidate_.reset();
         }
         else
@@ -174,20 +176,62 @@ void LockTracker::updateEstimate(std::chrono::system_clock::time_point now)
     while (!offsets_.empty() && seconds(now - offsets_.front().time) > kEstimateSeconds) offsets_.pop_front();
     status_.estimateSamples = static_cast<int>(offsets_.size());
     status_.estimateValid = status_.state == LockState::Locked && status_.estimateSamples >= kMinEstimateSamples;
-    if (!status_.estimateValid) return;
-    std::vector<double> dx, dy;
-    for (const Offset& offset : offsets_)
+    if (status_.estimateValid)
     {
-        dx.push_back(offset.dx);
-        dy.push_back(offset.dy);
+        std::vector<double> dx, dy;
+        for (const Offset& offset : offsets_)
+        {
+            dx.push_back(offset.dx);
+            dy.push_back(offset.dy);
+        }
+        status_.estimateDx = median(std::move(dx));
+        status_.estimateDy = median(std::move(dy));
     }
-    status_.estimateDx = median(std::move(dx));
-    status_.estimateDy = median(std::move(dy));
+
+    while (!driftOffsets_.empty() && seconds(now - driftOffsets_.front().time) > kDriftWindowSeconds)
+        driftOffsets_.pop_front();
+    status_.driftRateValid = false;
+    status_.driftRateDx = 0;
+    status_.driftRateDy = 0;
+    status_.driftRateSpanSeconds = 0;
+    if (status_.state != LockState::Locked || static_cast<int>(driftOffsets_.size()) < kMinDriftSamples) return;
+    const auto t0 = driftOffsets_.front().time;
+    const double span = seconds(driftOffsets_.back().time - t0);
+    if (span < kMinDriftSpanSeconds) return;
+    const double n = static_cast<double>(driftOffsets_.size());
+    double meanT = 0, meanX = 0, meanY = 0;
+    for (const Offset& o : driftOffsets_)
+    {
+        meanT += seconds(o.time - t0);
+        meanX += o.dx;
+        meanY += o.dy;
+    }
+    meanT /= n;
+    meanX /= n;
+    meanY /= n;
+    double varT = 0, covTX = 0, covTY = 0;
+    for (const Offset& o : driftOffsets_)
+    {
+        const double dt = seconds(o.time - t0) - meanT;
+        varT += dt * dt;
+        covTX += dt * (o.dx - meanX);
+        covTY += dt * (o.dy - meanY);
+    }
+    if (varT <= 1e-9) return;
+    status_.driftRateValid = true;
+    status_.driftRateDx = covTX / varT;
+    status_.driftRateDy = covTY / varT;
+    status_.driftRateSpanSeconds = span;
 }
 
 void LockTracker::clearEstimate()
 {
     offsets_.clear();
+    driftOffsets_.clear();
     status_.estimateValid = false;
     status_.estimateSamples = 0;
+    status_.driftRateValid = false;
+    status_.driftRateDx = 0;
+    status_.driftRateDy = 0;
+    status_.driftRateSpanSeconds = 0;
 }

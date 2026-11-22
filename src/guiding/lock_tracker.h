@@ -40,6 +40,12 @@ struct LockStatus
     bool estimateValid{false};
     double estimateDx{0}, estimateDy{0};
     int estimateSamples{0};
+    // Feature-41: live drift speed (frame px/s), fitted over up to
+    // kDriftWindowSeconds of unpulsed valid matches. Useful both for polar
+    // alignment feedback while locked and for drift-compensated guide pulses.
+    bool driftRateValid{false};
+    double driftRateDx{0}, driftRateDy{0};
+    double driftRateSpanSeconds{0};
 
     // The frame of the latest step.
     uint64_t frameIndex{0};
@@ -60,6 +66,9 @@ public:
     static constexpr double kMeasureIntervalSeconds = 0.2;
     static constexpr double kEstimateSeconds = 3.0;
     static constexpr int kMinEstimateSamples = 3;
+    static constexpr double kDriftWindowSeconds = 20.0;
+    static constexpr double kMinDriftSpanSeconds = 4.0;
+    static constexpr int kMinDriftSamples = 5;
     static constexpr double kLockLostSeconds = 2.0;
     // Feature-32: how long the wide search lasts, the guiding's grace period
     // for a passing cloud. The observer sets it in the Guiding dock.
@@ -107,6 +116,7 @@ private:
     std::optional<FeatureLock> lock_;
     LockStatus status_;
     std::deque<Offset> offsets_;
+    std::deque<Offset> driftOffsets_;
     std::optional<std::chrono::system_clock::time_point> lastStep_;
     std::chrono::system_clock::time_point lastValid_{};
     std::chrono::system_clock::time_point searchingSince_{};

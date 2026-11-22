@@ -71,6 +71,7 @@ private:
 
     QLabel* state_;
     QLabel* drift_;
+    QLabel* driftSpeed_;
     QLabel* match_;
     QLabel* region_;
     QLabel* message_;

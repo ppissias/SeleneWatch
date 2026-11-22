@@ -236,7 +236,19 @@ GuideDecision GuideController::decide(const GuideObservation& o)
     }
     raError_ = axes->raPx;
     decError_ = axes->decPx;
-    updateDriftEstimate(o.now, raError_, decError_);
+    if (o.driftRateValid)
+    {
+        if (const auto liveDrift = decompose(o.driftRateDx, o.driftRateDy))
+        {
+            driftRaPxPerSec_ = liveDrift->raPx;
+            driftDecPxPerSec_ = liveDrift->decPx;
+            driftEstimateSeeded_ = true;
+        }
+    }
+    else
+    {
+        updateDriftEstimate(o.now, raError_, decError_);
+    }
 
     const double tolerance = settings_.tolerancePixels;
     queue_.clear();

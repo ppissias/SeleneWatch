@@ -45,6 +45,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-38 — Switch observing watches during Preview](#feature-38--switch-observing-watches-during-preview)
 - [Feature-39 — Exposure range presets for the camera slider](#feature-39--exposure-range-presets-for-the-camera-slider)
 - [Feature-40 — Drift-aware guiding for imperfect polar alignment](#feature-40--drift-aware-guiding-for-imperfect-polar-alignment)
+- [Feature-41 — Live drift speed readout and drift-rate guiding feed-forward](#feature-41--live-drift-speed-readout-and-drift-rate-guiding-feed-forward)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3310,3 +3311,18 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 4. **Tunable guiding controls & stronger safe defaults:** Default `gain = 0.85`, `maxPulseMs = 3000 ms`, `maxPulseMsPerMinute = 30 s`, `maxFruitlessCorrections = 5`. Added **Aggressiveness** (`30–100 %`) and **Max pulse** (`500–5000 ms`) to `GuidingPanel`, applied live through `Guider::setCorrectionTuning` and remembered in `QSettings`. All mount safety rules (pulse-only, pier-side, tracking/slewing/parked, reversed/dead axis stop, duty-cycle cap) remain enforced.
 
 **Status & verification (22 November 2026).** Implemented in `GuideController`, `Guider`, `GuidingPanel`, and `MainWindow`, documented in `MANUAL.md`. Debug build, `dependency_rules`, `guiding` (including `guidingHandlesStrongPolarDriftAndDecBacklash`, `guidingHoldsTheFieldForAnHour`, `mountThatMovesTheWrongWayStopsGuiding`, and `pulseTimeCapStopsGuiding`), and `ui` (`everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, `numberBoxesFitTheirWidestValue`, and `siteAndRecordingControls`) passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`). Field validation under real polar-alignment drift and Dec backlash added to `features.md`.
+
+## Feature-41 — Live drift speed readout and drift-rate guiding feed-forward
+
+*Requested by the observer at the telescope and built on 22 November 2026.*
+
+**Idea.** Measuring the live drift speed while a lunar feature is locked serves two purposes at once:
+1. Letting the observer see drift speed (and RA/Dec drift once calibrated) in real time while adjusting polar alignment—even with guiding off.
+2. Feeding that measured drift speed directly into `GuideController` so guide pulses immediately reflect the current drift rate rather than relying only on calibration-time drift.
+
+**What was built.**
+1. **Least-squares drift speed in `LockTracker`:** Keeps up to `20 s` of recent unpulsed valid lock matches (`driftOffsets_`, cleared on `restartEstimate()`, discontinuity, or unlock) and fits `(driftRateDx, driftRateDy)` in `px/s` once at least `5` samples span `4 s`.
+2. **Live `Drift speed` row in `GuidingPanel`:** Shows `px/s` (`dx, dy`) while locked; once calibrated, splits the drift speed onto the mount's RA and Dec axes (in `″/s` when `arcsecPerPixel` is known, or `px/s` otherwise) and flags `"— fast"` when drift exceeds `70 %` of the mount's guide speed.
+3. **Direct feed-forward into `GuideController`:** `GuideObservation` carries `driftRateValid`, `driftRateDx`, `driftRateDy` from `LockTracker`, updating `GuideController`'s RA/Dec drift rates immediately on every unpulsed decision (falling back to calibration drift + Watching EMA between rapid pulses).
+
+**Status & verification (22 November 2026).** Implemented in `LockTracker`, `GuideObservation`, `GuideController`, `Guider`, and `GuidingPanel`, documented in `MANUAL.md`. Debug build (all targets), `dependency_rules`, `guiding` (including `lockTrackerMeasuresDriftSpeedAndFeedsGuideController`), and UI checks (`everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, `numberBoxesFitTheirWidestValue`) passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).

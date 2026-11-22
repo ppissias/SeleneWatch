@@ -635,6 +635,63 @@ private slots:
         }
     }
 
+    // Feature-41: LockTracker fits live drift speed over recent unpulsed matches
+    // (for polar-alignment feedback) and GuideController uses it on the first pulse.
+    void lockTrackerMeasuresDriftSpeedAndFeedsGuideController()
+    {
+        const Canvas canvas;
+        LockTracker tracker;
+        QVERIFY2(tracker.lock(*canvas.frame(0, 0, 0.0), {100, 70, 24, 24}), tracker.status().message.c_str());
+        // Drift at +1.5 px/s in X and -0.5 px/s in Y (whole-pixel canvas steps).
+        for (int step = 1; step <= 40; ++step)
+        {
+            const double t = step * 0.2;
+            const int sx = static_cast<int>(std::lround(1.5 * t));
+            const int sy = static_cast<int>(std::lround(-0.5 * t));
+            QVERIFY(tracker.step(*canvas.frame(sx, sy, t)));
+            if (t < LockTracker::kMinDriftSpanSeconds) QVERIFY(!tracker.status().driftRateValid);
+        }
+        QVERIFY(tracker.status().driftRateValid);
+        QVERIFY(tracker.status().driftRateSpanSeconds >= LockTracker::kMinDriftSpanSeconds);
+        QVERIFY2(std::abs(tracker.status().driftRateDx - 1.5) < 0.15,
+            qPrintable(QString("driftRateDx=%1").arg(tracker.status().driftRateDx)));
+        QVERIFY2(std::abs(tracker.status().driftRateDy + 0.5) < 0.15,
+            qPrintable(QString("driftRateDy=%1").arg(tracker.status().driftRateDy)));
+        tracker.restartEstimate();
+        QVERIFY(!tracker.status().driftRateValid);
+
+        // GuideController uses live drift speed immediately on its first pulse
+        // even when calibration.drift is zero.
+        GuideCalibration cal;
+        cal.west = {0.01, 0.0};  // 10 px/s
+        cal.north = {0.0, 0.01}; // 10 px/s
+        cal.pierSide = PierSide::West;
+        GuideController::Settings settings;
+        settings.tolerancePixels = 10;
+        GuideController withoutDrift(cal, settings);
+        GuideController withDrift(cal, settings);
+        GuideObservation o;
+        o.now = SimulatedPointing::Clock::time_point{} + std::chrono::hours{1};
+        o.locked = true;
+        o.estimateValid = true;
+        o.estimateSamples = 5;
+        o.estimateDx = 12.0;
+        o.mount.connected = true;
+        o.mount.tracking = true;
+        o.mount.canPulseGuide = true;
+        o.mount.pierSide = PierSide::West;
+        o.frameInterval = 1.0 / 30.0;
+        const auto d0 = withoutDrift.step(o);
+        o.driftRateValid = true;
+        o.driftRateDx = 3.0; // +3 px/s opposing East correction
+        const auto d1 = withDrift.step(o);
+        QVERIFY(d0.pulse && d1.pulse);
+        QCOMPARE(d0.pulse->direction, GuideDirection::East);
+        QCOMPARE(d1.pulse->direction, GuideDirection::East);
+        QVERIFY2(d1.pulse->milliseconds > d0.pulse->milliseconds + 500,
+            qPrintable(QString("without=%1 ms with=%2 ms").arg(d0.pulse->milliseconds).arg(d1.pulse->milliseconds)));
+    }
+
     // Done-when 6: each safety rule stops guiding or withholds pulses.
     void safetyRulesStopOrWithholdPulses_data()
     {

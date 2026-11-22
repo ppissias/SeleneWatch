@@ -244,7 +244,7 @@ Even with lunar tracking enabled, the Moon moves continuously in declination (~0
 
 | Section | Control / Readout | Purpose |
 | --- | --- | --- |
-| **Feature lock** | **Lock at selection** / **Unlock** / drag box | Lock onto a 2D crater feature and inspect **State**, **Drift** (`dx`, `dy`), **Last match** score, and template quality |
+| **Feature lock** | **Lock at selection** / **Unlock** / drag box | Lock onto a 2D crater feature and inspect **State**, **Drift** (`dx`, `dy`), **Drift speed** (`px/s`, and RA/Dec `″/s` once calibrated for live polar-alignment tuning), **Last match** score, and template quality |
 | **Mount** | **ASCOM telescope** / **Simulated mount**, **Choose…**, **Connect** / **Disconnect** | Connects mount late-bound via ASCOM COM and displays tracking, slewing, park, pier side, and guide rates |
 | **Guiding** | **Calibrate**, **Start guiding**, **Tolerance** (`% of field`) | Measures mount axes once per pier side and holds feature drift inside tolerance (`3 %` default) via bounded guide pulses |
 | | **Aggressiveness** (`%`), **Max pulse** (`ms`) | Share of drift removed per correction (`85 %` default, `30–100 %`) and longest single pulse (`3000 ms` default, `500–5000 ms`), applied live and remembered |
