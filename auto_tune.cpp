@@ -64,6 +64,40 @@ std::string number(double value)
     return std::format("{:g}", std::round(value * 100) / 100);
 }
 
+// What each workflow measures, as the panel names it.
+const char* measuredSubject(TuneWorkflow workflow)
+{
+    return workflow == TuneWorkflow::MoonFlashes ? "The earthshine"
+        : workflow == TuneWorkflow::MoonTransits ? "The brightest sunlit areas" : "The sky";
+}
+
+// Feature-34: a saturated measurement hides how bright the area really is;
+// it says only "too bright".
+bool clipped(const BrightnessSample& sample, const TuneAim& aim)
+{
+    return aim.brightest ? sample.atMax > 1e-4 : sample.level >= 0.98;
+}
+
+// Feature-34: the camera's black level, as a share of full scale, from the
+// newest two unclipped measurements at the same gain and different exposures
+// whose levels differ by more than quantisation (Feature-26, design point 8).
+std::optional<double> blackLevel(const std::vector<TuneMeasurement>& history, const TuneAim& aim)
+{
+    for (size_t i = history.size(); i-- > 0;)
+        for (size_t j = i; j-- > 0;)
+        {
+            const TuneMeasurement& a = history[i];
+            const TuneMeasurement& b = history[j];
+            if (std::abs(a.gain - b.gain) > 1e-9 || clipped(a.brightness, aim) || clipped(b.brightness, aim)) continue;
+            if (std::abs(a.exposureUs - b.exposureUs) <= 0.01 * a.exposureUs) continue;
+            if (std::abs(a.brightness.level - b.brightness.level) < 0.003) continue;
+            const double slope = (a.brightness.level - b.brightness.level) / (a.exposureUs - b.exposureUs);
+            const double pedestal = a.brightness.level - slope * a.exposureUs;
+            if (slope > 0 && pedestal >= 0 && pedestal < std::min(a.brightness.level, b.brightness.level)) return pedestal;
+        }
+    return std::nullopt;
+}
+
 } // namespace
 
 TuneWorkflow tuneWorkflow(Target target, const DetectionSettings& settings)
@@ -268,8 +302,7 @@ CameraSuggestion suggestCamera(const CameraTuneInput& in)
 {
     CameraSuggestion out;
     const TuneAim aim = tuneAim(in.workflow, in.skyMaxExposureUs);
-    const char* what = in.workflow == TuneWorkflow::MoonFlashes ? "The earthshine"
-        : in.workflow == TuneWorkflow::MoonTransits ? "The brightest sunlit areas" : "The sky";
+    const char* what = measuredSubject(in.workflow);
     if (!in.measured)
     {
         out.reachable = false;
@@ -429,6 +462,170 @@ CameraSuggestion suggestCamera(const CameraTuneInput& in)
         }
     }
     return out;
+}
+
+CameraStep nextCameraStep(TuneWorkflow workflow, const TuneCamera& camera,
+    const std::vector<TuneMeasurement>& history, double skyMaxExposureUs)
+{
+    CameraStep step;
+    step.outcome = CameraStep::Outcome::OutOfReach;
+    if (!camera.exposure || history.empty())
+    {
+        step.text = "Not a camera, or nothing measured.";
+        return step;
+    }
+    const TuneAim aim = tuneAim(workflow, skyMaxExposureUs);
+    const TuneControl exposure = *camera.exposure;
+    const bool hasGain = camera.gain && camera.gain->maximum > camera.gain->minimum;
+    const double gainNow = camera.gain ? camera.gain->value : 0;
+    step.exposureUs = exposure.value;
+    step.gain = gainNow;
+    const double longest = std::min(exposure.maximum, aim.maxExposureUs > 0 ? aim.maxExposureUs : exposure.maximum);
+    const double lowest = std::min(std::max(exposure.minimum, aim.minExposureUs), longest);
+
+    const BrightnessSample& now = history.back().brightness;
+    const bool saturated = clipped(now, aim);
+    const std::string measured = std::format("{} is at {}{}; the aim is {:.0f}-{:.0f} %", measuredSubject(workflow),
+        percent(now.level), saturated ? ", saturated" : "", 100 * aim.low, 100 * aim.high);
+
+    // An exposure outside the workflow's range is brought into it first.
+    if (exposure.value < lowest || exposure.value > longest)
+    {
+        step.outcome = CameraStep::Outcome::Move;
+        step.exposureUs = std::clamp(exposure.value, lowest, longest);
+        step.text = std::format("{}. Exposure {} → {}, into this watch's range.", measured, milliseconds(exposure.value),
+            milliseconds(step.exposureUs));
+        return step;
+    }
+    if (!saturated && now.level >= aim.low && now.level <= aim.high)
+    {
+        step.outcome = CameraStep::Outcome::InAim;
+        step.text = measured + ": in the aim.";
+        return step;
+    }
+
+    // Which control moves: the workflow's order (as suggestCamera).
+    const bool darker = !saturated && now.level < aim.low;
+    const bool exposureCanMove = darker ? exposure.value < longest : exposure.value > lowest;
+    const bool gainCanMove = hasGain && (darker ? gainNow < camera.gain->maximum : gainNow > camera.gain->minimum);
+    const bool gainFirst = workflow == TuneWorkflow::MoonFlashes || !darker;
+    const bool moveGain = gainFirst ? gainCanMove : !exposureCanMove;
+    if (moveGain ? !gainCanMove : !exposureCanMove)
+    {
+        step.text = std::format("{}. The camera cannot reach it: the exposure is at its limit for this watch ({}) and "
+            "the gain {}.", measured, milliseconds(exposure.value),
+            hasGain ? (darker ? "at its highest" : "at its lowest") : "cannot change");
+        return step;
+    }
+
+    // The measurements taken while only this control moved, newest first.
+    // Exposure is placed on a logarithmic scale, gain on its own.
+    struct Point
+    {
+        double x{0}, level{0};
+        bool clipped{false};
+    };
+    // Steps aim at the signal above the black level once it is known; a
+    // black level close to the aim is not trusted that far.
+    const std::optional<double> measuredBlack = blackLevel(history, aim);
+    const double black = measuredBlack && *measuredBlack < 0.8 * aim.aim ? *measuredBlack : 0;
+    const auto ln = [black](double level) { return std::log(std::max(level - black, 1e-6)); };
+    const auto logUs = [](double us) { return std::log(std::max(us, 1.0)); };
+    std::vector<Point> leg;
+    for (auto it = history.rbegin(); it != history.rend(); ++it)
+    {
+        const bool otherHeld = moveGain ? std::abs(it->exposureUs - exposure.value) <= 1e-6 * exposure.value
+                                        : std::abs(it->gain - gainNow) < 1e-9;
+        if (!otherHeld) break;
+        leg.push_back({moveGain ? it->gain : logUs(it->exposureUs), it->brightness.level, clipped(it->brightness, aim)});
+    }
+    const double xNow = moveGain ? gainNow : logUs(exposure.value);
+    const double xMin = moveGain ? camera.gain->minimum : logUs(lowest);
+    const double xMax = moveGain ? camera.gain->maximum : logUs(longest);
+    const double target = ln(aim.aim);
+
+    // The bracket: the aim lies above every darker measurement and below
+    // every brighter one. A bracket that contradicts itself (the scene
+    // changed) keeps only the latest measurement.
+    double below = xMin, above = xMax;
+    bool belowMeasured = false, aboveMeasured = false;
+    for (const Point& p : leg)
+    {
+        if (!p.clipped && p.level < aim.aim)
+        {
+            if (p.x >= below) { below = p.x; belowMeasured = true; }
+        }
+        else if (p.x <= above) { above = p.x; aboveMeasured = true; }
+    }
+    if (below >= above)
+    {
+        below = darker ? xNow : xMin;
+        above = darker ? xMax : xNow;
+        belowMeasured = darker;
+        aboveMeasured = !darker;
+    }
+
+    // The guess: from the measured response of the last two unclipped
+    // measurements, or twice the last move when the brightness did not
+    // answer it (the signal still hidden under the black level); else, in
+    // proportion for the exposure and a stop per tenth of the range for gain;
+    // after saturation, a quarter down.
+    const double gainRange = hasGain ? camera.gain->maximum - camera.gain->minimum : 0;
+    std::optional<double> guess;
+    const Point* last = nullptr;
+    const Point* before = nullptr;
+    for (const Point& p : leg)
+    {
+        if (p.clipped) continue;
+        if (!last) last = &p;
+        else if (std::abs(p.x - last->x) > 1e-9) { before = &p; break; }
+    }
+    if (last && before)
+    {
+        const double slope = (ln(last->level) - ln(before->level)) / (last->x - before->x);
+        const double moved = last->x - before->x;
+        if (slope > 0) guess = last->x + (target - ln(last->level)) / slope;
+        else if (last == &leg.front() && (moved > 0) == darker) guess = last->x + 2 * moved;
+    }
+    if (!guess && !saturated) guess = xNow + (target - ln(now.level)) / (moveGain ? std::log(2.0) / (gainRange / 10) : 1.0);
+    if (!guess) guess = moveGain ? xNow - gainRange / 4 : xNow - std::log(4.0);
+
+    // Never past a measurement: a guess beyond one halves the bracket; beyond
+    // the control's limit, it stops there.
+    double next = *guess;
+    if (next <= below) next = belowMeasured ? (below + above) / 2 : below;
+    else if (next >= above) next = aboveMeasured ? (below + above) / 2 : above;
+    double value = moveGain ? next : std::exp(next);
+    // A limit is set exactly, not as its logarithm's round trip.
+    if (next >= xMax) value = moveGain ? camera.gain->maximum : longest;
+    if (next <= xMin) value = moveGain ? camera.gain->minimum : lowest;
+    if (moveGain && gainRange >= 20) value = std::round(value);
+    value = moveGain ? std::clamp(value, camera.gain->minimum, camera.gain->maximum) : std::clamp(value, lowest, longest);
+
+    // A value already measured in this leg: the aim lies between two settings
+    // the camera can take.
+    const double tolerance = moveGain ? 1e-9 : 0.005;
+    const bool measuredBefore = std::any_of(leg.begin(), leg.end(), [&](const Point& p) {
+        return moveGain ? std::abs(p.x - value) <= tolerance : std::abs(p.x - logUs(value)) <= tolerance;
+    });
+    if (measuredBefore)
+    {
+        step.text = std::format("{}. It lies between two {} settings already measured; this is the closest the loop "
+            "can get.", measured, moveGain ? "gain" : "exposure");
+        return step;
+    }
+    step.outcome = CameraStep::Outcome::Move;
+    if (moveGain)
+    {
+        step.gain = value;
+        step.text = std::format("{}. Gain {} → {}.", measured, number(gainNow), number(value));
+    }
+    else
+    {
+        step.exposureUs = value;
+        step.text = std::format("{}. Exposure {} → {}.", measured, milliseconds(exposure.value), milliseconds(value));
+    }
+    return step;
 }
 
 std::vector<double> kValuesToTest(double centre, int count)

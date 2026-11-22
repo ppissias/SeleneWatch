@@ -133,6 +133,29 @@ struct CameraSuggestion
 };
 [[nodiscard]] CameraSuggestion suggestCamera(const CameraTuneInput& input);
 
+// Feature-34: one round of the camera loop. Auto-tune sets exposure and gain
+// live, measures, and moves again until the brightness is in the aim.
+//
+// history holds the loop's measurements, the last one taken at the camera's
+// current settings. One control moves at a time, in the workflow's order
+// (as suggestCamera). Its next value comes from the measurements taken while
+// only it moved: exposure on a logarithmic scale, gain from the measured
+// response of the last two, and never past a measurement on either side of
+// the aim. Saturated measurements only bound the move.
+struct CameraStep
+{
+    enum class Outcome { Move, InAim, OutOfReach };
+    Outcome outcome{Outcome::Move};
+    // The settings to apply next; for InAim and OutOfReach, the current ones.
+    double exposureUs{0}, gain{0};
+    // What was measured and what the round does, for the panel and the log.
+    std::string text;
+};
+[[nodiscard]] CameraStep nextCameraStep(TuneWorkflow workflow, const TuneCamera& camera,
+    const std::vector<TuneMeasurement>& history, double skyMaxExposureUs = 250'000);
+// Rounds after which the loop gives up: the brightness may be changing.
+constexpr int kMaxCameraRounds = 12;
+
 // What one K would have done during a watch.
 struct TuneEvent
 {

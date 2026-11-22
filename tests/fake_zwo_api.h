@@ -4,6 +4,8 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -32,6 +34,10 @@ public:
     std::atomic<bool> connected{true}, timeouts{false};
     std::atomic<int> disconnectAt{-1}, telemetryFailureAt{-1};
     std::vector<std::string> calls;
+    // Feature-34: when set, the frames' level in 8-bit codes follows the
+    // exposure (microseconds) and gain the camera holds, clipped at full
+    // scale; otherwise they are fixed.
+    std::function<double(double exposureUs, double gain)> light;
     // Read after stop/join: verifies that live writes and reads share a worker.
     std::thread::id liveControlThread, readThread;
     std::string version() const override { return "TEST SDK 1"; }
@@ -62,10 +68,16 @@ public:
         if (!connected || (disconnectAt>=0 && delivered>=disconnectAt)) throw std::runtime_error("TEST camera disconnected");
         if (timeouts) return false;
         if (bytes.size()!=frameBytes(settings.width,settings.height,settings.format)) throw std::runtime_error("Wrong SDK destination buffer size");
+        const double level=light?light(controlValue(ZwoControl::Exposure),controlValue(ZwoControl::Gain)):-1;
         for (size_t i=0;i<static_cast<size_t>(settings.width)*settings.height;++i)
         {
-            if (settings.format==PixelFormat::Mono8) bytes[i]=static_cast<uint8_t>(100+i%13);
-            else { const int word=static_cast<int>((400+i%13)<<4); bytes[2*i]=static_cast<uint8_t>(word&255); bytes[2*i+1]=static_cast<uint8_t>(word>>8); }
+            if (settings.format==PixelFormat::Mono8)
+                bytes[i]=static_cast<uint8_t>(level<0?100+i%13:std::clamp(std::lround(level)+static_cast<long>(i%13),0L,255L));
+            else
+            {
+                const long sample=level<0?static_cast<long>(400+i%13):std::clamp(std::lround(level*16)+static_cast<long>(i%13),0L,4095L);
+                const int word=static_cast<int>(sample<<4); bytes[2*i]=static_cast<uint8_t>(word&255); bytes[2*i+1]=static_cast<uint8_t>(word>>8);
+            }
         }
         ++delivered; return true;
     }
@@ -76,6 +88,11 @@ public:
         return dropCounts[std::min(static_cast<size_t>(delivered.load()-1),dropCounts.size()-1)];
     }
 private:
+    double controlValue(ZwoControl kind) const
+    {
+        for (const auto& c:caps) if (c.kind==kind) return static_cast<double>(c.value);
+        return 0;
+    }
     void call(const std::string& operation)
     {
         std::lock_guard lock(mutex_); calls.push_back(operation);

@@ -22,7 +22,9 @@ class QVBoxLayout;
 // Feature-26: the auto-tune panel, in its own window (Feature-28), opened by
 // the Auto-tune button at the top of the Detection dock.
 //
-// Two steps, camera first and then K, each ending in suggestions the
+// Step 1 tunes the camera: once asked, the window sets exposure and gain live
+// until the brightness is in the aim (Feature-34), and the panel lists each
+// round. The later steps, K and the minimum patch, end in suggestions the
 // observer ticks and applies. The panel holds the latest suggestions and the
 // K results it shows, and which events the observer excluded; it measures
 // nothing itself. The window runs the measurements, applies what is asked,
@@ -43,6 +45,7 @@ public:
         bool testingTools{false};
         bool busy{false};         // A measurement is waiting or running.
         bool haveBox{false};      // Moon flashes: an earthshine box is drawn.
+        bool canRestore{false};   // The camera loop changed settings that can be set back.
         QString twilight;         // Advice about the Sun's altitude; empty when none.
     };
     void setSituation(const Situation& situation);
@@ -58,7 +61,10 @@ public:
     // The current measurement's progress, or the last result's state.
     void setProgress(const QString& text, double progress, bool running);
 
-    // Step 1: the camera.
+    // Step 1: the camera. The loop's rounds, one line each; then the verdict,
+    // warnings, and the rows left for the observer (Offset, the follower).
+    void clearCameraRounds();
+    void addCameraRound(const QString& text);
     void setCameraSuggestion(const CameraSuggestion& suggestion);
     void clearCamera(const QString& why);
     [[nodiscard]] std::vector<TuneRow> tickedCameraRows() const;
@@ -93,7 +99,8 @@ public:
 signals:
     void drawBoxToggled(bool on);
     void boxOnlyToggled(bool on);
-    void measureCameraRequested();
+    void tuneCameraRequested();
+    void restoreCameraRequested();
     void applyCameraRequested();
     void watchRequested(bool higher);
     void tryKRequested(double k);
@@ -115,7 +122,9 @@ private:
     QToolButton* drawBox_;
     QCheckBox* boxOnly_;
     QLabel* area_;
-    QPushButton* measureCamera_;
+    QPushButton* tuneCamera_;
+    QPushButton* restoreCamera_;
+    QLabel* cameraRounds_;
     QWidget* skyMaxRow_;
     QDoubleSpinBox* skyMax_;
     QLabel* cameraVerdict_;

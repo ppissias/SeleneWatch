@@ -91,11 +91,16 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
     // Step 1: the camera.
     auto* cameraBox = new QGroupBox("1. Camera", this);
     auto* cameraColumn = new QVBoxLayout(cameraBox);
-    measureCamera_ = new QPushButton("Measure camera", cameraBox);
-    measureCamera_->setObjectName("autoTuneMeasureCamera");
-    measureCamera_->setToolTip("Measures the brightness of the measured area for two seconds and suggests exposure and "
-        "gain for the aim above. Nothing changes until you press Apply.");
-    cameraColumn->addWidget(measureCamera_);
+    // Feature-34: one press tunes the camera live, round by round.
+    auto* tuneRow = new QHBoxLayout;
+    tuneCamera_ = new QPushButton("Tune camera", cameraBox);
+    tuneCamera_->setObjectName("autoTuneCamera");
+    restoreCamera_ = new QPushButton("Restore previous settings", cameraBox);
+    restoreCamera_->setObjectName("autoTuneRestoreCamera");
+    restoreCamera_->setToolTip("Sets the exposure and gain back to what they were before Tune camera changed them.");
+    tuneRow->addWidget(tuneCamera_, 1);
+    tuneRow->addWidget(restoreCamera_);
+    cameraColumn->addLayout(tuneRow);
     skyMaxRow_ = new QWidget(cameraBox);
     auto* skyMaxForm = new QFormLayout(skyMaxRow_);
     skyMaxForm->setContentsMargins(0, 0, 0, 0);
@@ -109,6 +114,9 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
         "exposures reach fainter meteors but blur fast ones; 250 ms is a usual limit.");
     skyMaxForm->addRow("Longest exposure for meteors", skyMax_);
     cameraColumn->addWidget(skyMaxRow_);
+    cameraRounds_ = wrapped(cameraBox, "autoTuneCameraRounds");
+    cameraRounds_->hide();
+    cameraColumn->addWidget(cameraRounds_);
     cameraVerdict_ = wrapped(cameraBox, "autoTuneCameraVerdict");
     cameraColumn->addWidget(cameraVerdict_);
     cameraRowsLayout_ = new QVBoxLayout;
@@ -119,11 +127,12 @@ AutoTunePanel::AutoTunePanel(QWidget* parent) : QWidget(parent)
     cameraColumn->addWidget(cameraWarnings_);
     applyCamera_ = new QPushButton("Apply", cameraBox);
     applyCamera_->setObjectName("autoTuneApplyCamera");
-    applyCamera_->setToolTip("Sends the ticked camera settings to the camera together, waits until it reports them back "
-        "and Preview has settled, then measures again to check.");
+    applyCamera_->setToolTip("Applies the ticked rows. A new Offset shifts the camera's black level, so the camera is "
+        "then tuned again.");
     cameraColumn->addWidget(applyCamera_);
     column->addWidget(cameraBox);
-    connect(measureCamera_, &QPushButton::clicked, this, &AutoTunePanel::measureCameraRequested);
+    connect(tuneCamera_, &QPushButton::clicked, this, &AutoTunePanel::tuneCameraRequested);
+    connect(restoreCamera_, &QPushButton::clicked, this, &AutoTunePanel::restoreCameraRequested);
     connect(applyCamera_, &QPushButton::clicked, this, &AutoTunePanel::applyCameraRequested);
 
     // Step 2: K.
@@ -319,9 +328,11 @@ void AutoTunePanel::updateButtons()
     const Situation& s = situation_;
     const bool needBox = s.workflow == TuneWorkflow::MoonFlashes && !s.haveBox;
     const bool idle = s.preview && !s.busy;
-    measureCamera_->setEnabled(idle && s.camera && !needBox);
+    tuneCamera_->setEnabled(idle && s.camera && !needBox && !s.recording);
+    restoreCamera_->setEnabled(idle && s.camera && !s.recording && s.canRestore);
     const bool anyTicked = std::any_of(cameraRows_.begin(), cameraRows_.end(), [](const auto& row) { return row.first->isChecked(); });
     applyCamera_->setEnabled(idle && s.camera && !s.recording && camera_.has_value() && anyTicked);
+    applyCamera_->setVisible(!cameraRows_.empty());
     watch_->setEnabled(idle && !needBox);
     higher_->setEnabled(idle && !needBox && !kRows_.empty());
     tryButton_->setEnabled(idle && !needBox);
@@ -337,8 +348,9 @@ void AutoTunePanel::updateButtons()
     else if (needBox) why = "Draw a box on the earthshine first.";
     else if (!s.camera) why = "A recording is playing: only the sensitivity (K) can be tuned.";
     else if (s.recording) why = "A recording is running: camera changes and the test flash wait until it ends.";
-    measureCamera_->setToolTip(why.isEmpty() ? "Measures the brightness of the measured area for two seconds and "
-        "suggests exposure and gain for the aim above. Nothing changes until you press Apply." : why);
+    tuneCamera_->setToolTip(why.isEmpty() ? "Sets exposure and gain live until the measured area is in the aim above: "
+        "each round measures for two seconds, changes one setting, and waits for the camera to settle. Changing a camera "
+        "setting yourself, or Cancel, stops it; Restore previous settings sets the earlier values back." : why);
     // A hint about what is missing, unless a measurement's result is shown.
     if (!s.busy && (status_->text().isEmpty() || status_->property("hint").toBool()))
     {
@@ -365,6 +377,19 @@ void AutoTunePanel::setProgress(const QString& text, double progress, bool runni
     status_->setProperty("hint", false);
     progress_->setVisible(running);
     progress_->setValue(static_cast<int>(std::lround(100 * std::clamp(progress, 0.0, 1.0))));
+}
+
+void AutoTunePanel::clearCameraRounds()
+{
+    cameraRounds_->clear();
+    cameraRounds_->hide();
+}
+
+void AutoTunePanel::addCameraRound(const QString& text)
+{
+    const QString lines = cameraRounds_->text();
+    cameraRounds_->setText(lines.isEmpty() ? text : lines + "\n" + text);
+    cameraRounds_->show();
 }
 
 void AutoTunePanel::setCameraSuggestion(const CameraSuggestion& suggestion)

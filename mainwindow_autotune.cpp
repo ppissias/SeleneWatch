@@ -1,7 +1,8 @@
 // Feature-26: auto-tune's part of the window. The panel holds the
 // suggestions and the K results; the window runs each measurement through
 // the session, applies what the observer accepts, and logs it to
-// candidates.txt like the exposure follower's changes.
+// candidates.txt like the exposure follower's changes. Feature-34: once the
+// observer asks, the window tunes the camera itself, round by round.
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
@@ -67,7 +68,7 @@ void MainWindow::setupAutoTune()
     connect(tuneReadbackTimer_, &QTimer::timeout, this, [this] {
         if (tunePhase_ != TunePhase::WaitingForCamera) return;
         tunePhase_ = TunePhase::Idle;
-        autoTunePanel_->setProgress("The camera did not report its new settings within 10 s. Measure again when the "
+        autoTunePanel_->setProgress("The camera did not report its new settings within 10 s. Tune again when the "
             "preview has settled.", 0, false);
         updateAutoTune();
     });
@@ -87,12 +88,14 @@ void MainWindow::setupAutoTune()
         showMessage("Drag a box on the preview over the earthshine.", 6000);
     });
     connect(autoTunePanel_, &AutoTunePanel::boxOnlyToggled, this, [this] {
+        stopCameraTune("The measured area changed: tuning stopped.");
         autoTunePanel_->clearCamera("The measured area changed: measure again.");
         autoTunePanel_->clearK("The measured area changed: watch again.");
         tuneHasK_ = false;
         updateEarthshineArea();
     });
-    connect(autoTunePanel_, &AutoTunePanel::measureCameraRequested, this, [this] { startCameraMeasurement(false); });
+    connect(autoTunePanel_, &AutoTunePanel::tuneCameraRequested, this, &MainWindow::startCameraTune);
+    connect(autoTunePanel_, &AutoTunePanel::restoreCameraRequested, this, &MainWindow::restoreAutoTuneCamera);
     connect(autoTunePanel_, &AutoTunePanel::applyCameraRequested, this, &MainWindow::applyAutoTuneCamera);
     connect(autoTunePanel_, &AutoTunePanel::watchRequested, this, [this](bool higher) { startKWatch(higher); });
     connect(autoTunePanel_, &AutoTunePanel::tryKRequested, this, [this](double k) { startKWatch(false, k); });
@@ -180,6 +183,7 @@ void MainWindow::updateAutoTune()
     situation.testingTools = testingTools_;
     situation.busy = autoTuneMeasuring();
     situation.haveBox = earthshineBox_.has_value();
+    situation.canRestore = tuneRestore_.has_value();
     situation.twilight = twilightAdvice();
     autoTunePanel_->setSituation(situation);
     updateFlashWidth();
@@ -192,6 +196,7 @@ void MainWindow::setEarthshineBox(QRect box)
     drawingEarthshineBox_ = false;
     if (autoTunePanel_)
     {
+        stopCameraTune("The earthshine box changed: tuning stopped.");
         autoTunePanel_->setDrawingBox(false);
         autoTunePanel_->clearCamera("The earthshine box changed: measure again.");
         autoTunePanel_->clearK("The earthshine box changed: watch again.");
@@ -294,7 +299,20 @@ std::vector<std::string> MainWindow::guidingWarnings() const
         "unsaturated feature.").arg(100 * measured->atMax, 0, 'f', 0).toStdString()};
 }
 
-void MainWindow::startCameraMeasurement(bool check)
+// Feature-34: Tune camera. The loop's measurements start afresh; the
+// settings from before the first loop stay for Restore.
+void MainWindow::startCameraTune()
+{
+    if (!latestFrame_ || session_->recordingStatus().active) return;
+    tuneHistory_.clear();
+    if (!tuneRestore_) tuneRestore_ = tuneCamera();
+    autoTunePanel_->clearCameraRounds();
+    autoTunePanel_->clearCamera({});
+    startCameraMeasurement();
+}
+
+// One round's measurement of the area's brightness.
+void MainWindow::startCameraMeasurement()
 {
     if (!latestFrame_) return;
     updateEarthshineArea();
@@ -307,16 +325,164 @@ void MainWindow::startCameraMeasurement(bool check)
     const uint64_t id = session_->startAutoTune(std::move(request));
     if (!id)
     {
+        tunePhase_ = TunePhase::Idle;
         autoTunePanel_->setProgress("Auto-tune measures only in Preview.", 0, false);
+        updateAutoTune();
         return;
     }
     tuneWatchId_ = id;
-    tunePhase_ = check ? TunePhase::CheckingCamera : TunePhase::MeasuringCamera;
+    tunePhase_ = TunePhase::MeasuringCamera;
     tuneMeasuredCamera_ = tuneCamera();
-    autoTunePanel_->setProgress(check ? "Checking the new settings…" : "Measuring the brightness…", 0, true);
+    autoTunePanel_->setProgress(QString("Round %1: measuring the brightness…").arg(tuneHistory_.size() + 1), 0, true);
     updateAutoTune();
 }
 
+// A round's measurement is in: set the next exposure or gain, or end the
+// loop with the verdict and the rows left for the observer.
+void MainWindow::onCameraMeasured(const TuneWatchStatus& status)
+{
+    const TuneCamera camera = tuneCamera();
+    if (camera != tuneMeasuredCamera_)
+    {
+        autoTunePanel_->clearCamera("The camera settings changed during the measurement: tuning stopped.");
+        autoTunePanel_->setProgress({}, 0, false);
+        return;
+    }
+    std::optional<CameraStep> step;
+    if (status.brightness && camera.exposure)
+    {
+        tuneHistory_.push_back(TuneMeasurement{camera.exposure->value, camera.gain ? camera.gain->value : 0, *status.brightness});
+        step = nextCameraStep(autoTuneWorkflow(), camera, tuneHistory_, autoTunePanel_->skyMaxExposureUs());
+        autoTunePanel_->addCameraRound(QString("%1. %2").arg(tuneHistory_.size()).arg(QString::fromStdString(step->text)));
+    }
+    const int rounds = static_cast<int>(tuneHistory_.size());
+    if (step && step->outcome == CameraStep::Outcome::Move && rounds < kMaxCameraRounds)
+    {
+        setCameraLive(step->exposureUs, step->gain,
+            QString("round=%1 measured_level=%2%").arg(rounds).arg(100 * status.brightness->level, 0, 'f', 2));
+        return;
+    }
+
+    const SkyExtras extras = detectionPanel_->skyExtras();
+    CameraTuneInput input;
+    input.workflow = autoTuneWorkflow();
+    input.camera = camera;
+    input.measured = status.brightness;
+    input.skyMaxExposureUs = autoTunePanel_->skyMaxExposureUs();
+    input.follow = extras.follow;
+    input.followFromMs = extras.minExposureMs;
+    input.followToMs = extras.maxExposureMs;
+    input.followMaxGain = extras.maxGain;
+    input.followGainStep = extras.gainStep;
+    CameraSuggestion suggestion = suggestCamera(input);
+    // The loop owns exposure and gain; the Offset and the follower's limits stay the observer's.
+    std::erase_if(suggestion.rows, [](const TuneRow& row) {
+        return row.kind == TuneRow::Kind::Exposure || row.kind == TuneRow::Kind::Gain;
+    });
+    for (std::string& warning : guidingWarnings()) suggestion.warnings.push_back(std::move(warning));
+    autoTunePanel_->setCameraSuggestion(suggestion);
+    const QString count = QString("%1 round%2").arg(rounds).arg(rounds == 1 ? "" : "s");
+    QString result;
+    if (!step) result = "Nothing to tune: see above.";
+    else if (step->outcome == CameraStep::Outcome::InAim) result = QString("Tuned in %1: in the aim. Go on to step 2.").arg(count);
+    else if (step->outcome == CameraStep::Outcome::Move)
+        result = QString("Stopped after %1 without reaching the aim: the brightness may be changing (clouds, twilight). "
+            "Tune again later.").arg(count);
+    else result = QString("Stopped after %1: the closest the camera can get. Go on to step 2, or change the setup.").arg(count);
+    autoTunePanel_->setProgress(result, 1, false);
+}
+
+// Feature-34: sets the loop's next exposure and gain through the camera
+// settings editor, as the observer would, logs them, and waits for the
+// camera to report them back.
+void MainWindow::setCameraLive(double exposureUs, double gain, const QString& record)
+{
+    CameraFamilyPanel* family = activeCamera();
+    CameraSettingsEditor* controls = family ? family->controls() : nullptr;
+    if (!controls || session_->mode() != Session::Mode::Preview || session_->recordingStatus().active)
+    {
+        autoTunePanel_->setProgress("Tuning stopped: the camera can be changed only in Preview, without a recording.", 0, false);
+        updateAutoTune();
+        return;
+    }
+    const TuneCamera before = tuneCamera();
+    bool changed = false;
+    QStringList applied;
+    if (before.exposure && exposureUs != before.exposure->value)
+    {
+        changed |= controls->setControlValue(kExposureControl, exposureUs);
+        applied << QString("Exposure=%1 ms").arg(exposureUs / 1000, 0, 'g', 6);
+    }
+    if (before.gain && gain != before.gain->value)
+    {
+        changed |= controls->setControlValue(kGainControl, gain);
+        applied << QString("Gain=%1").arg(gain, 0, 'g', 6);
+    }
+    session_->logRecord(QString("%1 autotune_camera target=%2 %3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
+        target_ == Target::Sky ? "sky" : "moon", record, applied.join("; ")));
+    if (!changed)
+    {
+        autoTunePanel_->setProgress("Tuning stopped: the camera did not take the new setting.", 0, false);
+        updateAutoTune();
+        return;
+    }
+    // The editor sends the changed controls to the camera after its short
+    // pause; the next round starts when the camera reports them back.
+    tunePhase_ = TunePhase::WaitingForCamera;
+    tuneReadbackTimer_->start();
+    autoTunePanel_->clearK("The camera settings changed: watch again with the new ones.");
+    autoTunePanel_->clearMinPatch("The camera settings changed: measure again.");
+    tuneHasK_ = false;
+    tuneHasMinPatch_ = false;
+    autoTunePanel_->setProgress("Waiting for the camera to report " + applied.join(", ") + "…", 0, true);
+    updateAutoTune();
+}
+
+// Feature-34: the loop stops when what it measures changes.
+void MainWindow::stopCameraTune(const QString& why)
+{
+    if (tunePhase_ != TunePhase::MeasuringCamera && tunePhase_ != TunePhase::WaitingForCamera) return;
+    tuneReadbackTimer_->stop();
+    tunePhase_ = TunePhase::Idle;
+    session_->cancelAutoTune(why.toStdString());
+    autoTunePanel_->setProgress(why, 0, false);
+}
+
+// Feature-34: the exposure and gain from before Tune camera changed them.
+void MainWindow::restoreAutoTuneCamera()
+{
+    CameraFamilyPanel* family = activeCamera();
+    CameraSettingsEditor* controls = family ? family->controls() : nullptr;
+    if (!tuneRestore_ || autoTuneMeasuring() || !controls || session_->mode() != Session::Mode::Preview
+        || session_->recordingStatus().active) return;
+    QStringList applied;
+    if (tuneRestore_->exposure)
+    {
+        controls->setControlValue(kExposureControl, tuneRestore_->exposure->value);
+        applied << QString("Exposure=%1 ms").arg(tuneRestore_->exposure->value / 1000, 0, 'g', 6);
+    }
+    if (tuneRestore_->gain)
+    {
+        controls->setControlValue(kGainControl, tuneRestore_->gain->value);
+        applied << QString("Gain=%1").arg(tuneRestore_->gain->value, 0, 'g', 6);
+    }
+    session_->logRecord(QString("%1 autotune_camera target=%2 restore=yes applied=\"%3\"\n").arg(
+        utcText(std::chrono::system_clock::now()), target_ == Target::Sky ? "sky" : "moon", applied.join("; ")));
+    tuneRestore_.reset();
+    tuneHistory_.clear();
+    autoTunePanel_->clearCameraRounds();
+    autoTunePanel_->clearCamera("Restored: " + applied.join(", ") + ".");
+    autoTunePanel_->clearK("The camera settings changed: watch again.");
+    autoTunePanel_->clearMinPatch("The camera settings changed: measure again.");
+    tuneHasK_ = false;
+    tuneHasMinPatch_ = false;
+    autoTunePanel_->setProgress({}, 0, false);
+    showMessage("Auto-tune restored: " + applied.join(", "), 6000);
+    updateAutoTune();
+}
+
+// The rows the loop leaves to the observer: the Offset and the follower's
+// limits. A new Offset shifts the black level, so the loop runs again.
 void MainWindow::applyAutoTuneCamera()
 {
     CameraFamilyPanel* family = activeCamera();
@@ -324,7 +490,7 @@ void MainWindow::applyAutoTuneCamera()
     if (!controls || session_->mode() != Session::Mode::Preview || session_->recordingStatus().active) return;
     if (tuneCamera() != tuneMeasuredCamera_)
     {
-        autoTunePanel_->clearCamera("The camera settings changed since the measurement: measure again.");
+        autoTunePanel_->clearCamera("The camera settings changed since the measurement: tune again.");
         return;
     }
     const std::vector<TuneRow> rows = autoTunePanel_->tickedCameraRows();
@@ -358,14 +524,15 @@ void MainWindow::applyAutoTuneCamera()
         saveSkyExtras();
         skyExposureState_ = {};
     }
-    const QString measured = tuneLast_ ? QString(" measured_level=%1%").arg(100 * tuneLast_->brightness.level, 0, 'f', 2) : QString();
+    const QString measured = tuneHistory_.empty() ? QString()
+        : QString(" measured_level=%1%").arg(100 * tuneHistory_.back().brightness.level, 0, 'f', 2);
     session_->logRecord(QString("%1 autotune_camera target=%2%3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
         target_ == Target::Sky ? "sky" : "moon", measured, applied.join("; ")));
-    tunePrevious_ = tuneLast_;
     if (cameraChanged)
     {
-        // The editor sends the changed controls to the camera together, after
-        // its short pause; the check starts when the camera reports them back.
+        // The earlier measurements were taken at the old black level.
+        tuneHistory_.clear();
+        autoTunePanel_->addCameraRound("Applied " + applied.join(", ") + ": tuning again.");
         tunePhase_ = TunePhase::WaitingForCamera;
         tuneReadbackTimer_->start();
         autoTunePanel_->clearCamera("Applied: " + applied.join(", ") + ".");
@@ -393,25 +560,33 @@ void MainWindow::onCameraReadbackForAutoTune()
             .arg(utcText(std::chrono::system_clock::now()), QString::fromStdString(info.exposure),
                 QString::fromStdString(info.gain), QString::fromStdString(info.offset)));
         tunePhase_ = TunePhase::Idle;
-        startCameraMeasurement(true);
+        startCameraMeasurement();
         return;
     }
-    // The observer changed the camera: what was measured no longer holds.
-    if (tuneLast_ || tuneHasK_ || tuneHasMinPatch_)
+    // The observer changed the camera: what was measured no longer holds,
+    // and the settings from before the loop are no longer what Restore means.
+    // (A second readback of the loop's own values changes nothing.)
+    if (!tuneHistory_.empty() && tuneCamera() != tuneMeasuredCamera_)
     {
-        autoTunePanel_->clearCamera("The camera settings changed: measure again.");
+        autoTunePanel_->clearCamera("The camera settings changed: tune again.");
+        tuneHistory_.clear();
+        tuneRestore_.reset();
+    }
+    if (tuneHasK_ || tuneHasMinPatch_)
+    {
         autoTunePanel_->clearK("The camera settings changed: watch again.");
         autoTunePanel_->clearMinPatch("The camera settings changed: measure again.");
         tuneHasK_ = false;
         tuneHasMinPatch_ = false;
-        tuneLast_.reset();
-        tunePrevious_.reset();
     }
+    updateAutoTune();
 }
 
 void MainWindow::onDetectionSettingsChangedForAutoTune()
 {
     if (!autoTunePanel_) return;
+    // The watch in progress is cancelled by the session; the loop stops with it.
+    stopCameraTune("The detection settings changed: tuning stopped.");
     if (tuneHasK_ && detectionPanel_->settings() != tuneBoundDetection_)
     {
         autoTunePanel_->clearK("The detection settings changed after the watch: watch again.");
@@ -557,37 +732,7 @@ void MainWindow::onAutoTuneChanged()
     {
         const TunePhase phase = tunePhase_;
         tunePhase_ = TunePhase::Idle;
-        if (phase == TunePhase::MeasuringCamera || phase == TunePhase::CheckingCamera)
-        {
-            const TuneCamera camera = tuneCamera();
-            if (camera != tuneMeasuredCamera_)
-            {
-                autoTunePanel_->clearCamera("The camera settings changed during the measurement: measure again.");
-                autoTunePanel_->setProgress({}, 0, false);
-                break;
-            }
-            const SkyExtras extras = detectionPanel_->skyExtras();
-            CameraTuneInput input;
-            input.workflow = autoTuneWorkflow();
-            input.camera = camera;
-            input.measured = status.brightness;
-            input.previous = tunePrevious_;
-            input.skyMaxExposureUs = autoTunePanel_->skyMaxExposureUs();
-            input.follow = extras.follow;
-            input.followFromMs = extras.minExposureMs;
-            input.followToMs = extras.maxExposureMs;
-            input.followMaxGain = extras.maxGain;
-            input.followGainStep = extras.gainStep;
-            CameraSuggestion suggestion = suggestCamera(input);
-            for (std::string& warning : guidingWarnings()) suggestion.warnings.push_back(std::move(warning));
-            autoTunePanel_->setCameraSuggestion(suggestion);
-            if (status.brightness && camera.exposure)
-                tuneLast_ = TuneMeasurement{camera.exposure->value, camera.gain ? camera.gain->value : 0, *status.brightness};
-            autoTunePanel_->setProgress(phase == TunePhase::CheckingCamera
-                ? (suggestion.inAim ? "Checked: the new settings are in the aim. Go on to step 2."
-                    : "Checked: not in the aim yet. See the new suggestion.")
-                : QString("Measured over %1 frames.").arg(status.frames), 1, false);
-        }
+        if (phase == TunePhase::MeasuringCamera) onCameraMeasured(status);
         else if (phase == TunePhase::WatchingK)
         {
             autoTunePanel_->setKResults(status);

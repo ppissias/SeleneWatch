@@ -151,7 +151,7 @@ private slots:
     void darkeningIsForTheMoonOnly();
     void everyControlHasHelp();
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
-    void autoTuneMeasuresAppliesAndChecks();
+    void autoTuneTunesTheCameraLiveThenWatchesK();
     void autoTuneOutlinesTheEarthshineBox();
     void autoTuneSuggestsTheMinimumPatchForFlashes();
     void aDragDrawsOnlyWhatWasChosen();
@@ -1224,15 +1224,17 @@ void UiTest::everyControlHasHelp()
 // the camera reports back; then it watches what each K would have done, and
 // applies the suggested K only while nothing has changed since the watch.
 // Every applied change is logged in candidates.txt.
-void UiTest::autoTuneMeasuresAppliesAndChecks()
+void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
 {
     QTemporaryDir dir;
     auto api = std::make_shared<FakeZwoApi>();
+    // Feature-34: a dark sky whose level follows the camera: 5 codes of black
+    // level plus 0.01 per millisecond of exposure, doubled every 20 gain units.
+    api->light = [](double exposureUs, double gain) { return 5 + 0.01 * exposureUs / 1000 * std::pow(2.0, gain / 20); };
     MainWindow window(nullptr, dir.path(), api);
     window.findChild<QAction*>("testingToolsAction")->setChecked(true);
     window.show();
     chooseSource(window, "zwo");
-    // The sky: the fake camera's frames are at 41 % of full scale, too bright.
     chooseWatch(window, Watch::Sky);
     auto* referenceTime = window.findChild<QDoubleSpinBox*>("detectionReferenceTime");
     referenceTime->setValue(0.5); // The detector learns in 1.5 s, so the K watch starts soon.
@@ -1241,32 +1243,35 @@ void UiTest::autoTuneMeasuresAppliesAndChecks()
     toggle->click();
     auto* panel = window.findChild<AutoTunePanel*>();
     QVERIFY(panel->isVisible());
-    auto* measure = panel->findChild<QPushButton*>("autoTuneMeasureCamera");
-    QVERIFY(!measure->isEnabled()); // Not before Preview.
+    auto* tune = panel->findChild<QPushButton*>("autoTuneCamera");
+    QVERIFY(!tune->isEnabled()); // Not before Preview.
     window.findChild<QPushButton*>("startButton")->click();
-    QTRY_VERIFY_WITH_TIMEOUT(measure->isEnabled(), 5000);
-
-    // Step 1: measure, apply, and the check after the camera's readback.
-    measure->click();
-    auto* verdict = panel->findChild<QLabel*>("autoTuneCameraVerdict");
-    QTRY_VERIFY2_WITH_TIMEOUT(verdict->text().contains("The sky is at"), qPrintable(verdict->text() + " | "
-        + panel->findChild<QLabel*>("autoTuneStatus")->text()), 8000);
-    QVERIFY2(verdict->text().contains("aim is 8-30 %"), qPrintable(verdict->text()));
-    auto* gainRow = panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Gain)));
-    QVERIFY(gainRow && gainRow->isChecked()); // A brighter sky lowers gain first.
+    QTRY_VERIFY_WITH_TIMEOUT(tune->isEnabled(), 5000);
     auto* camera = window.findChild<CameraPanel*>();
+    auto* exposureBox = camera->findChild<QDoubleSpinBox*>("cameraControl0");
     auto* gainBox = camera->findChild<QDoubleSpinBox*>("cameraControl1");
+    const double exposureBefore = exposureBox->value();
     const double gainBefore = gainBox->value();
-    auto* apply = panel->findChild<QPushButton*>("autoTuneApplyCamera");
-    QVERIFY(apply->isEnabled());
-    apply->click();
-    QVERIFY(gainBox->value() < gainBefore);
+    auto* restore = panel->findChild<QPushButton*>("autoTuneRestoreCamera");
+    QVERIFY(!restore->isEnabled());
+
+    // Step 1: one press. The dark sky lengthens the exposure to the longest
+    // for meteors (250 ms), then raises gain, live, until it is in the aim.
+    tune->click();
     auto* status = panel->findChild<QLabel*>("autoTuneStatus");
-    QTRY_VERIFY_WITH_TIMEOUT(camera->profile().current.controls.at(ZwoControl::Gain) == static_cast<int64_t>(gainBox->value()), 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith("Checked"), 10000);
+    auto* rounds = panel->findChild<QLabel*>("autoTuneCameraRounds");
+    QTRY_VERIFY2_WITH_TIMEOUT(status->text().startsWith("Tuned in"), qPrintable(status->text() + " | " + rounds->text()), 60000);
+    QVERIFY2(rounds->text().startsWith("1. The sky is at") && rounds->text().count('\n') >= 2, qPrintable(rounds->text()));
+    auto* verdict = panel->findChild<QLabel*>("autoTuneCameraVerdict");
+    QVERIFY2(verdict->text().contains("aim is 8-30 %") && verdict->text().contains("It is in the aim"), qPrintable(verdict->text()));
+    QCOMPARE(camera->profile().current.controls.at(ZwoControl::Exposure), int64_t{250'000});
+    QVERIFY(gainBox->value() > gainBefore);
+    // The loop owns exposure and gain: no rows for them are left to apply.
+    QVERIFY(!panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Gain))));
     const QString log = eventsFolder(dir.path(), Target::Sky) + "/candidates.txt";
-    QTRY_VERIFY_WITH_TIMEOUT(text(log).contains(" autotune_camera target=sky "), 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(text(log).contains(" autotune_camera target=sky round=1 measured_level="), 3000);
     QVERIFY(text(log).contains(" autotune_readback exposure="));
+    QVERIFY(restore->isEnabled());
 
     // Step 2: the K watch, shortened for the test.
     auto* length = panel->findChild<QComboBox*>("autoTuneLength");
@@ -1306,6 +1311,13 @@ void UiTest::autoTuneMeasuresAppliesAndChecks()
     QTRY_VERIFY_WITH_TIMEOUT(checked->text().startsWith("Caught") || checked->text().startsWith("Missed"), 10000);
     QVERIFY2(checked->text().startsWith("Caught"), qPrintable(checked->text()));
 
+    // Restore previous settings: the exposure and gain from before the loop.
+    restore->click();
+    QCOMPARE(exposureBox->value(), exposureBefore);
+    QCOMPARE(gainBox->value(), gainBefore);
+    QVERIFY(text(log).contains(" autotune_camera target=sky restore=yes applied=\""));
+    QTRY_VERIFY_WITH_TIMEOUT(!restore->isEnabled() && tune->isEnabled(), 5000);
+
     // During a recording, no camera change and no test flash.
     window.findChild<QPushButton*>("recordButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(!check->isEnabled(), 3000);
@@ -1314,7 +1326,7 @@ void UiTest::autoTuneMeasuresAppliesAndChecks()
     // Monitoring: auto-tune waits for Preview.
     window.findChild<QPushButton*>("monitoringButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 5000);
-    QVERIFY(!watch->isEnabled() && !measure->isEnabled());
+    QVERIFY(!watch->isEnabled() && !tune->isEnabled());
     window.findChild<QPushButton*>("stopButton")->click();
 }
 
@@ -1329,21 +1341,25 @@ void UiTest::autoTuneOutlinesTheEarthshineBox()
     chooseSource(window, "zwo");
     window.findChild<QPushButton*>("autoTuneButton")->click();
     auto* panel = window.findChild<AutoTunePanel*>();
-    auto* measure = panel->findChild<QPushButton*>("autoTuneMeasureCamera");
+    auto* tune = panel->findChild<QPushButton*>("autoTuneCamera");
     window.findChild<QPushButton*>("startButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"), 5000);
     QVERIFY(panel->findChild<QToolButton*>("autoTuneDrawBox")->isVisible());
-    QVERIFY(!measure->isEnabled()); // No box yet.
+    QVERIFY(!tune->isEnabled()); // No box yet.
     window.setEarthshineBox(QRect(40, 20, 24, 16));
     QTRY_VERIFY_WITH_TIMEOUT(panel->findChild<QLabel*>("autoTuneArea")->text().contains("box alone"), 3000);
-    QTRY_VERIFY_WITH_TIMEOUT(measure->isEnabled(), 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(tune->isEnabled(), 3000);
     QCOMPARE(QSettings().value("autotune/earthshineBox").toRect(), QRect(40, 20, 24, 16));
-    measure->click();
-    QTRY_VERIFY_WITH_TIMEOUT(panel->findChild<QLabel*>("autoTuneCameraVerdict")->text().contains("The earthshine is at"), 8000);
-    // The fake camera's 41 % is far above the earthshine's 3-10 %: gain down,
-    // and the exposure brought into 10-40 ms first.
-    auto* exposureRow = panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Exposure)));
-    QVERIFY(exposureRow && exposureRow->isChecked() && exposureRow->text().contains("→ 10 ms"));
+    tune->click();
+    // The fake camera's fixed 41 % is far above the earthshine's 3-10 %: the
+    // exposure is brought into 10-40 ms first, then the gain goes to its
+    // lowest, and the loop stops: the camera cannot get darker.
+    auto* status = panel->findChild<QLabel*>("autoTuneStatus");
+    auto* rounds = panel->findChild<QLabel*>("autoTuneCameraRounds");
+    QTRY_VERIFY2_WITH_TIMEOUT(status->text().startsWith("Stopped after"), qPrintable(status->text() + " | " + rounds->text()), 30000);
+    QVERIFY2(rounds->text().contains("→ 10 ms, into this watch's range") && rounds->text().contains("cannot reach"),
+        qPrintable(rounds->text()));
+    QVERIFY(panel->findChild<QLabel*>("autoTuneCameraVerdict")->text().contains("The earthshine is at"));
     window.findChild<QPushButton*>("stopButton")->click();
 }
 // Feature-30: for flashes, auto-tune measures the footprint of a flash just

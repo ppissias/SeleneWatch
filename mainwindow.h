@@ -188,7 +188,14 @@ private:
     void onAutoTuneChanged();
     void onCameraReadbackForAutoTune();
     void onDetectionSettingsChangedForAutoTune();
-    void startCameraMeasurement(bool check);
+    // Feature-34: the camera loop. Tune camera starts it; each finished
+    // measurement sets the next exposure or gain, until the aim is reached.
+    void startCameraTune();
+    void startCameraMeasurement();
+    void onCameraMeasured(const TuneWatchStatus& status);
+    void setCameraLive(double exposureUs, double gain, const QString& record);
+    void stopCameraTune(const QString& why);
+    void restoreAutoTuneCamera();
     void applyAutoTuneCamera();
     void startKWatch(bool higher, std::optional<double> onlyK = {});
     void applyAutoTuneK();
@@ -352,12 +359,15 @@ private:
     std::optional<QRect> earthshineBox_;
     EarthshineArea earthshineArea_;
     bool drawingEarthshineBox_{false};
-    enum class TunePhase { Idle, MeasuringCamera, WaitingForCamera, CheckingCamera, WatchingK, CheckingFlash,
+    enum class TunePhase { Idle, MeasuringCamera, WaitingForCamera, WatchingK, CheckingFlash,
         MeasuringFootprint, WatchingMinPatch };
     TunePhase tunePhase_{TunePhase::Idle};
     uint64_t tuneWatchId_{0};
     TuneCamera tuneMeasuredCamera_;
-    std::optional<TuneMeasurement> tuneLast_, tunePrevious_;
+    // Feature-34: the camera loop's measurements, the last at the current
+    // settings, and the exposure and gain from before it changed them.
+    std::vector<TuneMeasurement> tuneHistory_;
+    std::optional<TuneCamera> tuneRestore_;
     bool tuneHasK_{false};
     bool tuneHasMinPatch_{false};
     std::optional<int> tuneFootprint_;

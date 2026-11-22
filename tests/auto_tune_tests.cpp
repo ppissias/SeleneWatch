@@ -98,16 +98,63 @@ TuneWatchRequest sensitivity(const DetectionSettings& settings, std::vector<doub
 }
 
 // A camera whose raw level is its black level plus a slope times the
-// exposure, multiplied by 2 for every 60 gain units, clipped at full scale.
+// exposure, multiplied by 2 for every gainPerStop gain units (60 unless
+// changed), clipped at full scale.
 struct ModelCamera
 {
     double pedestal{0.02}, perMillisecond{0.001};
     TuneControl exposure{30'000, 32, 2'000'000}, gain{100, 0, 500};
+    double gainPerStop{60};
     [[nodiscard]] double level(double brightnessScale = 1) const
     {
-        return std::min(1.0, pedestal + perMillisecond * brightnessScale * exposure.value / 1000 * std::pow(2.0, gain.value / 60));
+        return std::min(1.0, pedestal + perMillisecond * brightnessScale * exposure.value / 1000
+            * std::pow(2.0, gain.value / gainPerStop));
     }
 };
+
+// Feature-34: the camera loop as the window runs it. Each round measures,
+// asks for the next step and sets it, as the live camera would.
+struct LoopRun
+{
+    CameraStep::Outcome outcome{CameraStep::Outcome::Move};
+    int rounds{0};
+    ModelCamera camera;
+    std::string text;
+    // Every setting stayed within the camera's range, and the exposure within
+    // the workflow's once it was brought there.
+    bool withinLimits{true};
+};
+LoopRun runLoop(TuneWorkflow workflow, ModelCamera camera)
+{
+    const TuneAim aim = tuneAim(workflow);
+    std::vector<TuneMeasurement> history;
+    LoopRun run;
+    for (int round = 1; round <= kMaxCameraRounds; ++round)
+    {
+        BrightnessSample measured;
+        measured.level = camera.level();
+        measured.atMax = measured.level >= 1 ? 0.01 : 0;
+        measured.samples = 1000;
+        history.push_back({camera.exposure.value, camera.gain.value, measured});
+        const CameraStep step = nextCameraStep(workflow, TuneCamera{camera.exposure, camera.gain, std::nullopt}, history);
+        run.rounds = round;
+        run.text = step.text;
+        if (step.outcome != CameraStep::Outcome::Move)
+        {
+            run.outcome = step.outcome;
+            break;
+        }
+        const bool exposureWasInRange = camera.exposure.value >= aim.minExposureUs && camera.exposure.value <= aim.maxExposureUs;
+        camera.exposure.value = step.exposureUs;
+        camera.gain.value = step.gain;
+        if (camera.gain.value < camera.gain.minimum || camera.gain.value > camera.gain.maximum
+            || camera.exposure.value < camera.exposure.minimum || camera.exposure.value > camera.exposure.maximum
+            || (exposureWasInRange && (camera.exposure.value < aim.minExposureUs || camera.exposure.value > aim.maxExposureUs)))
+            run.withinLimits = false;
+    }
+    run.camera = camera;
+    return run;
+}
 
 // Measure, apply the ticked rows, measure again: as the observer would.
 bool reachesTheAim(TuneWorkflow workflow, ModelCamera camera, int rounds, double brightness = 1)
@@ -156,6 +203,10 @@ private slots:
     void twoMeasurementsGiveTheBlackLevel();
     void aFullyMaskedSkyGivesNoSuggestion();
     void theFollowersLimitsAreOffered();
+    void theLoopReachesEachAimInAFewRounds();
+    void theLoopLearnsAnyGainCurve();
+    void saturationOnlyBoundsTheLoopsMove();
+    void theLoopStopsWhenTheAimIsOutOfReach();
     void kValuesAreTestedAroundTheCurrentOne();
     void eachKRowCountsWhatThatKAloneWould();
     void aSkippedSearchIsNeverAQuietK();
@@ -508,6 +559,103 @@ void AutoTuneTest::theFollowersLimitsAreOffered()
     QCOMPARE(gain.kind, TuneRow::Kind::FollowGain);
     QCOMPARE(gain.value, 350.0);   // 200 + a quarter of 600.
     QCOMPARE(gain.value2, 30.0);   // A twentieth of 600.
+}
+
+void AutoTuneTest::theLoopReachesEachAimInAFewRounds()
+{
+    const auto check = [](TuneWorkflow workflow, const ModelCamera& camera, int maxRounds, const char* name) {
+        const LoopRun run = runLoop(workflow, camera);
+        QVERIFY2(run.outcome == CameraStep::Outcome::InAim && run.rounds <= maxRounds && run.withinLimits,
+            qPrintable(QString("%1: %2 rounds, %3").arg(name).arg(run.rounds).arg(QString::fromStdString(run.text))));
+    };
+    // Earthshine far too dark, most of the level the black level: gain only.
+    ModelCamera dark;
+    dark.perMillisecond = 0.00002;
+    check(TuneWorkflow::MoonFlashes, dark, 5, "dark earthshine");
+    const LoopRun darkRun = runLoop(TuneWorkflow::MoonFlashes, dark);
+    QCOMPARE(darkRun.camera.exposure.value, 30'000.0);
+    // Earthshine too bright even at gain 0: the exposure comes down within 10-40 ms.
+    ModelCamera bright;
+    bright.perMillisecond = 0.004;
+    check(TuneWorkflow::MoonFlashes, bright, 5, "bright earthshine");
+    // An exposure outside 10-40 ms is brought into it first.
+    ModelCamera longExposure;
+    longExposure.exposure.value = 200'000;
+    check(TuneWorkflow::MoonFlashes, longExposure, 5, "long exposure");
+    // Transits: a sunlit Moon, saturated at first.
+    ModelCamera sunlit;
+    sunlit.perMillisecond = 0.2;
+    sunlit.exposure.value = 20'000;
+    check(TuneWorkflow::MoonTransits, sunlit, 8, "saturated Moon");
+    // The sky at night, and at dusk.
+    ModelCamera night;
+    night.perMillisecond = 0.0004;
+    night.exposure.value = 50'000;
+    check(TuneWorkflow::Sky, night, 5, "night sky");
+    ModelCamera dusk;
+    dusk.perMillisecond = 0.01;
+    dusk.exposure.value = 100'000;
+    check(TuneWorkflow::Sky, dusk, 5, "dusk sky");
+}
+
+void AutoTuneTest::theLoopLearnsAnyGainCurve()
+{
+    // The loop's first guess is a stop per tenth of the range; the camera may
+    // answer much faster or much slower. The earthshine's signal starts 80
+    // times too faint, under a black level of 1 %.
+    for (const double perStop : {5.0, 10.0, 25.0, 60.0, 400.0})
+        for (const double range : {100.0, 600.0})
+        {
+            ModelCamera camera;
+            camera.gainPerStop = perStop;
+            camera.gain = TuneControl{0, 0, range};
+            camera.pedestal = 0.01;
+            camera.perMillisecond = 0.0006 / 30; // 0.06 % of signal at 30 ms and gain 0.
+            const double needed = perStop * std::log2(0.05 / 0.0006);
+            if (needed > range) continue; // Out of this camera's reach.
+            const LoopRun run = runLoop(TuneWorkflow::MoonFlashes, camera);
+            QVERIFY2(run.outcome == CameraStep::Outcome::InAim && run.rounds <= 7 && run.withinLimits,
+                qPrintable(QString("%1 units per stop, range %2: %3 rounds, %4").arg(perStop).arg(range).arg(run.rounds)
+                    .arg(QString::fromStdString(run.text))));
+        }
+}
+
+void AutoTuneTest::saturationOnlyBoundsTheLoopsMove()
+{
+    // Transits at 10 ms and gain 0, saturated: a quarter of the exposure.
+    ModelCamera camera;
+    camera.perMillisecond = 0.5;
+    camera.exposure.value = 10'000;
+    camera.gain.value = 0;
+    std::vector<TuneMeasurement> history{{10'000, 0, BrightnessSample{1.0, 0, 0.2, 1000}}};
+    const CameraStep first = nextCameraStep(TuneWorkflow::MoonTransits, TuneCamera{camera.exposure, camera.gain, std::nullopt}, history);
+    QCOMPARE(first.outcome, CameraStep::Outcome::Move);
+    QCOMPARE(first.exposureUs, 2'500.0);
+    QCOMPARE(first.gain, 0.0);
+    QVERIFY(first.text.find("saturated") != std::string::npos);
+    // Too dark at 2.5 ms: the next exposure stays below the saturated 10 ms.
+    camera.exposure.value = 2'500;
+    history.push_back({2'500, 0, BrightnessSample{0.3, 0, 0, 1000}});
+    const CameraStep second = nextCameraStep(TuneWorkflow::MoonTransits, TuneCamera{camera.exposure, camera.gain, std::nullopt}, history);
+    QCOMPARE(second.outcome, CameraStep::Outcome::Move);
+    QVERIFY(second.exposureUs > 2'500 && second.exposureUs < 10'000);
+}
+
+void AutoTuneTest::theLoopStopsWhenTheAimIsOutOfReach()
+{
+    // A sky too dark at the longest exposure for meteors and the highest gain.
+    ModelCamera camera;
+    camera.perMillisecond = 0.0000001;
+    camera.exposure.value = 100'000;
+    const LoopRun run = runLoop(TuneWorkflow::Sky, camera);
+    QCOMPARE(run.outcome, CameraStep::Outcome::OutOfReach);
+    QVERIFY(run.withinLimits);
+    QCOMPARE(run.camera.exposure.value, 250'000.0);
+    QVERIFY2(run.camera.gain.value == 500.0, run.text.c_str());
+    QVERIFY2(run.text.find("cannot reach") != std::string::npos, run.text.c_str());
+    // Without a camera nothing moves.
+    std::vector<TuneMeasurement> history{{30'000, 0, BrightnessSample{0.01, 0, 0, 1000}}};
+    QCOMPARE(nextCameraStep(TuneWorkflow::Sky, TuneCamera{}, history).outcome, CameraStep::Outcome::OutOfReach);
 }
 
 void AutoTuneTest::kValuesAreTestedAroundTheCurrentOne()

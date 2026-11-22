@@ -478,7 +478,7 @@ try {
     $tuneWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Auto-tune" -OwnerWindow $mainWin -TimeoutMs 8000
     $watchBtn = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneWatch"
     Wait-Until { $watchBtn.Current.IsEnabled } "Auto-tune Watch enabled in Sky Preview" -TimeoutMs 8000
-    Assert-True (-not (Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneMeasureCamera").Current.IsEnabled) "Measure camera must be off for a non-camera source"
+    Assert-True (-not (Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneCamera").Current.IsEnabled) "Tune camera must be off for a non-camera source"
     Invoke-UiaClick $watchBtn "Auto-tune quick K watch"
     $kVerdict = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneKVerdict"
     Wait-Until { $kVerdict.Current.Name -match "Suggested K|Every K value|No K value" } "Auto-tune K watch finished" -TimeoutMs 45000
