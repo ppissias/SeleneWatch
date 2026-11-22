@@ -240,6 +240,7 @@ private slots:
     void linearSharpeningPreservesLinearity();
     void perPeriodCapAndParallelOverlapWithoutSkips();
     void overloadPreCaptureSkipGateAndMemoryBound();
+    void aTransitCanUseUpOneBurstGraceWithoutMovingTheCadence();
     void diskReserveStopsAndStillExportsVideo();
     void sessionStartTimeLapseAndResharpenRebuild();
     void unicodeFitsPathsAndHeaderOnlyMetadata();
@@ -917,6 +918,44 @@ void TimelapseTests::diskReserveStopsAndStillExportsVideo()
     QVERIFY(QFileInfo(mp4).size() > 500);
     QVERIFY(checkFileHasMp4Signature(mp4));
     QVERIFY(decodeWithFfmpeg(mp4));
+}
+
+void TimelapseTests::aTransitCanUseUpOneBurstGraceWithoutMovingTheCadence()
+{
+    QTemporaryDir tmp;
+    QObject context;
+    TimelapseSession::Config config;
+    config.timelapsesRoot = tmp.path();
+    config.stream.playback = "controlled test";
+    config.settings.watchTransits = true;
+    config.settings.intervalSeconds = 10;
+    config.settings.captureWindowSeconds = 1;
+    config.settings.video.writeMp4 = false;
+    TimelapseSession session(&context, std::move(config));
+    QVERIFY(session.valid());
+    uint64_t index = 0;
+    const auto field = makeLunarCraterField(48, 48);
+    const auto offer = [&](int seconds, int milliseconds = 0, bool busy = false) {
+        return session.onFrame(makeMono8Frame(48, 48, field, index++, utcPoint(seconds, milliseconds)), busy);
+    };
+    QCOMPARE(offer(0), TimelapseWork::Capturing);
+    offer(0, 100);
+    offer(1);
+    QTRY_COMPARE(session.status().stacksCompleted, 1);
+    QCOMPARE(offer(10, 0, true), TimelapseWork::Idle);
+    QCOMPARE(offer(14, 900, true), TimelapseWork::Idle);
+    QCOMPARE(session.status().periodsSkipped, 0);
+    QCOMPARE(offer(15, 0, true), TimelapseWork::Idle);
+    QCOMPARE(session.status().periodsSkipped, 1);
+    QCOMPARE(offer(16), TimelapseWork::Idle);
+    QCOMPARE(offer(20), TimelapseWork::Capturing);
+    offer(20, 100);
+    offer(21);
+    session.stop();
+    session.waitFinished();
+    QCOMPARE(session.status().stacksCompleted, 2);
+    const auto log = readTextFile(QDir(session.status().sessionDir).filePath("timelapse.txt"));
+    QVERIFY(log.contains("reason=\"transit clip occupied burst grace\""));
 }
 
 void TimelapseTests::sessionStartTimeLapseAndResharpenRebuild()

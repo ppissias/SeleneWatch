@@ -134,6 +134,9 @@ public:
     void setOutputRoot(QString outputRoot, bool sessionLayout = false);
     // Finish a specific watch after earlier evidence jobs have drained.
     void finishReport(QString folder, std::function<void(QString, QString)> finished);
+    // Called once earlier jobs finish or the writer stops. May run on the
+    // writer thread or the caller's thread if the writer has already ended.
+    void afterQueued(std::function<void()> finished);
     // Before the first submit. Replaces the drive query, for tests.
     void setFreeSpace(FreeSpace freeSpace);
     [[nodiscard]] WriterUsage usage() const;
@@ -158,6 +161,7 @@ private:
         bool sessionLayout{false};
         QString folder, fileName;
         std::function<void(QString, QString)> reportFinished;
+        std::function<void()> drained;
         std::optional<SessionStart> sessionStart;
         bool guiding{false};
         QString guidingLines;

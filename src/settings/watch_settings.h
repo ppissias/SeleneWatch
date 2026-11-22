@@ -42,6 +42,7 @@ struct WatchTimelapse
 void saveWatch(Watch watch);
 
 [[nodiscard]] DetectionSettings savedDetectionSettings(Watch watch);
+[[nodiscard]] bool hasSavedDetectionSettings(Watch watch);
 void saveDetectionSettings(Watch watch, const DetectionSettings& settings);
 
 [[nodiscard]] CaptureSettings savedCaptureSettings(Watch watch);

@@ -519,6 +519,22 @@ void EventWriter::finishReport(QString folder, std::function<void(QString, QStri
     ready_.notify_one();
 }
 
+void EventWriter::afterQueued(std::function<void()> finished)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (!ended_)
+        {
+            Job job;
+            job.drained = std::move(finished);
+            queue_.push_back(std::move(job));
+            ready_.notify_one();
+            return;
+        }
+    }
+    finished();
+}
+
 void EventWriter::logRecord(QString lines, QString folder, QString fileName)
 {
     bool ended = false;
@@ -632,6 +648,8 @@ void EventWriter::run(std::stop_token stopToken)
         usage_.retainedBytes = 0;
         usage_.outstandingClips = 0;
     }
+    for (auto& job : abandoned)
+        if (job.drained) job.drained();
 }
 
 void EventWriter::writeQueuedJobs(std::stop_token stopToken)
@@ -650,6 +668,12 @@ void EventWriter::writeQueuedJobs(std::stop_token stopToken)
             }
             job = std::move(queue_.front());
             queue_.pop_front();
+        }
+
+        if (job.drained)
+        {
+            job.drained();
+            continue;
         }
 
         if (job.reportFinished)

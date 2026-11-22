@@ -133,6 +133,13 @@ void saveDetectionSettings(Watch watch, const DetectionSettings& settings)
     saved.sync();
 }
 
+bool hasSavedDetectionSettings(Watch watch)
+{
+    QSettings saved;
+    saved.beginGroup(detectionGroup(watch));
+    return !saved.childKeys().isEmpty();
+}
+
 CaptureSettings savedCaptureSettings(Watch watch)
 {
     const QSettings saved;

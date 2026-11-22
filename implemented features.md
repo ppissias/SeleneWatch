@@ -41,6 +41,8 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-34 — Auto-tune sets the camera itself](#feature-34--auto-tune-sets-the-camera-itself)
 - [Feature-35 — Two ways to watch the sky](#feature-35--two-ways-to-watch-the-sky)
 - [Feature-36 — A time-lapse beside the slow sky watch](#feature-36--a-time-lapse-beside-the-slow-sky-watch)
+- [Feature-37 — Transit watch between lunar time-lapse bursts](#feature-37--transit-watch-between-lunar-time-lapse-bursts)
+- [Feature-38 — Switch observing watches during Preview](#feature-38--switch-observing-watches-during-preview)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3249,3 +3251,26 @@ Built on 22 November 2026.
 **Not done.** The real-window test `tests\gui_e2e_test.ps1` was not run.
 
 **Pending:** a night outside with the slow sky and the time-lapse on, ideally from dusk, with the exposure follower on.
+
+## Feature-37 — Transit watch between lunar time-lapse bursts
+
+The observer wants one lunar time-lapse that also preserves unexpected silhouettes crossing the sunlit Moon. A short crossing can fall between sampled bursts or disappear during frame selection and stacking. In an isolated benchmark the Mini's measured 1280 × 960 RAW8 rate of 28 fps supported both jobs. At 2560 × 1920 RAW16, concurrent capture reached the 2 GiB RAM limit at 30 and 60 fps. Alternating completed the bursts. A 10-second burst plus stacking occupied about 13 seconds at the smaller size and about 24–36 seconds at the larger size. The observer chose explicit best-effort transit coverage and priority for the time-lapse.
+
+- **Also watch for transits** is an opt-in on the Moon time-lapse panel, off initially. It uses the saved **The Moon: shadows on the sunlit side** detector settings and Moon clip settings. Built-in defaults work on a new installation. **Configure transit detection…** opens the existing controls in Preview so the observer can check or adjust them. The time-lapse uses the exposure and gain already set on its stream.
+- The one camera stream and guiding continue through both activities. The transit detector and ring work in the gaps. They pause during burst collection and while a stack is queued, processed, or written. Reset the reference and history at the pause so a moved image or an old clip lead-up cannot cross the gap. The normal Monitoring mode keeps its continuous coverage rule.
+- When a burst is due while a transit clip is collecting or saving, let the clip finish its tail and disk write. Give that burst up to five seconds of grace. Run a delayed burst for its full capture window if it fits before the next scheduled burst. If it cannot begin within grace or fit, log the skip and keep the next scheduled time. The frame path never waits on the writer. A failed write becomes a recorded outcome and releases the wait.
+- Show whether transit watching is active, saving, or paused. Record pause and resume times alongside the saved and unsaved candidate outcomes. Keep timestamped native clips under the time-lapse session, and offer **Open transit clips** when the run finishes. Stop closes the active clip and hands off the evidence even if a tail is incomplete.
+
+**Acceptance.** An injected crossing in a gap makes a native SER clip with its lead-up and tail. An injected crossing during a burst makes no candidate and sits inside a logged pause. A clip crossing the scheduled start delays the burst until its writer finishes. A clip occupying the grace interval skips just that period. Verify the Moon-only control, saved/default settings, and normal plain time-lapse and Monitoring behaviour. Field-check the coverage and throughput with a real sunlit lunar stream.
+
+**Status & verification (22 November 2026).** Implemented across `Session`, `TimelapseSession`, `TimelapseSettings`, `EventWriter`, `watch_settings`, `MainWindow`, and `TimelapsePanel`. Debug build and full 25/25 CTest suite passed (`manual_capture`, `timelapse`, `ui`, `dependency_rules`). Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`). Field check with a real sunlit lunar stream remains open in `features.md`.
+
+## Feature-38 — Switch observing watches during Preview
+
+Allow **Watching** to switch between Moon flashes, Moon shadows, and both sky watches while a live Preview is running. Stay in Preview on the same camera or playback stream. Apply the chosen watch's saved detector and display settings, clear stale detection and history, and offer the Moon time-lapse controls again when a Moon watch is selected. Starting the time-lapse from a Moon Preview remains a separate action.
+
+Keep the selection locked in Monitoring and Time-lapse, through pending transitions, and during a Preview recording so its provenance and the current guide and camera workflow stay consistent. A Preview watch change invalidates an in-progress Auto-tune measurement. Choosing a watch keeps the camera's active controls and readback; each target's stored camera profile remains available when reopening a stream. Crossing between Moon and sky applies the existing target-specific guiding and pointing controls.
+
+**Acceptance.** Switch Moon → sky → Moon shadows on a running Preview, check the loaded settings, source continuity and control availability, and confirm the next Monitoring run uses the chosen watch. Verify the locks during recording, Monitoring and time-lapse.
+
+**Status & verification (22 November 2026).** Implemented in `Session::requestPreviewWatch` / `applyPreviewWatch` and `MainWindow::onWatchRequested` / `updateControls`. Debug build and full 25/25 CTest suite passed (`UiTest::watchesCanChangeInPreviewAndTransitControlsFollowTheMoon`). Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).

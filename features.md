@@ -2,7 +2,7 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-36 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-38 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
@@ -42,8 +42,6 @@ Let the observer step through candidates using the existing overviews and animat
 - Exercise Preview and Monitoring with continuous recording both on and off. In each combination the banner correctly names both activities, including after recording stops or fails.
 - Review a watch with zero candidates and a watch containing a known interruption, a saved clip and an unsaved candidate. The observer can account for each outcome, open a saved preview and find their follow-up mark after reopening the night.
 - Make a representative earthshine recording the next lunar validation milestone. Replay the same span with candidate settings under consideration for Feature-26. Count candidates and clips requiring review on the original data. In separate marked trials, report flashes recovered out of those injected, with their positions, amplitudes and durations. Use both measurements when choosing an observing profile. [Open lunar calibration work](docs/feature-9-validation.md)
-
----
 
 ---
 
@@ -98,3 +96,4 @@ What each implemented feature still needs outside the tests. Grouped by the kind
 | Night sky | Feature-35 | A night with each sky watch: the fast one at 40 ms on meteors, the slow one's detection defaults (background over 10 s, release after 60 s) on real frames. |
 | Night sky | Feature-36 | The slow sky's time-lapse from dusk with the follower on: the frames, the video's stretch through the night, and the disk use. |
 | Overnight | Feature-18 | A Moon and a planet time-lapse at the telescope. |
+| Moon, sunlit | Feature-37 | A Moon time-lapse with **Also watch for transits** on a real sunlit lunar stream: gap coverage, throughput, burst grace, and saved clips. |

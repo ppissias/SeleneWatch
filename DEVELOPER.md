@@ -230,6 +230,7 @@ ctest --test-dir out/build/debug --output-on-failure
 ```
 
 - [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for the source folders' dependency directions (`dependency_rules`), each watch's saved settings (`watch_settings`), core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`, `auto_tune`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
+- `manual_capture` checks that a Moon time-lapse saves a transit in an idle gap, delays the next burst for its clip, and finishes an open clip at Stop. `timelapse` covers grace expiry and cadence. `ui` covers live Preview watch changes, settings, and the Moon-only transit controls.
 - Camera tests run against deterministic boundary implementations (`FakeZwoApi`, `FakeQhyApi`, `FakePlayerOneApi`, `FakeToupTekApi`) and never open physical hardware.
 - Window and offscreen rendering tests set `QT_QPA_PLATFORM=offscreen` and isolate QSettings under a test namespace.
 - CTest invokes Qt Test targets with `-o -,tap` so test output reaches stdout on Windows even when launched without an attached console.

@@ -152,7 +152,7 @@ private:
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
     // Feature-28: what the next drag on the preview draws. Only one at a time.
-    enum class Drawing { LockBox, EarthshineBox, Anchor, Mask };
+    enum class Drawing { None, LockBox, EarthshineBox, Anchor, Mask };
     void chooseDrawing(Drawing drawing);
 public:
     // Feature-15: closes the mask shape whose corners were clicked; the

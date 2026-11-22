@@ -64,6 +64,8 @@ public:
 
     [[nodiscard]] size_t bufferSize() const;
     [[nodiscard]] RingUsage historyUsage() const;
+    // Source thread only. A clip is still collecting frames.
+    [[nodiscard]] bool collectingClip() const { return collecting_; }
 
 private:
     // Without history the clip starts empty and takes the next frames.

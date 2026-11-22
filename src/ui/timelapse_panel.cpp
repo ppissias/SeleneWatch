@@ -4,6 +4,8 @@
 #include <QtCore/QSettings>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QPixmap>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -147,6 +149,18 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         "one night. Turning it on asks for confirmation, and it is off again each time SeleneWatch starts.");
     form->addRow(saveRawSer_);
 
+    watchTransits_ = new QCheckBox("Also watch for transits", body);
+    watchTransits_->setObjectName("timelapseWatchTransits");
+    watchTransits_->setToolTip("Watch for crossings between time-lapse bursts and save triggered clips in native SER. Watching pauses during burst capture and stacking.");
+    form->addRow(watchTransits_);
+    transitHelp_ = new QLabel(body);
+    transitHelp_->setWordWrap(true);
+    form->addRow(transitHelp_);
+    configureTransits_ = new QPushButton("Configure transit detection…", body);
+    configureTransits_->setObjectName("timelapseConfigureTransits");
+    configureTransits_->setToolTip("Opens the shadows watch in the Detection dock. Use Preview to check the settings on the current stream.");
+    form->addRow(configureTransits_);
+
     estimateLabel_ = new QLabel(body);
     estimateLabel_->setObjectName("timelapseEstimate");
     estimateLabel_->setWordWrap(true);
@@ -163,6 +177,14 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     btnRow->addWidget(startStopButton_, 1);
     btnRow->addWidget(resharpenButton_);
     root->addLayout(btnRow);
+    openTransitsButton_ = new QPushButton("Open transit clips", body);
+    openTransitsButton_->setObjectName("timelapseOpenTransits");
+    openTransitsButton_->setToolTip("Opens the finished session's transit clips and candidate log.");
+    openTransitsButton_->hide();
+    root->addWidget(openTransitsButton_);
+    connect(openTransitsButton_, &QPushButton::clicked, this, [this] {
+        if (!lastTransitFolder_.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(lastTransitFolder_));
+    });
 
     auto* liveBox = new QGroupBox("Session progress && preview", body);
     auto* liveLayout = new QVBoxLayout(liveBox);
@@ -176,6 +198,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     timingLabel_->setObjectName("timelapseTiming");
     timingLabel_->setWordWrap(true);
     liveLayout->addWidget(timingLabel_);
+    transitStatus_ = new QLabel(liveBox);
+    transitStatus_->setObjectName("timelapseTransitStatus");
+    transitStatus_->setWordWrap(true);
+    transitStatus_->hide();
+    liveLayout->addWidget(transitStatus_);
 
     statsLabel_ = new QLabel(liveBox);
     statsLabel_->setObjectName("timelapseStats");
@@ -241,10 +268,12 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     refreshProfiles();
     loadFromQSettings();
+    updateTransitControls();
 
     connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
         if (updating_) return;
         applyPresetDefaults(static_cast<TimelapsePreset>(preset_->currentData().toInt()));
+        updateTransitControls();
         saveToQSettings();
         updateEstimates();
     });
@@ -278,6 +307,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     connect(saveRawSer_, &QCheckBox::clicked, this, [this](bool checked) {
         if (checked && !confirmRawSer()) saveRawSer_->setChecked(false);
     });
+    connect(watchTransits_, &QCheckBox::toggled, this, [this] {
+        if (!updating_) saveToQSettings();
+        updateTransitControls();
+    });
+    connect(configureTransits_, &QPushButton::clicked, this, &TimelapsePanel::configureTransitsRequested);
 
     connect(selectAnchor_, &QToolButton::toggled, this, &TimelapsePanel::anchorSelectionChanged);
     connect(clearAnchor_, &QPushButton::clicked, this, [this] {
@@ -342,6 +376,7 @@ TimelapseSettings TimelapsePanel::settings() const
     s.stopKind = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
     s.targetStacks = targetStacks_->value();
     s.saveRawSer = saveRawSer_->isChecked();
+    s.watchTransits = moonWatch_ && s.preset == TimelapsePreset::Moon && watchTransits_->isChecked();
 
     const QString key = sharpening_->currentData().toString();
     if (key == "preset:off") s.sharpening = sharpeningForPreset(SharpeningPreset::Off);
@@ -388,8 +423,32 @@ void TimelapsePanel::setSettings(const TimelapseSettings& s)
     writeGif_->setChecked(s.video.writeGif);
     videoFps_->setValue(s.video.fps);
     saveRawSer_->setChecked(s.saveRawSer);
+    watchTransits_->setChecked(s.watchTransits);
     updating_ = false;
+    updateTransitControls();
     updateEstimates();
+}
+
+void TimelapsePanel::setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable)
+{
+    moonWatch_ = moonWatch;
+    transitSettingsSaved_ = hasSavedSettings;
+    transitEditable_ = editable;
+    updateTransitControls();
+}
+
+void TimelapsePanel::updateTransitControls()
+{
+    const bool available = moonWatch_ && preset_->currentData().toInt() == static_cast<int>(TimelapsePreset::Moon);
+    const bool selected = available && watchTransits_->isChecked();
+    watchTransits_->setVisible(available);
+    watchTransits_->setEnabled(transitEditable_);
+    transitHelp_->setVisible(selected);
+    transitHelp_->setText(transitSettingsSaved_
+        ? "Uses your saved The Moon: shadows on the sunlit side settings. Watching pauses during burst capture and stacking."
+        : "Using default transit settings. Watching pauses during burst capture and stacking.");
+    configureTransits_->setVisible(selected);
+    configureTransits_->setEnabled(transitEditable_);
 }
 
 void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording, bool timeLapsing,
@@ -526,6 +585,18 @@ bool TimelapsePanel::confirmRawSer()
 void TimelapsePanel::updateStatus(const TimelapseStatus& s)
 {
     if (!s.sessionDir.isEmpty()) lastSessionDir_ = s.sessionDir;
+    QString transit;
+    switch (s.transitWatch)
+    {
+    case TransitWatchState::Off: break;
+    case TransitWatchState::Watching: transit = "Watching for transits"; break;
+    case TransitWatchState::Saving: transit = "Saving transit clip"; break;
+    case TransitWatchState::Capturing: transit = "Transit watch paused · capturing burst"; break;
+    case TransitWatchState::Stacking: transit = "Transit watch paused · stacking"; break;
+    case TransitWatchState::Finished: transit = "Transit watch ended"; break;
+    }
+    transitStatus_->setText(transit);
+    transitStatus_->setVisible(!transit.isEmpty());
 
     if (s.finalizing)
     {
@@ -611,6 +682,9 @@ void TimelapsePanel::onSessionFinished(const TimelapseFinishResult& result)
 {
     filmstripTimer_->stop();
     if (!result.sessionDir.isEmpty()) lastSessionDir_ = result.sessionDir;
+    lastTransitFolder_ = result.transitFolder;
+    openTransitsButton_->setVisible(!lastTransitFolder_.isEmpty());
+    transitStatus_->hide();
     progressBar_->setRange(0, 100);
     progressBar_->setValue(result.stacksCompleted > 0 ? 100 : 0);
     timingLabel_->setText(QString("Finished (%1). %2 stacks, %3 skipped.")
@@ -634,6 +708,9 @@ void TimelapsePanel::clearRunVisuals()
     filmstripThumb_->setText("--");
     filmstripInfo_->setText("0 stacks");
     warningLabel_->hide();
+    transitStatus_->hide();
+    lastTransitFolder_.clear();
+    openTransitsButton_->hide();
     statsLabel_->clear();
     timingLabel_->setText("Running…");
     progressBar_->setRange(0, 100);
@@ -676,6 +753,7 @@ void TimelapsePanel::loadFromQSettings()
     // Raw SER bursts are never remembered: each run asks again (and an older
     // saved choice is dropped).
     saveRawSer_->setChecked(false);
+    watchTransits_->setChecked(saved.value("watchTransits", false).toBool());
     saved.remove("saveRawSer");
     saved.endGroup();
     updating_ = false;
@@ -697,5 +775,6 @@ void TimelapsePanel::saveToQSettings() const
     saved.setValue("writeMp4", writeMp4_->isChecked());
     saved.setValue("writeGif", writeGif_->isChecked());
     saved.setValue("videoFps", videoFps_->value());
+    saved.setValue("watchTransits", watchTransits_->isChecked());
     saved.endGroup();
 }

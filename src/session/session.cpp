@@ -1,6 +1,7 @@
 #include "session/session.h"
 
 #include "session/clock_check.h"
+#include "detection/target_defaults.h"
 #include "recording/metadata_text.h"
 #include "recording/output_paths.h"
 #include "selenewatch_version.h"
@@ -41,7 +42,9 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
               if (recordingKnown_ && !clip.frames.empty() && clip.frames.front()->frameIndex <= recordingLastIndex_
                   && clip.frames.back()->frameIndex >= recordingFirstIndex_)
                   clip.duringRecording = recordingName_;
-              writer_.submit(std::move(clip));
+               if (!transitFolder_.isEmpty()) ++transitWrites_;
+               writer_.submit(std::move(clip));
+               if (!transitFolder_.isEmpty()) writer_.afterQueued([this] { --transitWrites_; });
           }, {}, memory_)
     , guider_(writer_, [this] { post(notifications_.lockChanged); })
     , outputRoot_(std::move(outputRoot))
@@ -269,7 +272,7 @@ void Session::startClockCheck()
 bool Session::requestRecording(bool record, uint64_t maxFrames)
 {
     std::lock_guard lock(requestMutex_);
-    if (!running_ || sourceFinished_.load() || mode_.load() == Mode::TimeLapse) return false;
+    if (!running_ || sourceFinished_.load() || mode_.load() == Mode::TimeLapse || previewWatchRequest_) return false;
     recordRequest_ = record;
     recordMaxFrames_ = record ? maxFrames : 0;
     return true;
@@ -308,6 +311,7 @@ void Session::updateRecording(const FramePtr& frame)
     {
         std::lock_guard lock(requestMutex_);
         request = recordRequest_;
+        recordStarting_ = request.value_or(false);
         requestMaxFrames = recordMaxFrames_;
         recordRequest_.reset();
         recordMaxFrames_ = 0;
@@ -340,11 +344,13 @@ void Session::updateRecording(const FramePtr& frame)
             recording_ = false;
             scheduledRecording_ = false;
         }
+        if (request.value_or(false)) { std::lock_guard lock(requestMutex_); recordStarting_ = false; }
         return;
     }
     if (request && *request)
     {
         beginRecording(frame, "the observer", requestMaxFrames);
+        { std::lock_guard lock(requestMutex_); recordStarting_ = false; }
         return;
     }
     if (!monitoring) return;
@@ -517,17 +523,24 @@ void Session::stop(std::string reason, bool resumeWatch)
         post(notifications_.autoTuneChanged);
     }
     capture_.finishPartial(reason);
+    closeTransitWatch(reason);
     closeWatch(QString::fromStdString(reason), resumeWatch);
     blip_.reset();
     running_ = false;
     mode_.store(Mode::Stopped);
-    { std::lock_guard lock(requestMutex_); monitoringRequest_.reset(); }
+    {
+        std::lock_guard lock(requestMutex_);
+        monitoringRequest_.reset();
+        previewWatchRequest_.reset();
+        recordRequest_.reset();
+        recordStarting_ = false;
+    }
 }
 
 bool Session::requestMonitoring(bool monitoring)
 {
     std::lock_guard lock(requestMutex_);
-    if (!running_ || sourceFinished_.load() || monitoringRequest_
+    if (!running_ || sourceFinished_.load() || monitoringRequest_ || previewWatchRequest_
         || mode_.load() == Mode::TimeLapse || (monitoring && cameraTuned_)) return false;
     monitoringRequest_ = monitoring;
     return true;
@@ -537,7 +550,60 @@ Session::Mode Session::mode() const { return mode_.load(); }
 bool Session::modeChangePending() const
 {
     std::lock_guard lock(requestMutex_);
-    return monitoringRequest_.has_value();
+    return monitoringRequest_.has_value() || previewWatchRequest_.has_value();
+}
+
+bool Session::canChangePreviewWatchLocked() const
+{
+    return running_ && mode_.load() == Mode::Preview && !sourceFinished_.load()
+        && !monitoringRequest_ && !previewWatchRequest_ && !recordRequest_ && !recordStarting_ && !recorder_.status().active;
+}
+
+bool Session::canChangePreviewWatch() const
+{
+    std::lock_guard lock(requestMutex_);
+    return canChangePreviewWatchLocked();
+}
+
+bool Session::previewWatchChangePending() const
+{
+    std::lock_guard lock(requestMutex_);
+    return previewWatchRequest_.has_value();
+}
+
+bool Session::requestPreviewWatch(Watch watch, const DetectionSettings& detection, CaptureSettings capture)
+{
+    if (!detection.valid() || !capture.valid() || capture.target != watchTarget(watch)) return false;
+    std::lock_guard lock(requestMutex_);
+    if (!canChangePreviewWatchLocked()) return false;
+    previewWatchRequest_ = PreviewWatch{watch, detection, capture};
+    return true;
+}
+
+bool Session::applyPreviewWatch()
+{
+    {
+        std::lock_guard lock(requestMutex_);
+        if (!previewWatchRequest_) return true;
+        const auto& next = *previewWatchRequest_;
+        capture_.reset();
+        (void)previewSlot_.take();
+        // An older evidence job may still own buffers. Leave the change queued
+        // until those readers drain if the observer chose a lower ceiling.
+        if (captureSettings_.memoryBytes != next.capture.memoryBytes && !memory_.setLimit(next.capture.memoryBytes))
+            return false;
+        captureSettings_ = next.capture;
+        watch_ = next.watch;
+        detectionSettings_ = next.detection;
+        budgetPrepared_ = false;
+        previewWatchRequest_.reset();
+    }
+    lastPreviewTime_ = {};
+    blip_.reset();
+    writer_.setOutputRoot(eventsRoot());
+    cancelAutoTune("The observing watch changed.");
+    post(notifications_.modeChanged);
+    return true;
 }
 
 void Session::applyModeRequest()
@@ -681,6 +747,7 @@ void Session::setDetectionSettings(const DetectionSettings& settings)
 {
     if (!settings.valid()) throw std::invalid_argument("invalid detection settings");
     std::lock_guard<std::mutex> lock(requestMutex_);
+    if (previewWatchRequest_) previewWatchRequest_->detection = settings;
     detectionSettings_ = settings;
 }
 
@@ -693,18 +760,30 @@ void Session::setDetectionDisplay(DetectionOverlay overlay, int probeX, int prob
 }
 
 bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
-    FreeSpaceQuery freeSpace, std::chrono::milliseconds stackDelay)
+    FreeSpaceQuery freeSpace, std::chrono::milliseconds stackDelay, std::optional<DetectionSettings> transitDetection)
 {
     if (!settings.valid())
     {
         error = "invalid time-lapse settings";
         return false;
     }
-    if (mode_.load() == Mode::Monitoring || modeChangePending() || recordingStatus().active)
+    if (mode_.load() == Mode::Monitoring || modeChangePending() || recordingStatus().active
+        || (running_ && sourceFinished()))
     {
         error = "stop Monitoring and recording before starting a time-lapse";
         return false;
     }
+    if (settings.watchTransits)
+    {
+        if (captureSettings_.target != Target::Moon || (transitDetection && !transitDetection->valid()))
+        {
+            error = "choose a Moon watch with valid transit settings";
+            return false;
+        }
+        transitDetection = settingsForWatch(transitDetection.value_or(defaultDetectionSettings(Watch::MoonShadows)),
+            Watch::MoonShadows);
+    }
+    else transitDetection.reset();
     uint64_t tlId = 0;
     {
         std::lock_guard lock(timelapseMutex_);
@@ -719,13 +798,6 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
     {
         if (!start(error, Mode::Preview)) return false;
     }
-    else
-    {
-        // Never mutate EventCapture on the GUI thread while the source thread is streaming;
-        // defer the reset to the source thread on the next non-timelapse frame.
-        captureResetRequested_.store(true);
-    }
-
     TimelapseSession::Config cfg;
     cfg.timelapsesRoot = timelapsesFolder();
     cfg.settings = settings;
@@ -741,31 +813,14 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
     if (gStatus.lock.state == LockState::Locked)
         cfg.lockRegion = gStatus.lock.region;
     cfg.freeSpace = std::move(freeSpace);
-    cfg.statusChanged = notifications_.timeLapseChanged;
-    cfg.finished = [this, tlId](const TimelapseFinishResult& res) {
-        bool clearedActive = false;
-        {
-            std::lock_guard lock(timelapseMutex_);
-            if (activeTimelapseId_ == tlId)
-            {
-                timelapse_.reset();
-                activeTimelapseId_ = 0;
-                clearedActive = true;
-            }
-            finishingTimelapses_.erase(
-                std::remove_if(finishingTimelapses_.begin(), finishingTimelapses_.end(),
-                    [tlId](const auto& entry) { return entry.first == tlId; }),
-                finishingTimelapses_.end());
-        }
-        if (clearedActive && running_ && mode_.load() == Mode::TimeLapse)
-        {
-            mode_.store(Mode::Preview);
-        }
-        post(notifications_.modeChanged);
-        if (notifications_.timeLapseFinished) notifications_.timeLapseFinished(res);
+    if (settings.watchTransits) cfg.beforeBurst = [this] { capture_.reset(); };
+    cfg.statusChanged = [this](TimelapseStatus status) {
+        status.transitWatch = transitState_.load();
+        if (notifications_.timeLapseChanged) notifications_.timeLapseChanged(status);
     };
+    cfg.finished = [this, tlId](const TimelapseFinishResult& res) { finishTimeLapse(tlId, res); };
 
-    auto tl = std::make_shared<TimelapseSession>(context_, std::move(cfg));
+    auto tl = std::make_shared<TimelapseSession>(&timeLapseCallbacks_, std::move(cfg));
     if (!tl->valid())
     {
         error = tl->initError();
@@ -776,10 +831,39 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
         std::lock_guard lock(timelapseMutex_);
         timelapse_ = tl;
         activeTimelapseId_ = tlId;
+        transitDetection_ = std::move(transitDetection);
+        transitDraining_ = transitDetection_.has_value();
     }
+    transitState_.store(TransitWatchState::Off);
+    captureResetRequested_.store(true);
     mode_.store(Mode::TimeLapse);
     post(notifications_.modeChanged);
     return true;
+}
+
+void Session::finishTimeLapse(uint64_t id, TimelapseFinishResult result)
+{
+    bool clearedActive = false;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        if (transitDraining_)
+        {
+            transitFinish_.emplace(id, std::move(result));
+            return;
+        }
+        if (activeTimelapseId_ == id)
+        {
+            timelapse_.reset();
+            activeTimelapseId_ = 0;
+            clearedActive = true;
+        }
+        std::erase_if(finishingTimelapses_, [id](const auto& entry) { return entry.first == id; });
+    }
+    if (clearedActive && running_ && mode_.load() == Mode::TimeLapse) mode_.store(Mode::Preview);
+    const QString transitFolder = QDir(result.sessionDir).filePath("transits");
+    if (QFileInfo::exists(transitFolder)) result.transitFolder = transitFolder;
+    post(notifications_.modeChanged);
+    if (notifications_.timeLapseFinished) notifications_.timeLapseFinished(result);
 }
 
 void Session::stopTimeLapse(const std::string& reason)
@@ -829,41 +913,122 @@ bool Session::timeLapseFinalizing() const
 TimelapseStatus Session::timeLapseStatus() const
 {
     std::lock_guard lock(timelapseMutex_);
-    if (timelapse_) return timelapse_->status();
-    if (!finishingTimelapses_.empty() && finishingTimelapses_.back().second)
-        return finishingTimelapses_.back().second->status();
-    return TimelapseStatus{};
+    TimelapseStatus status;
+    if (timelapse_) status = timelapse_->status();
+    else if (!finishingTimelapses_.empty()) status = finishingTimelapses_.back().second->status();
+    status.transitWatch = transitState_.load();
+    return status;
 }
 
-// From the moment the frame is held as a FramePtr it is published: nobody
-// writes it again. Test injection is the last write before publication.
-void Session::onFrame(std::shared_ptr<Frame> frame)
+void Session::openTransitWatch(const QString& parent)
 {
-    applyModeRequest();
+    std::lock_guard lock(timelapseMutex_);
+    if (!transitDetection_ || !transitFolder_.isEmpty()) return;
+    transitFolder_ = QDir(parent).filePath("transits");
+    capture_.reset();
+    capture_.setDetectionSettings(*transitDetection_);
+    capture_.setMonitoring(true);
+    writer_.setOutputRoot(transitFolder_, true);
+    std::lock_guard requestLock(requestMutex_);
+    writer_.logSessionStart(streamInfo_, site_, clockRecord_, testingTools_);
+}
+
+void Session::setTransitState(TransitWatchState state, std::chrono::system_clock::time_point utc)
+{
+    const auto previous = transitState_.exchange(state);
+    if (previous == state) return;
+    const auto watching = [](TransitWatchState value) {
+        return value == TransitWatchState::Watching || value == TransitWatchState::Saving;
+    };
+    QString line;
+    if (state == TransitWatchState::Finished) line = "transit_end";
+    else if (watching(state) && !watching(previous)) line = "transit_resume";
+    else if (!watching(state) && (watching(previous) || previous == TransitWatchState::Off))
+        line = "transit_pause reason=time-lapse";
+    if (!line.isEmpty())
+        writer_.logRecord(utcText(utc) + " " + line + "\n", transitFolder_, "session.txt");
+}
+
+void Session::updateTransitWatch(const FramePtr& frame, TimelapseWork work)
+{
+    if (transitFolder_.isEmpty()) return;
+    transitFrameUtc_ = frame->timestamp;
+    if (work != TimelapseWork::Idle)
+    {
+        setTransitState(work == TimelapseWork::Capturing ? TransitWatchState::Capturing : TransitWatchState::Stacking,
+            frame->timestamp);
+        return;
+    }
+    capture_.onFrame(frame);
+    setTransitState(capture_.collectingClip() || transitWrites_.load() ? TransitWatchState::Saving : TransitWatchState::Watching,
+        frame->timestamp);
+}
+
+void Session::closeTransitWatch(const std::string& reason)
+{
+    {
+        std::lock_guard lock(timelapseMutex_);
+        if (!transitDetection_) return;
+        transitDetection_.reset();
+    }
+    if (!transitFolder_.isEmpty())
+    {
+        capture_.finishPartial(reason);
+        capture_.setMonitoring(false);
+        capture_.reset();
+        setTransitState(TransitWatchState::Finished, transitFrameUtc_);
+        transitFolder_.clear();
+        writer_.setOutputRoot(eventsRoot());
+    }
+    writer_.afterQueued([this] {
+        QMetaObject::invokeMethod(&timeLapseCallbacks_, [this] {
+            std::optional<std::pair<uint64_t, TimelapseFinishResult>> pending;
+            {
+                std::lock_guard lock(timelapseMutex_);
+                transitDraining_ = false;
+                pending = std::exchange(transitFinish_, std::nullopt);
+            }
+            if (pending) finishTimeLapse(pending->first, std::move(pending->second));
+        }, Qt::QueuedConnection);
+    });
+}
+
+void Session::prepareCaptureBudget(const Frame& frame)
+{
     if (!budgetPrepared_)
     {
         // Reserve for mean/variance, two maps/differences, GUI/writer images,
         // incoming/spare frames, and bounded sparse work before sharing the
         // rest between the open clip and all writer-held clips.
-        const size_t pixels = static_cast<size_t>(frame->width) * frame->height;
+        const size_t pixels = static_cast<size_t>(frame.width) * frame.height;
         const size_t working = std::max(captureSettings_.memoryBytes / 5,
-            pixels * 32 + frame->data.capacity() * 5 + size_t{4} * 1024 * 1024);
+            pixels * 32 + frame.data.capacity() * 5 + size_t{4} * 1024 * 1024);
         if (working >= captureSettings_.memoryBytes) throw std::runtime_error("RAM ceiling too small for this frame layout and processing reserve; increase it");
         const size_t half = (captureSettings_.memoryBytes - working) / 2;
-        const size_t previewAndNextFrame = pixels * sizeof(float) + frame->data.capacity();
+        const size_t previewAndNextFrame = pixels * sizeof(float) + frame.data.capacity();
         if (previewAndNextFrame >= half) throw std::runtime_error("RAM ceiling leaves too little room for a frame and its difference; increase it");
         capture_.configure(captureSettings_, half - previewAndNextFrame, half / 2);
         writer_.setByteLimit(half);
         // A recording's backlog mostly shares its frames with the ring; past
         // the ring's allowance the disk is not keeping up (Feature-14).
         recordingQueueBytes_ = half / 2;
-        const size_t sized = pixels * 32 + frame->data.capacity() * 5 + size_t{4} * 1024 * 1024;
+        const size_t sized = pixels * 32 + frame.data.capacity() * 5 + size_t{4} * 1024 * 1024;
         tuneSpareBytes_.store(working > sized ? working - sized : 0);
         budgetPrepared_ = true;
     }
+}
+
+// From the moment the frame is held as a FramePtr it is published: nobody
+// writes it again. Test injection is the last write before publication.
+void Session::onFrame(std::shared_ptr<Frame> frame)
+{
+    const bool watchReady = applyPreviewWatch();
+    applyModeRequest();
     acquiredFrames_.fetch_add(1, std::memory_order_relaxed);
     if (frame->sourceDroppedFrames) droppedFrames_.store(*frame->sourceDroppedFrames);
     dropsKnown_.store(frame->sourceDroppedFrames.has_value());
+    if (!watchReady) return;
+    prepareCaptureBudget(*frame);
 
     if (mode_.load() == Mode::TimeLapse)
     {
@@ -877,14 +1042,19 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
             tuneWatch_.stopped("a time-lapse started");
             post(notifications_.autoTuneChanged);
         }
+        if (captureResetRequested_.exchange(false)) capture_.reset();
         const FramePtr published = std::move(frame);
-        if (activeTl && activeTl->active()) activeTl->onFrame(published);
-        guider_.offer(published, false);
         if (activeTl && activeTl->active())
         {
+            if (transitFolder_.isEmpty()) openTransitWatch(activeTl->sessionDir());
+            const TimelapseWork work = activeTl->onFrame(published, capture_.collectingClip() || transitWrites_.load());
+            if (activeTl->active()) updateTransitWatch(published, work);
+            else closeTransitWatch("time-lapse capture ended");
             const GuiderStatus gs = guider_.status();
             activeTl->setGuidingStatus(gs, gs.guide.mode == GuideMode::Guiding);
         }
+        else closeTransitWatch("time-lapse capture ended");
+        guider_.offer(published, !transitFolder_.isEmpty());
         const auto now = std::chrono::steady_clock::now();
         if (now - lastPreviewTime_ >= std::chrono::milliseconds{50})
         {
@@ -990,7 +1160,12 @@ void Session::onSettingsChanged(const StreamInfo& info, std::chrono::duration<do
     post(notifications_.cameraSettingsChanged);
 }
 
-void Session::onIdle() { applyModeRequest(); }
+void Session::onIdle()
+{
+    applyPreviewWatch();
+    applyModeRequest();
+    if (timeLapseFinalizing()) closeTransitWatch("time-lapse capture ended");
+}
 
 void Session::onEnded()
 {
@@ -1004,6 +1179,7 @@ void Session::onEnded()
     applyManualSave();
     endRecording("the source ended");
     capture_.finishPartial("source ended");
+    closeTransitWatch("source ended");
     closeWatch("source ended");
     if (tuneWatch_.busy())
     {
@@ -1025,6 +1201,7 @@ void Session::onFailed(const std::string& message)
     applyManualSave();
     endRecording("source failure: " + message);
     capture_.finishPartial("source failure: " + message);
+    closeTransitWatch("source failure: " + message);
     closeWatch("source failure: " + QString::fromStdString(message));
     const QString text = QString::fromStdString(message);
     if (notifications_.failed)

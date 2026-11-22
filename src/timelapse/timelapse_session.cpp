@@ -221,13 +221,13 @@ void TimelapseSession::discardCurrentBurstLocked()
     currentRamRefused_ = 0;
 }
 
-void TimelapseSession::onFrame(const FramePtr& frame)
+TimelapseWork TimelapseSession::onFrame(const FramePtr& frame, bool transitClipBusy)
 {
-    if (!accepting_.load(std::memory_order_acquire) || !frame) return;
+    if (!accepting_.load(std::memory_order_acquire) || !frame) return TimelapseWork::Idle;
 
     {
         std::lock_guard collectorLock(collectorMutex_);
-        if (!accepting_.load(std::memory_order_relaxed)) return;
+        if (!accepting_.load(std::memory_order_relaxed)) return TimelapseWork::Idle;
 
         if (!clockStarted_)
         {
@@ -247,7 +247,7 @@ void TimelapseSession::onFrame(const FramePtr& frame)
         if (collecting_ && tSec >= windowEndSec_)
             finishCurrentWindowLocked(/*allowAfterStop=*/false);
 
-        startNextWindowIfDueLocked(tSec, frame->timestamp);
+        startNextWindowIfDueLocked(tSec, frame->timestamp, transitClipBusy);
 
         if (collecting_)
         {
@@ -345,10 +345,37 @@ void TimelapseSession::onFrame(const FramePtr& frame)
             const int nextK = std::max(0, currentPeriodIndex_ + 1);
             status_.nextBurstInSeconds = collecting_ ? 0.0 : std::max(0.0, nextK * interval - tSec);
         }
+        if (collecting_) return TimelapseWork::Capturing;
+        return stackingOrQueued() ? TimelapseWork::Stacking : TimelapseWork::Idle;
     }
 }
 
-void TimelapseSession::startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow)
+bool TimelapseSession::stackingOrQueued() const
+{
+    std::lock_guard lock(mutex_);
+    return stacking_ || pendingJob_.has_value();
+}
+
+void TimelapseSession::skipPeriod(int period, std::chrono::system_clock::time_point utc, const QString& reason)
+{
+    currentPeriodIndex_ = period;
+    TimelapseStatus snap;
+    {
+        std::lock_guard lock(mutex_);
+        ++status_.periodsSkipped;
+        ++consecutiveSkips_;
+        status_.overloadWarning = true;
+        overloadWarningText_ = QString("Stack skipped (%1 skipped; %2).").arg(status_.periodsSkipped).arg(reason);
+        skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"%3\"")
+            .arg(period).arg(utcText(utc), reason));
+        refreshWarningTextLocked();
+        snap = status_;
+    }
+    postStatusSnapshot(std::move(snap));
+}
+
+void TimelapseSession::startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow,
+    bool transitClipBusy)
 {
     if (collecting_ || !accepting_.load(std::memory_order_relaxed)) return;
 
@@ -357,12 +384,13 @@ void TimelapseSession::startNextWindowIfDueLocked(double tSec, std::chrono::syst
     if (k <= currentPeriodIndex_) return;
 
     const double kStart = k * interval;
-    const double kWindowEnd = kStart + config_.settings.captureWindowSeconds;
+    double kWindowEnd = kStart + config_.settings.captureWindowSeconds;
+    const bool waitingForTransit = config_.settings.watchTransits && (transitClipBusy || deferredPeriod_ == k);
 
     // Record any intermediate periods skipped due to stalls or timestamp jumps
     // (capped at 1000 entries to guard against malformed timestamps).
     const int firstMissed = currentPeriodIndex_ + 1;
-    const int lastMissed = (tSec >= kWindowEnd) ? k : (k - 1);
+    const int lastMissed = (!waitingForTransit && tSec >= kWindowEnd) ? k : (k - 1);
     if (lastMissed >= firstMissed)
     {
         const int logCount = std::min(lastMissed - firstMissed + 1, 1000);
@@ -375,52 +403,52 @@ void TimelapseSession::startNextWindowIfDueLocked(double tSec, std::chrono::syst
             overloadWarningText_ = QString("Capture window missed (%1 skipped).").arg(status_.periodsSkipped);
             for (int m = firstMissed; m < firstMissed + logCount; ++m)
             {
-                skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"window missed\"")
-                    .arg(m).arg(utcText(utcNow)));
+                skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"%3\"")
+                    .arg(m).arg(utcText(utcNow), m == deferredPeriod_ ? "transit clip occupied burst grace" : "window missed"));
             }
             refreshWarningTextLocked();
             snap = status_;
         }
+        currentPeriodIndex_ = lastMissed;
         postStatusSnapshot(std::move(snap));
     }
 
-    if (tSec >= kWindowEnd)
+    if (waitingForTransit)
     {
-        currentPeriodIndex_ = k;
-        return;
+        constexpr double graceSeconds = 5;
+        const double latestStart = kStart + std::min(graceSeconds, interval - config_.settings.captureWindowSeconds);
+        if (tSec > latestStart + 1e-9 || (transitClipBusy && tSec >= latestStart - 1e-9))
+        {
+            skipPeriod(k, utcNow, "transit clip occupied burst grace");
+            return;
+        }
+        if (transitClipBusy)
+        {
+            deferredPeriod_ = k;
+            return;
+        }
+        kWindowEnd = tSec + config_.settings.captureWindowSeconds;
     }
+    else if (tSec >= kWindowEnd) return;
 
     // Pre-capture overload skip gate: skip period k immediately if the depth-1
     // pending slot is still occupied or memory is already tight.
     bool overload = false;
     {
         std::lock_guard lock(mutex_);
-        overload = pendingJob_.has_value();
+        overload = pendingJob_.has_value() || (config_.settings.watchTransits && stacking_);
     }
+    if (!overload && config_.beforeBurst) config_.beforeBurst();
     const MemoryUsage mem = config_.memory.usage();
     const bool memTight = mem.limit > 0 && mem.used >= (mem.limit * 9) / 10;
 
-    currentPeriodIndex_ = k;
     if (overload || memTight)
     {
-        const QString reason = overload ? "processing overload" : "memory limit";
-        TimelapseStatus snap;
-        {
-            std::lock_guard lock(mutex_);
-            ++status_.periodsSkipped;
-            ++consecutiveSkips_;
-            status_.overloadWarning = true;
-            overloadWarningText_ = QString("Processing fell behind interval (%1 skipped; %2).")
-                .arg(status_.periodsSkipped).arg(reason);
-            skippedLogs_.push_back(QString("skip period=%1 utc=%2 reason=\"%3\"")
-                .arg(k).arg(utcText(utcNow), reason));
-            refreshWarningTextLocked();
-            snap = status_;
-        }
-        postStatusSnapshot(std::move(snap));
+        skipPeriod(k, utcNow, overload ? "processing overload" : "memory limit");
         return;
     }
 
+    currentPeriodIndex_ = k;
     collecting_ = true;
     windowStartSec_ = kStart;
     windowEndSec_ = kWindowEnd;
@@ -613,6 +641,7 @@ void TimelapseSession::workerLoop(std::stop_token stopToken)
             {
                 job = std::move(pendingJob_);
                 pendingJob_.reset();
+                stacking_ = true;
             }
             else if (stopRequested_ || stopToken.stop_requested())
             {
@@ -634,10 +663,11 @@ void TimelapseSession::workerLoop(std::stop_token stopToken)
             job->frames.clear(); // Frees any raw copies before the bytes are released
             releaseBurstMemory(job->chargedBytes);
 
-            if (config_.settings.stopKind == StopConditionKind::StackCount)
             {
                 std::lock_guard lock(mutex_);
-                if (status_.stacksCompleted >= config_.settings.targetStacks)
+                stacking_ = false;
+                if (config_.settings.stopKind == StopConditionKind::StackCount
+                    && status_.stacksCompleted >= config_.settings.targetStacks)
                 {
                     accepting_.store(false);
                     requestStopLocked("target stack count reached", /*discardPending=*/true);
@@ -1098,6 +1128,7 @@ void TimelapseSession::writeMetadataLog(const QString& reason, const TimelapseEx
     out << "preset: " << timelapsePresetName(config_.settings.preset) << "\n";
     out << "interval_seconds: " << config_.settings.intervalSeconds << "\n";
     out << "capture_window_seconds: " << config_.settings.captureWindowSeconds << "\n";
+    if (config_.settings.watchTransits) out << "transit_watch: transits/session.txt\n";
     out << "keep_percent: " << config_.settings.keepPercent << "\n";
     out << "max_frames_per_period: " << config_.settings.maxFramesPerPeriod << "\n";
     out << "sharpening_profile: " << config_.settings.sharpening.profileName << "\n";

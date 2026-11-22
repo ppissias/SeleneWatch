@@ -22,11 +22,12 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 
 1. **Set your output folder & site once:** Open **Session → Output folder…** (choose a fast local SSD) and **Session → Site and instrument…** (save observer/site coordinates and telescope optics; keep several as named presets, for example home and a club field).
 2. **Choose a source & start Preview:** Select your camera (**ZWO ASI**, **QHYCCD**, **Player One**, **ToupTek**), a **Recording file** (`.ser` or uncompressed `.avi`), or **Synthetic** (via **View → Testing tools**), then click **Start preview**.
-3. **Frame, zoom & tune thresholds:** Use **Fit / 100% / 200%** or the mouse wheel (and right/middle-drag to pan) to inspect actual sensor pixels, adjust **Display and capture** stretch and **Histogram**, pick **Watching** (**The Moon** or **The sky**) in **Detection**, tune **Sensitivity K** above the 10-second seeing trace (or load a saved **Profile**), and optionally lock onto a crater in **Guiding**.
+3. **Frame, zoom & tune thresholds:** Use **Fit / 100% / 200%** or the mouse wheel (and right/middle-drag to pan) to inspect actual sensor pixels. In **Preview**, switch **Watching** in **Detection** between the Moon and sky watches on the same stream. Adjust **Display and capture** and **Histogram**, tune **Sensitivity K** or load a saved **Profile**, and optionally lock onto a crater in **Guiding**.
 4. **Capture:**
    - Click **Start monitoring** for automatic flash, darkening/transit, or sky-event capture (plus on-demand **Save now**).
    - Click **Record** (unlimited or for a fixed frame count, or arm **Session → Schedule a recording…**) for continuous lossless SER video.
    - Or open **Time-lapse** and click **Start time-lapse** to stack the sharpest frames at a fixed cadence and build MP4/GIF animations of planetary rotation and changing lunar shadows.
+   - For a Moon time-lapse, tick **Also watch for transits** to save lossless crossing clips in the gaps between bursts and stacks. **Configure transit detection…** opens the existing sunlit-side watch settings.
 
 ---
 

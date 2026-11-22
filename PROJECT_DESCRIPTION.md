@@ -113,6 +113,10 @@ The application is a **processing core** with a **Qt Widgets interface**. The co
 
 `Session` also owns Stopped / Preview / Monitoring state. Preview is the default and keeps acquisition, bounded history and analysis active with capture disabled. Monitoring enables both automatic clips and explicit Save now. Mode requests cross on the source thread before a frame or after a camera read returns without one. Leaving Monitoring hands off the current available clip before Preview camera edits are allowed. The writer drains immutable jobs independently. Camera adapters queue live controls for their workers and publish readback snapshots under a mutex. The camera SDKs lack settings identifiers for individual frames, so Monitoring starts with a fresh open/readback and an empty history and reference. Synthetic and recorded sources retain valid same-configuration history and reference and reconfirm ongoing patches on entry. [Preview and Monitoring](docs/preview-monitoring.md)
 
+Switching watches in Preview sends the selected detector and capture settings together at that same source boundary. The source stays open. The detector reference, ring and auto-tune measurement reset for the new watch.
+
+The Moon time-lapse has an optional best-effort transit watch on its existing stream. `Session` reuses the shadows detector and clip writer when the burst collector and stack worker are idle. It releases the detector's history and working buffers at burst admission. A collecting or saving clip can delay a due burst within a five-second grace interval and the available cadence. The writer acknowledges completion asynchronously. `transits/session.txt` records the watch's pauses and resumes, and the usual evidence and candidate rules apply during its active intervals.
+
 ### Frame ownership
 
 One rule covers every frame: **one writer, then many readers.**

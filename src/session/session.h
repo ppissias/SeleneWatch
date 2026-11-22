@@ -44,7 +44,7 @@ class Session final : private FrameSourceListener
 {
 public:
     // Preview analyses the stream with capture off. Monitoring also collects evidence clips.
-    // TimeLapse stacks bursts at fixed intervals with flash detection off.
+    // TimeLapse stacks bursts at fixed intervals and can watch for transits in the gaps.
     enum class Mode { Stopped, Preview, Monitoring, TimeLapse };
     // Each one runs on the context object's thread, queued. Any may be empty.
     struct Notifications
@@ -101,6 +101,10 @@ public:
     // A camera tuned live must be reopened before arming to exclude buffered
     // frames whose settings cannot be established by the SDK.
     bool requestMonitoring(bool monitoring);
+    // Context thread. Switch detector and limits on the current Preview stream.
+    [[nodiscard]] bool canChangePreviewWatch() const;
+    [[nodiscard]] bool previewWatchChangePending() const;
+    bool requestPreviewWatch(Watch watch, const DetectionSettings& detection, CaptureSettings capture);
     [[nodiscard]] Mode mode() const;
     [[nodiscard]] bool modeChangePending() const;
 
@@ -189,9 +193,10 @@ public:
     [[nodiscard]] RecordingWriter& recordingWriter() { return recorder_; }
 
     // Feature-18 time-lapse mode. Starts from Preview (or starts Preview if
-    // Stopped) with flash detection off.
+    // Stopped). The optional detector settings belong to the Moon shadows watch.
     bool startTimeLapse(const TimelapseSettings& settings, QString& error,
-        FreeSpaceQuery freeSpace = {}, std::chrono::milliseconds stackDelay = {});
+        FreeSpaceQuery freeSpace = {}, std::chrono::milliseconds stackDelay = {},
+        std::optional<DetectionSettings> transitDetection = {});
     void stopTimeLapse(const std::string& reason = "stopped by the observer");
     void waitTimeLapseFinished();
     // Abandons MP4/GIF assembly of every finalizing time-lapse (closing the
@@ -232,6 +237,9 @@ private:
     void post(std::function<void()> call);
     void applyManualSave();
     void applyModeRequest();
+    [[nodiscard]] bool canChangePreviewWatchLocked() const;
+    bool applyPreviewWatch();
+    void prepareCaptureBudget(const Frame& frame);
     bool openWatch(QString& error);
     void retryReport(const QString& folder, const QString& error, int attemptsLeft);
     void closeWatch(const QString& reason, bool resume = false);
@@ -272,6 +280,14 @@ private:
     DetectionDisplayRequest displayRequest_;
     std::optional<std::chrono::system_clock::time_point> manualRequest_;
     std::optional<bool> monitoringRequest_;
+    // Whole watch selection, copied at the next source-thread boundary.
+    struct PreviewWatch
+    {
+        Watch watch;
+        DetectionSettings detection;
+        CaptureSettings capture;
+    };
+    std::optional<PreviewWatch> previewWatchRequest_;
     std::atomic<Mode> mode_{Mode::Stopped};
     bool cameraTuned_{false}; // protected by requestMutex_
     std::chrono::steady_clock::time_point settlingUntil_{};
@@ -298,6 +314,7 @@ private:
     std::atomic<bool> clockBusy_{false};
     std::jthread clockThread_;
     std::optional<bool> recordRequest_;
+    bool recordStarting_{false}; // Under requestMutex_, between request and writer admission.
     uint64_t recordMaxFrames_{0};
     std::optional<Schedule> schedule_;
     RecordingWriter recorder_;
@@ -313,8 +330,24 @@ private:
     size_t recordingQueueBytes_{0};
 
     // Declared last, so it is stopped and destroyed before what it feeds.
+    void openTransitWatch(const QString& parent);
+    void updateTransitWatch(const FramePtr& frame, TimelapseWork work);
+    void setTransitState(TransitWatchState state, std::chrono::system_clock::time_point utc);
+    void closeTransitWatch(const std::string& reason);
+    void finishTimeLapse(uint64_t id, TimelapseFinishResult result);
+
+    // The source thread owns the folder and detector while running. The
+    // writer acknowledges closed clips and the last queued record in order.
+    QString transitFolder_;
+    std::atomic<TransitWatchState> transitState_{TransitWatchState::Off};
+    std::atomic<unsigned> transitWrites_{0};
+    std::chrono::system_clock::time_point transitFrameUtc_{};
     std::atomic<bool> captureResetRequested_{false};
     mutable std::mutex timelapseMutex_;
+    std::optional<DetectionSettings> transitDetection_;
+    bool transitDraining_{false};
+    std::optional<std::pair<uint64_t, TimelapseFinishResult>> transitFinish_;
+    QObject timeLapseCallbacks_;
     uint64_t nextTimelapseId_{0};
     uint64_t activeTimelapseId_{0};
     std::shared_ptr<TimelapseSession> timelapse_;

@@ -32,6 +32,7 @@ public:
     [[nodiscard]] TimelapseSettings settings() const;
     void setSettings(const TimelapseSettings& settings);
     void refreshProfiles();
+    void setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable);
 
     void setStreamInfo(bool running, bool monitoring, bool recording, bool timeLapsing,
         double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock,
@@ -49,12 +50,14 @@ signals:
     void startRequested();
     void stopRequested();
     void resharpenRequested(const QString& sessionDir);
+    void configureTransitsRequested();
     void anchorSelectionChanged(bool active);
     void anchorChanged(const std::optional<QRect>& rect);
 
 private:
     void applyPresetDefaults(TimelapsePreset preset);
     void updateEstimates();
+    void updateTransitControls();
     [[nodiscard]] int estimatedKeptFrames() const;
     [[nodiscard]] double rawSerGiBPerHour() const;
     // Asks the observer to confirm turning raw SER bursts on; true when confirmed.
@@ -68,6 +71,9 @@ private:
     bool monitoring_{false};
     bool recording_{false};
     bool timeLapsing_{false};
+    bool moonWatch_{true};
+    bool transitEditable_{true};
+    bool transitSettingsSaved_{false};
     double estimatedFps_{30.0};
     int frameWidth_{640};
     int frameHeight_{480};
@@ -95,13 +101,18 @@ private:
     QCheckBox* writeGif_{nullptr};
     QSpinBox* videoFps_{nullptr};
     QCheckBox* saveRawSer_{nullptr};
+    QCheckBox* watchTransits_{nullptr};
+    QLabel* transitHelp_{nullptr};
+    QPushButton* configureTransits_{nullptr};
     QLabel* estimateLabel_{nullptr};
 
     QPushButton* startStopButton_{nullptr};
     QPushButton* resharpenButton_{nullptr};
+    QPushButton* openTransitsButton_{nullptr};
 
     QProgressBar* progressBar_{nullptr};
     QLabel* timingLabel_{nullptr};
+    QLabel* transitStatus_{nullptr};
     QLabel* statsLabel_{nullptr};
     QLabel* warningLabel_{nullptr};
     QLabel* latestThumb_{nullptr};
@@ -116,5 +127,6 @@ private:
     size_t filmstripIndex_{0};
     QTimer* filmstripTimer_{nullptr};
     QString lastSessionDir_;
+    QString lastTransitFolder_;
     int lastSeenStacks_{0};
 };

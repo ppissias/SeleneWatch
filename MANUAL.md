@@ -291,7 +291,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 
 | Panel | Control | Purpose & Default |
 | --- | --- | --- |
-| **Detection** | **Watching** | **The Moon: flashes on the earthlit side** (editable while stopped; each watch keeps its own detection settings and profiles) |
+| **Detection** | **Watching** | **The Moon: flashes on the earthlit side** (editable while stopped or in Preview, with separate settings and profiles for each watch) |
 | | **Ignore brighter than** | Flashes only: pixels whose learned brightness is above this share of full scale are not tested (`30 %`; `Off` tests every pixel) |
 | | **Profile** (`Save…` / `Delete`) | Save, load, or delete named detection profiles for the active target (`The Moon` or `The sky`) |
 | | **Sensitivity K** | Rise threshold in noise units (`sigma`). Sliders show live teal mark (`now`) + amber recent 10 s peak (`6.0 sigma` default) |
@@ -325,7 +325,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 #### Path A — Automated transit / shadow hunting (**Monitoring**)
 
 1. Frame the sunlit Moon or limb in **Preview** (optionally enable **Guiding**, [Section 3](#3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows)).
-2. Under **View → Detection**, while stopped, set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on in this watch and off in the flashes watch. Its settings are its own and start insensitive to seeing on bright terrain: `K 12`, a shadow must cover `20 px` and last two frames, dark patches up to `20000 px` / `10 ×`, large darkening off. Both Moon watches save under `events/moon/`, share the Moon's capture settings and guiding, and run one at a time.
+2. Under **View → Detection**, while stopped or in Preview, set **Watching** to **The Moon: shadows on the sunlit side**. This watch uses darkening with defaults of `K 12`, a minimum shadow of `20 px` confirmed over two frames, and dark patch limits of `20000 px` / `10 ×`. Large darkening starts off. Both Moon watches save under `events/moon/` during Monitoring and share the Moon's capture settings and guiding.
 3. Set **Sensitivity K** to **`12.0 sigma` or higher** for sunlit lunar terrain. Archive measurements show `K = 6` triggers heavily on sunlit crater-rim seeing, whereas `K ≥ 12` stays completely quiet on normal seeing while catching ~90%-darkness ISS and plane silhouettes.
 4. Keep **Maximum dark patch** at `20000 px` and **Maximum dark box / patch** at `10.00 ×` (or enable **Large darkening** `~5%` only if hunting wide low-altitude aircraft/birds). *(With **View → Testing tools** on, you can rehearse this directly by choosing **Kind: Dark transit** in the **Test flash** bar, clicking the sunlit lunar disk, and pressing **Inject blip**).*
 5. Press **Start monitoring**. Check the **Deepest fall / Largest dark patch** readout at the bottom of the Detection panel. Triggered events save into `events/moon/session-<UTC start>/clips/<UTC>/` (`kind=darkening`, blue track in `00_overview.png`, and `04_event_preview.gif`).
@@ -367,7 +367,7 @@ Objects silhouetted against the sunlit Moon (**ISS**, satellites, commercial air
 
 Watch planets turn and lunar shadows unfold. Time-lapse animations bring the slow changes of an observing session into view, from Jupiter's rotation to shadows moving across lunar craters.
 
-Lunar and planetary time-lapses use short exposures at high frame rates, with the sharpest frames selected and stacked for each point in the sequence. SeleneWatch provides **Time-lapse mode** as an independent running state (**flash detection OFF**):
+Lunar and planetary time-lapses use short exposures at high frame rates, with the sharpest frames selected and stacked for each point in the sequence. A Moon time-lapse can also watch for transits between bursts.
 
 - **Fixed-cadence frame selection and stacking:** Every **Interval** (e.g. `60 s`), SeleneWatch collects incoming frames over your **Capture window** (e.g. `15 s`), scores sharpness on the target ROI in real time, and retains only the sharpest **Keep best %** capped at **Max frames/period (`100–200` frames max, hard cap 200)** so burst RAM stays bounded.
 - **Overload skip protection:** Heavy two-pass subpixel phase correlation, Lanczos/bicubic resampling, sigma-clipped stacking, session alignment (**Moon** rigid translation + Alt-Az field rotation with optional **Lunar anchor**, or **Planet** limb-centroid centering), linear sharpening, and 32-bit FITS I/O run asynchronously on a dedicated worker thread. If processing ever falls behind the cadence or `MemoryBudget`, the pre-capture gate skips that period cleanly without dropping or queueing unbounded frames in RAM and logs it in `timelapse.txt`.
@@ -386,6 +386,7 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
    - *(Moon optional)* Press **Select lunar anchor** and drag a box on the preview around a sunlit crater that will stay illuminated throughout your session, or tick **Crop around locked feature**.
    - Pick initial **Sharpening** (`Mild (default)`, `Off`, `Medium`, or saved custom profile), **Stops** (**When the session ends**, or **After a number of stacks**; the time and duration are the **Ends** setting above the preview, [Section 2.7](#27-ending-a-session-unattended)), and **Animation** outputs (**MP4**, optional **GIF**, FPS, optional raw SER burst archival).
    - **Also save raw SER bursts** writes every stacked frame of every burst to `raw/*.ser` and can fill a drive in one night (the dock's **Est. disk** line shows the rate). Ticking it asks for confirmation, and it is off again each time SeleneWatch starts. The time-lapse stops only when free space falls below the **Disk reserve** in **Display and capture** (10 GiB unless you change it; your value is remembered for each target); with the reserve at **None** it runs until the drive is full. A burst keeps a raw frame only while the RAM ceiling has room, so a full burst never stalls the camera.
+   - **Also watch for transits** is available with the **Moon** preset while a Moon watch is selected. It uses the saved **The Moon: shadows on the sunlit side** detection settings and the Moon's clip history and tail. **Configure transit detection…** opens that watch in **Detection**. The built-in defaults work on a new installation. Set exposure and gain for the sunlit Moon in Preview.
 3. Press **Start time-lapse**. Monitor **Latest stack**, **Filmstrip loop**, per-stack stats (`Q` quality, shift, rotation), and any overload/cloud/disk-reserve warnings.
 4. After **Stop time-lapse** (or **Ends**, or the number of stacks), the dock shows **Building the video: n / N frames** while the MP4/GIF is assembled. Closing SeleneWatch during a time-lapse asks to stop it first, then keeps the window open with a progress dialog until the video is built; **Close without video** abandons only the video (the FITS stacks stay, and **Rebuild video only** makes it later). If stacking fails unexpectedly, the time-lapse stops on its own (not the program), records `error` and `stop_reason: internal error: …` in `timelapse.txt`, and still builds the video from the stacks already saved.
 5. When finished, inspect `timelapses/<UTC>/timelapse.mp4` / `.gif`. Open **Session → Re-sharpen time-lapse…** (or **Re-sharpen…**) anytime to fine-tune sliders live (`Before` vs `After`), save reusable profiles, choose **Rebuild video only** for fast FPS/gamma/GIF adjustments, or **Apply to all** non-destructively into `<session>/sharpened_<profile>_<UTC>/`.
@@ -400,11 +401,20 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
 
 ***Re-sharpen time-lapse…** (`Moon_165104.ser`): defaults to the highest-quality FITS stack (`Q=0.00291`), featuring synced live sliders (`25 ms` coalesced updates + cached `Before` image) for non-destructive tuning and export.*
 
+### Transit coverage during a Moon time-lapse
+
+The camera and guiding continue while the transit watch alternates with the time-lapse. The progress panel shows **Watching for transits**, **Saving transit clip**, or when watching is paused for burst capture or stacking. A transit that happens during a pause can be missed.
+
+If a clip is already collecting or saving when a burst is due, the burst can wait up to five seconds. A delayed burst needs room for its full capture window before the next scheduled one. If it runs out of room or grace, SeleneWatch skips that burst and keeps the original schedule. The `timelapse.txt` log records the skip.
+
+After stopping, use **Open transit clips** to open `timelapses/<UTC>/transits/`. Within it, `clips/<UTC>/event.ser` contains the native frames, `candidates.txt` records saved and unsaved candidates, and `session.txt` records the UTC pauses and resumes.
+
 ### Time-Lapse & Re-Sharpen Controls Reference
 
 | Window | Control | Purpose |
 | --- | --- | --- |
 | **Time-lapse dock** | **Target preset** (`Moon` / `Planet`) | Switches inter-stack alignment strategy and fills keep-% / cap defaults |
+| | **Also watch for transits** | Moon only. Saves native crossing clips in the gaps between time-lapse bursts and stacks. Off by default. |
 | | **Interval** & **Capture window** | Fixed cadence `t_k = t_0 + k × interval` and burst sampling duration (`window ≤ interval`) |
 | | **Keep best** & **Max frames/period** | Percentage retained per burst capped at `100–200` frames max (hard cap `200`) |
 | | **Sharpening** | Linear profile (`Off`, `Mild`, `Medium`, or saved `Profile: ...`) |
@@ -449,7 +459,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 ### Step-by-Step Workflow
 
 1. Confirm **Position known** with accurate latitude/longitude under **Session → Site and instrument…** ([Section 2.3](#23-site-instrument--clock-accuracy)) and select your camera under **Source** (optionally tick **Connect at startup**).
-2. Under **View → Detection**, while stopped, switch **Watching** to **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)** (Notice **Guiding** automatically shows `(Moon only)` and disables).
+2. Under **View → Detection**, while stopped or in Preview, switch **Watching** to **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)**. **Guiding** then shows `(Moon only)` and is disabled.
 3. Press **Start preview** briefly at twilight or night, tune initial exposure/gain, and exclude horizon clutter:
    - Toggle **Draw mask** ON: click corners around trees, roofs, or streetlights and **double-click** to close a polygon (or **drag** for a rectangle; up to `16` shapes of up to `32` corners). Turn **Draw mask** OFF when finished.
    - **Saving Sky detection profiles:** When you click **Save…** on the **Profile** row in Sky mode, the dialog offers an optional **Include horizon mask** checkbox (unchecked by default). Leave it unchecked for sensitivity-only profiles that preserve whatever horizon mask you currently have drawn, or check it (`(+mask)`) to save a site-specific profile that restores its own horizon mask when selected.
@@ -489,7 +499,7 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
 
 | Control | Purpose | Sky Starting Value |
 | --- | --- | --- |
-| **Watching** | **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)** (changes while stopped; each with its own settings, isolated from Moon settings) | `The Moon` initially |
+| **Watching** | **The sky: fast events (meteors, lightning)** or **The sky: slow and faint (long exposures)**, selectable while stopped or in Preview | `The Moon` initially |
 | **Time-lapse while monitoring, every** | Slow and faint only: a frame every interval as PNG and in `timelapse.mp4` (Feature-36) | `Off`, `30 s` |
 | **Large brightening** | Share of unmasked pixels rising by `K` in one frame (lightning / fireball flare) | `2.0 % of frame` |
 | **Learn a patch after** | Releases persistent patches (e.g. slowly drifting stars/planets) back to background learning | `20 s` |

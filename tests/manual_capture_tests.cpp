@@ -83,19 +83,13 @@ public:
     void stop() override { if (worker_.joinable()) { worker_.request_stop(); ready_.notify_all(); worker_.join(); } }
     void frame(uint64_t n, bool bright=false)
     {
-        command([this,n,bright] {
-            auto f=pool_.acquire(64*48);
-            f->width=64; f->height=48; f->format=PixelFormat::Mono8; f->significantBits=8;
-            f->alignment=BitAlignment::Low; f->bayer=BayerPattern::None;
-            f->frameIndex=n;
-            f->timestamp=std::chrono::system_clock::time_point{}+std::chrono::milliseconds{static_cast<int64_t>(n)*100};
-            f->steadyTimestamp={}; f->testSource=true; f->syntheticFlash=false; f->blip.reset();
-            std::fill(f->data.begin(),f->data.end(),uint8_t{100});
-            if (bright)
-                for (int y=10;y<13;++y) for (int x=10;x<13;++x) f->data[static_cast<size_t>(y)*64+x]+=40;
-            listener_->onFrame(std::move(f));
-        });
+        publish(n, bright, false, false);
     }
+    void transitFrame(uint64_t n, bool dark=false)
+    {
+        publish(n, false, dark, true);
+    }
+    void idle() { command([this] { listener_->onIdle(); }); }
     void settingsChanged()
     {
         command([this] { auto info=streamInfo(); info.gain="42"; listener_->onSettingsChanged(info,std::chrono::duration<double>{0}); });
@@ -106,6 +100,28 @@ public:
         else listener_->onDiscontinuity();
     }); }
 private:
+    void publish(uint64_t n, bool bright, bool dark, bool textured)
+    {
+        command([this,n,bright,dark,textured] {
+            auto f=pool_.acquire(64*48);
+            f->width=64; f->height=48; f->format=PixelFormat::Mono8; f->significantBits=8;
+            f->alignment=BitAlignment::Low; f->bayer=BayerPattern::None;
+            f->frameIndex=n;
+            f->timestamp=std::chrono::system_clock::time_point{}+std::chrono::milliseconds{static_cast<int64_t>(n)*100};
+            f->steadyTimestamp=textured
+                ? std::chrono::steady_clock::time_point{}+std::chrono::milliseconds{1000+static_cast<int64_t>(n)*100}
+                : std::chrono::steady_clock::time_point{};
+            f->testSource=true; f->syntheticFlash=false; f->blip.reset();
+            std::fill(f->data.begin(),f->data.end(),uint8_t{100});
+            if (textured)
+                for (size_t i=0; i<f->data.size(); ++i) f->data[i] += static_cast<uint8_t>((i*i + 13*i) % 80);
+            if (bright)
+                for (int y=10;y<13;++y) for (int x=10;x<13;++x) f->data[static_cast<size_t>(y)*64+x]+=40;
+            if (dark)
+                for (int y=16; y<24; ++y) for (int x=21; x<29; ++x) f->data[static_cast<size_t>(y)*64+x]=18;
+            listener_->onFrame(std::move(f));
+        });
+    }
     void command(std::function<void()> call)
     {
         std::packaged_task<void()> task(std::move(call)); auto done=task.get_future();
@@ -126,6 +142,77 @@ class ManualCaptureTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void lunarTimeLapseWatchesTheGapsAndFinishesAnOpenClip()
+    {
+        QTemporaryDir dir;
+        QObject context;
+        int candidates=0;
+        std::vector<ClipWriteResult> clips;
+        std::optional<TimelapseFinishResult> finished;
+        Session::Notifications notices;
+        notices.candidateStarted=[&] { ++candidates; };
+        notices.clipWritten=[&](const auto& result) { clips.push_back(result); };
+        notices.timeLapseFinished=[&](const auto& result) { finished=result; };
+        Session session(&context, dir.path(), std::move(notices));
+        auto source=std::make_unique<ControlledSource>();
+        auto* controlled=source.get();
+        session.setSource(std::move(source));
+        CaptureSettings capture;
+        capture.historySeconds=0.6;
+        capture.postSeconds=0.3;
+        session.setCaptureSettings(capture);
+        TimelapseSettings lapse;
+        lapse.intervalSeconds=3;
+        lapse.captureWindowSeconds=0.5;
+        lapse.watchTransits=true;
+        lapse.video.writeMp4=false;
+        QString error;
+        QVERIFY2(session.startTimeLapse(lapse, error), qPrintable(error));
+        const auto folder=session.timeLapseStatus().sessionDir;
+
+        // The first crossing is wholly inside the first burst.
+        for (uint64_t n=0; n<=5; ++n) controlled->transitFrame(n, n>=2 && n<=3);
+        QTRY_COMPARE(session.timeLapseStatus().stacksCompleted, 1);
+        QCOMPARE(candidates, 0);
+        for (uint64_t n=6; n<=30; ++n) controlled->transitFrame(n, n>=28);
+        QTRY_COMPARE(candidates, 1);
+        QCOMPARE(session.timeLapseStatus().transitWatch, TransitWatchState::Saving);
+        for (uint64_t n=31; n<=34; ++n) controlled->transitFrame(n);
+        QTRY_COMPARE(clips.size(), size_t{1});
+        QVERIFY2(clips.front().notSaved.isEmpty(), qPrintable(clips.front().notSaved));
+        QVERIFY(clips.front().folder.startsWith(folder + "/transits/clips/"));
+        SerReader reader;
+        std::string readError;
+        QVERIFY(reader.open(std::filesystem::path((clips.front().folder + "/event.ser").toStdWString()), 10, readError));
+        QVERIFY(reader.frameTime(0) < std::chrono::system_clock::time_point{} + std::chrono::milliseconds{2800});
+        QVERIFY(reader.frameTime(reader.frameCount()-1) >= std::chrono::system_clock::time_point{} + std::chrono::milliseconds{3300});
+        QVERIFY(read(clips.front().folder + "/event.txt").contains("kind=darkening"));
+
+        uint64_t next=35;
+        for (; next<40 && session.timeLapseStatus().transitWatch != TransitWatchState::Capturing; ++next)
+            controlled->transitFrame(next);
+        QCOMPARE(session.timeLapseStatus().transitWatch, TransitWatchState::Capturing);
+        for (; next<=46; ++next) controlled->transitFrame(next);
+        QTRY_COMPARE(session.timeLapseStatus().stacksCompleted, 2);
+        const auto coverage=read(folder + "/transits/session.txt");
+        QCOMPARE(coverage.count("transit_pause"), 2);
+        QVERIFY(coverage.contains("transit_resume"));
+        const auto candidatesBeforeStop=read(folder + "/transits/candidates.txt");
+        QCOMPARE(candidatesBeforeStop.count("candidate_pending"), 1);
+
+        // A manual stop still hands the available part of a new clip to the writer.
+        for (uint64_t n=47; n<=53; ++n) controlled->transitFrame(n, n>=52);
+        QTRY_COMPARE(candidates, 2);
+        session.stopTimeLapse();
+        controlled->idle();
+        QTRY_VERIFY(finished.has_value());
+        QCOMPARE(clips.size(), size_t{2});
+        QCOMPARE(finished->transitFolder, folder + "/transits");
+        QVERIFY(read(clips.back().folder + "/event.txt").contains("complete: yes"));
+        QVERIFY(read(folder + "/transits/session.txt").contains("transit_end"));
+        QCOMPARE(session.mode(), Session::Mode::Preview);
+    }
+
     void previewNeverWritesAndArmingReconfirmsAnOngoingPatch()
     {
         QTemporaryDir dir; QObject context;

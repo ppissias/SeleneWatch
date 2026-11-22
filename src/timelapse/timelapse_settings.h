@@ -84,6 +84,7 @@ struct TimelapseSettings
     StopConditionKind stopKind{StopConditionKind::Manual};
     int targetStacks{60};
     bool saveRawSer{false};
+    bool watchTransits{false};
     SharpeningSettings sharpening;
     VideoToneSettings video;
 

@@ -147,6 +147,7 @@ private slots:
     void detectionPanelExplainsPatchRejections();
     void readoutsKeepTheControlsBelowInPlace();
     void eachTargetKeepsItsOwnSettings();
+    void watchesCanChangeInPreviewAndTransitControlsFollowTheMoon();
     void diskReserveStartsAtTenGiBAndIsRemembered();
     void theSlowSkyKeepsATimelapseWhileMonitoring();
     void everyControlFitsOnASmallLaptopScreen();
@@ -2337,6 +2338,79 @@ void UiTest::outputFolderSafetyAndMigration()
 
     stopBtn->click();
     QVERIFY(!QDir(customRoot).exists());
+}
+
+void UiTest::watchesCanChangeInPreviewAndTransitControlsFollowTheMoon()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    useSynthetic(window);
+    auto* panel = window.findChild<DetectionPanel*>();
+    auto* watch = panel->findChild<QComboBox*>("targetChoice");
+    auto* timeLapse = window.findChild<TimelapsePanel*>();
+    auto* transits = timeLapse->findChild<QCheckBox*>("timelapseWatchTransits");
+    auto* configure = timeLapse->findChild<QPushButton*>("timelapseConfigureTransits");
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    auto* record = window.findChild<QPushButton*>("recordButton");
+    auto* startLapse = timeLapse->findChild<QPushButton*>("timelapseStartButton");
+    QVERIFY(!transits->isChecked());
+    start->click();
+    QTRY_VERIFY(watch->isEnabled() && monitoring->isEnabled() && !start->isEnabled());
+
+    chooseWatch(window, Watch::SkySlow);
+    QTRY_VERIFY(watch->isEnabled());
+    QCOMPARE(panel->watch(), Watch::SkySlow);
+    QCOMPARE(panel->settings().referenceTimeConstantSeconds, 10.0);
+    QVERIFY(transits->isHidden());
+    QVERIFY(!window.findChild<GuidingPanel*>()->isEnabled());
+    chooseWatch(window, Watch::MoonFlashes);
+    QTRY_VERIFY(watch->isEnabled());
+    QVERIFY(!transits->isHidden());
+    QVERIFY(window.findChild<GuidingPanel*>()->isEnabled());
+
+    // The configure button opens the existing watch without stopping Preview.
+    transits->setChecked(true);
+    QVERIFY(configure->isEnabled());
+    configure->click();
+    QTRY_VERIFY(watch->isEnabled());
+    QCOMPARE(panel->watch(), Watch::MoonShadows);
+    QCOMPARE(panel->settings().sigma, 12.0);
+    QVERIFY(!start->isEnabled());
+    panel->findChild<QDoubleSpinBox*>("detectionSigma")->setValue(15.0);
+    chooseWatch(window, Watch::Sky);
+    QTRY_VERIFY(watch->isEnabled());
+    chooseWatch(window, Watch::MoonShadows);
+    QTRY_VERIFY(watch->isEnabled());
+    QCOMPARE(panel->settings().sigma, 15.0);
+
+    record->click();
+    QTRY_VERIFY(!watch->isEnabled() && record->text().contains("Stop"));
+    record->click();
+    QTRY_VERIFY(watch->isEnabled());
+    monitoring->click();
+    QTRY_VERIFY(!watch->isEnabled() && monitoring->text().contains("Stop"));
+    QVERIFY(!startLapse->isEnabled());
+    monitoring->click();
+    QTRY_VERIFY(watch->isEnabled());
+
+    auto settings = timeLapse->settings();
+    settings.intervalSeconds = 2;
+    settings.captureWindowSeconds = 0.3;
+    settings.video.writeMp4 = false;
+    timeLapse->setSettings(settings);
+    startLapse->click();
+    QTRY_VERIFY(!watch->isEnabled() && !transits->isEnabled() && startLapse->text().contains("Stop"));
+    auto* transitStatus = timeLapse->findChild<QLabel*>("timelapseTransitStatus");
+    QTRY_VERIFY(!transitStatus->text().isEmpty());
+    startLapse->click();
+    QTRY_VERIFY(watch->isEnabled());
+    QVERIFY(!timeLapse->findChild<QPushButton*>("timelapseOpenTransits")->isHidden());
+
+    auto* preset = timeLapse->findChild<QComboBox*>("timelapsePreset");
+    preset->setCurrentIndex(1);
+    QVERIFY(transits->isHidden());
+    QVERIFY(!timeLapse->settings().watchTransits);
 }
 
 void UiTest::timelapsePanelAndResharpenWorkflow()

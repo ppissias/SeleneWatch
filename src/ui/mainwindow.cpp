@@ -581,8 +581,8 @@ void MainWindow::saveCapturePanel()
 
 void MainWindow::onWatchRequested(Watch watch)
 {
-    // The choice is disabled while running or finalizing; a late request is undone.
-    if (session_->isRunning() || session_->timeLapseFinalizing() || watch == watch_)
+    const bool running = session_->isRunning();
+    if (session_->timeLapseFinalizing() || (running && !session_->canChangePreviewWatch()) || watch == watch_)
     {
         detectionPanel_->setWatch(watch_);
         return;
@@ -593,22 +593,47 @@ void MainWindow::onWatchRequested(Watch watch)
     const bool captureChanges = !sameCaptureSettings(watch, watch_);
     if (captureChanges) saveCapturePanel();
     saveSkyExtrasPanel();
+    const auto detection = savedDetectionSettings(watch);
+    const auto capture = captureChanges ? savedCaptureSettings(watch) : displayPanel_->captureSettings();
+    if (running && !session_->requestPreviewWatch(watch, detection, capture))
+    {
+        detectionPanel_->setWatch(watch_);
+        return;
+    }
     watch_ = watch;
     saveWatch(watch_);
     detectionPanel_->setWatch(watch_);
-    detectionPanel_->setSettings(savedDetectionSettings(watch_));
-    if (captureChanges)
+    detectionPanel_->setSettings(detection);
+    if (captureChanges) displayPanel_->setCaptureSettings(capture);
+    if (!running)
     {
-        displayPanel_->setCaptureSettings(savedCaptureSettings(watch_));
-        session_->setCaptureSettings(displayPanel_->captureSettings());
+        if (captureChanges) session_->setCaptureSettings(displayPanel_->captureSettings());
+        session_->setWatch(watch_);
+        session_->setDetectionSettings(detectionPanel_->settings());
     }
-    session_->setWatch(watch_);
-    session_->setDetectionSettings(detectionPanel_->settings());
+    stopCameraTune("The observing watch changed: tune again.");
+    session_->cancelAutoTune("The observing watch changed: measure again.");
+    if (autoTunePanel_)
+    {
+        autoTunePanel_->clearK("The observing watch changed: watch again.");
+        autoTunePanel_->clearMinPatch("The observing watch changed: measure again.");
+        tuneHasK_ = false;
+        tuneHasMinPatch_ = false;
+        tuneRestore_.reset();
+        tuneHistory_.clear();
+        autoTunePanel_->clearCamera("The observing watch changed: tune again.");
+    }
+    latestDetection_ = {};
+    detectionPanel_->setView({});
+    chooseDrawing(Drawing::None);
     showSkyExtras();
     applyWatchTimelapse();
     skyExposureState_ = {};
     showAutoTuneLongestExposure();
     applyTarget();
+    renderPreview();
+    updateControls();
+    updateStatusLabel();
     showMessage(watch_ == Watch::Sky ? "Watching the sky for fast events: their settings are loaded. Guiding is for the Moon and is off."
         : watch_ == Watch::SkySlow ? "Watching the sky for slow and faint light: its settings are loaded. Guiding is for the Moon and is off."
         : watch_ == Watch::MoonShadows ? "Watching the Moon for shadows on the sunlit side: their settings are loaded."
@@ -737,6 +762,7 @@ void MainWindow::chooseDrawing(Drawing drawing)
     if (drawing != Drawing::Anchor && timelapsePanel_ && timelapsePanel_->selectingAnchor()) timelapsePanel_->cancelAnchorSelection();
     switch (drawing)
     {
+    case Drawing::None: break;
     case Drawing::LockBox: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kLockColour)); break;
     case Drawing::EarthshineBox: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kEarthshineColour)); break;
     case Drawing::Anchor: ui_->previewWidget->setDragColour(QColor("#ff99dd")); break;
@@ -903,6 +929,11 @@ void MainWindow::setupTimelapsePanel()
     connect(timelapsePanel_, &TimelapsePanel::startRequested, this, &MainWindow::onStartTimeLapse);
     connect(timelapsePanel_, &TimelapsePanel::stopRequested, this, &MainWindow::onStopTimeLapse);
     connect(timelapsePanel_, &TimelapsePanel::resharpenRequested, this, &MainWindow::onOpenResharpen);
+    connect(timelapsePanel_, &TimelapsePanel::configureTransitsRequested, this, [this] {
+        if (watch_ != Watch::MoonShadows) onWatchRequested(Watch::MoonShadows);
+        detectionDock_->show();
+        detectionDock_->raise();
+    });
     connect(timelapsePanel_, &TimelapsePanel::anchorSelectionChanged, this, [this](bool active) {
         if (!active) return;
         chooseDrawing(Drawing::Anchor);
@@ -947,14 +978,16 @@ void MainWindow::onStartTimeLapse()
     if (!askMountAtEnd()) return;
     timelapsePanel_->clearRunVisuals();
     QString error;
-    if (!session_->startTimeLapse(tlSettings, error))
+    const auto transitDetection = !tlSettings.watchTransits ? std::optional<DetectionSettings>{}
+        : watch_ == Watch::MoonShadows ? detectionPanel_->settings() : savedDetectionSettings(Watch::MoonShadows);
+    if (!session_->startTimeLapse(tlSettings, error, {}, {}, transitDetection))
     {
         showMessage(QString("Cannot start time-lapse: %1").arg(error), 5000);
         return;
     }
     beginSessionRun(true);
     timelapseDock_->raise();
-    showMessage("Time-lapse started (flash detection is off).", 4000);
+    showMessage(tlSettings.watchTransits ? "Time-lapse started with transit watching between stacks." : "Time-lapse started.", 4000);
     updateControls();
     updateStatusLabel();
 }
@@ -2068,7 +2101,8 @@ void MainWindow::updateControls()
     ui_->injectFlashButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && synthetic_ != nullptr);
 
     ui_->sourceComboBox->setEnabled(!busy);
-    if (detectionPanel_) detectionPanel_->setTargetEditable(!busy);
+    const bool watchEditable = !busy || (!timeLapseFinalizing && session_->canChangePreviewWatch());
+    if (detectionPanel_) detectionPanel_->setTargetEditable(watchEditable);
     if (detectionPanel_) detectionPanel_->setWatchTimelapseEditable(!monitoring);
     ui_->openFileButton->setEnabled(!busy && recording);
     ui_->loopCheckBox->setEnabled(!busy && recording);
@@ -2088,8 +2122,10 @@ void MainWindow::updateControls()
     if (timelapsePanel_)
     {
         const bool hasLock = session_->guider().status().lock.state == LockState::Locked;
-        timelapsePanel_->setStreamInfo(running, monitoring, session_->recordingStatus().active, timeLapsing,
+        timelapsePanel_->setStreamInfo(running, monitoring || pending, session_->recordingStatus().active, timeLapsing,
             measuredFps_, lastFrameWidth_, lastFrameHeight_, lastFrameBpp_, hasLock, timeLapseFinalizing);
+        timelapsePanel_->setTransitOptions(target() == Target::Moon,
+            hasSavedDetectionSettings(Watch::MoonShadows), watchEditable);
     }
 }
 
@@ -2186,12 +2222,16 @@ void MainWindow::updateStatusLabel()
     modeLabel_->setStyleSheet(monitoring ? "background:#164b3c; color:white; font-weight:bold;"
         : timeLapsing ? "background:#4a2f6e; color:white; font-weight:bold;"
         : "background:#26364e; color:white; font-weight:bold;");
-    if (session_->modeChangePending())
+    if (session_->previewWatchChangePending())
+        modeLabel_->setText("PREVIEW — applying the selected watch.");
+    else if (session_->modeChangePending())
         modeLabel_->setText(monitoring?"Stopping monitoring… finishing the current capture before returning to Preview.":"Starting monitoring… applying the capture boundary at the next frame.");
     else if (!session_->isRunning())
         modeLabel_->setText("STOPPED — select an input and start Preview to tune it.");
     else if (timeLapsing)
-        modeLabel_->setText("TIME-LAPSE — stacking bursts into FITS. Flash detection is OFF.");
+        modeLabel_->setText(timelapsePanel_->settings().watchTransits
+            ? "TIME-LAPSE — transit watching between bursts and stacks."
+            : "TIME-LAPSE — stacking bursts into FITS. Flash detection is OFF.");
     else if (monitoring)
         modeLabel_->setText(recordFailed_?"MONITORING — recording failed. Check the reported storage error.":"MONITORING — event capture ON. Stop monitoring to return to Preview and tune camera settings.");
     else
@@ -2369,6 +2409,8 @@ void MainWindow::startStream(Session::Mode mode)
     lastHistogramTime_ = {};
     detectionPanel_->setView({});
     session_->setCaptureSettings(displayPanel_->captureSettings());
+    session_->setWatch(watch_);
+    session_->setDetectionSettings(detectionPanel_->settings());
     latestDetection_ = {};
     updateDetectionDisplay();
     updateBlipReadout();

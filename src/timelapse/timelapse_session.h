@@ -29,6 +29,12 @@
 #include <thread>
 #include <vector>
 
+// Work on a frame boundary. The transit detector runs only when the stacker is idle.
+enum class TimelapseWork { Idle, Capturing, Stacking };
+
+// Coverage state for the optional lunar transit watch, published by Session.
+enum class TransitWatchState { Off, Watching, Saving, Capturing, Stacking, Finished };
+
 struct TimelapseStatus
 {
     bool active{false};
@@ -60,6 +66,7 @@ struct TimelapseStatus
     bool diskLowWarning{false};
     QString warningText;
     QString stopReason;
+    TransitWatchState transitWatch{TransitWatchState::Off};
 };
 
 struct TimelapseFinishResult
@@ -70,6 +77,7 @@ struct TimelapseFinishResult
     int stacksCompleted{0};
     int periodsSkipped{0};
     TimelapseExportResult exportResult;
+    QString transitFolder;
 };
 
 // Runs a lunar or planetary time-lapse session:
@@ -99,6 +107,8 @@ public:
         MemoryBudget memory;
         std::optional<LockRegion> lockRegion;
         FreeSpaceQuery freeSpace;
+        // Source thread, just before a transit-enabled burst claims RAM.
+        std::function<void()> beforeBurst;
         std::function<void(const TimelapseStatus&)> statusChanged;
         std::function<void(const TimelapseFinishResult&)> finished;
     };
@@ -110,7 +120,7 @@ public:
     TimelapseSession& operator=(const TimelapseSession&) = delete;
 
     // Source thread. Offers a published frame to the active period collector.
-    void onFrame(const FramePtr& frame);
+    TimelapseWork onFrame(const FramePtr& frame, bool transitClipBusy = false);
     // Any thread. Updates guiding status flag for warnings.
     void setGuidingStatus(const GuiderStatus& status, bool guidingWanted);
     // Any thread. Requests session stop (also triggered by stop condition or disk reserve).
@@ -122,6 +132,7 @@ public:
     [[nodiscard]] bool active() const { return accepting_.load(); }
     [[nodiscard]] bool valid() const { return initError_.isEmpty(); }
     [[nodiscard]] QString initError() const { return initError_; }
+    [[nodiscard]] const QString& sessionDir() const { return sessionDir_; }
 
     // Any thread. Abandons MP4/GIF assembly during finalization (for closing the
     // program); FITS stacks stay on disk and Re-sharpen can rebuild the video.
@@ -181,7 +192,9 @@ private:
     bool tryReserveBurstMemory(size_t bytes);
     [[nodiscard]] FramePtr copyRawFrame(const Frame& frame) const;
     void releaseBurstMemory(size_t bytes);
-    void startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow);
+    void startNextWindowIfDueLocked(double tSec, std::chrono::system_clock::time_point utcNow, bool transitClipBusy);
+    void skipPeriod(int period, std::chrono::system_clock::time_point utc, const QString& reason);
+    [[nodiscard]] bool stackingOrQueued() const;
     void finishCurrentWindowLocked(bool allowAfterStop);
     void discardCurrentBurstLocked();
 
@@ -199,6 +212,7 @@ private:
     std::chrono::system_clock::time_point startSourceUtc_{};
     std::chrono::system_clock::time_point startWallUtc_{};
     int currentPeriodIndex_{-1};
+    int deferredPeriod_{-1}; // A due period waiting for the current transit clip.
     bool collecting_{false};
     double windowStartSec_{0};
     double windowEndSec_{0};
@@ -214,6 +228,7 @@ private:
     std::condition_variable_any cv_;
     std::condition_variable doneCv_;
     std::optional<BurstJob> pendingJob_;
+    bool stacking_{false}; // Under mutex_, from dequeue through release of burst memory.
     std::atomic<bool> accepting_{true};
     bool workerFinished_{false};
     bool stopRequested_{false};
