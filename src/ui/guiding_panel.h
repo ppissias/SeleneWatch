@@ -42,6 +42,11 @@ public:
     // The tolerance as a percentage of the frame's shorter side.
     [[nodiscard]] double tolerancePercent() const;
     void setTolerancePercent(double percent);
+    // Feature-40: correction aggressiveness (30-100 %) and max pulse duration (ms).
+    [[nodiscard]] int aggressivenessPercent() const;
+    void setAggressivenessPercent(int percent);
+    [[nodiscard]] int maxPulseMs() const;
+    void setMaxPulseMs(int milliseconds);
     // Feature-32: the grace period for a lost lock while guiding, seconds.
     [[nodiscard]] double lostAfterSeconds() const;
     void setLostAfterSeconds(double seconds);
@@ -56,6 +61,7 @@ signals:
     void calibrateRequested();
     void guidingRequested(bool on);
     void toleranceChanged();
+    void correctionTuningChanged();
     void lostAfterChanged();
     void mountKindChanged();
 
@@ -84,6 +90,8 @@ private:
     QLabel* calibration_;
     QDoubleSpinBox* tolerance_;
     QLabel* toleranceReadout_;
+    QSpinBox* aggressiveness_;
+    QSpinBox* maxPulse_;
     QPushButton* guideButton_;
     QSpinBox* lostAfter_;
     QLabel* guiding_;

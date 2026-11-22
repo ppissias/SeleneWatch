@@ -173,6 +173,16 @@ void Guider::setTolerance(double pixels)
     wake_.notify_one();
 }
 
+void Guider::setCorrectionTuning(double gain, int maxPulseMs)
+{
+    {
+        std::lock_guard lock(mutex_);
+        requests_.gain = std::clamp(gain, 0.3, 1.0);
+        requests_.maxPulseMs = std::clamp(maxPulseMs, 250, 5000);
+    }
+    wake_.notify_one();
+}
+
 void Guider::setLostAfter(double seconds)
 {
     {
@@ -406,6 +416,16 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
         tolerance_ = *requests.tolerance;
         if (controller_) controller_->setTolerance(tolerance_);
     }
+    if (requests.gain)
+    {
+        gain_ = *requests.gain;
+        if (controller_) controller_->setGain(gain_);
+    }
+    if (requests.maxPulseMs)
+    {
+        maxPulseMs_ = *requests.maxPulseMs;
+        if (controller_) controller_->setMaxPulseMs(maxPulseMs_);
+    }
     if (requests.guide && !*requests.guide) stopActivity("Guiding stopped by the observer.", recording);
 
     const bool wantsCalibration = requests.calibrate;
@@ -457,6 +477,8 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
     }
     GuideController::Settings settings;
     settings.tolerancePixels = tolerance_;
+    settings.gain = gain_;
+    settings.maxPulseMs = maxPulseMs_;
     if (std::string refusal = GuideController::refusal(*calibration_, settings, o); !refusal.empty())
     {
         message_ = "Cannot guide: " + refusal;
@@ -591,7 +613,8 @@ void Guider::run(std::stop_token stopToken)
             std::unique_lock lock(mutex_);
             auto ready = [&] {
                 return pending_ != nullptr || requests_.unlock || requests_.discontinuity || requests_.connect
-                    || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance || requests_.end
+                    || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance
+                    || requests_.gain || requests_.maxPulseMs || requests_.end
                     || requests_.lostAfter || requests_.stopTracking;
             };
             // With a mount, the guider also wakes to follow pulses and read the mount's state.
@@ -609,6 +632,8 @@ void Guider::run(std::stop_token stopToken)
             requests.calibrate = std::exchange(requests_.calibrate, false);
             requests.guide = std::exchange(requests_.guide, std::nullopt);
             requests.tolerance = std::exchange(requests_.tolerance, std::nullopt);
+            requests.gain = std::exchange(requests_.gain, std::nullopt);
+            requests.maxPulseMs = std::exchange(requests_.maxPulseMs, std::nullopt);
             requests.end = std::exchange(requests_.end, std::nullopt);
             requests.lostAfter = std::exchange(requests_.lostAfter, std::nullopt);
             requests.stopTracking = std::exchange(requests_.stopTracking, false);

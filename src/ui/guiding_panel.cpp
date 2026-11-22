@@ -183,7 +183,7 @@ GuiderStatus widestStatus()
     guide.guideSpeedPixelsPerFrame = 0.25;
     guide.raErrorPixels = guide.decErrorPixels = -99.99;
     guide.pulses = 9999;
-    guide.lastPulse = GuidePulse{GuideDirection::North, 1500};
+    guide.lastPulse = GuidePulse{GuideDirection::North, 5000};
     return status;
 }
 
@@ -294,6 +294,22 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     tolerance_->setToolTip("Nothing is sent while the drift stays within this distance on both mount axes. "
         "Make it several times the seeing's jitter.");
     toleranceReadout_ = wrapped(guideBox);
+    aggressiveness_ = new QSpinBox(guideBox);
+    aggressiveness_->setObjectName("guideAggressivenessSpinBox");
+    aggressiveness_->setRange(30, 100);
+    aggressiveness_->setSingleStep(5);
+    aggressiveness_->setSuffix(" %");
+    aggressiveness_->setValue(static_cast<int>(std::lround(GuideController::Settings{}.gain * 100.0)));
+    aggressiveness_->setToolTip("Share of the measured drift removed by each correction, plus steady-drift compensation. "
+        "Raise toward 90–100 % when polar alignment is rough; lower if seeing causes over-corrections.");
+    maxPulse_ = new QSpinBox(guideBox);
+    maxPulse_->setObjectName("guideMaxPulseSpinBox");
+    maxPulse_->setRange(500, 5000);
+    maxPulse_->setSingleStep(250);
+    maxPulse_->setSuffix(" ms");
+    maxPulse_->setValue(GuideController::Settings{}.maxPulseMs);
+    maxPulse_->setToolTip("Longest single guide pulse SeleneWatch may send on one axis. "
+        "Longer pulses help keep up with polar-alignment drift and clear declination backlash faster.");
     guideButton_ = new QPushButton("Start guiding", guideBox);
     guideButton_->setObjectName("guideButton");
     guideButton_->setToolTip("Starts or stops pulse guiding on the locked feature. Needs a connected, calibrated mount.");
@@ -324,6 +340,8 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* guideForm = new QFormLayout;
     guideForm->addRow("Calibration", calibration_);
     guideForm->addRow("Tolerance", toleranceRow);
+    guideForm->addRow("Aggressiveness", aggressiveness_);
+    guideForm->addRow("Max pulse", maxPulse_);
     guideForm->addRow("Lock lost after", lostAfter_);
     guideForm->addRow("Status", guiding_);
     auto* guideLayout = new QVBoxLayout(guideBox);
@@ -362,6 +380,8 @@ GuidingPanel::GuidingPanel(QWidget* parent)
         updateTolerance();
         emit toleranceChanged();
     });
+    connect(aggressiveness_, &QSpinBox::valueChanged, this, &GuidingPanel::correctionTuningChanged);
+    connect(maxPulse_, &QSpinBox::valueChanged, this, &GuidingPanel::correctionTuningChanged);
     connect(lostAfter_, &QSpinBox::valueChanged, this, &GuidingPanel::lostAfterChanged);
     connect(mountKind_, &QComboBox::currentIndexChanged, this, [this] {
         updateMountControls();
@@ -490,6 +510,26 @@ double GuidingPanel::tolerancePercent() const
 void GuidingPanel::setTolerancePercent(double percent)
 {
     tolerance_->setValue(percent);
+}
+
+int GuidingPanel::aggressivenessPercent() const
+{
+    return aggressiveness_->value();
+}
+
+void GuidingPanel::setAggressivenessPercent(int percent)
+{
+    aggressiveness_->setValue(percent);
+}
+
+int GuidingPanel::maxPulseMs() const
+{
+    return maxPulse_->value();
+}
+
+void GuidingPanel::setMaxPulseMs(int milliseconds)
+{
+    maxPulse_->setValue(milliseconds);
 }
 
 double GuidingPanel::lostAfterSeconds() const

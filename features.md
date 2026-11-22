@@ -2,7 +2,7 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-39 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-40 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
@@ -97,3 +97,4 @@ What each implemented feature still needs outside the tests. Grouped by the kind
 | Night sky | Feature-36 | The slow sky's time-lapse from dusk with the follower on: the frames, the video's stretch through the night, and the disk use. |
 | Overnight | Feature-18 | A Moon and a planet time-lapse at the telescope. |
 | Moon, sunlit | Feature-37 | A Moon time-lapse with **Also watch for transits** on a real sunlit lunar stream: gap coverage, throughput, burst grace, and saved clips. |
+| Moon, any phase | Feature-40 | Guided lunar run with rough polar alignment and real Dec backlash: verify drift compensation, backlash take-up, and no false fruitless stops. |

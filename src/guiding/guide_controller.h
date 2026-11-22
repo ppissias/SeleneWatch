@@ -32,12 +32,12 @@ public:
     struct Settings
     {
         double tolerancePixels{10};
-        double gain{0.7};
-        int maxPulseMs{1500};
+        double gain{0.85};
+        int maxPulseMs{3000};
         int minPulseMs{20};
         double settleSeconds{1.0};
-        int maxFruitlessCorrections{3};
-        int maxPulseMsPerMinute{20000};
+        int maxFruitlessCorrections{5};
+        int maxPulseMsPerMinute{30000};
         double maxGuideSpeedPixelsPerFrame{0.25};
     };
 
@@ -53,8 +53,10 @@ public:
 
     GuideDecision step(const GuideObservation& observation);
 
-    // Changes the tolerance; applied at the next decision.
+    // Changes applied at the next decision.
     void setTolerance(double pixels) { settings_.tolerancePixels = pixels; }
+    void setGain(double gain) { settings_.gain = gain; }
+    void setMaxPulseMs(int milliseconds) { settings_.maxPulseMs = milliseconds; }
 
     [[nodiscard]] Phase phase() const { return phase_; }
     [[nodiscard]] bool stopped() const { return phase_ == Phase::Stopped; }
@@ -70,6 +72,15 @@ public:
     [[nodiscard]] double decErrorPixels() const { return decError_; }
 
 private:
+    struct AxisError
+    {
+        double raMs{0}, decMs{0};
+        double raPx{0}, decPx{0};
+    };
+
+    [[nodiscard]] std::optional<AxisError> decompose(double dx, double dy) const;
+    void updateDriftEstimate(std::chrono::steady_clock::time_point now, double raPx, double decPx);
+    [[nodiscard]] int pulseDurationMs(double errorPx, double driftPxPerSec, double axisSpeedPxPerMs, int backlashMs) const;
     void stop(std::string reason);
     GuideDecision sendNext(const GuideObservation& observation);
     GuideDecision decide(const GuideObservation& observation);
@@ -85,7 +96,18 @@ private:
     std::chrono::steady_clock::time_point settleUntil_{};
     std::deque<std::pair<std::chrono::steady_clock::time_point, int>> recentPulses_;
     std::optional<GuideDirection> lastDecDirection_;
-    double errorBefore_{0};
+    int decBacklashPendingMs_{0};
+    int decBacklashUsedThisStep_{0};
+    bool pulsedRa_{false};
+    bool pulsedDec_{false};
+    double raErrorBefore_{0};
+    double decErrorBefore_{0};
+    double driftRaPxPerSec_{0};
+    double driftDecPxPerSec_{0};
+    bool driftEstimateSeeded_{false};
+    std::optional<std::chrono::steady_clock::time_point> watchSampleTime_;
+    double watchSampleRaPx_{0};
+    double watchSampleDecPx_{0};
     int fruitless_{0};
     int corrections_{0};
     int pulses_{0};

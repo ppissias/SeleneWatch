@@ -556,6 +556,85 @@ private slots:
         QVERIFY(north == 0 || south == 0); // declination never reversed
     }
 
+    // Feature-40: imperfect polar alignment (strong steady drift) and heavy
+    // declination backlash after calibration are both handled without false
+    // fruitless stops, while an unpulsed drifting axis never penalizes a good pulse.
+    void guidingHandlesStrongPolarDriftAndDecBacklash()
+    {
+        // Strong polar-alignment drift: 1.2"/s Dec + 0.4"/s RA at 3.75"/s guide speed,
+        // with 20" (5.3 s) of Dec backlash after calibration ends moving South.
+        SimulatedPointing::Settings pointing;
+        pointing.driftRa = 0.4;
+        pointing.driftDec = -1.2; // image drifts South -> requires North pulses (against calibration's South return)
+        pointing.decBacklash = 20.0;
+        Loop loop(pointing);
+        Calibrator calibrator;
+        while (!calibrator.finished() && loop.elapsed() < 600) loop.step(calibrator.step(loop.observe()));
+        QVERIFY2(calibrator.finished() && !calibrator.failed(), calibrator.failure().c_str());
+
+        // Reset the lock origin to the post-calibration position, as an observer does.
+        const auto origin = loop.pointing->imageOffset(loop.now);
+        auto observeCentered = [&] {
+            GuideObservation o = loop.observe();
+            o.foundDx -= origin.x;
+            o.foundDy -= origin.y;
+            o.estimateDx -= origin.x;
+            o.estimateDy -= origin.y;
+            return o;
+        };
+        GuideController::Settings settings;
+        settings.tolerancePixels = 10;
+        GuideController controller(*calibrator.result(), settings);
+        const double startTime = loop.elapsed();
+        while (loop.elapsed() - startTime < 600)
+        {
+            const GuideDecision decision = controller.step(observeCentered());
+            loop.step(decision);
+            QVERIFY2(!controller.stopped(), controller.stopReason().c_str());
+        }
+        QVERIFY(controller.pulses() > 5);
+
+        // Unpulsed-axis drift: RA is pulsed and improves (12 -> 9 px), while Dec
+        // (unpulsed because it stayed inside tolerance) drifts 5 -> 9.5 px, so
+        // total hypot(dx, dy) grows (13.0 -> 13.09). That must NOT count as fruitless.
+        Loop axisLoop({});
+        GuideCalibration axisCal = axisLoop.trueCalibration();
+        axisCal.west = {0.01, 0.0};
+        axisCal.north = {0.0, 0.01};
+        GuideController::Settings axisSettings;
+        axisSettings.tolerancePixels = 10;
+        axisSettings.maxFruitlessCorrections = 2;
+        axisSettings.settleSeconds = 0.0;
+        GuideController axisCtrl(axisCal, axisSettings);
+        auto now = SimulatedPointing::Clock::time_point{} + std::chrono::hours{1};
+        auto obsAt = [&](double dx, double dy) {
+            GuideObservation o;
+            o.now = now;
+            o.locked = true;
+            o.estimateValid = true;
+            o.estimateSamples = 5;
+            o.estimateDx = dx;
+            o.estimateDy = dy;
+            o.mount.connected = true;
+            o.mount.tracking = true;
+            o.mount.canPulseGuide = true;
+            o.mount.pierSide = PierSide::West;
+            o.frameInterval = 1.0 / 30.0;
+            return o;
+        };
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto d = axisCtrl.step(obsAt(12.0, 5.0)); // RA out (>10), Dec in (<=10), hypot=13.0
+            QVERIFY(d.pulse.has_value());
+            QCOMPARE(d.pulse->direction, GuideDirection::East);
+            now += std::chrono::milliseconds{d.pulse->milliseconds + 100};
+            (void)axisCtrl.step(obsAt(9.0, 9.5)); // ends pulse -> enters Measuring
+            // Measuring evaluates RA (12 -> 9, improved!) even though hypot grew (13.0 -> 13.09).
+            (void)axisCtrl.step(obsAt(9.0, 9.5));
+            QVERIFY2(!axisCtrl.stopped(), axisCtrl.stopReason().c_str());
+        }
+    }
+
     // Done-when 6: each safety rule stops guiding or withholds pulses.
     void safetyRulesStopOrWithholdPulses_data()
     {

@@ -891,12 +891,17 @@ void MainWindow::setupGuidingPanel()
     guidingPanel_->setMountKind(saved.value("guiding/mountKind", 0).toInt() == 1 && ascomAvailable()
             ? GuidingPanel::MountKind::Ascom : GuidingPanel::MountKind::Simulated);
     guidingPanel_->setTolerancePercent(std::clamp(saved.value("guiding/tolerancePercent", 3.0).toDouble(), 0.5, 20.0));
+    guidingPanel_->setAggressivenessPercent(std::clamp(saved.value("guiding/aggressivenessPercent",
+        static_cast<int>(std::lround(GuideController::Settings{}.gain * 100.0))).toInt(), 30, 100));
+    guidingPanel_->setMaxPulseMs(std::clamp(saved.value("guiding/maxPulseMs",
+        GuideController::Settings{}.maxPulseMs).toInt(), 500, 5000));
     // Feature-32: how long a lost lock is searched for before guiding, and the session, end.
     guidingPanel_->setLostAfterSeconds(std::clamp(saved.value("guiding/lostAfterSeconds", LockTracker::kDefaultSearchSeconds)
         .toDouble(), LockTracker::kMinSearchSeconds, LockTracker::kMaxSearchSeconds));
 
     Guider& guider = session_->guider();
     guider.setLostAfter(guidingPanel_->lostAfterSeconds());
+    guider.setCorrectionTuning(guidingPanel_->aggressivenessPercent() / 100.0, guidingPanel_->maxPulseMs());
     connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
     connect(guidingPanel_, &GuidingPanel::drawLockToggled, this, [this](bool on) {
         if (!on) return;
@@ -910,6 +915,10 @@ void MainWindow::setupGuidingPanel()
     connect(guidingPanel_, &GuidingPanel::calibrateRequested, this, [&guider] { guider.requestCalibration(); });
     connect(guidingPanel_, &GuidingPanel::guidingRequested, this, [&guider](bool on) { guider.requestGuiding(on); });
     connect(guidingPanel_, &GuidingPanel::toleranceChanged, this, [this] { sendTolerance(); saveGuidingSettings(); });
+    connect(guidingPanel_, &GuidingPanel::correctionTuningChanged, this, [this, &guider] {
+        guider.setCorrectionTuning(guidingPanel_->aggressivenessPercent() / 100.0, guidingPanel_->maxPulseMs());
+        saveGuidingSettings();
+    });
     connect(guidingPanel_, &GuidingPanel::lostAfterChanged, this, [this, &guider] {
         guider.setLostAfter(guidingPanel_->lostAfterSeconds());
         saveGuidingSettings();
@@ -1129,6 +1138,8 @@ void MainWindow::saveGuidingSettings()
     saved.setValue("guiding/ascomDriver", ascomDriver_);
     saved.setValue("guiding/mountKind", guidingPanel_->mountKind() == GuidingPanel::MountKind::Ascom ? 1 : 0);
     saved.setValue("guiding/tolerancePercent", guidingPanel_->tolerancePercent());
+    saved.setValue("guiding/aggressivenessPercent", guidingPanel_->aggressivenessPercent());
+    saved.setValue("guiding/maxPulseMs", guidingPanel_->maxPulseMs());
     saved.setValue("guiding/lostAfterSeconds", guidingPanel_->lostAfterSeconds());
 }
 

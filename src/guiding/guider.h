@@ -127,6 +127,7 @@ public:
     void requestCalibration();
     void requestGuiding(bool on);
     void setTolerance(double pixels);
+    void setCorrectionTuning(double gain, int maxPulseMs);
     // Any thread. Ends calibration or guiding with the reason (safety rules 1 and 8).
     void endGuiding(std::string reason);
     // Any thread. Feature-32: how long a lost lock is searched for before it
@@ -154,6 +155,8 @@ private:
         bool calibrate{false};
         std::optional<bool> guide;
         std::optional<double> tolerance;
+        std::optional<double> gain;
+        std::optional<int> maxPulseMs;
         std::optional<std::string> end;
         std::optional<double> lostAfter;
         bool stopTracking{false};
@@ -211,6 +214,8 @@ private:
     std::optional<GuideController> controller_;
     std::optional<GuideCalibration> calibration_;
     double tolerance_{10};
+    double gain_{GuideController::Settings{}.gain};
+    int maxPulseMs_{GuideController::Settings{}.maxPulseMs};
     std::string message_;
     int unplannedStops_{0};
     int trackingStops_{0};

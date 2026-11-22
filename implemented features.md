@@ -44,6 +44,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-37 — Transit watch between lunar time-lapse bursts](#feature-37--transit-watch-between-lunar-time-lapse-bursts)
 - [Feature-38 — Switch observing watches during Preview](#feature-38--switch-observing-watches-during-preview)
 - [Feature-39 — Exposure range presets for the camera slider](#feature-39--exposure-range-presets-for-the-camera-slider)
+- [Feature-40 — Drift-aware guiding for imperfect polar alignment](#feature-40--drift-aware-guiding-for-imperfect-polar-alignment)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3292,3 +3293,20 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 3. **Automatic switching with `Watching`.** `MainWindow` selects **Planetary** for *The Moon: shadows on the sunlit side*, **Fast** for *The Moon: flashes* and *The sky: fast events*, and **Sky** for *The sky: slow and faint* (both on startup and on live Preview watch changes), while allowing manual override in the Camera dock at any time.
 
 **Status & verification (22 November 2026).** Implemented in `CameraSettingsEditor` and `MainWindow`, documented in `MANUAL.md`. Debug build and full CTest suite passed (25/25: `dependency_rules`, all 50 `ui` tests including `cameraSlidersSetTheBoxAndReachTheCameraOnce`, `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, and `numberBoxesFitTheirWidestValue`, plus the 23 core/camera/timelapse suites). Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).
+
+## Feature-40 — Drift-aware guiding for imperfect polar alignment
+
+*Reported by the observer at the telescope and built on 22 November 2026.*
+
+**Problem.** With rough polar alignment, guiding stopped prematurely with *"3 corrections in a row did not reduce the error"* for four compounding reasons:
+1. `GuideController` compared total vector error `hypot(dx, dy)` before and after a correction, so steady drift on an unpulsed axis could make a working single-axis pulse look fruitless.
+2. Conservative defaults (`gain = 0.7`, `maxPulseMs = 1500 ms`, `maxFruitlessCorrections = 3`, `maxPulseMsPerMinute = 20 s`) had no drift compensation during the pulse + settle + re-measure cycle.
+3. Calibration finishes with a South return leg, so a first North guiding pulse had to chew through Dec backlash (`calibration.backlashMs`) before moving the field, tripping the 3-correction stop right before the gears meshed.
+
+**What was built.**
+1. **Pulsed-axis effectiveness check (`GuideController`):** Effectiveness is judged on the axis(es) actually pulsed rather than `hypot(dx, dy)` across an unpulsed drifting axis.
+2. **Steady-drift feed-forward:** Seeded from `calibration.drift` and refined via an EMA during unpulsed `Watching` intervals. When steady drift opposes the correction, pulse duration accounts for the drift during the pulse and settle/re-measure window (capped so it cannot overshoot past the opposite tolerance edge).
+3. **Dec backlash take-up:** Uses the already-measured `calibration.backlashMs` (capped at `15 s`) on a first North pulse after calibration or any Dec reversal, adding it to the clamped pulse and withholding fruitless counts while that finite backlash budget is being consumed.
+4. **Tunable guiding controls & stronger safe defaults:** Default `gain = 0.85`, `maxPulseMs = 3000 ms`, `maxPulseMsPerMinute = 30 s`, `maxFruitlessCorrections = 5`. Added **Aggressiveness** (`30–100 %`) and **Max pulse** (`500–5000 ms`) to `GuidingPanel`, applied live through `Guider::setCorrectionTuning` and remembered in `QSettings`. All mount safety rules (pulse-only, pier-side, tracking/slewing/parked, reversed/dead axis stop, duty-cycle cap) remain enforced.
+
+**Status & verification (22 November 2026).** Implemented in `GuideController`, `Guider`, `GuidingPanel`, and `MainWindow`, documented in `MANUAL.md`. Debug build, `dependency_rules`, `guiding` (including `guidingHandlesStrongPolarDriftAndDecBacklash`, `guidingHoldsTheFieldForAnHour`, `mountThatMovesTheWrongWayStopsGuiding`, and `pulseTimeCapStopsGuiding`), and `ui` (`everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, `numberBoxesFitTheirWidestValue`, and `siteAndRecordingControls`) passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`). Field validation under real polar-alignment drift and Dec backlash added to `features.md`.
