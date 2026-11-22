@@ -62,6 +62,7 @@ struct GuideObservation
     // Live drift speed (image px/s), fitted over recent unpulsed matches.
     bool driftRateValid{false};
     double driftRateDx{0}, driftRateDy{0};
+    double driftRateSpanSeconds{0};
     MountState mount;
     // Seconds between frames; 0 when not yet known.
     double frameInterval{0};

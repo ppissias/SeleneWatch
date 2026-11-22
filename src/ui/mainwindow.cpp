@@ -200,6 +200,21 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     };
     notifications.timeLapseChanged = [this](const TimelapseStatus& status) {
         if (timelapsePanel_) timelapsePanel_->updateStatus(status);
+        if (detectionPanel_ && session_->mode() == Session::Mode::TimeLapse)
+        {
+            const bool transits = timelapsePanel_ && timelapsePanel_->settings().watchTransits;
+            QString detail;
+            switch (status.transitWatch)
+            {
+            case TransitWatchState::Watching: detail = "watching between bursts"; break;
+            case TransitWatchState::Saving: detail = "saving transit clip"; break;
+            case TransitWatchState::Capturing: detail = "paused during burst capture"; break;
+            case TransitWatchState::Stacking: detail = "paused during stacking"; break;
+            case TransitWatchState::Off:
+            case TransitWatchState::Finished: break;
+            }
+            detectionPanel_->setTimeLapseState(true, transits, detail);
+        }
         updateClosingProgress(status);
     };
     notifications.timeLapseFinished = [this](const TimelapseFinishResult& result) {
@@ -2125,8 +2140,26 @@ void MainWindow::updateControls()
 
     ui_->sourceComboBox->setEnabled(!busy);
     const bool watchEditable = !busy || (!timeLapseFinalizing && session_->canChangePreviewWatch());
-    if (detectionPanel_) detectionPanel_->setTargetEditable(watchEditable);
-    if (detectionPanel_) detectionPanel_->setWatchTimelapseEditable(!monitoring);
+    if (detectionPanel_)
+    {
+        detectionPanel_->setTargetEditable(watchEditable);
+        detectionPanel_->setWatchTimelapseEditable(!monitoring);
+        const bool tlTransits = timeLapsing && timelapsePanel_ && timelapsePanel_->settings().watchTransits;
+        QString detail;
+        if (tlTransits)
+        {
+            switch (session_->timeLapseStatus().transitWatch)
+            {
+            case TransitWatchState::Watching: detail = "watching between bursts"; break;
+            case TransitWatchState::Saving: detail = "saving transit clip"; break;
+            case TransitWatchState::Capturing: detail = "paused during burst capture"; break;
+            case TransitWatchState::Stacking: detail = "paused during stacking"; break;
+            case TransitWatchState::Off:
+            case TransitWatchState::Finished: break;
+            }
+        }
+        detectionPanel_->setTimeLapseState(timeLapsing, tlTransits, detail);
+    }
     ui_->openFileButton->setEnabled(!busy && recording);
     ui_->loopCheckBox->setEnabled(!busy && recording);
     ui_->loopSecondsSpinBox->setEnabled(!busy && recording && ui_->loopCheckBox->isChecked());

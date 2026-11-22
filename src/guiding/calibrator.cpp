@@ -35,6 +35,12 @@ std::string Calibrator::progress() const
 {
     switch (phase_)
     {
+    case Phase::Drift:
+    {
+        const double elapsed = driftSamples_.size() >= 2
+            ? seconds(driftSamples_.back().time - driftSamples_.front().time) : 0.0;
+        return std::format("measuring field drift ({:.0f} / {:.0f} s)", elapsed, kDriftMeasureSeconds);
+    }
     case Phase::WestStart:
         return "measuring the start position";
     case Phase::West:
@@ -130,6 +136,46 @@ GuideDecision Calibrator::step(const GuideObservation& o)
     const ImageVector found{o.foundDx, o.foundDy};
     switch (phase_)
     {
+    case Phase::Drift:
+        // Reuse LockTracker's live unpulsed drift fit if already long enough;
+        // otherwise observe unpulsed for kDriftMeasureSeconds so every leg
+        // subtracts pure drift unaffected by RA backlash.
+        if (o.driftRateValid && o.driftRateSpanSeconds >= kDriftMeasureSeconds)
+        {
+            drift_ = {o.driftRateDx, o.driftRateDy};
+            phase_ = Phase::WestStart;
+            return decision;
+        }
+        if (driftSamples_.empty() || o.now > driftSamples_.back().time)
+            driftSamples_.push_back({found, o.now});
+        if (static_cast<int>(driftSamples_.size()) >= kMinDriftSamples
+            && seconds(driftSamples_.back().time - driftSamples_.front().time) >= kDriftMeasureSeconds)
+        {
+            const auto t0 = driftSamples_.front().time;
+            const double n = static_cast<double>(driftSamples_.size());
+            double meanT = 0, meanX = 0, meanY = 0;
+            for (const Point& p : driftSamples_)
+            {
+                meanT += seconds(p.time - t0);
+                meanX += p.position.x;
+                meanY += p.position.y;
+            }
+            meanT /= n;
+            meanX /= n;
+            meanY /= n;
+            double varT = 0, covTX = 0, covTY = 0;
+            for (const Point& p : driftSamples_)
+            {
+                const double dt = seconds(p.time - t0) - meanT;
+                varT += dt * dt;
+                covTX += dt * (p.position.x - meanX);
+                covTY += dt * (p.position.y - meanY);
+            }
+            if (varT > 1e-9) drift_ = {covTX / varT, covTY / varT};
+            phase_ = Phase::WestStart;
+        }
+        return decision;
+
     case Phase::WestStart:
         if (auto point = fresh(o, decision))
         {
@@ -140,7 +186,7 @@ GuideDecision Calibrator::step(const GuideObservation& o)
         return decision;
 
     case Phase::West:
-        if ((found - westStart_.position).length() >= kTargetPixels || legMs_ >= kMaxLegMs)
+        if ((found - westStart_.position - driftSince(westStart_, o.now)).length() >= kTargetPixels || legMs_ >= kMaxLegMs)
         {
             westMs_ = legMs_;
             phase_ = Phase::WestEnd;
@@ -153,14 +199,15 @@ GuideDecision Calibrator::step(const GuideObservation& o)
         if (auto point = fresh(o, decision))
         {
             westEnd_ = *point;
-            const double moved = (westEnd_.position - westStart_.position).length();
-            if (moved < kMinMovePixels)
+            const ImageVector westMove = westEnd_.position - westStart_.position - driftSince(westStart_, westEnd_.time);
+            if (westMove.length() < kMinMovePixels)
             {
                 fail(std::format("{:.1f} s of west pulses moved the feature {:.1f} pixels, less than {:.0f}. "
                     "The mount does not respond to pulses, or its guide rate is far too low.",
-                    westMs_ / 1000.0, moved, kMinMovePixels));
+                    westMs_ / 1000.0, westMove.length(), kMinMovePixels));
                 return decision;
             }
+            west_ = westMove / westMs_;
             eastMs_ = 0;
             phase_ = Phase::East;
         }
@@ -179,15 +226,8 @@ GuideDecision Calibrator::step(const GuideObservation& o)
         }
 
     case Phase::EastEnd:
-        if (auto point = fresh(o, decision))
+        if (fresh(o, decision))
         {
-            // West: w T + d tw. East: -w T + d te. Their sum is the drift alone.
-            const ImageVector westMove = westEnd_.position - westStart_.position;
-            const ImageVector eastMove = point->position - westEnd_.position;
-            const double westSeconds = seconds(westEnd_.time - westStart_.time);
-            const double eastSeconds = seconds(point->time - westEnd_.time);
-            drift_ = (westMove + eastMove) / (westSeconds + eastSeconds);
-            west_ = (westMove - drift_ * westSeconds) / westMs_;
             backlashMs_ = 0;
             phase_ = Phase::BacklashStart;
         }

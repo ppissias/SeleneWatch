@@ -51,6 +51,9 @@ struct GuideStatus
     double frameInterval{0};
     // The latest estimate along the mount axes while guiding, image pixels.
     double raErrorPixels{0}, decErrorPixels{0};
+    // Active RA/Dec drift speed used by GuideController while guiding (px/s).
+    bool driftEstimateValid{false};
+    double driftRaPxPerSec{0}, driftDecPxPerSec{0};
     // Pulses of the current or last calibration or guiding run.
     int pulses{0};
     std::optional<GuidePulse> lastPulse;

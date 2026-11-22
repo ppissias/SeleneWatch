@@ -38,6 +38,9 @@ public:
     void setView(const DetectionView& view);
     // The current capture state can change while no new exposure is ready.
     void setMonitoring(bool monitoring);
+    // Feature-44: while a time-lapse runs, lock editing/Auto-tune and state
+    // clearly whether shadow/transit monitoring is active between bursts.
+    void setTimeLapseState(bool active, bool watchingTransits, const QString& statusDetail = {});
     [[nodiscard]] QImage overlayImage() const;
 
     // The target whose settings the panel holds. The choice box only asks
@@ -91,6 +94,8 @@ private:
     void onProfileComboChanged(int index);
 
     QPushButton* autoTune_;
+    QLabel* timeLapseBanner_;
+    QWidget* content_;
     MeterSlider* sigmaSlider_;
     MeterSlider* minSlider_;
     MeterSlider* maxSlider_;
@@ -145,5 +150,7 @@ private:
     QImage overlayImage_;
     DetectionSummary latest_;
     bool monitoring_{false}, settling_{false};
+    bool timeLapseActive_{false}, timeLapseTransits_{false};
+    QString timeLapseDetail_;
     bool updating_{false};
 };

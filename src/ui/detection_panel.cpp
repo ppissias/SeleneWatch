@@ -218,10 +218,16 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "apply it.");
     outer->addWidget(autoTune_);
     connect(autoTune_, &QPushButton::clicked, this, &DetectionPanel::autoTuneRequested);
+    timeLapseBanner_ = new QLabel(this);
+    timeLapseBanner_->setObjectName("detectionTimeLapseBanner");
+    timeLapseBanner_->setWordWrap(true);
+    timeLapseBanner_->hide();
+    outer->addWidget(timeLapseBanner_);
     auto* scroll = new QScrollArea(this);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
-    auto* content = new QWidget;
+    content_ = new QWidget;
+    auto* content = content_;
     auto* column = new QVBoxLayout(content);
     scroll->setWidget(content);
     outer->addWidget(scroll);
@@ -973,8 +979,47 @@ void DetectionPanel::setMonitoring(bool monitoring)
     updateDecision();
 }
 
+void DetectionPanel::setTimeLapseState(bool active, bool watchingTransits, const QString& statusDetail)
+{
+    timeLapseActive_ = active;
+    timeLapseTransits_ = active && watchingTransits;
+    timeLapseDetail_ = active ? statusDetail : QString();
+    autoTune_->setEnabled(!active);
+    content_->setEnabled(!active);
+    if (!active)
+    {
+        timeLapseBanner_->hide();
+    }
+    else if (watchingTransits)
+    {
+        timeLapseBanner_->setStyleSheet("background:#164b3c; color:white; font-weight:bold; padding:5px 8px; border-radius:4px;");
+        QString text = "Active monitoring for shadows / transits between time-lapse bursts";
+        if (!statusDetail.isEmpty()) text += " (" + statusDetail + ")";
+        text += ". Settings are locked during time-lapse.";
+        timeLapseBanner_->setText(text);
+        timeLapseBanner_->show();
+    }
+    else
+    {
+        timeLapseBanner_->setStyleSheet("background:#3b3f4a; color:white; font-weight:bold; padding:5px 8px; border-radius:4px;");
+        timeLapseBanner_->setText("Time-lapse running — detection is OFF. Settings are locked during time-lapse.");
+        timeLapseBanner_->show();
+    }
+    updateDecision();
+}
+
 void DetectionPanel::updateDecision()
 {
+    if (timeLapseActive_)
+    {
+        if (timeLapseTransits_)
+            state_->setText(timeLapseDetail_.isEmpty()
+                ? QString("Active monitoring for shadows / transits between bursts.")
+                : QString("Active shadow / transit monitoring — %1.").arg(timeLapseDetail_));
+        else
+            state_->setText("Time-lapse running — detection OFF.");
+        return;
+    }
     const auto& summary=latest_;
     if (settling_)
         state_->setText(kSettlingState);

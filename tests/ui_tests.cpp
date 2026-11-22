@@ -2482,8 +2482,17 @@ void UiTest::watchesCanChangeInPreviewAndTransitControlsFollowTheMoon()
     QTRY_VERIFY(!watch->isEnabled() && !transits->isEnabled() && startLapse->text().contains("Stop"));
     auto* transitStatus = timeLapse->findChild<QLabel*>("timelapseTransitStatus");
     QTRY_VERIFY(!transitStatus->text().isEmpty());
+    // Feature-44: Detection controls and Auto-tune lock during time-lapse, and
+    // a banner states that active shadow/transit monitoring is taking place.
+    auto* autoTuneBtn = panel->findChild<QPushButton*>("autoTuneButton");
+    auto* sigmaBox = panel->findChild<QDoubleSpinBox*>("detectionSigma");
+    auto* tlBanner = panel->findChild<QLabel*>("detectionTimeLapseBanner");
+    QVERIFY(autoTuneBtn && !autoTuneBtn->isEnabled());
+    QVERIFY(sigmaBox && !sigmaBox->isEnabled());
+    QVERIFY(tlBanner && !tlBanner->isHidden() && tlBanner->text().contains("shadows / transits"));
     startLapse->click();
     QTRY_VERIFY(watch->isEnabled());
+    QVERIFY(autoTuneBtn->isEnabled() && sigmaBox->isEnabled() && tlBanner->isHidden());
     QVERIFY(!timeLapse->findChild<QPushButton*>("timelapseOpenTransits")->isHidden());
 
     auto* preset = timeLapse->findChild<QComboBox*>("timelapsePreset");

@@ -258,6 +258,9 @@ void Guider::publish()
         guide.frameInterval = frameInterval_;
         guide.raErrorPixels = controller_ ? controller_->raErrorPixels() : 0.0;
         guide.decErrorPixels = controller_ ? controller_->decErrorPixels() : 0.0;
+        guide.driftEstimateValid = controller_ && controller_->hasDriftEstimate();
+        guide.driftRaPxPerSec = controller_ ? controller_->driftRaPxPerSec() : 0.0;
+        guide.driftDecPxPerSec = controller_ ? controller_->driftDecPxPerSec() : 0.0;
         guide.pulses = pulses_;
         guide.lastPulse = lastPulse_;
         guide.lastPulseTime = lastPulseTime_;
@@ -315,6 +318,7 @@ GuideObservation Guider::observation(const MountState& state) const
     o.driftRateValid = lock.driftRateValid;
     o.driftRateDx = lock.driftRateDx;
     o.driftRateDy = lock.driftRateDy;
+    o.driftRateSpanSeconds = lock.driftRateSpanSeconds;
     o.mount = state;
     o.frameInterval = frameInterval_;
     return o;

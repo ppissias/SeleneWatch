@@ -74,6 +74,9 @@ public:
     // RA part along the west vector, the declination part along the north vector.
     [[nodiscard]] double raErrorPixels() const { return raError_; }
     [[nodiscard]] double decErrorPixels() const { return decError_; }
+    [[nodiscard]] bool hasDriftEstimate() const { return driftEstimateSeeded_; }
+    [[nodiscard]] double driftRaPxPerSec() const { return driftRaPxPerSec_; }
+    [[nodiscard]] double driftDecPxPerSec() const { return driftDecPxPerSec_; }
 
 private:
     struct AxisError

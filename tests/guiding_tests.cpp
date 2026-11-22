@@ -506,12 +506,36 @@ private slots:
     {
         SimulatedPointing::Settings settings;
         settings.ignorePulses = true;
+        settings.driftDec = 1.5; // strong drift must not fool WestEnd into thinking pulses moved the mount
         Loop loop(settings);
         Calibrator calibrator;
         while (!calibrator.finished() && loop.elapsed() < 600) loop.step(calibrator.step(loop.observe()));
         QVERIFY(calibrator.failed());
         QVERIFY2(calibrator.failure().find("does not respond") != std::string::npos, calibrator.failure().c_str());
         QVERIFY(!calibrator.result());
+    }
+
+    // Feature-43: measuring unpulsed drift before pulsing lets calibration handle
+    // strong polar-alignment drift cleanly without cutting the West leg short.
+    void calibrationMeasuresDriftFirstUnderStrongPolarDrift()
+    {
+        SimulatedPointing::Settings settings;
+        settings.driftRa = 0.3;
+        settings.driftDec = 1.5;
+        settings.decBacklash = 15.0;
+        Loop loop(settings);
+        Calibrator calibrator;
+        while (!calibrator.finished() && loop.elapsed() < 600) loop.step(calibrator.step(loop.observe()));
+        QVERIFY2(calibrator.finished() && !calibrator.failed(), calibrator.failure().c_str());
+        const GuideCalibration& result = *calibrator.result();
+        const auto west = loop.pointing->imageRate(GuideDirection::West);
+        const auto north = loop.pointing->imageRate(GuideDirection::North);
+        const double speed = std::hypot(west.x, west.y);
+        QVERIFY2(std::hypot(result.west.x - west.x, result.west.y - west.y) < 0.06 * speed,
+            qPrintable(QString("west %1,%2 expected %3,%4").arg(result.west.x * 1000).arg(result.west.y * 1000).arg(west.x * 1000).arg(west.y * 1000)));
+        QVERIFY2(std::hypot(result.north.x - north.x, result.north.y - north.y) < 0.06 * speed,
+            qPrintable(QString("north %1,%2 expected %3,%4").arg(result.north.x * 1000).arg(result.north.y * 1000).arg(north.x * 1000).arg(north.y * 1000)));
+        QVERIFY(std::abs(result.axisAngleDegrees - 90) < 5);
     }
 
     // Done-when 5: an hour of constant drift stays in the box, with about the

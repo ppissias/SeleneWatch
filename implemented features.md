@@ -47,6 +47,8 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-40 — Drift-aware guiding for imperfect polar alignment](#feature-40--drift-aware-guiding-for-imperfect-polar-alignment)
 - [Feature-41 — Live drift speed readout and drift-rate guiding feed-forward](#feature-41--live-drift-speed-readout-and-drift-rate-guiding-feed-forward)
 - [Feature-42 — Separate guiding correction tolerance and give-up drift limit](#feature-42--separate-guiding-correction-tolerance-and-give-up-drift-limit)
+- [Feature-43 — Pre-calibration drift measurement and persistent drift speed readout](#feature-43--pre-calibration-drift-measurement-and-persistent-drift-speed-readout)
+- [Feature-44 — Lock Detection controls and show active shadow monitoring during Time-lapse](#feature-44--lock-detection-controls-and-show-active-shadow-monitoring-during-time-lapse)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3342,3 +3344,21 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 3. **Higher duty-cycle headroom:** Reduced default `settleSeconds` from `1.0 s` to `0.6 s` and raised `maxPulseMsPerMinute` from `30 s` to `50 s` so continuous `3–5 s` Dec pulses can hold strong polar-alignment drift indefinitely without hitting a premature 30 s stop.
 
 **Status & verification (22 November 2026).** Implemented in `GuideController`, `Guider`, `GuidingPanel`, and `MainWindow`, documented in `MANUAL.md`. Debug build (all targets), `dependency_rules`, `guiding` (all 31 tests including `giveUpToleranceLetsGuidingHoldSlowCreepThenStopsPastLimit`, `mountThatMovesTheWrongWayStopsGuiding`, and `guidingHandlesStrongPolarDriftAndDecBacklash`), and UI layout/help/width checks passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).
+
+## Feature-43 — Pre-calibration drift measurement and persistent drift speed readout
+
+*Proposed by the observer during live lunar guiding and built on 22 November 2026.*
+
+**What was built.**
+1. **Unpulsed drift phase before calibration (`Calibrator::Phase::Drift`):** Before sending the first West pulse, `Calibrator` adopts `LockTracker`'s live unpulsed drift fit immediately if it already spans `≥ 10 s`, or otherwise observes unpulsed for `10 s` (`"measuring field drift"`). `West`, `WestEnd`, `Backlash`, and `North` all subtract that pure drift vector, preventing strong polar-alignment drift from cutting the West leg short, preventing RA backlash on the East return from biasing `drift_`, and catching unresponsive mounts even under fast drift.
+2. **Persistent `Drift speed` readout during active guiding:** `GuideStatus` publishes `GuideController`'s active RA/Dec drift rate while guiding so `GuidingPanel`'s **Drift speed** row stays visible even when pulses fire faster than every `4 s`.
+
+## Feature-44 — Lock Detection controls and show active shadow monitoring during Time-lapse
+
+*Reported by the observer during a live Moon time-lapse with transit watch and built on 22 November 2026.*
+
+**What was built.**
+- Added `DetectionPanel::setTimeLapseState(...)`, wired from `MainWindow::updateControls()` and `notifications.timeLapseChanged`.
+- While a time-lapse runs, Detection editing controls and **Auto-tune…** are disabled, and a top banner plus the decision readout state clearly whether active monitoring for shadows / transits is running between bursts (including watching / saving / paused during burst capture or stacking) or whether detection is OFF for a plain time-lapse. Controls re-enable automatically when the time-lapse ends.
+
+**Status & verification (22 November 2026).** Feature-43 and Feature-44 implemented across `Calibrator`, `GuideController`, `Guider`, `GuidingPanel`, `DetectionPanel`, and `MainWindow`, documented in `MANUAL.md`. Debug build (all targets), `dependency_rules`, `guiding` (all 32 tests including `calibrationMeasuresDriftFirstUnderStrongPolarDrift` and both `calibrationMeasuresTheSimulation` rows), and `ui` (`watchesCanChangeInPreviewAndTransitControlsFollowTheMoon`, `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, `numberBoxesFitTheirWidestValue`) passed. Not run: Release build and real-window GUI E2E (`tests\gui_e2e_test.ps1`).
