@@ -14,7 +14,19 @@ Its primary purpose is helping observers capture **lunar transient phenomena**, 
 
 ![SeleneWatch monitoring a lunar terminator recording with live detection and native-ADU histogram](docs/images/readme-main-window.png)
 
-*Monitoring a lunar terminator recording (`Moon_181337.avi`): live preview, detection thresholds and 10-second sigma trace on the right, and native-ADU histogram below.*
+*Monitoring a lunar terminator recording (`moon_2012-08-27-205006-0000_vd.avi`, Clavius region): full-height live preview, slim top command bar with **MONITORING** badge, **Detection** controls on the right, and compact native-ADU **Histogram** below.*
+
+---
+
+## Real-world capture example (Sky mode)
+
+<p align="center">
+  <img src="docs/images/readme-meteor-realtime.gif" alt="Real-time cropped meteor animation captured automatically by SeleneWatch" width="426">
+</p>
+
+![SeleneWatch automatic overview summary of the 2026-11-21 03:49:57 UTC meteor capture](docs/images/readme-meteor-overview.jpg)
+
+*Automatic overnight **Sky** capture with a fixed **ZWO ASI120MM Mini** (`2026-11-21 03:49:57.409 UTC`, frame `753520`, `Peak 27.1 σ`, `K 13.9`): real-time cropped playback (top) and SeleneWatch's automatic `00_overview.png` report (bottom) showing the trigger crosshair, hatched horizon mask, `before / first / peak / after` frames, and highlighted change mask.*
 
 ---
 

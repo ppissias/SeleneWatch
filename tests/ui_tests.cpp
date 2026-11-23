@@ -1357,7 +1357,7 @@ void UiTest::everyControlHasHelp()
     // and the follower's limit rows show only while Follow the sky's brightness is checked.
     auto* autoTuneBtn = window.findChild<QPushButton*>("autoTuneButton");
     auto* autoTuneHelp = window.findChild<QLabel*>("autoTuneHelp");
-    QVERIFY(autoTuneBtn && autoTuneBtn->text() == QString("Tune camera & detection…"));
+    QVERIFY(autoTuneBtn && autoTuneBtn->text() == QString("Tune camera && detection…"));
     QVERIFY(autoTuneHelp && autoTuneHelp->text().contains("ⓘ"));
 
     auto* followCheck = window.findChild<QCheckBox*>("followSky");

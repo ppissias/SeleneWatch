@@ -245,7 +245,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     auto* autoTuneRow = new QHBoxLayout;
     autoTuneRow->setContentsMargins(6, 4, 6, 2);
     autoTuneRow->setSpacing(6);
-    autoTune_ = new QPushButton("Tune camera & detection…", this);
+    autoTune_ = new QPushButton("Tune camera && detection…", this);
     autoTune_->setObjectName("autoTuneButton");
     autoTune_->setStyleSheet(autoTuneButtonStyle());
     autoTune_->setToolTip("Measures the live Preview to suggest and apply camera settings (exposure, gain, offset) "

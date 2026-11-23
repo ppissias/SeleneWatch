@@ -34,7 +34,7 @@ For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md). For arch
 
 ![SeleneWatch main window monitoring a lunar recording](docs/images/readme-main-window.png)
 
-*The SeleneWatch main window running **Monitoring** on `Moon_181337.avi`, showing the top control bar, status banner, live preview, docked panels on the right, live histogram below, and the two-line status bar.*
+*The SeleneWatch main window running **Monitoring** on `moon_2012-08-27-205006-0000_vd.avi` (Clavius region), showing the top command bar and mode badge, full-height live preview, right-hand **Detection** dock, and compact live **Histogram** below.*
 
 From top to bottom, the main screen contains:
 
