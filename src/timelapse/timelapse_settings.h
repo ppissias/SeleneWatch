@@ -80,6 +80,8 @@ struct VideoToneSettings
     int fps{12};
     bool writeMp4{true};
     bool writeGif{false};
+    bool writeSer{false};
+    bool stretchSer{false}; // false = linear 16-bit mono / RGB; true = apply black/white stretch & gamma like MP4
 
     [[nodiscard]] bool valid() const;
     [[nodiscard]] bool operator==(const VideoToneSettings&) const = default;

@@ -298,7 +298,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
   - **The Moon** is aligned by shift and rotation, inside the **lunar anchor** you choose: a steady, sunlit area. Without an anchor the whole frame is used, sky included, and a passing cloud can turn a stack wrongly. The panel warns in amber until you set one.
   - **A planet** is never rotated: each stack is shifted so the planet's disk stays where it was. Bright moons beside Jupiter count towards its centre, so the disk may wander by a pixel or two as they move.
 - **Kept safely.** Each stack is saved at once as a 32-bit FITS file, as it is and sharpened, so a crash loses nothing finished. If processing ever falls behind, SeleneWatch skips a burst rather than fall further behind, and records it.
-- **The video** (MP4, and optionally GIF) is built when the time-lapse ends, with the brightness of the stacks matched, so haze and thin cloud do not make it flicker.
+- **The output** (any combination of MP4, GIF and lossless SER) is built when the time-lapse ends, with the brightness of the stacks matched, so haze and thin cloud do not make it flicker. `timelapse.ser` keeps one frame per stack (linear 16-bit mono or RGB by default, with real UTC timestamps for SER Player; tick **Stretch SER (match MP4)** to bake in the MP4's stretch and gamma).
 - **The field is kept in place.** The feature lock follows a crater or the planet's disk, and guiding corrects the mount ([chapter 6](#6-feature-lock-and-guiding)).
 
 ### Step by step
@@ -309,7 +309,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
    - **Target preset:** **Moon** or **Planet**.
    - **Interval** and **Capture window**. For a planet, keep the capture window short (a minute or so) so its rotation does not blur a burst.
    - **Moon: Select lunar anchor** and drag a box around a sunlit area that will stay lit, with steady shadows, for the whole session.
-   - **Sharpening**, **Stops** (when the session ends, or after a number of stacks; [1.8](#18-ending-a-session-by-itself)), and the **Animation**: MP4, GIF, frames per second.
+   - **Sharpening**, **Stops** (when the session ends, or after a number of stacks; [1.8](#18-ending-a-session-by-itself)), and **Output**: MP4, GIF, SER (plus **Stretch SER (match MP4)** when SER is ticked), and frames per second.
    - **Also save raw SER bursts** keeps every stacked frame. It can fill a drive in one night, so it asks first and is off again the next time SeleneWatch starts.
    - **Also watch for transits** (Moon): watches for shadows between the bursts, with the shadows watch's settings ([chapter 4](#4-shadows-crossing-the-moon)).
 4. Press **Start time-lapse**. The panel shows the latest stack, a short loop of the last stacks, and each stack's sharpness, shift and rotation, with any warnings.
@@ -350,7 +350,7 @@ With **Also watch for transits**, the shadows watch runs between the bursts and 
 | **Crop around locked feature** | Crops each stack around the lock. Does not replace the lunar anchor |
 | **Sharpening** | Off, Mild, Medium, or a saved profile |
 | **Stops** | When the session ends, or after a number of stacks |
-| **Animation** | MP4 and GIF, frames per second |
+| **Output** | MP4, GIF and lossless SER (linear by default, or stretched to match MP4), frames per second |
 | **Also save raw SER bursts** | Keeps every stacked frame (very large) |
 | **Also watch for transits** | Moon: the shadows watch between bursts |
 
@@ -532,7 +532,7 @@ At the top, the report says how many events of each group the session has. Each 
     timelapses/<UTC start>/
         stacks/                      each stack, as 32-bit FITS
         sharpened/                   each stack sharpened
-        timelapse.mp4, timelapse.gif the video
+        timelapse.mp4, timelapse.gif, timelapse.ser  the video / SER sequence
         timelapse.txt                the settings, every stack, and why it ended
         transits/                    crossings saved during a Moon time-lapse
 ```

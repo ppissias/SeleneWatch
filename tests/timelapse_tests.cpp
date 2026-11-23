@@ -8,6 +8,7 @@
 
 #include "cameras/zwo_source.h"
 #include "core/memory_budget.h"
+#include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
 #include "session/session.h"
 #include "sources/recording_source.h"
@@ -264,6 +265,7 @@ private slots:
     void skyTimelapseKeepsAFrameEveryIntervalAndItsVideo();
     void skyTimelapseStopsAtTheDiskReserve();
     void qualityFilterModesAndManualOverrides();
+    void serTimelapseExportLinearAndStretchedWithTimestamps();
     void anUnclosedVideoStillPlays();
 };
 
@@ -2590,6 +2592,117 @@ void TimelapseTests::qualityFilterModesAndManualOverrides()
     QVERIFY(loadProfileJson(profPath, ls, lv, err));
     QCOMPARE(lv.qualityFilterMode, QualityFilterMode::KeepBestPct);
     QCOMPARE(lv.keepBestPercent, 60.0);
+}
+
+void TimelapseTests::serTimelapseExportLinearAndStretchedWithTimestamps()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString fitsDir = tmp.filePath("mono_stacks");
+    QVERIFY(QDir().mkpath(fitsDir));
+
+    const auto t0 = std::chrono::system_clock::time_point(std::chrono::seconds{1795300000});
+    for (int i = 0; i < 3; ++i)
+    {
+        FitsImage img;
+        img.width = 64;
+        img.height = 48;
+        img.channels = 1;
+        img.pixels.resize(static_cast<size_t>(img.width) * img.height);
+        // Unclipped linear range [0.10, 0.50] so stretched vs. linear are cleanly distinct.
+        for (int y = 0; y < img.height; ++y)
+            for (int x = 0; x < img.width; ++x)
+                img.pixels[static_cast<size_t>(y) * img.width + x] =
+                    0.10f + 0.40f * static_cast<float>(x) / static_cast<float>(img.width - 1);
+        img.meta.dateObs = t0 + std::chrono::seconds{i * 60};
+        img.meta.camera = "ASI120MM";
+        img.meta.telescope = "C9.25";
+        img.meta.qualityScore = 0.01 + 0.001 * i;
+        QString err;
+        QVERIFY2(writeFitsFloat(QDir(fitsDir).filePath(QString("%1.fits").arg(i + 1, 4, 10, QChar('0'))), img, err),
+            qPrintable(err));
+    }
+
+    // 1. SER-only export (no FFmpeg needed), linear 16-bit mono default.
+    VideoToneSettings linearTone;
+    linearTone.writeMp4 = false;
+    linearTone.writeGif = false;
+    linearTone.writeSer = true;
+    linearTone.stretchSer = false;
+    linearTone.brightnessMode = BrightnessLevellingMode::Off;
+    const QString linOut = tmp.filePath("out_linear");
+    const TimelapseExportResult linRes = exportTimelapseFromFits(fitsDir, linOut, linearTone);
+    QVERIFY2(linRes.ok, qPrintable(linRes.error));
+    QVERIFY(linRes.mp4Path.isEmpty() && linRes.gifPath.isEmpty());
+    QVERIFY(QFileInfo::exists(linRes.serPath));
+    QCOMPARE(linRes.stacksUsed, 3);
+
+    SerReader linReader;
+    std::string serErr;
+    QVERIFY2(linReader.open(std::filesystem::path(linRes.serPath.toStdWString()), 12.0, serErr), serErr.c_str());
+    QCOMPARE(linReader.frameCount(), 3);
+    QVERIFY(linReader.hasFrameTimes());
+    QCOMPARE(linReader.instrument(), std::string("ASI120MM"));
+    QCOMPARE(linReader.frameTime(0), t0);
+    QCOMPARE(linReader.frameTime(2), t0 + std::chrono::seconds{120});
+    Frame linFrame;
+    linFrame.data.resize(linReader.frameBytes());
+    QVERIFY2(linReader.readFrame(0, linFrame, serErr), serErr.c_str());
+    QCOMPARE(linFrame.width, 64);
+    QCOMPARE(linFrame.height, 48);
+    QCOMPARE(linFrame.format, PixelFormat::Mono16);
+    QCOMPARE(linFrame.significantBits, 16);
+    const uint16_t* linPx = reinterpret_cast<const uint16_t*>(linFrame.data.data());
+    // Linear x=0 -> ~0.10 * 65535 (~6554), x=63 -> ~0.50 * 65535 (~32768).
+    QVERIFY(linPx[0] > 5500 && linPx[0] < 7500);
+    QVERIFY(linPx[63] > 31500 && linPx[63] < 34000);
+
+    // 2. Stretched 16-bit mono SER matching MP4 auto-stretch.
+    VideoToneSettings stretchTone = linearTone;
+    stretchTone.stretchSer = true;
+    stretchTone.autoStretch = true;
+    const QString strOut = tmp.filePath("out_stretched");
+    const TimelapseExportResult strRes = exportTimelapseFromFits(fitsDir, strOut, stretchTone);
+    QVERIFY2(strRes.ok, qPrintable(strRes.error));
+    SerReader strReader;
+    QVERIFY2(strReader.open(std::filesystem::path(strRes.serPath.toStdWString()), 12.0, serErr), serErr.c_str());
+    Frame strFrame;
+    strFrame.data.resize(strReader.frameBytes());
+    QVERIFY2(strReader.readFrame(0, strFrame, serErr), serErr.c_str());
+    const uint16_t* strPx = reinterpret_cast<const uint16_t*>(strFrame.data.data());
+    // Auto-stretch maps ~0.10 -> near 0 and ~0.50 -> near 65535.
+    QVERIFY(strPx[0] < 1000);
+    QVERIFY(strPx[63] > 64000);
+
+    // 3. Colour (3-channel) FITS stacks export as RGB888 SER.
+    const QString rgbDir = tmp.filePath("rgb_stacks");
+    QVERIFY(QDir().mkpath(rgbDir));
+    FitsImage rgb;
+    rgb.width = 32;
+    rgb.height = 24;
+    rgb.channels = 3;
+    rgb.pixels.resize(static_cast<size_t>(rgb.width) * rgb.height * 3, 0.5f);
+    rgb.meta.dateObs = t0;
+    rgb.meta.qualityScore = 0.02;
+    QString err;
+    QVERIFY(writeFitsFloat(QDir(rgbDir).filePath("0001.fits"), rgb, err));
+    const TimelapseExportResult rgbRes = exportTimelapseFromFits(rgbDir, tmp.filePath("out_rgb"), linearTone);
+    QVERIFY2(rgbRes.ok, qPrintable(rgbRes.error));
+    SerReader rgbReader;
+    QVERIFY2(rgbReader.open(std::filesystem::path(rgbRes.serPath.toStdWString()), 12.0, serErr), serErr.c_str());
+    QCOMPARE(rgbReader.frameCount(), 1);
+    Frame rgbFrame;
+    rgbFrame.data.resize(rgbReader.frameBytes());
+    QVERIFY2(rgbReader.readFrame(0, rgbFrame, serErr), serErr.c_str());
+    QCOMPARE(rgbFrame.format, PixelFormat::RGB888);
+
+    // 4. Profile JSON round-trip preserves writeSer and stretchSer.
+    const QString profPath = tmp.filePath("ser_profile.json");
+    QVERIFY(saveProfileJson(profPath, SharpeningSettings{}, stretchTone, err));
+    SharpeningSettings ls;
+    VideoToneSettings lv;
+    QVERIFY(loadProfileJson(profPath, ls, lv, err));
+    QVERIFY(lv.writeSer && lv.stretchSer && !lv.writeMp4 && !lv.writeGif);
 }
 
 QTEST_MAIN(TimelapseTests)

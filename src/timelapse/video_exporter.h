@@ -35,6 +35,7 @@ struct TimelapseExportResult
     bool ok{false};
     QString mp4Path;
     QString gifPath;
+    QString serPath;
     int stacksUsed{0};
     int stacksDropped{0};
     QString error;

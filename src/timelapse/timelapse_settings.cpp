@@ -177,6 +177,8 @@ QJsonObject toJson(const VideoToneSettings& v)
     obj["fps"] = v.fps;
     obj["writeMp4"] = v.writeMp4;
     obj["writeGif"] = v.writeGif;
+    obj["writeSer"] = v.writeSer;
+    obj["stretchSer"] = v.stretchSer;
     return obj;
 }
 
@@ -234,6 +236,8 @@ VideoToneSettings videoFromJson(const QJsonObject& obj)
     v.fps = obj["fps"].toInt(v.fps);
     v.writeMp4 = obj["writeMp4"].toBool(v.writeMp4);
     v.writeGif = obj["writeGif"].toBool(v.writeGif);
+    v.writeSer = obj["writeSer"].toBool(v.writeSer);
+    v.stretchSer = obj["stretchSer"].toBool(v.stretchSer);
     return v.valid() ? v : VideoToneSettings{};
 }
 

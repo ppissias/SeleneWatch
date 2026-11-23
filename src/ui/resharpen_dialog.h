@@ -121,6 +121,9 @@ private:
     QSpinBox* fps_{nullptr};
     QCheckBox* writeMp4_{nullptr};
     QCheckBox* writeGif_{nullptr};
+    QCheckBox* writeSer_{nullptr};
+    QCheckBox* stretchSer_{nullptr};
+    QWidget* stretchSerRow_{nullptr};
     QCheckBox* rebuildVideoOnly_{nullptr};
 
     QToolButton* zoomFitBtn_{nullptr};

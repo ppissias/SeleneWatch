@@ -138,16 +138,27 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     writeGif_ = new QCheckBox("GIF", body);
     writeGif_->setObjectName("timelapseGif");
     writeGif_->setToolTip("Also builds timelapse.gif, which plays everywhere but is larger and has fewer colours.");
+    writeSer_ = new QCheckBox("SER", body);
+    writeSer_->setObjectName("timelapseSer");
+    writeSer_->setToolTip("Also builds timelapse.ser (one lossless frame per stack with UTC timestamps) for SER "
+        "Player or further processing. Much smaller than raw SER bursts below.");
     videoFps_ = new QSpinBox(body);
     videoFps_->setObjectName("timelapseVideoFps");
-    videoFps_->setToolTip("Frames per second of the video: each stack is one frame.");
+    videoFps_->setToolTip("Frames per second of the MP4/GIF video: each stack is one frame.");
     videoFps_->setRange(1, 60);
     videoFps_->setValue(12);
     videoFps_->setSuffix(" fps");
     outRow->addWidget(writeMp4_);
     outRow->addWidget(writeGif_);
+    outRow->addWidget(writeSer_);
     outRow->addWidget(videoFps_, 1);
-    form->addRow("Animation", outRow);
+    form->addRow("Output", outRow);
+
+    stretchSer_ = new QCheckBox("Stretch SER (match MP4)", body);
+    stretchSer_->setObjectName("timelapseStretchSer");
+    stretchSer_->setToolTip("Off (default) writes unclipped linear 16-bit mono / RGB stacks to timelapse.ser for "
+        "further processing in SER Player. On applies the same black/white stretch and gamma as timelapse.mp4.");
+    form->addRow(stretchSer_);
 
     saveRawSer_ = new QCheckBox("Also save raw SER bursts (uses a lot of disk space)", body);
     saveRawSer_->setObjectName("timelapseSaveSer");
@@ -298,7 +309,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         updateEstimates();
     });
     for (QObject* w : std::initializer_list<QObject*>{keepPercent_, maxFrames_, sharpening_, cropToLock_,
-             targetStacks_, writeMp4_, writeGif_, videoFps_, saveRawSer_})
+             targetStacks_, writeMp4_, writeGif_, writeSer_, stretchSer_, videoFps_, saveRawSer_})
     {
         if (auto* sb = qobject_cast<QDoubleSpinBox*>(w))
             connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) { saveToQSettings(); updateEstimates(); } });
@@ -412,6 +423,8 @@ TimelapseSettings TimelapsePanel::settings() const
 
     s.video.writeMp4 = writeMp4_->isChecked();
     s.video.writeGif = writeGif_->isChecked();
+    s.video.writeSer = writeSer_->isChecked();
+    s.video.stretchSer = stretchSer_->isChecked();
     s.video.fps = videoFps_->value();
     return s;
 }
@@ -430,6 +443,8 @@ void TimelapsePanel::setSettings(const TimelapseSettings& s)
     targetStacks_->setValue(s.targetStacks);
     writeMp4_->setChecked(s.video.writeMp4);
     writeGif_->setChecked(s.video.writeGif);
+    writeSer_->setChecked(s.video.writeSer);
+    stretchSer_->setChecked(s.video.stretchSer);
     videoFps_->setValue(s.video.fps);
     saveRawSer_->setChecked(s.saveRawSer);
     watchTransits_->setChecked(s.watchTransits);
@@ -478,7 +493,7 @@ void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording
     const bool editable = !busy;
     for (QWidget* w : std::initializer_list<QWidget*>{preset_, interval_, window_, keepPercent_, maxFrames_,
              sharpening_, cropToLock_, clearAnchor_, stopKind_, targetStacks_,
-             writeMp4_, writeGif_, videoFps_, saveRawSer_})
+             writeMp4_, writeGif_, writeSer_, stretchSer_, videoFps_, saveRawSer_})
     {
         w->setEnabled(editable);
     }
@@ -545,6 +560,7 @@ void TimelapsePanel::updateEstimates()
 {
     const auto stop = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
     form_->setRowVisible(targetStacks_, stop == StopConditionKind::StackCount);
+    form_->setRowVisible(stretchSer_, writeSer_->isChecked());
 
     const double estCaptured = std::max(1.0, window_->value() * estimatedFps_);
     const int estKept = estimatedKeptFrames();
@@ -774,6 +790,8 @@ void TimelapsePanel::loadFromQSettings()
     targetStacks_->setValue(saved.value("targetStacks", 60).toInt());
     writeMp4_->setChecked(saved.value("writeMp4", true).toBool());
     writeGif_->setChecked(saved.value("writeGif", false).toBool());
+    writeSer_->setChecked(saved.value("writeSer", false).toBool());
+    stretchSer_->setChecked(saved.value("stretchSer", false).toBool());
     videoFps_->setValue(std::clamp(saved.value("videoFps", 12).toInt(), 1, 60));
     // Raw SER bursts are never remembered: each run asks again (and an older
     // saved choice is dropped).
@@ -799,6 +817,8 @@ void TimelapsePanel::saveToQSettings() const
     saved.setValue("targetStacks", targetStacks_->value());
     saved.setValue("writeMp4", writeMp4_->isChecked());
     saved.setValue("writeGif", writeGif_->isChecked());
+    saved.setValue("writeSer", writeSer_->isChecked());
+    saved.setValue("stretchSer", stretchSer_->isChecked());
     saved.setValue("videoFps", videoFps_->value());
     saved.setValue("watchTransits", watchTransits_->isChecked());
     saved.endGroup();

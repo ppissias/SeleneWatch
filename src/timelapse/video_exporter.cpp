@@ -1,6 +1,7 @@
 #include "timelapse/video_exporter.h"
 #include "recording/ffmpeg_video.h"
 #include "recording/metadata_text.h"
+#include "recording/ser_writer.h"
 #include "timelapse/stack_processor.h"
 
 #include <QtCore/QDir>
@@ -136,7 +137,7 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     const std::map<QString, bool>& stackOverrides)
 {
     TimelapseExportResult res;
-    if (!tone.writeMp4 && !tone.writeGif)
+    if (!tone.writeMp4 && !tone.writeGif && !tone.writeSer)
     {
         res.ok = true;
         return res;
@@ -239,34 +240,100 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     QDir().mkpath(outputDir);
     const QString mp4 = tone.writeMp4 ? QDir(outputDir).filePath("timelapse.mp4") : QString();
     const QString gif = tone.writeGif ? QDir(outputDir).filePath("timelapse.gif") : QString();
+    const QString ser = tone.writeSer ? QDir(outputDir).filePath("timelapse.ser") : QString();
 
     const int total = static_cast<int>(keptPaths.size());
-    const int passes = (tone.writeMp4 ? 1 : 0) + (tone.writeGif ? 1 : 0);
+    const int passes = (tone.writeMp4 ? 1 : 0) + (tone.writeGif ? 1 : 0) + (tone.writeSer ? 1 : 0);
     int emitted = 0;
 
-    // Stream one stack at a time into FFmpeg stdin so multi-hour sessions stay O(1) RAM.
-    const auto produceFrame = [&](int i, QString& err) -> QImage {
-        FitsImage img;
-        if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, err)) return {};
-        const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
-        QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, 1.0, crop, 0,
-            refPtr, tone.brightnessMode, alignedPixels);
-        if (mapped.isNull())
-        {
-            err = "could not tone-map FITS stack";
-            return {};
-        }
-        ++emitted;
-        if (progress) progress(emitted, total * std::max(1, passes));
-        return mapped;
-    };
+    if (tone.writeMp4 || tone.writeGif)
+    {
+        // Stream one stack at a time into FFmpeg stdin so multi-hour sessions stay O(1) RAM.
+        const auto produceFrame = [&](int i, QString& err) -> QImage {
+            FitsImage img;
+            if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, err)) return {};
+            const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
+            QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, 1.0, crop, 0,
+                refPtr, tone.brightnessMode, alignedPixels);
+            if (mapped.isNull())
+            {
+                err = "could not tone-map FITS stack";
+                return {};
+            }
+            ++emitted;
+            if (progress) progress(emitted, total * std::max(1, passes));
+            return mapped;
+        };
 
-    if (!encodeStreamWithFfmpeg(total, produceFrame, crop.width(), crop.height(), mp4, gif, tone.fps, res.error, cancel))
-        return res;
+        if (!encodeStreamWithFfmpeg(total, produceFrame, crop.width(), crop.height(), mp4, gif, tone.fps, res.error, cancel))
+            return res;
+    }
+
+    if (tone.writeSer)
+    {
+        QFile serFile(ser);
+        if (!serFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        {
+            res.error = QString("Could not open %1 for writing: %2").arg(ser, serFile.errorString());
+            return res;
+        }
+        SerWriter writer(serFile);
+        bool started = false;
+        for (int i = 0; i < total; ++i)
+        {
+            if (cancel && cancel->load())
+            {
+                serFile.close();
+                QFile::remove(ser);
+                res.error = "cancelled";
+                return res;
+            }
+            FitsImage img;
+            if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, res.error))
+            {
+                serFile.close();
+                QFile::remove(ser);
+                return res;
+            }
+            const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
+            Frame frame = fitsToSerFrame(img, tone.stretchSer, black, white, tone.gamma, crop,
+                refPtr, tone.brightnessMode, alignedPixels);
+            frame.frameIndex = static_cast<uint64_t>(i);
+            if (!started)
+            {
+                const std::string camera = !img.meta.camera.empty() ? img.meta.camera : refImg.meta.camera;
+                const std::string telescope = !img.meta.telescope.empty() ? img.meta.telescope : refImg.meta.telescope;
+                if (!writer.start(frame, camera, res.error, false, telescope))
+                {
+                    serFile.close();
+                    QFile::remove(ser);
+                    return res;
+                }
+                started = true;
+            }
+            if (!writer.append(frame, res.error))
+            {
+                serFile.close();
+                QFile::remove(ser);
+                return res;
+            }
+            ++emitted;
+            if (progress) progress(emitted, total * std::max(1, passes));
+        }
+        if (!writer.finish(res.error) || !serFile.flush())
+        {
+            if (res.error.isEmpty()) res.error = QString("Could not flush %1").arg(ser);
+            serFile.close();
+            QFile::remove(ser);
+            return res;
+        }
+        serFile.close();
+    }
 
     res.ok = true;
     res.mp4Path = mp4;
     res.gifPath = gif;
+    res.serPath = ser;
     res.stacksUsed = total;
     return res;
 }

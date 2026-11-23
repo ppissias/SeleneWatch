@@ -1370,14 +1370,15 @@ void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& 
     outWhite = std::clamp(quantileOfSorted(grid, 0.999), outBlack + 0.01, 1.0);
 }
 
-QImage toneMapFitsToImage(const FitsImage& image,
-    double black, double white, double gamma, double brightnessScale,
-    const QRect& crop, int maxLongSide,
+namespace {
+
+cv::Mat prepareLevelledFitsMat(const FitsImage& image,
+    double black, double white, double brightnessScale,
+    const QRect& crop,
     const FitsImage* reference,
     BrightnessLevellingMode levelling,
     bool alignedPixels)
 {
-    if (!image.valid()) return {};
     cv::Mat m = croppedView(fitsToMat(image), crop).clone();
 
     if (reference && reference->valid() && levelling != BrightnessLevellingMode::Off)
@@ -1459,6 +1460,32 @@ QImage toneMapFitsToImage(const FitsImage& image,
     {
         m = m * static_cast<float>(std::clamp(brightnessScale, 0.25, 4.0));
     }
+    return m;
+}
+
+cv::Mat applyStretchAndGamma(const cv::Mat& m, double black, double white, double gamma)
+{
+    const double safeSpan = std::max(1e-5, white - black);
+    const double invGamma = 1.0 / std::clamp(gamma, 0.2, 4.0);
+    cv::Mat scaled = (m - cv::Scalar::all(black)) * static_cast<float>(1.0 / safeSpan);
+    cv::min(scaled, 1.0f, scaled);
+    cv::max(scaled, 0.0f, scaled);
+    if (std::abs(invGamma - 1.0) > 1e-3)
+        cv::pow(scaled, invGamma, scaled);
+    return scaled;
+}
+
+} // namespace
+
+QImage toneMapFitsToImage(const FitsImage& image,
+    double black, double white, double gamma, double brightnessScale,
+    const QRect& crop, int maxLongSide,
+    const FitsImage* reference,
+    BrightnessLevellingMode levelling,
+    bool alignedPixels)
+{
+    if (!image.valid()) return {};
+    cv::Mat m = prepareLevelledFitsMat(image, black, white, brightnessScale, crop, reference, levelling, alignedPixels);
 
     if (maxLongSide > 0 && std::max(m.cols, m.rows) > maxLongSide)
     {
@@ -1470,14 +1497,7 @@ QImage toneMapFitsToImage(const FitsImage& image,
         m = resized;
     }
 
-    const double safeSpan = std::max(1e-5, white - black);
-    const double invGamma = 1.0 / std::clamp(gamma, 0.2, 4.0);
-    cv::Mat scaled = (m - cv::Scalar::all(black)) * static_cast<float>(1.0 / safeSpan);
-    cv::min(scaled, 1.0f, scaled);
-    cv::max(scaled, 0.0f, scaled);
-    if (std::abs(invGamma - 1.0) > 1e-3)
-        cv::pow(scaled, invGamma, scaled);
-
+    const cv::Mat scaled = applyStretchAndGamma(m, black, white, gamma);
     cv::Mat u8;
     scaled.convertTo(u8, image.channels == 3 ? CV_8UC3 : CV_8UC1, 255.0);
     const QImage::Format fmt = image.channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
@@ -1485,5 +1505,63 @@ QImage toneMapFitsToImage(const FitsImage& image,
     const int rowBytes = u8.cols * u8.channels();
     for (int y = 0; y < u8.rows; ++y)
         std::memcpy(out.scanLine(y), u8.ptr<uint8_t>(y), static_cast<size_t>(rowBytes));
+    return out;
+}
+
+Frame fitsToSerFrame(const FitsImage& image,
+    bool stretch, double black, double white, double gamma,
+    const QRect& crop,
+    const FitsImage* reference,
+    BrightnessLevellingMode levelling,
+    bool alignedPixels)
+{
+    Frame out;
+    if (!image.valid()) return out;
+
+    cv::Mat m = prepareLevelledFitsMat(image, black, white, 1.0, crop, reference, levelling, alignedPixels);
+    cv::Mat norm;
+    if (stretch)
+    {
+        norm = applyStretchAndGamma(m, black, white, gamma);
+    }
+    else
+    {
+        norm = m;
+        cv::min(norm, 1.0f, norm);
+        cv::max(norm, 0.0f, norm);
+    }
+
+    out.width = norm.cols;
+    out.height = norm.rows;
+    out.bayer = BayerPattern::None;
+    const auto epoch = std::chrono::system_clock::time_point{};
+    if (image.meta.dateObs != epoch) out.timestamp = image.meta.dateObs;
+    else if (image.meta.dateAvg != epoch) out.timestamp = image.meta.dateAvg;
+    else out.timestamp = std::chrono::system_clock::now();
+
+    if (image.channels == 3)
+    {
+        out.format = PixelFormat::RGB888;
+        out.significantBits = 8;
+        out.alignment = BitAlignment::Low;
+        cv::Mat u8;
+        norm.convertTo(u8, CV_8UC3, 255.0);
+        const size_t rowBytes = static_cast<size_t>(u8.cols) * 3;
+        out.data.resize(rowBytes * static_cast<size_t>(u8.rows));
+        for (int y = 0; y < u8.rows; ++y)
+            std::memcpy(out.data.data() + static_cast<size_t>(y) * rowBytes, u8.ptr<uint8_t>(y), rowBytes);
+    }
+    else
+    {
+        out.format = PixelFormat::Mono16;
+        out.significantBits = 16;
+        out.alignment = BitAlignment::Low;
+        cv::Mat u16;
+        norm.convertTo(u16, CV_16UC1, 65535.0);
+        const size_t rowBytes = static_cast<size_t>(u16.cols) * sizeof(uint16_t);
+        out.data.resize(rowBytes * static_cast<size_t>(u16.rows));
+        for (int y = 0; y < u16.rows; ++y)
+            std::memcpy(out.data.data() + static_cast<size_t>(y) * rowBytes, u16.ptr<uint16_t>(y), rowBytes);
+    }
     return out;
 }

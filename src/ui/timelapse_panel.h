@@ -100,6 +100,8 @@ private:
 
     QCheckBox* writeMp4_{nullptr};
     QCheckBox* writeGif_{nullptr};
+    QCheckBox* writeSer_{nullptr};
+    QCheckBox* stretchSer_{nullptr};
     QSpinBox* videoFps_{nullptr};
     QCheckBox* saveRawSer_{nullptr};
     QCheckBox* watchTransits_{nullptr};

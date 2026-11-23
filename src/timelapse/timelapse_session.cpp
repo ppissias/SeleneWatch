@@ -1155,6 +1155,7 @@ void TimelapseSession::writeMetadataLog(const QString& reason, const TimelapseEx
     out << "video_stacks_dropped: " << exportRes.stacksDropped << "\n";
     if (!exportRes.mp4Path.isEmpty()) out << "mp4: timelapse.mp4\n";
     if (!exportRes.gifPath.isEmpty()) out << "gif: timelapse.gif\n";
+    if (!exportRes.serPath.isEmpty()) out << "ser: timelapse.ser\n";
     if (!exportRes.error.isEmpty()) out << "export_error: " << exportRes.error << "\n";
     writeSiteLines(out, config_.site);
     writeStreamLines(out, config_.stream, nullptr);

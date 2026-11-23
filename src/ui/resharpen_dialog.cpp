@@ -362,12 +362,27 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     fps_->setSuffix(" fps");
     auto* fmtRow = new QHBoxLayout();
     writeMp4_ = new QCheckBox("MP4", videoBox);
+    writeMp4_->setObjectName("resharpenWriteMp4");
     writeMp4_->setToolTip("Export an H.264 MP4 video.");
     writeMp4_->setChecked(true);
     writeGif_ = new QCheckBox("GIF", videoBox);
+    writeGif_->setObjectName("resharpenWriteGif");
     writeGif_->setToolTip("Also export a looping animated GIF.");
+    writeSer_ = new QCheckBox("SER", videoBox);
+    writeSer_->setObjectName("resharpenWriteSer");
+    writeSer_->setToolTip("Also export timelapse.ser (one lossless frame per kept stack with UTC timestamps) for "
+        "SER Player or further processing.");
     fmtRow->addWidget(writeMp4_);
     fmtRow->addWidget(writeGif_);
+    fmtRow->addWidget(writeSer_);
+    stretchSerRow_ = new QWidget(videoBox);
+    auto* stretchSerLay = checkboxRowWithHelp(
+        (stretchSer_ = new QCheckBox("Stretch SER (match MP4)", stretchSerRow_)), stretchSerRow_);
+    stretchSer_->setObjectName("resharpenStretchSer");
+    stretchSer_->setToolTip("Off (default) writes unclipped linear 16-bit mono / RGB stacks to timelapse.ser for "
+        "further processing in SER Player. On applies the same black/white stretch and gamma as timelapse.mp4.");
+    stretchSerRow_->setLayout(stretchSerLay);
+    stretchSerRow_->hide();
     rebuildVideoOnly_ = new QCheckBox("Rebuild video only (reuse sharpened/)", videoBox);
     rebuildVideoOnly_->setObjectName("resharpenRebuildOnly");
     rebuildVideoOnly_->setToolTip("Re-encodes the video directly from the existing sharpened/ FITS stacks without "
@@ -384,6 +399,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     videoForm->addRow(checkboxRowWithHelp(cropOverlap_, videoBox));
     videoForm->addRow("Frame rate", fps_);
     videoForm->addRow("Formats", fmtRow);
+    videoForm->addRow(stretchSerRow_);
     videoForm->addRow(checkboxRowWithHelp(rebuildVideoOnly_, videoBox));
     ctrlCol->addWidget(videoBox);
 
@@ -456,6 +472,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         if (!updating_) updatePreview();
     });
     connect(cropOverlap_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
+    connect(writeSer_, &QCheckBox::toggled, this, [this](bool on) { stretchSerRow_->setVisible(on); });
     connect(brightnessLevel_, &QComboBox::currentIndexChanged, this, [this] { if (!updating_) updatePreview(); });
     connect(qualityMode_, &QComboBox::currentIndexChanged, this, [this] {
         updateQualityFilterControls();
@@ -597,6 +614,9 @@ void ResharpenDialog::setControlsFromSettings(const SharpeningSettings& sharp, c
     fps_->setValue(tone.fps);
     writeMp4_->setChecked(tone.writeMp4);
     writeGif_->setChecked(tone.writeGif);
+    writeSer_->setChecked(tone.writeSer);
+    stretchSer_->setChecked(tone.stretchSer);
+    stretchSerRow_->setVisible(tone.writeSer);
     updating_ = false;
     refreshQualityFilter();
 }
@@ -789,6 +809,8 @@ VideoToneSettings ResharpenDialog::currentTone() const
     v.fps = fps_->value();
     v.writeMp4 = writeMp4_->isChecked();
     v.writeGif = writeGif_->isChecked();
+    v.writeSer = writeSer_->isChecked();
+    v.stretchSer = stretchSer_->isChecked();
     return v;
 }
 

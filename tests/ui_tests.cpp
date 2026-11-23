@@ -2914,12 +2914,36 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
         const QString origMp4 = QDir(sessionDir).filePath("timelapse.mp4");
         const QDateTime origMtime = QFileInfo(origMp4).lastModified();
         QThread::msleep(20);
+        // Verify SER + Stretch SER checkboxes on both TimelapsePanel and ResharpenDialog,
+        // and rebuild video + timelapse.ser together non-destructively.
+        auto* tlSer = tl->findChild<QCheckBox*>("timelapseSer");
+        auto* tlStretchSer = tl->findChild<QCheckBox*>("timelapseStretchSer");
+        QVERIFY(tlSer && tlStretchSer);
+        QVERIFY(!tlSer->isChecked() && !tlStretchSer->isChecked());
+        QVERIFY(tlStretchSer->isHidden());
+        tlSer->setChecked(true);
+        QVERIFY(!tlStretchSer->isHidden());
+        tlStretchSer->setChecked(true);
+        QVERIFY(tl->settings().video.writeSer && tl->settings().video.stretchSer);
+        tlSer->setChecked(false);
+        QVERIFY(tlStretchSer->isHidden());
+
+        auto* dlgSer = dlg.findChild<QCheckBox*>("resharpenWriteSer");
+        auto* dlgStretchSer = dlg.findChild<QCheckBox*>("resharpenStretchSer");
+        QVERIFY(dlgSer && dlgStretchSer);
+        QVERIFY(!dlgSer->isChecked() && !dlgStretchSer->isChecked());
+        QVERIFY(!dlgStretchSer->isVisibleTo(&dlg));
+        dlgSer->setChecked(true);
+        QVERIFY(dlgStretchSer->isVisibleTo(&dlg));
+
         rebuildOnly->setChecked(true);
         applyBtn->click();
         QTRY_VERIFY_WITH_TIMEOUT(statusLbl->text().startsWith("Done:"), 15000);
         const QStringList vidDirs = QDir(sessionDir).entryList({"video_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
         QCOMPARE(vidDirs.size(), 1);
-        QVERIFY(QFileInfo::exists(QDir(QDir(sessionDir).filePath(vidDirs.first())).filePath("timelapse.mp4")));
+        const QDir rebuiltDir(QDir(sessionDir).filePath(vidDirs.first()));
+        QVERIFY(QFileInfo::exists(rebuiltDir.filePath("timelapse.mp4")));
+        QVERIFY(QFileInfo::exists(rebuiltDir.filePath("timelapse.ser")));
         QCOMPARE(QFileInfo(origMp4).lastModified(), origMtime);
     }
 

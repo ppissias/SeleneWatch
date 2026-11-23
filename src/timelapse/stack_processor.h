@@ -147,3 +147,15 @@ void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& 
     const FitsImage* reference = nullptr,
     BrightnessLevellingMode levelling = BrightnessLevellingMode::Off,
     bool alignedPixels = true);
+
+// Converts a linear float FitsImage into a lossless Frame for SER export
+// (Mono16 16-bit for mono stacks, RGB888 for colour stacks), sharing the same
+// crop and brightness levelling as toneMapFitsToImage. When stretch is false,
+// preserves unclipped linear [0, 1] values; when true, applies black/white
+// stretch and gamma identically to MP4 export.
+[[nodiscard]] Frame fitsToSerFrame(const FitsImage& image,
+    bool stretch, double black, double white, double gamma,
+    const QRect& crop = {},
+    const FitsImage* reference = nullptr,
+    BrightnessLevellingMode levelling = BrightnessLevellingMode::Off,
+    bool alignedPixels = true);
