@@ -14,6 +14,7 @@ It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, o
 
 - [What you can do with it](#what-you-can-do-with-it) ([Sky](#1-watch-the-sky-through-the-night) · [Time-lapses](#2-time-lapses-of-the-moon-and-the-planets) · [Lunar shadows](#3-shadows-crossing-the-moon) · [Impact flashes](#4-impact-flashes-on-the-moons-dark-side))
 - [Surface-feature and planetary guiding](#surface-feature-and-planetary-guiding)
+- [Status on your phone](#status-on-your-phone)
 - [Also in SeleneWatch](#also-in-selenewatch)
 - [Getting SeleneWatch](#getting-selenewatch)
 - [How far it has been tested](#how-far-it-has-been-tested)
@@ -96,13 +97,26 @@ Draw a box around a crisp lunar crater, terminator detail, or a planet's disk, a
 
 ---
 
+## Status on your phone
+
+Leaving the telescope running outside while you step indoors? Turn on **Session → Status on your phone…** and scan the QR code to open a read-only status page on your local home network—no cloud account, no port forwarding, protected by a session key, and off by default.
+
+From your phone's browser you can check what SeleneWatch is doing (Monitoring, Preview, or Time-lapse), when the session is scheduled to end, whether the feature lock and guiding hold, live frame rate and free disk space, the latest saved clip's crops, and a live preview snapshot.
+
+<p align="center">
+  <img src="docs/images/phone-status.png" alt="SeleneWatch read-only status page on a phone showing live Monitoring status, session end time, event counts with the last clip's crops, guiding lock, camera and disk health, and a live preview snapshot" width="320">
+</p>
+
+*The read-only status page on a phone (shown here with sample data): live session state, scheduled end time, event counts with the latest clip's crops, guiding lock, camera and disk health, and a live preview.*
+
+---
+
 ## Also in SeleneWatch
 
 - **Cameras:** ZWO ASI, QHYCCD, Player One, and ToupTek (with the brands whose cameras it makes, such as Altair). Recordings in SER and uncompressed AVI, with FireCapture's log files. A synthetic Moon and sky for practice without hardware.
 - **Preview before you capture:** see the camera's real pixels at any zoom, set the stretch and the histogram, and see what would trigger, without saving anything.
 - **Auto-tune:** measures the scene and suggests the exposure, gain and sensitivity for what you are watching.
 - **Unattended nights:** the session ends by itself at a time, after a duration, at dawn or when the Moon sets, and also when the camera, the guiding or the disk fails. You choose whether the mount then keeps tracking.
-- **Check on it from your phone:** a read-only status page on your home network, found by scanning a QR code: what SeleneWatch is doing, whether the lock holds, and this session's events.
 - **Continuous and scheduled recording:** record every frame on demand, or over a time set in advance for a predicted event.
 - **Lossless evidence:** every saved frame is kept exactly as the camera delivered it, with its time and index, and test signals are marked on every frame they touch.
 
