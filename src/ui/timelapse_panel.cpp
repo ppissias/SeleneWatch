@@ -42,7 +42,9 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* form = form_;
     preset_ = new QComboBox(body);
     preset_->setObjectName("timelapsePreset");
-    preset_->setToolTip("Moon: rigid alignment with field rotation, keeps the best 25 %. Planet: centres on the disk's limb, keeps the best 15 %. Sets the defaults below.");
+    preset_->setToolTip("Moon: rigid alignment with field rotation, keeps the best 25 %; select a lunar anchor, or a "
+        "passing cloud can rotate a stack wrongly. Planet: keeps the disk where it was in the first stack, by its "
+        "brightness-weighted centre, never rotated; keeps the best 15 %. Sets the defaults below.");
     preset_->addItem("Moon", static_cast<int>(TimelapsePreset::Moon));
     preset_->addItem("Planet", static_cast<int>(TimelapsePreset::Planet));
     form->addRow("Target preset", preset_);
@@ -96,18 +98,22 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     selectAnchor_->setObjectName("timelapseSelectAnchor");
     selectAnchor_->setCheckable(true);
     selectAnchor_->setText("Select lunar anchor");
-    selectAnchor_->setToolTip("Drag a sunlit lunar region expected to keep steady shadows for rotation alignment.");
+    selectAnchor_->setToolTip("Strongly recommended for the Moon. Drag a box on a sunlit region that keeps steady "
+        "shadows for the whole session: each stack's shift and rotation are then fitted inside it only. Without an "
+        "anchor they are fitted over the whole frame, sky included, and a passing cloud can rotate a stack wrongly.");
     clearAnchor_ = new QPushButton("Clear", body);
     clearAnchor_->setObjectName("timelapseClearAnchor");
-    clearAnchor_->setToolTip("Removes the lunar anchor: rotation is measured on the whole lit disk again.");
+    clearAnchor_->setToolTip("Removes the lunar anchor: shift and rotation are fitted over the whole frame again, "
+        "sky included.");
     anchorRow->addWidget(selectAnchor_, 1);
     anchorRow->addWidget(clearAnchor_);
     form->addRow("Lunar anchor", anchorRow);
 
-    anchorLabel_ = new QLabel("Full lit disk (no fixed anchor)", body);
+    anchorLabel_ = new QLabel(body);
     anchorLabel_->setObjectName("timelapseAnchorLabel");
     anchorLabel_->setWordWrap(true);
     form->addRow(QString(), anchorLabel_);
+    showAnchor();
 
     stopKind_ = new QComboBox(body);
     stopKind_->setObjectName("timelapseStopKind");
@@ -271,6 +277,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     updateTransitControls();
 
     connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
+        showAnchor();
         if (updating_) return;
         applyPresetDefaults(static_cast<TimelapsePreset>(preset_->currentData().toInt()));
         updateTransitControls();
@@ -500,11 +507,27 @@ void TimelapsePanel::setLunarAnchor(const std::optional<QRect>& rect)
         const QSignalBlocker b(selectAnchor_);
         selectAnchor_->setChecked(false);
     }
-    if (rect && rect->isValid())
-        anchorLabel_->setText(QString("Anchor (%1, %2) %3 × %4 px").arg(rect->x()).arg(rect->y()).arg(rect->width()).arg(rect->height()));
-    else
-        anchorLabel_->setText("Full lit disk (no fixed anchor)");
+    showAnchor();
     clearAnchor_->setEnabled(!timeLapsing_ && rect.has_value());
+}
+
+// What the alignment between stacks is fitted on. Without an anchor, a Moon
+// time-lapse fits shift and rotation over the whole frame, sky included, and
+// a passing cloud can rotate a stack wrongly, so the row warns.
+void TimelapsePanel::showAnchor()
+{
+    const bool planet = static_cast<TimelapsePreset>(preset_->currentData().toInt()) == TimelapsePreset::Planet;
+    const bool anchored = lunarAnchor_ && lunarAnchor_->isValid();
+    if (planet)
+        anchorLabel_->setText("Not used: a planet is aligned on its disk, without rotation.");
+    else if (anchored)
+        anchorLabel_->setText(QString("Anchor (%1, %2) %3 × %4 px").arg(lunarAnchor_->x()).arg(lunarAnchor_->y())
+            .arg(lunarAnchor_->width()).arg(lunarAnchor_->height()));
+    else
+        anchorLabel_->setText("No anchor: shift and rotation are fitted over the whole frame, sky included, so a "
+            "passing cloud can rotate a stack wrongly. Select a steady sunlit area.");
+    // The same amber as the time-lapse warnings below.
+    anchorLabel_->setStyleSheet(!planet && !anchored ? "color: #b45309; font-weight: bold;" : QString());
 }
 
 bool TimelapsePanel::selectingAnchor() const

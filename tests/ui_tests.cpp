@@ -2610,14 +2610,18 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     auto* statsLabel = tl->findChild<QLabel*>("timelapseStats");
     QVERIFY(preset && interval && winSpin && keepPct && maxFrames && selectAnchor && anchorLabel && startTl && statsLabel);
 
-    // Preset switch: Moon <-> Planet.
+    // Preset switch: Moon <-> Planet. Without an anchor the Moon warns that a
+    // passing cloud can rotate a stack; a planet does not use one.
     preset->setCurrentIndex(1); // Planet
     QCOMPARE(keepPct->value(), 15.0);
     QCOMPARE(maxFrames->value(), 200);
     QVERIFY(!selectAnchor->isEnabled());
+    QVERIFY2(anchorLabel->text().startsWith("Not used"), qPrintable(anchorLabel->text()));
     preset->setCurrentIndex(0); // Moon
     QCOMPARE(keepPct->value(), 25.0);
     QCOMPARE(maxFrames->value(), 150);
+    QVERIFY2(anchorLabel->text().startsWith("No anchor") && anchorLabel->text().contains("rotate a stack wrongly"),
+        qPrintable(anchorLabel->text()));
 
     // window <= interval invariant in both directions.
     interval->setValue(1.0);

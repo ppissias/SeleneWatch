@@ -1381,7 +1381,15 @@ void MainWindow::onStartTimeLapse()
     }
     beginSessionRun(true);
     timelapseDock_->raise();
-    showMessage(tlSettings.watchTransits ? "Time-lapse started with transit watching between stacks." : "Time-lapse started.", 4000);
+    QString started = tlSettings.watchTransits ? "Time-lapse started with transit watching between stacks." : "Time-lapse started.";
+    // Without an anchor a Moon time-lapse fits rotation over the whole frame,
+    // where a passing cloud can rotate a stack wrongly.
+    const bool unanchoredMoon = tlSettings.preset == TimelapsePreset::Moon
+        && !(tlSettings.lunarAnchor && tlSettings.lunarAnchor->isValid());
+    if (unanchoredMoon)
+        started += " No lunar anchor: alignment uses the whole frame, so a passing cloud can rotate a stack wrongly. "
+            "Select one before the next time-lapse.";
+    showMessage(started, unanchoredMoon ? 15000 : 4000);
     updateControls();
     updateStatusLabel();
 }

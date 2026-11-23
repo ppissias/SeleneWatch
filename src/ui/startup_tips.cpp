@@ -222,10 +222,11 @@ const std::vector<StartupTip>& allStartupTips()
             kSectionTimelapse
         },
         {
-            "Lunar anchor for long time-lapses",
-            "During multi-hour lunar terminator time-lapses, moving crater shadows can pull whole-frame alignment off "
-            "course. Use <b>Select lunar anchor</b> in <b>Time-lapse</b> to lock a steady sunlit feature&mdash;and "
-            "optionally tick <b>Crop around locked feature</b> for a rock-steady movie.",
+            "A lunar anchor for every Moon time-lapse",
+            "Always select one for a Moon time-lapse. Without it, each stack's shift and rotation are fitted over the "
+            "whole frame, where moving crater shadows or a passing cloud can pull the alignment off course and rotate a "
+            "stack wrongly. Use <b>Select lunar anchor</b> in <b>Time-lapse</b> to box a steady sunlit region; "
+            "<b>Crop around locked feature</b> can be added, but does not replace it.",
             kSectionTimelapse
         },
         {

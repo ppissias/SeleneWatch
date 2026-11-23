@@ -56,6 +56,7 @@ signals:
 
 private:
     void applyPresetDefaults(TimelapsePreset preset);
+    void showAnchor();
     void updateEstimates();
     void updateTransitControls();
     [[nodiscard]] int estimatedKeptFrames() const;
