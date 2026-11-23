@@ -2,9 +2,11 @@
 
 #include "detection/detection_mask.h"
 #include "core/frame.h"
+#include "recording/clip_groups.h"
 
 #include <QtCore/QPoint>
 #include <QtCore/QRect>
+#include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtGui/QImage>
@@ -45,18 +47,27 @@ struct OverviewRequest
     std::optional<uint64_t> peakFrameIndex;
     // The strip's times count from here, normally the first trigger.
     std::optional<std::chrono::system_clock::time_point> referenceTime;
-    // Trigger boxes in frame pixels, marked and numbered in this order.
-    std::vector<QRect> marks;
+    // The clip's triggers, for its group (Feature-46). The boxes of the
+    // patches are marked and numbered in this order.
+    std::vector<TriggerPoint> triggers;
     // Areas the detector leaves out (Feature-11): not measured, and hatched.
     DetectionMask mask;
     // The image scale, when the site and instrument give it (Feature-14):
     // speeds are then also given in degrees per second.
     std::optional<double> arcsecPerPixel;
-    // A large brightening fired in the clip (Feature-11), for the suggested kind.
-    bool largeBrightening{false};
-    // Lines about the clip, printed above the line the overview adds.
+    // Lines about the clip, printed above the lines the overview adds.
     QStringList caption;
 };
+
+// The overview's layout for a frame of this size, in picture pixels: the
+// main view, and the row of the strip's crops below it (the picture's full
+// width). The nightly report shows that row as the clip's thumbnail.
+struct OverviewLayout
+{
+    QSize view;
+    QRect crops;
+};
+[[nodiscard]] OverviewLayout overviewLayout(int frameWidth, int frameHeight);
 
 // The picture, and what was found to draw it.
 struct ClipOverview
@@ -79,6 +90,8 @@ struct ClipOverview
     // How far the activity around the main frame moved, from its first to
     // its last frame, in pixels and pixels per second. Zero for a flash.
     double movedX{0}, movedY{0}, speed{0};
+    // That run's frames and duration, when there was one.
+    std::optional<ActivityRun> run;
 
     // The caption line describing the activity.
     QString activity;
@@ -90,11 +103,9 @@ struct ClipOverview
     size_t lastActivePosition{0};
     bool hasActiveRun{false};
 
-    // Feature-15 Part C: what the clip probably shows, and why. One of
-    // flash, meteor, satellite, aircraft, dark transit, lightning, seeing,
-    // unclear. A suggestion for review, not a decision.
-    QString suggestedKind;
-    QString kindReason;
+    // Feature-46: the clip's group, from its triggers and the run, with what
+    // was measured. It replaced Feature-15's suggested kind.
+    ClipDescription description;
 };
 
 // frames must not be empty and share one layout. Throws MemoryLimitError

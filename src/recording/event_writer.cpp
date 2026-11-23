@@ -373,6 +373,34 @@ std::vector<QImage> preparePreviewGifFrames(const EventClip& clip, const ClipOve
 
 } // namespace
 
+// A trigger as the clip's group sees it (Feature-46): what triggerFields
+// writes into event.txt, which the nightly report reads back.
+TriggerPoint triggerPointOf(const ClipTrigger& trigger)
+{
+    TriggerPoint point;
+    point.time = trigger.triggerTime;
+    point.frameIndex = trigger.triggerFrameIndex;
+    if (trigger.kind == TriggerKind::Manual)
+    {
+        point.change = TriggerPoint::Change::Manual;
+        return point;
+    }
+    switch (trigger.change)
+    {
+    case ChangeKind::Rise: point.change = TriggerPoint::Change::Rise; break;
+    case ChangeKind::Fall: point.change = TriggerPoint::Change::Fall; break;
+    case ChangeKind::LargeRise: point.change = TriggerPoint::Change::WideRise; break;
+    case ChangeKind::LargeFall: point.change = TriggerPoint::Change::WideFall; break;
+    }
+    point.peak = QPoint(trigger.peakX, trigger.peakY);
+    if (trigger.boxWidth > 0 && trigger.boxHeight > 0)
+        point.box = QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight);
+    point.pixels = trigger.brightPixelCount;
+    point.sigma = trigger.peakSigma;
+    point.share = trigger.share;
+    return point;
+}
+
 EventWriter::EventWriter(QObject* context, QString outputRoot, size_t maxQueuedBytes, Finished finished)
     : context_(context)
     , outputRoot_(std::move(outputRoot))
@@ -767,7 +795,7 @@ ClipWriteResult EventWriter::process(Job& job)
         try
         {
             QString error;
-            const QString folder = writeClip(job.clip, error, result.suggestedKind);
+            const QString folder = writeClip(job.clip, error, result.group, result.groupFacts);
             if (error.isEmpty())
             {
                 result.folder = folder;
@@ -798,7 +826,7 @@ ClipWriteResult EventWriter::process(Job& job)
     return result;
 }
 
-QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggestedKind)
+QString EventWriter::writeClip(EventClip& clip, QString& error, QString& group, QString& groupFacts)
 {
     if (clip.triggers.empty())
     {
@@ -935,10 +963,12 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
     // Feature-12: the overview needs every frame, so it is made before the
     // frames are released. A review aid must not cost the evidence: when it
     // cannot be made, the clip is still complete and says why.
-    QString kindReason;
+    ClipDescription description;
     ClipOverview overviewData;
     bool hasOverviewData = false;
-    const QString overviewNote = writeOverview(clip, folder, suggestedKind, kindReason, &overviewData);
+    const QString overviewNote = writeOverview(clip, folder, description, &overviewData);
+    group = groupName(description.group);
+    groupFacts = description.facts;
     hasOverviewData = overviewData.mainPosition < clip.frames.size();
 
     QString previewGifNote;
@@ -1062,8 +1092,8 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
         }
         out << "overview: " << overviewNote << "\n";
         out << "preview_gif: " << previewGifNote << "\n";
-        if (!suggestedKind.isEmpty())
-            out << "suggested_kind: " << suggestedKind << " (" << kindReason << "); a suggestion for review, not a decision\n";
+        // Feature-46: measured, from the triggers and the run around the peak.
+        out << "group: " << groupName(description.group) << " (" << description.facts << "); measured, not an identification\n";
         out.flush();
         if (out.status() != QTextStream::Ok || !note.flush())
         {
@@ -1090,7 +1120,7 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& suggest
     return folder;
 }
 
-QString EventWriter::writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason,
+QString EventWriter::writeOverview(const EventClip& clip, const QString& folder, ClipDescription& description,
     ClipOverview* outOverview) const
 {
     const ClipTrigger& first = clip.triggers.front();
@@ -1104,18 +1134,15 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder,
     request.referenceTime = first.triggerTime;
     request.arcsecPerPixel = clip.site.arcsecPerPixel();
     bool duringCorrection = false;
-    // A large brightening or darkening covers much of the frame; it is not marked.
     for (const ClipTrigger& trigger : clip.triggers)
     {
-        if (trigger.kind == TriggerKind::Automatic && (trigger.change == ChangeKind::Rise || trigger.change == ChangeKind::Fall)
-            && trigger.boxWidth > 0 && trigger.boxHeight > 0)
-            request.marks.push_back(QRect(trigger.boxX, trigger.boxY, trigger.boxWidth, trigger.boxHeight));
+        request.triggers.push_back(triggerPointOf(trigger));
         duringCorrection = duringCorrection || duringMountCorrection(trigger.triggerTime);
-        request.largeBrightening = request.largeBrightening
-            || (trigger.kind == TriggerKind::Automatic && trigger.change == ChangeKind::LargeRise);
     }
     request.mask = first.settings.mask;
     request.caption = overviewCaption(clip, duringCorrection);
+    // Feature-46: without an overview the group comes from the triggers alone.
+    description = describeClip(request.triggers, {}, request.arcsecPerPixel);
     try
     {
         const ClipOverview overview = makeClipOverview(clip.frames, request, clip.frames.front()->data.get_allocator().budget);
@@ -1124,13 +1151,18 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder,
             *outOverview = overview;
             outOverview->image = {};
         }
-        // Feature-15: the suggested kind is kept even if the picture cannot be saved.
-        suggestedKind = overview.suggestedKind;
-        kindReason = overview.kindReason;
+        // The group is kept even if the picture cannot be saved.
+        description = overview.description;
         if (!overview.image.save(QDir(folder).filePath("00_overview.png"), "PNG"))
             return "not written: could not save 00_overview.png";
-        return QString("00_overview.png main_frame_index=%1 sigma=%2 active_frames=%3 changed_pixels=%4; display only, not evidence")
-            .arg(overview.mainFrameIndex).arg(request.sigma, 0, 'g', 17).arg(overview.activeFrames).arg(overview.changedPixels);
+        // The run around the peak is recorded so the nightly report can
+        // group the clip again exactly as here.
+        QString run;
+        if (overview.run)
+            run = QString(" run_frames=%1 run_seconds=%2 run_moved_px=%3")
+                .arg(overview.run->frames).arg(overview.run->seconds, 0, 'g', 6).arg(overview.run->movedPixels, 0, 'f', 1);
+        return QString("00_overview.png main_frame_index=%1 sigma=%2 active_frames=%3 changed_pixels=%4%5; display only, not evidence")
+            .arg(overview.mainFrameIndex).arg(request.sigma, 0, 'g', 17).arg(overview.activeFrames).arg(overview.changedPixels).arg(run);
     }
     catch (const MemoryLimitError&)
     {
@@ -1162,8 +1194,8 @@ bool EventWriter::appendCandidates(const Job& job, const ClipWriteResult& result
             << (duringMountCorrection(trigger.triggerTime) ? " during_mount_correction=yes" : "")
             << (job.containsTestSignal ? " contains_test_signal=yes" : "")
             << " record_id=" << job.recordId;
-        if (!pending && !result.suggestedKind.isEmpty())
-            out << " suggested_kind=" << QString(result.suggestedKind).replace(' ', '_');
+        if (!pending && !result.group.isEmpty())
+            out << " group=" << result.group;
         if (!pending) out << " " << outcome;
         out << "\n";
     }

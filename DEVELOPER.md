@@ -219,7 +219,7 @@ See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the license analysis 
 
 The Session allocates a unique watch directory on arming. The event writer puts journals at its root and clip folders under the clips directory. The recorder uses the watch's recordings directory during Monitoring and the output root's recordings directory during Preview. Report finalization follows both writers' queued work. Monitoring boundaries in session.txt use host UTC, with elapsed time measured on the steady clock. Candidate timestamps use source UTC, including during replay.
 
-To regenerate a report without starting acquisition, run `SeleneWatch.exe --nightly-report "<watch folder>"` with the usual Qt runtime. The generator reads the journal and sidecars and atomically replaces report.html. Legacy clips can be grouped under clips with their original candidates.txt at the watch root. Missing stop times appear as unknown coverage. [Report generator](src/recording/nightly_report.cpp)
+To regenerate a report without starting acquisition, run `SeleneWatch.exe --nightly-report "<watch folder>"` with the usual Qt runtime. The generator reads the journal and sidecars and atomically replaces report.html. Legacy clips can be grouped under clips with their original candidates.txt at the watch root. Missing stop times appear as unknown coverage. It groups each clip again from `event.txt` with `recording/clip_groups` (Feature-46), the code the overview uses when the clip is written, and puts consecutive clips of one event together. Its **Open SER** and **Show in folder** links become `selenewatch:` links, which Windows hands to `SeleneWatch.exe --open-link "<link>"`: it checks the file with `recording/report_links` (known types, inside a watch folder), opens it with its program or in Explorer, and exits. The program registers that link for the current user at each start, except under `SELENEWATCH_SETTINGS_NAME`. [Report generator](src/recording/nightly_report.cpp)
 
 ### Automated suite (`CTest`)
 
@@ -229,7 +229,7 @@ With Qt's `bin` directory on `PATH` and `QT_PLUGIN_PATH` set:
 ctest --test-dir out/build/debug --output-on-failure
 ```
 
-- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for the source folders' dependency directions (`dependency_rules`), each watch's saved settings (`watch_settings`), core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`, `auto_tune`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), and GUI widgets (`preview`, `ui`).
+- [CMakeLists.txt](CMakeLists.txt) registers Qt Test suites for the source folders' dependency directions (`dependency_rules`), each watch's saved settings (`watch_settings`), core/session/ring/memory (`core`, `display_capture`, `manual_capture`, `session_record`), file formats (`ser`), detection (`detection`, `overview`, `sky`, `darkening`, `sky_extras`, `registration`, `auto_tune`), time-lapse (`timelapse`), guiding (`guiding`), camera boundaries and runtime discovery (`zwo`, `qhy`, `playerone`, `touptek`, `vendor_runtime`, `camera_probe`), GUI widgets (`preview`, `ui`), and the status page for a phone (`remote`; its server listens on the loopback only, so no firewall asks).
 - `manual_capture` checks that a Moon time-lapse saves a transit in an idle gap, delays the next burst for its clip, and finishes an open clip at Stop. `timelapse` covers grace expiry and cadence. `ui` covers live Preview watch changes, settings, and the Moon-only transit controls.
 - Camera tests run against deterministic boundary implementations (`FakeZwoApi`, `FakeQhyApi`, `FakePlayerOneApi`, `FakeToupTekApi`) and never open physical hardware.
 - Window and offscreen rendering tests set `QT_QPA_PLATFORM=offscreen` and isolate QSettings under a test namespace.
@@ -260,7 +260,7 @@ These targets are built alongside the application and are never executed by CTes
 
 | Target | Purpose | Docs / notes |
 | --- | --- | --- |
-| `SeleneWatchProbe` | Runs detection, rearming, overview, darkening, lock, registration, and ASCOM/simulated guiding against explicit recordings or synthetic loops (`guide-sim`, `ascom`, etc.). | Path must point to an explicit file/output directory; see [local environment.txt](local%20environment.txt) and `tools/`. |
+| `SeleneWatchProbe` | Runs detection, rearming, overview, darkening, lock, registration, and ASCOM/simulated guiding against explicit recordings or synthetic loops (`guide-sim`, `ascom`, etc.). `iss INPUT OUTPUT.json LENGTH[,LENGTH...]` counts ISS crossings at their real speed with the shadows watch's two-frame default and with a one-frame trigger (Feature-48). `inject-clip INPUT OUTPUT_ROOT CONFIG.json` plays a recording through the application's own Monitoring path with one marked test signal, for documentation pictures of test data. | Path must point to an explicit file/output directory; see [local environment.txt](local%20environment.txt) and `tools/`. |
 | `SeleneWatchCameraProbe` | ZWO hardware inspection, bench capture, and unattended soak testing (`inspect`, `bench`, `soak`). | [docs/camera-soak.md](docs/camera-soak.md), [docs/zwo-validation.md](docs/zwo-validation.md) |
 | `SeleneWatchQhyProbe` | QHY runtime version check, inspection, and bench/soak tool (`version`, `inspect`, `bench`, `soak`). | [docs/qhy-development.md](docs/qhy-development.md) |
 | `SeleneWatchRuntimeProbe` | Checks dynamic runtime discovery/version without opening a camera: `SeleneWatchRuntimeProbe qhy\|playerone\|touptek [DLL]`. | Used to verify QHY, Player One, and ToupTek runtime DLL loading. |
@@ -271,7 +271,8 @@ These targets are built alongside the application and are never executed by CTes
 
 ### Build targets and directories
 
-- `selenewatch_core` (static library): everything under `src/` except `ui/` and `app/`. Depends on `Qt6::Core` and `Qt6::Gui` only.
+- `selenewatch_core` (static library): everything under `src/` except `remote/`, `ui/` and `app/`. Depends on `Qt6::Core` and `Qt6::Gui` only.
+- `selenewatch_remote` (static library): `src/remote/`, the status page for a phone (Feature-47). Depends on `Qt6::Core`, `Qt6::Gui` and `Qt6::Network`, and on `selenewatch_qrcodegen`, Project Nayuki's MIT QR code generator, compiled unmodified from `third_party/qrcodegen/`.
 - `selenewatch_ui` (static library): `src/ui/`: `MainWindow`, preview widget, docks, dialogs, camera family panels, and the embedded [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) resource.
 - `SeleneWatch` (executable): `src/app/`: the entry point (`main.cpp`) and the Windows resource script (`selenewatch.rc`).
 
@@ -283,7 +284,7 @@ All application code is under `src/`, one folder per job (Design-2). `src/` is t
 | `display/` | Frames to images for the screen and the clip overviews (`preview_image`, `display_settings`) | core |
 | `detection/` | `FlashDetector`, its settings, results and mask, each watch's defaults (`target_defaults.h`) | core |
 | `capture/` | `FrameRingBuffer`, clip assembly (`EventCapture`), the clip (`event_clip.h`) | core, detection |
-| `recording/` | SER/AVI readers, FireCapture `.txt` log reader, SER event & continuous writers, `output_paths`, `metadata_text`, `frame_timing`, `clip_overview`, the nightly report, FFmpeg encoding (`ffmpeg_video`) | core, capture, detection, display |
+| `recording/` | SER/AVI readers, FireCapture `.txt` log reader, SER event & continuous writers, `output_paths`, `metadata_text`, `frame_timing`, `clip_overview`, `clip_groups` (a clip's measured group and events), the nightly report and its `report_links`, FFmpeg encoding (`ffmpeg_video`) | core, capture, detection, display |
 | `sources/` | `FrameSource` interface, `SyntheticFrameSource`, `RecordingSource` | core, recording |
 | `cameras/` | Per-vendor SDK wrappers (`*_sdk.cpp`), sources (`*_source.cpp`), `vendor_runtime` DLL discovery, and shared `raw_camera_layout.h` | core, sources |
 | `sky/` | Sun and Moon times at the site (`sky_schedule`), the exposure follower (`sky_exposure`), site presets | core, detection |
@@ -293,9 +294,10 @@ All application code is under `src/`, one folder per job (Design-2). `src/` is t
 | `timelapse/` | `TimelapseSession`, CFITSIO 32-bit float FITS I/O (`fits_io`), OpenCV burst stacking/alignment/sharpening (`stack_processor`), the time-lapse video and re-sharpen (`video_exporter`), `timelapse_settings`, the slow sky's `SkyTimelapse` | core, display, guiding, recording |
 | `settings/` | What is saved between launches: each watch's settings and the watch chosen last (`watch_settings`, the only code that knows their QSettings keys), named detection profiles | core, detection |
 | `session/` | `Session` (the frame path from source to capture, preview and guider), test-signal injection, the clock check, the end of a session | all of the above |
+| `remote/` | The read-only status page for a phone (Feature-47): the snapshot, its JSON and page, and the answer to a request (`status_page`), the server on Qt Network (`status_server`), this computer's addresses and the QR code (`phone_link`). The window fills the snapshot from what it shows | — |
 | `ui/widgets/` | Small reusable widgets (`ElidedLabel`, `FlowLayout`, `ReadoutLabel`, `WheelGuard`, control help) | core |
 | `ui/cameras/` | `CameraFamilyPanel` and one panel per family, the shared settings editor, the runtime chooser | core, sources, cameras, ui/widgets |
-| `ui/` | `MainWindow` (with `mainwindow_autotune.cpp` and `mainwindow_session_end.cpp`), its docks and dialogs | everything except app |
+| `ui/` | `MainWindow` (with `mainwindow_autotune.cpp`, `mainwindow_session_end.cpp` and `mainwindow_remote.cpp`), its docks and dialogs | everything except app |
 | `app/` | `main.cpp` and `selenewatch.rc` | core, recording, session, ui |
 
 The `dependency_rules` test reads every `#include` under `src/` and fails on one the table does not allow, on a folder that is not in it, and on Qt Widgets outside `ui/` and `app/`; its table and this one change together. Outside `src/`:

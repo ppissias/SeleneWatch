@@ -2,6 +2,8 @@
 #include "capture/event_capture.h"
 #include "recording/clip_overview.h"
 #include "recording/event_writer.h"
+#include "detection/target_defaults.h"
+#include "session/blip_injector.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -67,6 +69,8 @@ private slots:
     void withDarkeningOnlyTheFallIsLookedFor();
     void aLargeDarkeningFiresOnceAndASlowOneNever();
     void tooManyDarkPixelsStopTheSearchAndSaySo();
+    void theIssSilhouetteBlocksTheLightUnderItsOutline();
+    void theIssAtRealSpeedNeedsAOneFrameTrigger();
 };
 
 // Done-when 1: a 5 x 5 patch darkened for two frames.
@@ -255,6 +259,83 @@ void DarkeningTest::tooManyDarkPixelsStopTheSearchAndSaySo()
     QVERIFY(detector.summary().patchSearchLimited);
     QCOMPARE(detector.summary().brightPixels, 5000);
     QVERIFY(detector.candidates().empty());
+}
+
+
+// Feature-48: the ISS's outline at the C9.25's scale (0.33″/px), about 45°
+// up: 41″, so 124 px long.
+void DarkeningTest::theIssSilhouetteBlocksTheLightUnderItsOutline()
+{
+    std::mt19937 random(48);
+    auto frame = scene(400, 300, 1, random, {}, 200, 1e-6);
+    paintIssSilhouette(*frame, 200, 150, 124, 0.95, 400, 0);
+    const auto at = [&frame](int x, int y) { return static_cast<int>(frame->data[static_cast<size_t>(y) * 400 + x]); };
+    // The truss runs across the path (here, up and down) and is nearly black
+    // in the middle; the solar arrays along the path, beside the truss.
+    QVERIFY2(at(200, 150) < 60, qPrintable(QString::number(at(200, 150))));
+    QVERIFY(at(200, 100) < 120);
+    // Along the path the outline is smeared: the arrays' far ends and beyond.
+    QVERIFY(at(200 + 20, 150 + 0) < 200);
+    // Away from it the light is untouched.
+    QCOMPARE(at(10, 10), 200);
+    QCOMPARE(at(390, 290), 200);
+    int darkened = 0;
+    for (uint8_t value : frame->data) darkened += value < 100 ? 1 : 0;
+    // A few thousand pixels: far below the shadows watch's 20 000-pixel limit.
+    QVERIFY2(darkened > 1500 && darkened < 8000, qPrintable(QString::number(darkened)));
+    // It moves its own length every 14 ms: 3.9 lengths a frame at 18 fps.
+    QCOMPARE(qRound(issTravelPerFrame(124, 1.0 / 18.2)), 479);
+}
+
+// Feature-48: at any distance the ISS moves more than its own length from one
+// frame to the next at these frame rates, so no two of its shadows overlap,
+// and the shadows watch's two-frame confirmation never fires. A one-frame
+// trigger catches it on every frame it shows, and the clip's triggers lie on
+// one line: Moving (Feature-46).
+void DarkeningTest::theIssAtRealSpeedNeedsAOneFrameTrigger()
+{
+    const int width = 1296, height = 400;
+    const double travel = issTravelPerFrame(124, 1.0 / 30);
+    for (const bool oneFrame : {false, true})
+    {
+        std::mt19937 random(7);
+        DetectionSettings settings = defaultDetectionSettings(Watch::MoonShadows);
+        settings.oneFrame = oneFrame;
+        FlashDetector detector(settings);
+        std::vector<TriggerPoint> triggers;
+        int framesShown = 0;
+        for (uint64_t i = 0; i < 120; ++i)
+        {
+            auto frame = scene(width, height, i, random);
+            const int k = static_cast<int>(i) - 100;
+            const double x = (k + 0.5) * travel - 62;
+            if (k >= 0 && x < width + 62)
+            {
+                paintIssSilhouette(*frame, x, 200, 124, 0.95, travel, 0);
+                ++framesShown;
+            }
+            detector.analyze(*frame);
+            for (const DetectionSummary& found : detector.candidates())
+            {
+                TriggerPoint point;
+                point.change = TriggerPoint::Change::Fall;
+                point.time = frame->timestamp;
+                point.frameIndex = frame->frameIndex;
+                point.box = QRect(found.boxX, found.boxY, found.boxWidth, found.boxHeight);
+                point.peak = QPoint(found.peakX, found.peakY);
+                triggers.push_back(point);
+            }
+            detector.updateReference(*frame);
+        }
+        QVERIFY(framesShown >= 3);
+        if (!oneFrame)
+        {
+            QVERIFY2(triggers.empty(), qPrintable(QString::number(triggers.size())));
+            continue;
+        }
+        QCOMPARE(static_cast<int>(triggers.size()), framesShown);
+        QCOMPARE(describeClip(triggers).group, ClipGroup::Moving);
+    }
 }
 
 int main(int argc, char** argv)

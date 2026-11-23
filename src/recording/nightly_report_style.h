@@ -15,10 +15,15 @@ section{padding:30px 0;border-bottom:1px solid var(--line);scroll-margin:15px}.r
 .ruler a{position:absolute;top:-3px;bottom:-3px;width:4px;background:var(--accent);transform:translateX(-50%)}.ends,.row{justify-content:space-between}.ends,.hint{font-size:.83rem}
 .tools{margin:0 0 18px}button,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:3px 9px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}article{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;scroll-margin:12px}
-.picture{display:block;background:#080d11}.picture img{width:100%;aspect-ratio:1.9;object-fit:contain;display:block}.body{padding:14px 16px}.row h3{margin:0}.mark{cursor:pointer}.mark[aria-pressed=true]{color:var(--accent)}
+.picture{display:block;background:#080d11}.picture img{width:100%;aspect-ratio:1.9;object-fit:contain;display:block}.body{padding:14px 16px}.row h3{margin:0}.actions{display:flex;gap:8px;align-items:center}.mark,.gifToggle{cursor:pointer}.mark[aria-pressed=true],.gifToggle[aria-pressed=true],#toggleAllGifs[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}.gifToggle{font-size:.82rem;padding:2px 8px}.cardGif{background:#080d11;border-top:1px solid var(--line)}.cardGif img{width:100%;max-height:360px;object-fit:contain;display:block}
 .tag{border:1px solid var(--line);padding:2px 6px;border-radius:4px;font-size:.8rem}summary{cursor:pointer}details{margin:10px 0}li{overflow-wrap:anywhere}article ul{max-height:18rem;overflow:auto;padding-left:18px;font-size:.86rem}
 .animation img{max-width:100%}footer{border-top:1px solid var(--line);padding-top:10px;font-size:.86rem}[hidden]{display:none!important}
 .coverage{position:relative;height:14px;background:var(--line);border-radius:3px;overflow:hidden}.coverage span{position:absolute;top:0;bottom:0;background:var(--accent)}
+.summary{font-size:1.1rem;color:var(--ink)}.strip{display:block;overflow:hidden;background:#080d11}.strip img{width:100%;display:block}
+.badge{display:inline-block;border-radius:4px;padding:0 7px;margin-right:7px;font-size:.78rem;font-weight:700;color:#0b1218;vertical-align:1px}
+.badge.brief,.ruler a.brief{background:#ffd166}.badge.moving,.ruler a.moving{background:#8fb3c4}.badge.wide,.ruler a.wide{background:#f78c6b}.badge.other,.ruler a.other{background:#c5b3e6}
+.groupBlock{margin:28px 0 8px;scroll-margin:15px}.groupTitle{font-size:1.2rem;margin:0 0 2px}.facts{margin:8px 0;font-size:.92rem}
+ol.clips{padding-left:20px;margin:6px 0}ol.clips>li{margin:10px 0;padding-top:8px;border-top:1px solid var(--line);font-size:.9rem}
 </style>)HTML";
 
 constexpr auto reportScript = R"HTML(<script>
@@ -38,7 +43,8 @@ if(filter){
       c.hidden=filter.value==='*'?!saved:!!filter.value&&!c.dataset.tags.split('|').includes(filter.value);
       if(!c.hidden)shown++;
     }
-    document.querySelector('#count').textContent=shown+' of '+cards.length+' clips';
+    for(const g of document.querySelectorAll('.groupBlock'))g.hidden=![...g.querySelectorAll('article')].some(c=>!c.hidden);
+    document.querySelector('#count').textContent=shown+' of '+cards.length+' events';
   }
   for(const c of cards)c.querySelector('.mark').onclick=()=>{
     const key=c.dataset.key;
@@ -66,9 +72,44 @@ if(filter){
       try{localStorage.setItem(storage,JSON.stringify([...marked]));}catch{}
     }catch(err){notice.textContent=err.message;}
   };
+  const toggleAll=document.querySelector('#toggleAllGifs');
+  function setCardGif(c,show){
+    const box=c.querySelector('.cardGif'),btn=c.querySelector('.gifToggle');
+    if(!box||!btn)return;
+    const img=box.querySelector('img');
+    box.hidden=!show;
+    if(show){if(!img.getAttribute('src'))img.src=img.dataset.src;}else img.removeAttribute('src');
+    btn.setAttribute('aria-pressed',String(show));
+    btn.textContent=show?'■ Hide GIF':'▶ Play GIF';
+  }
+  function syncToggleAll(){
+    if(!toggleAll)return;
+    const vis=cards.filter(c=>!c.hidden&&c.querySelector('.cardGif'));
+    const allOpen=vis.length>0&&vis.every(c=>!c.querySelector('.cardGif').hidden);
+    toggleAll.setAttribute('aria-pressed',String(allOpen));
+    toggleAll.textContent=allOpen?'Hide all GIFs':'Play all GIFs';
+  }
+  for(const c of cards){
+    const btn=c.querySelector('.gifToggle');
+    if(btn)btn.onclick=()=>{setCardGif(c,c.querySelector('.cardGif').hidden);syncToggleAll();};
+  }
+  if(toggleAll)toggleAll.onclick=()=>{
+    const vis=cards.filter(c=>!c.hidden&&c.querySelector('.cardGif'));
+    const openNext=!vis.every(c=>!c.querySelector('.cardGif').hidden);
+    vis.forEach(c=>setCardGif(c,openNext));
+    syncToggleAll();
+  };
+  const origUpdate=update;
+  update=()=>{origUpdate();syncToggleAll();};
   filter.onchange=update;update();
+  const briefGifs=cards.filter(c=>c.dataset.tags.split('|').includes('brief')&&c.querySelector('.cardGif'));
+  if(briefGifs.length>0&&briefGifs.length<=20){briefGifs.forEach(c=>setCardGif(c,true));syncToggleAll();}
 }
 document.querySelectorAll('.animation').forEach(d=>d.ontoggle=()=>{
   const img=d.querySelector('img');if(d.open)img.src=img.dataset.src;else img.removeAttribute('src');
+});
+// Feature-46: SeleneWatch opens these files in their own programs.
+document.querySelectorAll('a[data-open]').forEach(a=>{
+  a.href='selenewatch:'+a.dataset.open+'?file='+encodeURIComponent(new URL(a.getAttribute('href'),location.href).href);
 });
 </script>)HTML";

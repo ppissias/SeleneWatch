@@ -9,7 +9,8 @@ enum class BlipKind
     DarkTransit,   // Moving negative Gaussian silhouette (lunar darkening/transit test)
     MovingStreak,  // Fast motion-smeared bright streak (meteor test)
     BlinkingMover, // Slow steady nav-light with periodic bright strobe (aircraft test)
-    Lightning      // Uniform full-frame brightening (large-brightening test)
+    Lightning,     // Uniform full-frame brightening (large-brightening test)
+    IssSilhouette  // The ISS crossing the sunlit Moon: an opaque outline at real speed (transit test)
 };
 
 [[nodiscard]] inline const char* blipKindName(BlipKind kind)
@@ -21,12 +22,15 @@ enum class BlipKind
     case BlipKind::MovingStreak: return "moving_streak";
     case BlipKind::BlinkingMover: return "blinking_mover";
     case BlipKind::Lightning: return "lightning";
+    case BlipKind::IssSilhouette: return "iss_silhouette";
     }
     return "bright_flash";
 }
 
 // A test signal, in frame coordinates and native sample units.
 // For a 12-bit stream, amplitude is in 12-bit ADU, wherever those bits sit.
+// For IssSilhouette, fwhm is the station's length in pixels and amplitude the
+// percentage of the light its outline blocks (Feature-48).
 struct BlipSettings
 {
     int x{0};

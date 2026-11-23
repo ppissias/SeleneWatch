@@ -172,6 +172,8 @@ void MainWindow::beginSessionRun(bool timeLapse)
     if (timeLapse) run.folder = session_->timeLapseStatus().sessionDir;
     sessionRun_ = run;
     sessionRunGone_ = 0;
+    // Feature-47: the status page counts this session's events.
+    remoteCounts_ = {};
     endNote_.clear();
     checkSessionEnd(run.start);
 }

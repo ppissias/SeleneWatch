@@ -29,6 +29,8 @@ set(SELENEWATCH_QT_LICENSE_FILE "${QT6_INSTALL_PREFIX}/../../Licenses/LICENSE" C
     "Qt's LICENSE file (the LGPLv3 and GPLv3 texts), from the Licenses folder of the Qt installation")
 install(FILES "${SELENEWATCH_QT_LICENSE_FILE}" DESTINATION licenses RENAME Qt-LICENSE.txt)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/licenses/Qt-third-party-notices.txt" DESTINATION licenses)
+# Feature-47: Project Nayuki's QR code generator (MIT), compiled into SeleneWatch.exe.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen/LICENSE.txt" DESTINATION licenses RENAME QR-Code-generator-LICENSE.txt)
 
 if(SELENEWATCH_ZWO_SDK_DIR)
     install(FILES "${SELENEWATCH_ZWO_SDK_DIR}/lib/x64/ASICamera2.dll" DESTINATION .)

@@ -18,7 +18,7 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
   - `Qt6Core`
   - `Qt6Gui`
   - `Qt6Widgets`
-  - `Qt6Network` — the asynchronous public GitHub release check in the UI library; HTTPS uses Qt's Windows Schannel TLS plugin and Windows certificate verification.
+  - `Qt6Network` — the asynchronous public GitHub release check in the UI library (HTTPS uses Qt's Windows Schannel TLS plugin and Windows certificate verification), and the status page for a phone on the local network (`QTcpServer`, Feature-47). Qt's HTTP Server module is not used: its open-source license is GPLv3 only.
   - `Qt6Test` — linked only by the test executables. The application does not link it, and a release of the app does not need `Qt6Test.dll`.
 - **Linkage / Integration:** **Dynamic linking** via shared libraries (`Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll`, `Qt6Network.dll`). The test target also links `Qt6Test.dll`. SeleneWatch does not statically link Qt.
 - **Compliance Obligations:**
@@ -95,6 +95,15 @@ This document tracks all external libraries, frameworks, SDKs, and third-party c
 
 ---
 
+### 9. QR Code generator library, Project Nayuki (compiled in, Feature-47)
+
+- **Files:** `third_party/qrcodegen/qrcodegen.hpp` and `qrcodegen.cpp`, unmodified from [github.com/nayuki/QR-Code-generator](https://github.com/nayuki/QR-Code-generator), tag `v1.8.0`, directory `cpp/` (SHA-256 `b779c3b156cf7a57ce789d6fee4fc991ccc2913774d26c909d22bb8f26b2a793` and `1f3b3fcdac6954c32cf583ccd02ec9b5901f756a38c461acedc70be4a77d3757`), read in full before use: standard C++ only, no input or output.
+- **License:** MIT. Copyright (c) Project Nayuki.
+- **Usage:** draws the QR code of the status page's address in **Session → Status on your phone** (`remote/phone_link`). Compiled into `SeleneWatch.exe` through the static library `selenewatch_qrcodegen`.
+- **Obligations:** keep the copyright and permission notice with the source (it heads each file) and with the binaries: `licenses/QR-Code-generator-LICENSE.txt` in the release packages, from `third_party/qrcodegen/LICENSE.txt`. Compatible with BSD-2-Clause.
+
+---
+
 ## Release packages: what is shipped and the obligations met
 
 Made by the Release build's `package` target, from the command line or Visual Studio (see [DEVELOPER.md](DEVELOPER.md) in the source repository, *Building a release*):
@@ -108,6 +117,7 @@ Made by the Release build's `package` target, from the command line or Visual St
   - Qt Network's additional third-party components are **libpsl**, revision `664f3dc85259ec65e30248a61fa1c45b7b0e4c3f` (BSD-3-Clause, https://github.com/rockdaboot/libpsl), and the **Public Suffix List**, `2026-05-14_08-35-31_UTC` (MPL-2.0, https://publicsuffix.org/). Their complete attribution/license texts are generated from the installed Qt documentation into the same notices file. Preserve the MPL notice and corresponding source availability when redistributing the unmodified list as part of Qt; the Qt source archive above includes it. No original SeleneWatch source is placed under MPL.
   - Qt Svg and the OpenSSL/certificate-only TLS backends are not shipped. The Windows Schannel backend uses Windows system libraries; no OpenSSL binaries are added.
 - **ZWO ASI SDK:** `ASICamera2.dll` with `licenses/ZWO-ASI-SDK.txt` (section 2 above), only when the build has the SDK.
+- **QR Code generator (Project Nayuki), MIT:** compiled into `SeleneWatch.exe`, with `licenses/QR-Code-generator-LICENSE.txt` (section 9 above).
 - **Microsoft Visual C++ runtime:** as above.
 - **Not shipped:** QHY, Player One and ToupTek files, ASCOM, camera drivers, test and probe programs.
 

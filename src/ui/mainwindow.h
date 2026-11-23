@@ -6,8 +6,12 @@
 #include "sky/sky_exposure.h"
 #include "sources/frame_source.h"
 #include "session/session.h"
+#include "remote/status_page.h"
+#include "ui/remote_status_dialog.h"
 #include "ui/widgets/theme.h"
 
+#include <QtCore/QDateTime>
+#include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtGui/QImage>
 #include <QtWidgets/QLabel>
@@ -48,6 +52,7 @@ class ReleaseChecker;
 class SimulatedPointing;
 class CameraFamilyPanel;
 class ElidedLabel;
+class StatusServer;
 class ZwoApi;
 class QhyApi;
 class PlayerOneApi;
@@ -258,6 +263,15 @@ private:
     [[nodiscard]] bool moonEnds() const;
     [[nodiscard]] bool mountForEnd() const;
     void beginSessionRun(bool timeLapse);
+    // Feature-47: the status page for a phone (mainwindow_remote.cpp). The
+    // server answers from snapshots of what the window shows.
+    void setupRemoteStatus();
+    void openRemoteStatus();
+    QString applyRemoteStatus(const RemoteStatusDialog::Settings& settings);
+    [[nodiscard]] RemoteStatus remoteStatus() const;
+    [[nodiscard]] QByteArray remoteLastClipImage();
+    [[nodiscard]] QByteArray remoteLastStack() const;
+    [[nodiscard]] QByteArray remotePreview();
     void endSession(const QString& why);
     void updateSessionEndRow(std::chrono::system_clock::time_point now);
     void checkTrackingStop(const GuideStatus& guide);
@@ -526,4 +540,31 @@ private:
     QAction* themeNightRedAction_{nullptr};
     bool focusView_{false};
     std::vector<QDockWidget*> focusSavedDocks_;
+
+    // Feature-47: the status page's server, its dialog, and what the page
+    // counts from the start of the observer's session (Monitoring or a
+    // time-lapse), through the exposure follower's restarts of the stream.
+    StatusServer* remoteServer_{nullptr};
+    RemoteStatusDialog* remoteDialog_{nullptr};
+    struct RemoteCounts
+    {
+        int candidates{0};
+        int saved{0};
+        int notSaved{0};
+        QMap<QString, int> groups;
+        std::optional<RemoteStatus::Clip> lastClip;
+        QString lastClipFolder;
+        // The frame size the clip's overview was made from.
+        QSize lastClipFrame;
+    };
+    RemoteCounts remoteCounts_;
+    // The status bar's last message, and when (UTC).
+    QString lastMessage_;
+    QDateTime lastMessageTime_;
+    // Made when the page asks: the last clip's crops, and the live view at
+    // most every 5 s.
+    QString remoteClipImageFolder_;
+    QByteArray remoteClipImage_;
+    QByteArray remotePreview_;
+    std::chrono::steady_clock::time_point remotePreviewTime_{};
 };

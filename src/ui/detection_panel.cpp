@@ -697,6 +697,12 @@ Watch DetectionPanel::watch() const
     return watch_;
 }
 
+QString DetectionPanel::watchTitle() const
+{
+    const int index = target_->findData(static_cast<int>(watch_));
+    return index >= 0 ? target_->itemText(index) : QString();
+}
+
 void DetectionPanel::setWatch(Watch watch)
 {
     const DetectionSettings current = settings();

@@ -3,6 +3,7 @@
 #include "session/clock_check.h"
 #include "recording/clip_overview.h"
 #include "recording/frame_timing.h"
+#include "recording/nightly_report.h"
 #include "recording/output_paths.h"
 #include "recording/recording_writer.h"
 #include "recording/ser_reader.h"
@@ -169,6 +170,7 @@ private slots:
     void theSiteIsRecordedEverywhere();
     void previewRecordingWithFrameLimitWritesExactFramesWithoutCandidates();
     void outputPathsAndValidationSeparateModesAndDetectIssues();
+    void nightlyReportIncludesInlineAnimatedGifControls();
 };
 
 // Done-when items 1 and 2: by frame time, on a played file, with a clip in it.
@@ -585,6 +587,44 @@ void SessionRecordTest::outputPathsAndValidationSeparateModesAndDetectIssues()
 
     const OutputFolderCheck missingDrive = checkOutputFolder("Z:/DefinitelyMissingDriveXYZ/SeleneWatch", 0, true);
     QVERIFY(!missingDrive.ok && missingDrive.mountMissing);
+}
+
+void SessionRecordTest::nightlyReportIncludesInlineAnimatedGifControls()
+{
+    QTemporaryDir dir;
+    const QString watchDir = dir.path();
+    QVERIFY(QDir(watchDir).mkpath("clips/20261123-010203-000"));
+
+    // Write a minimal candidates.txt, event.txt (brief event), and a dummy 04_event_preview.gif.
+    {
+        QFile f(QDir(watchDir).filePath("candidates.txt"));
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("2026-11-23T01:00:00.000Z session_start target=sky source=\"Test\"\n");
+        f.write("2026-11-23T01:02:03.000Z record_id=1 trigger_frame_index=10 kind=flash clip=20261123-010203-000\n");
+    }
+    {
+        QFile f(QDir(watchDir).filePath("clips/20261123-010203-000/event.txt"));
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("mode: sky\nframe_size: 640x480\n");
+        f.write("trigger: trigger_time=2026-11-23T01:02:03.000Z trigger_frame_index=10 kind=flash peak_sigma=20.0 bright_pixel_count=15 peak=(100,100)\n");
+        f.write("overview: 00_overview.png active_frames=2 run_frames=2 run_seconds=0.05 run_moved_px=0\n");
+        f.write("complete: yes\n");
+    }
+    {
+        QFile gif(QDir(watchDir).filePath("clips/20261123-010203-000/04_event_preview.gif"));
+        QVERIFY(gif.open(QIODevice::WriteOnly));
+        gif.write("GIF89a");
+    }
+
+    QString err;
+    const QString reportPath = writeNightlyReport(watchDir, err);
+    QVERIFY2(!reportPath.isEmpty(), qPrintable(err));
+    const QString html = contents(reportPath);
+    QVERIFY(html.contains("id='toggleAllGifs'"));
+    QVERIFY(html.contains("class='gifToggle'"));
+    QVERIFY(html.contains("class='cardGif'"));
+    QVERIFY(html.contains("clips/20261123-010203-000/04_event_preview.gif"));
+    QVERIFY(html.contains("briefGifs.length<=20"));
 }
 
 int main(int argc, char** argv)

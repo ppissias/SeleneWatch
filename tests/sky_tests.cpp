@@ -425,20 +425,19 @@ void SkyTest::syntheticSkySceneAndExtendedBlips()
     watch.capture.finishPartial();
     QVERIFY2(watch.clips.size() >= 2, qPrintable(QString("Expected >= 2 clips (meteor + lightning), got %1").arg(watch.clips.size())));
 
-    bool sawMeteor = false;
-    bool sawLightning = false;
+    bool sawMoving = false;
+    bool sawWide = false;
     for (const EventClip& clip : watch.clips)
     {
         OverviewRequest req;
         req.onsetFrameIndex = clip.triggers.front().onsetFrameIndex;
-        req.largeBrightening = std::any_of(clip.triggers.begin(), clip.triggers.end(),
-            [](const ClipTrigger& t) { return t.change == ChangeKind::LargeRise; });
+        for (const ClipTrigger& trigger : clip.triggers) req.triggers.push_back(triggerPointOf(trigger));
         const ClipOverview ov = makeClipOverview(clip.frames, req);
-        if (ov.suggestedKind == "meteor") sawMeteor = true;
-        if (ov.suggestedKind == "lightning") sawLightning = true;
+        if (ov.description.group == ClipGroup::Moving) sawMoving = true;
+        if (ov.description.group == ClipGroup::Wide) sawWide = true;
     }
-    QVERIFY2(sawMeteor, "Expected synthetic MovingStreak to classify as meteor");
-    QVERIFY2(sawLightning, "Expected synthetic Lightning to classify as lightning");
+    QVERIFY2(sawMoving, "Expected the synthetic MovingStreak to be grouped as moving");
+    QVERIFY2(sawWide, "Expected the synthetic Lightning to be grouped as wide");
 
     // DarkTransit subtracts pixels and clamps at 0.
     BlipInjector darkInj;

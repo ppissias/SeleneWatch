@@ -4,11 +4,14 @@
 #include "recording/ser_reader.h"
 #include "recording/nightly_report.h"
 #include "recording/output_paths.h"
+#include "recording/clip_overview.h"
+#include "recording/report_links.h"
 #include "session/session.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
 #include <QtTest/QTest>
 
@@ -399,11 +402,110 @@ private slots:
         const QString path = writeNightlyReport(folder, error);
         QVERIFY2(!path.isEmpty(), qPrintable(error));
         const auto html = read(path);
-        QVERIFY(html.contains("<strong>2</strong>Automatic candidates"));
+        QVERIFY(html.contains("<strong>2</strong>Automatic triggers"));
+        QVERIFY(!html.contains("Manual saves"));
         QVERIFY(html.contains("<strong>2</strong>Unsaved or unresolved triggers"));
         QVERIFY(html.contains("outcome unknown") && html.contains("disk reserve"));
         QVERIFY(html.contains("A&amp;B &lt;camera&gt;"));
         QVERIFY(html.contains("<strong>Unknown</strong>Monitoring time"));
+    }
+
+    // Feature-46: the report groups clips again from event.txt, puts the
+    // clips of one crossing together, and links their files through
+    // SeleneWatch instead of letting the browser download them.
+    void reportShowsEventsGroupedByWhatWasMeasured()
+    {
+        QTemporaryDir temp;
+        const QString folder = temp.filePath("sky/session-example");
+        QVERIFY(QDir().mkpath(folder));
+        QFile journal(folder + "/candidates.txt");
+        QVERIFY(journal.open(QIODevice::WriteOnly));
+        journal.write("2026-11-20T22:11:00.000Z session_start camera=\"Test\"\n");
+        journal.close();
+        // An aircraft's blinks along a line over two clips of 10 s, the first
+        // cut at its limit, then a lone meteor-like trigger an hour later.
+        const QDateTime base = QDateTime::fromString("2026-11-20T22:12:00.000Z", Qt::ISODateWithMs);
+        const auto trigger = [&base](int second, int millisecond, int x, int y) {
+            return QString("trigger: onset_frame_index=1 trigger_frame_index=%1 bright_pixel_count=40 sigma=13.9 min_pixels=20 "
+                           "max_pixels=3000 one_frame=yes peak_sigma=55.5 noise_floor_adu=4.2 peak=(%2,%3) box=(%4,%5,7,9) "
+                           "kind=automatic active_patches=1 trigger_time=%6\n")
+                .arg(second * 30 + millisecond / 33).arg(x).arg(y).arg(x - 3).arg(y - 4)
+                .arg(base.addMSecs(second * 1000LL + millisecond).toString(Qt::ISODateWithMs));
+        };
+        const auto clip = [&](const QString& name, const QString& body) {
+            QVERIFY(QDir().mkpath(folder + "/clips/" + name));
+            QFile file(folder + "/clips/" + name + "/event.txt");
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(("frame_size: 1280x960\n" + body + "complete: yes\n").toUtf8());
+            file.close();
+            QFile ser(folder + "/clips/" + name + "/event.ser");
+            QVERIFY(ser.open(QIODevice::WriteOnly));
+            ser.write("SER");
+        };
+        QString first, second;
+        for (int s = 0; s < 10; ++s) first += trigger(s, 0, 1000 - 20 * s, 100 + 8 * s);
+        for (int s = 10; s < 20; ++s) second += trigger(s, 100, 1000 - 20 * s - 2, 100 + 8 * s + 1);
+        clip("20261120-221200-000", first + "collection_end: maximum post-event interval\n"
+             "0300 300 2026-11-20T22:12:09.990Z\n");
+        clip("20261120-221210-100", second + "collection_end: post-event interval complete\n");
+        clip("20261120-231500-000", trigger(3780, 0, 540, 230)
+             + "overview: 00_overview.png main_frame_index=1 sigma=13.9 active_frames=2 changed_pixels=55 run_frames=2 run_seconds=0.033 run_moved_px=0.0; display only, not evidence\n");
+        QFile overview(folder + "/clips/20261120-231500-000/00_overview.png");
+        QVERIFY(overview.open(QIODevice::WriteOnly));
+        overview.close();
+
+        QString error;
+        const QString path = writeNightlyReport(folder, error);
+        QVERIFY2(!path.isEmpty(), qPrintable(error));
+        const QString html = read(path);
+        QVERIFY2(html.contains("<p class='summary'>2 events in 3 clips: <a href='#group-brief'>1 brief</a> · <a href='#group-moving'>1 moving</a></p>"),
+            qPrintable(html.section("<header>", 1).left(900)));
+        QVERIFY(html.contains("<strong>2</strong>Events") && html.contains("<strong>3</strong>Clips"));
+        // The crossing, one event of two clips, with all its triggers.
+        QVERIFY2(html.contains("20 triggers on 20 frames over 19.1 s, along a straight line from (1000, 100) to"),
+            qPrintable(html.section("<article id='event-0'", 1).left(1500)));
+        QVERIFY(html.contains("2 clips, 22:12:00 – 22:12:19 UTC"));
+        // The brief one, with its run, and its picture cut to the overview's crops.
+        QVERIFY(html.contains("1 trigger, 40 px in a 7 × 9 box at (540, 230), active on 2 frames over 0.033 s, strongest 55.5 σ"));
+        const OverviewLayout layout = overviewLayout(1280, 960);
+        QVERIFY(html.contains(QString("style='aspect-ratio:%1/%2'").arg(layout.crops.width()).arg(layout.crops.height())));
+        // Its files open through SeleneWatch.
+        QVERIFY(html.contains("<a data-open='open'") && html.contains("clips/20261120-231500-000/event.ser\">Open SER</a>"));
+        QVERIFY(html.contains("<a data-open='show'"));
+        QVERIFY(html.contains("a.href='selenewatch:'+a.dataset.open+'?file='"));
+    }
+
+    // Feature-46: a selenewatch: link opens only a known kind of file inside
+    // a monitoring session folder, whatever page made it.
+    void reportLinksOpenOnlyASessionsFiles()
+    {
+        QTemporaryDir temp;
+        const QString session = temp.filePath("sky/session-example");
+        QVERIFY(QDir().mkpath(session + "/clips/20261120-221200-000"));
+        const auto make = [](const QString& path) { QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("x"); };
+        make(session + "/candidates.txt");
+        make(session + "/clips/20261120-221200-000/event.ser");
+        make(session + "/clips/20261120-221200-000/run.bat");
+        make(temp.filePath("elsewhere.ser"));
+        const auto linkTo = [](const QString& action, const QString& path) {
+            return "selenewatch:" + action + "?file=" + QString::fromLatin1(QUrl::toPercentEncoding(QUrl::fromLocalFile(path).toString()));
+        };
+        QString error;
+        const auto ser = reportLinkTarget(linkTo("open", session + "/clips/20261120-221200-000/event.ser"), error);
+        QVERIFY2(ser, qPrintable(error));
+        QCOMPARE(ser->action, ReportLinkAction::Open);
+        QCOMPARE(ser->path, QFileInfo(session + "/clips/20261120-221200-000/event.ser").canonicalFilePath());
+        const auto show = reportLinkTarget(linkTo("show", session + "/candidates.txt"), error);
+        QVERIFY2(show && show->action == ReportLinkAction::Show, qPrintable(error));
+
+        QVERIFY(!reportLinkTarget(linkTo("open", session + "/clips/20261120-221200-000/run.bat"), error));
+        QVERIFY2(error.contains("only SER, AVI"), qPrintable(error));
+        QVERIFY(!reportLinkTarget(linkTo("open", temp.filePath("elsewhere.ser")), error));
+        QVERIFY2(error.contains("inside a monitoring session folder"), qPrintable(error));
+        QVERIFY(!reportLinkTarget(linkTo("open", session + "/clips/20261120-221200-000/missing.ser"), error));
+        QVERIFY(!reportLinkTarget(linkTo("run", session + "/candidates.txt"), error));
+        QVERIFY(!reportLinkTarget("selenewatch:open?file=https%3A%2F%2Fexample.com%2Fa.ser", error));
+        QVERIFY(!reportLinkTarget("https://example.com/?file=a.ser", error));
     }
 
     void nativeManualEvidenceAndRefusedRequestsStayOnRecord()

@@ -5,6 +5,23 @@
 #include <mutex>
 #include <optional>
 
+// Feature-48: the ISS as it crosses the sunlit Moon, for tests of the shadows
+// watch. Its outline is drawn opaque: the 109 m truss across its path, eight
+// solar-array wings (12 x 34 m) and the module stack along it, and two
+// radiators. It is smeared along its motion during the exposure (8 % of a
+// frame's travel) and softened by seeing (a Gaussian of a fiftieth of its
+// length). Under it each sample is scaled by 1 - depth x cover, in every
+// channel. lengthPixels is the truss's length; (vx, vy), its motion per
+// frame, also orients it, since the station flies with its modules along its
+// path. The one implementation for the Test flash bar and the darkening probe.
+void paintIssSilhouette(Frame& frame, double centreX, double centreY, double lengthPixels, double depth,
+    double vx, double vy);
+
+// Feature-48: the ISS covers its own length in about 14 ms (109 m at
+// 7.66 km/s), at any distance, since its size and its speed in the image both
+// fall with the distance. Its travel on one frame, in pixels.
+[[nodiscard]] double issTravelPerFrame(double lengthPixels, double frameSeconds);
+
 // Adds a requested Gaussian to writable frames, before publication.
 //
 // The caller may request from another thread. There is one request slot;

@@ -1,19 +1,19 @@
 #include "ui/startup_tips.h"
 
 namespace {
-constexpr auto kSectionMainScreen = "1-the-main-screen-at-a-glance";
-constexpr auto kSectionDrivers = "21-computer-installation--camera-drivers";
-constexpr auto kSectionOutput = "22-choosing-your-output-folder";
-constexpr auto kSectionSite = "23-site-instrument--clock-accuracy";
-constexpr auto kSectionSource = "24-selecting-a-camera-or-recording--starting-preview";
-constexpr auto kSectionDisplay = "25-display-stretch--the-native-adu-histogram";
-constexpr auto kSectionEnds = "27-ending-a-session-unattended";
-constexpr auto kSectionGuides = "3-feature-lock--mount-guiding-shared-for-lunar--planetary-workflows";
-constexpr auto kSectionLunar = "4-workflow-1--lunar-flashes-on-the-earth-illuminated-side";
-constexpr auto kSectionTransits = "5-workflow-2--objects-passing-in-front-of-the-moon-shadows--transits";
-constexpr auto kSectionTimelapse = "6-workflow-3--lunar-and-planetary-time-lapses";
-constexpr auto kSectionSky = "7-workflow-4--watching-the-sky-with-a-fixed-camera";
-constexpr auto kSectionOutputs = "8-what-selenewatch-saves-folders-clips--logs";
+constexpr auto kSectionMainScreen = "12-the-main-window";
+constexpr auto kSectionDrivers = "11-installing-and-connecting-a-camera";
+constexpr auto kSectionOutput = "13-where-selenewatch-saves";
+constexpr auto kSectionSite = "14-your-site-and-instrument";
+constexpr auto kSectionSource = "15-choosing-a-source-and-starting-preview";
+constexpr auto kSectionDisplay = "16-seeing-the-image-stretch-and-histogram";
+constexpr auto kSectionEnds = "18-ending-a-session-by-itself";
+constexpr auto kSectionGuides = "6-feature-lock-and-guiding";
+constexpr auto kSectionLunar = "5-impact-flashes-on-the-moons-dark-side";
+constexpr auto kSectionTransits = "4-shadows-crossing-the-moon";
+constexpr auto kSectionTimelapse = "3-time-lapses-of-the-moon-and-the-planets";
+constexpr auto kSectionSky = "2-watching-the-sky";
+constexpr auto kSectionOutputs = "8-the-report-and-the-saved-files";
 }
 
 const std::vector<StartupTip>& allStartupTips()

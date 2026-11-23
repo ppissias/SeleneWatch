@@ -50,6 +50,9 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-43 — Pre-calibration drift measurement and persistent drift speed readout](#feature-43--pre-calibration-drift-measurement-and-persistent-drift-speed-readout)
 - [Feature-44 — Lock Detection controls and show active shadow monitoring during Time-lapse](#feature-44--lock-detection-controls-and-show-active-shadow-monitoring-during-time-lapse)
 - [Feature-45 — The shadows watch looks only for shadows](#feature-45--the-shadows-watch-looks-only-for-shadows)
+- [Feature-46 — A nightly report that shows what was measured](#feature-46--a-nightly-report-that-shows-what-was-measured)
+- [Feature-47 — Checking on SeleneWatch from a phone](#feature-47--checking-on-selenewatch-from-a-phone)
+- [Feature-48 — An ISS silhouette test signal, and documentation that shows each feature](#feature-48--an-iss-silhouette-test-signal-and-documentation-that-shows-each-feature)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3392,3 +3395,184 @@ Keep the selection locked in Monitoring and Time-lapse, through pending transiti
 **Docs.** MANUAL.md (Workflow 2: functionality, Path A, the controls reference and the screenshot caption; the Detection controls reference; the flash check), README.md, CAMERA_SETTINGS_GUIDE.md, the startup tip on dark transits, [docs/darkening-trigger.md](docs/darkening-trigger.md) (a reproduction note), and features.md (field validation).
 
 **Status & verification (23 November 2026).** Debug build (all targets); all 25 CTest suites passed, among them `darkening`, `detection`, `auto_tune`, `watch_settings`, `dependency_rules`, `session_record`, `manual_capture` and `ui`. On real data, `SeleneWatchProbe darkening` on the archive's Mare recording (`Moon_180548.avi`, 500 frames) at K 12 gave exactly the published results of [the darkening measurements](docs/darkening-trigger.md) for all 12 injected crossing variants: crossings fired, dark candidates inside and outside their windows, and a quiet control (0 rising, 0 falling). On that recording, the dark side detects exactly as before. Not run: the probe on the other four recordings, a Release build and the real-window GUI E2E (`tests\gui_e2e_test.ps1`); an observing run was live from the Release build. Field check: [features.md](features.md#field-validation).
+
+## Feature-46 — A nightly report that shows what was measured
+
+*Raised by the observer on 23 November 2026, reviewed, decided and built the same day.*
+
+**What the observer saw.** In the Sky report of the night of 20–21 November 2026 (55 clips) there were many categories, and it was not clear that the program could tell them apart. Some clips showed many small detections over many frames, but their summary read "53 triggers scattered over the frame", without saying in how many frames. The report is the observer's landing page the next morning. And **Raw SER** made the browser download the file from the disk instead of opening it in the observer's SER player.
+
+**What the review found.** Every clip's trigger positions and times were read, and several overviews looked at. The night held about 12 aircraft (strobes blinking twice every 1.2 s along a straight line) in 41 clips, about 12 isolated brief events, among them the meteor at 03:49:57, and a nearby light at 04:24 in 2 clips. Feature-15's suggested kinds:
+
+| What it was | Suggested kind |
+| --- | --- |
+| The meteor at 03:49:57 (a streak on two frames) | flash, "a rise in place" |
+| Aircraft (40 clips) | flash 27, seeing 3, satellite 5, unclear 5 |
+| The nearby light at 04:24 | lightning |
+
+The kinds were mostly wrong, not just imprecise:
+1. The kind came from one short run of activity around the clip's strongest frame. A strobe's blink lasts one or two frames, so it read as "a rise in place": a flash. The clip's other triggers along a line were not used (Feature-15 had foreseen this for a strobing light in its archive note).
+2. "Seeing" looked only at how far apart the trigger centres were. A long straight aircraft track passed.
+3. At 33 ms a meteor is a streak on one or two frames, and motion needed three, so the meteor was a flash.
+4. "Lightning" was any large brightening; here a local light.
+5. A clip stops after 20 s, so one crossing was saved as up to six clips, each given its own kind.
+
+**Decision (the observer's).** Show only what can be measured reliably: A, groups decided by measurement; B, consecutive clips of one crossing shown as one event; C, facts with frame counts; D, a landing page that leads with the brief events; E, option 1 below, links that open files through SeleneWatch. A report for the latest session was also asked for.
+
+**What was built.**
+1. **Four groups (`recording/clip_groups`), one implementation.** `describeClip` gives a clip's group and the facts measured:
+   - **Moving:** three or more triggers on three or more frames lie along one straight line and advance along it as time goes on (fitted by orthogonal regression; on average within the larger of 3 px and 5 % of the track's length; never going back by more than twice that). Up to a fifth of the triggers may be left out as strays, and the facts say "(25 of the 28 triggers)". The speed may change: an aircraft heading for the horizon slowed from 27 to 4 px/s on 20 November, and a fit at constant speed split such crossings. With fewer than three triggers, a run around the peak that moved also counts (one trigger whose patch the detector followed for 13.7 s).
+   - **Brief:** every trigger within 0.2 s, and no run around the peak lasting longer or moving.
+   - **Wide:** a large brightening or darkening (`kind=brightening` / `large_darkening`), with the largest share of the frame.
+   - **Other:** the rest, described: "in one place", or "spread over W × H px, not along a straight line", or "saved by hand".
+   The facts always count triggers and frames: "53 triggers on 53 frames over 19.6 s, along a straight line from (351, 2) to (954, 289) at 31 px/s, strongest 58.5 σ"; "1 trigger, 21 px in a 6 × 12 box at (547, 219), active on 2 frames over 0.033 s, strongest 27.1 σ". Feature-15's kinds (flash, meteor, satellite, aircraft, dark transit, lightning, seeing, unclear) and their run-shape rules (straightness, blinking) are removed.
+2. **Where the group is written.** The overview groups a clip from its triggers (`OverviewRequest::triggers`, which replace `marks` and `largeBrightening`; the patches' boxes are still marked) and its run around the peak. Its caption's last line is the group and the facts, and the line above now reads "Around the peak at K …", because it describes only that run. `event.txt` has `group: moving (…); measured, not an identification` instead of `suggested_kind:`, and the clip's `candidates.txt` line `group=moving`. When no overview can be made, the group comes from the triggers alone. The overview line records the run: `run_frames= run_seconds= run_moved_px=`, so the report groups the clip exactly as the writer did. `triggerPointOf` (in `event_writer`) is the one conversion of a trigger.
+3. **The report groups again from `event.txt` (`nightly_report`).** It never opens a SER. Clips saved before this feature are grouped by the same code; their run is read from the words of their `suggested_kind:` line ("2 frames over 0.033 s", "moving at 0.04 frame widths/s for 13.7 s"), the only place it was written.
+4. **Events (`clipsIntoEvents`, `describeEvent`).** Consecutive clips are one event when:
+   - a clip that stopped at its length or memory limit (`collection_end`) is followed by one starting within 1 s of its last frame; or
+   - a clip that starts within 60 s of the event's last trigger fits one straight line together with the event, and that line leaves out no trigger that either keeps on a line of its own. Without the last condition, a two-trigger clip before an aircraft was swallowed as two strays.
+   An event's group comes from all its triggers. If they are not on one line but a clip moved, it is Moving.
+5. **The landing page.**
+   - The header says "25 events in 55 clips: 12 brief · 1 wide · 12 moving" with links. The tiles are Monitoring time, Events, Clips and Automatic triggers; Manual saves and Unsaved or unresolved triggers appear only when not zero.
+   - The groups follow in the order Brief, Wide, Other, Moving, each with one sentence on what it means and what it usually is. Filter buttons and the follow-up stars work per event.
+   - The time ruler colours each event by its group, with readable times at its ends.
+   - Each card's picture is the overview's row of crops (before, peak, after and the change), cut from `00_overview.png` by the page with the layout `overviewLayout` gives; a click opens the whole overview. A whole frame at card size had hidden a 5 px event; the crops show its shape. On 20 November several brief events are visibly streaks.
+   - An event of several clips lists them with their own group, facts and files.
+6. **Opening files (`recording/report_links`, `--open-link`).** A browser does not hand a local file to a desktop program; it copies it into Downloads, which for a 689-frame clip is about 850 MB. **Open SER** and **Show in folder** keep a plain relative link, which the page turns into `selenewatch:open?file=<file URL>` or `selenewatch:show?…`, so a moved watch folder still works. The browser asks, then Windows runs `SeleneWatch.exe --open-link <link>`. That opens the file with its associated program (SER Player, for example), or Explorer with the file selected, and exits without opening a window. SeleneWatch registers the link for the current user at each start (`HKCU\Software\Classes\selenewatch`, no administrator rights), pointing at the program that started. Runs with their own settings name (the package and GUI checks) do not register. Since any web page can make such a link, `reportLinkTarget` opens only an existing SER, AVI, PNG, GIF, JPEG, MP4 or text file inside a watch folder (one with `candidates.txt` at most three levels up). It runs nothing and passes nothing on; anything else is refused with a message.
+
+**Effect on the night of 20–21 November 2026.** 55 clips become 25 events:
+- **12 moving:** 11 aircraft crossings, 41 clips of up to 6 each, and the single trigger at 22:13:54 whose patch moved 701 px.
+- **12 brief:** among them the meteor at 03:49:57.
+- **1 wide:** the light at 04:24, 2 clips.
+This matches the reading of the trigger positions and times by hand. The report was regenerated in the observer's session folder, and the previous report kept beside it as `report-before-feature-46.html`.
+
+**Tests.**
+- `sky_extras`:
+  - `eachClipGetsAGroup` replaces `eachClipGetsASuggestedKind`: synthetic frames for a flash (brief), a fast streak, a slow light and a dark disk (moving), a wide trigger (wide), and blinks one at a time whose triggers lie along a line (moving, where the run alone gave a flash).
+  - `clipGroupsComeFromWhatWasMeasured`, with the night's patterns: the strobe (moving, then with three strays left out), the meteor (brief, with its facts exactly), one trigger followed for 13.7 s (moving), flicker in place, scattered triggers (other), a wide light, falls along a line (moving, "darkening triggers"), two patches on one frame, and a manual save.
+  - `consecutiveClipsOfOneCrossingAreOneEvent`: a crossing over three clips and a later single blink become one moving event; a blink off the line and a later flash stay apart; a cut clip continued at once is joined, and not when it ended by itself.
+- `manual_capture`:
+  - `reportShowsEventsGroupedByWhatWasMeasured`: event.txt files for two clips of one crossing and a brief clip give the summary, the tiles, the crossing's facts and clip range, the brief facts with its run, the crop picture's proportions and the `data-open` links.
+  - `reportLinksOpenOnlyASessionsFiles`: a SER and a text file in a session open; a `.bat` there, a SER outside a session, a missing file, an unknown action and a web URL are refused.
+  - The existing report test reads "Automatic triggers" and checks that a zero Manual saves tile is not shown.
+- `sky`: the synthetic moving streak and lightning are grouped moving and wide. `overview`: requests carry triggers. `ui` and `tests/gui_e2e_test.ps1` accept `group: moving` / `group: wide` in `event.txt`.
+
+**Docs.** MANUAL.md (the sky watches' review aids, the morning step, the Nightly report section, the `event.txt` entry and `--open-link`), README.md, DEVELOPER.md (the `recording/` row and the report's command lines), PROJECT_DESCRIPTION.md (Feature-15's row) and features.md (field validation).
+
+**Not done.** No Release build, and no real-window GUI E2E run. Not tried in a browser: the `selenewatch:` link from a real report in Edge or Chrome, through the registration a Release start makes. The registration is not removed by the installer's uninstall.
+
+**Status & verification (23 November 2026).** Debug build (all targets); all 25 CTest suites passed, among them `sky_extras`, `manual_capture`, `overview`, `sky`, `dependency_rules` and `ui`. On real data, `SeleneWatch --nightly-report` on the 20–21 November Sky watch gave the 25 events above; the report was looked at in Edge (headless screenshots of the header, the brief cards and an expanded six-clip crossing).
+
+## Feature-47 — Checking on SeleneWatch from a phone
+
+*Raised by the observer on 23 November 2026, discussed and built the same day.*
+
+**What the observer asked.** A small read-only web page with what SeleneWatch is doing now, for a phone's browser. The use case: the observer is at home, the telescope and camera run unattended, and from the phone they want to see whether SeleneWatch still monitors, whether it lost the lock, and how many events the session has caught. They asked how the phone would find the page without typing the computer's address: perhaps an app, or something broadcast on the network.
+
+**Discussion and decision.**
+- **A page served by SeleneWatch itself, found with a QR code, and no phone app.** A phone's browser cannot listen to a broadcast or browse advertised services, so either would need an app, and an app for iOS and Android is out of proportion for a status page.
+- **The QR code** holds the address, the port and an access key. Scanning it once and keeping it as a bookmark is enough. `<computer name>.local` is offered as well: Windows usually answers that name and iPhones resolve it, but not every Android phone or router does, so it cannot be the only way.
+- **Qt Network, which SeleneWatch already ships.** Qt's own HTTP Server module was not used: its open-source license is GPLv3 only (AGENTS.md, licensing rule 3). A server that only answers a few GET requests is small on `QTcpServer`.
+- **Away from home,** a private network app such as Tailscale, rather than a port opened on the router.
+- **Push notifications** (lost lock, an early end, a full disk) need an outside service and were left for later.
+
+**What was built.**
+1. **`remote/status_page` (plain functions).**
+   - `RemoteStatus` is the snapshot: state and mode badge, watch, source, session start and Ends, frame rate, frames and drops, this session's candidates, clips by group (Feature-46), clips not saved and the last clip, the lock, drift, guiding, mount and last correction, the time-lapse's progress, free disk space, and the status line's last message.
+   - `statusJson` turns it into JSON; unknown values are null, not zero.
+   - `statusPageHtml` is the page: one HTML file with its style and script, a dark mobile layout that fetches `status.json` every 5 s and shows how long ago SeleneWatch last answered, in red after 20 s.
+   - `respond` answers one request:
+     - every path but `/favicon.ico` needs `?key=`;
+     - only GET is accepted;
+     - the paths are `/`, `/status.json`, `/last-clip.png`, `/last-stack.png` and `/preview.jpg`.
+   - `httpResponse` writes the answer with `Cache-Control: no-store` and `Connection: close`.
+   - `allowedPeer` lets in only private, loopback and link-local addresses, and 100.64.0.0/10 (Tailscale), IPv4-mapped IPv6 included.
+   - `newAccessKey` makes 12 characters from an alphabet without look-alikes.
+2. **`remote/status_server` (`StatusServer`).**
+   - It runs on the window's thread with Qt's event loop and never touches the frame path.
+   - It reads a request's head (8 KB at most), answers and closes.
+   - A connection from outside the local network is closed at once, one without a complete request within 5 s is dropped, and at most 16 are open.
+   - It listens on every interface; tests give it the loopback, which no firewall asks about.
+3. **`remote/phone_link`.**
+   - `statusAddresses` lists this computer's IPv4 addresses on local networks: Wi-Fi first, then wired, then overlays such as Tailscale, then virtual adapters (Hyper-V, WSL, VirtualBox, VMware, Docker), which a phone cannot reach.
+   - `statusUrl` builds the address, `localNetworkName` gives `<name>.local`, and `qrImage` draws the QR code with medium error correction and the standard margin.
+   - The encoder is Project Nayuki's QR Code generator, v1.8.0, MIT, vendored unmodified in `third_party/qrcodegen/` after reading it in full (standard C++ only, no input or output), and compiled as `selenewatch_qrcodegen`. Its notice ships as `licenses/QR-Code-generator-LICENSE.txt`, which `check_package.ps1` now expects.
+4. **The window (`mainwindow_remote.cpp`, `RemoteStatusDialog`).**
+   - **Session → Status on your phone…** turns the page on and off and sets the port (8080). It shows the QR code of the chosen address, the address with **Copy address**, the `.local` address, **New key…** with a confirmation, whether the page runs or why not, and short advice: the same network, the Windows firewall on private networks, reserving the address, Tailscale.
+   - The settings are `remote/enabled` (off by default), `remote/port` and `remote/key` (made once). A page left on starts with the program; if its port is taken, the status line says so.
+   - The snapshot comes from what the window already shows: the status label, the mode badge, the Ends row, the guider's status, the stream counters, `QStorageInfo` for the output drive, and the detection panel's name of the watch (`DetectionPanel::watchTitle`).
+   - The page counts candidates and clips from the start of the observer's session (`beginSessionRun`), through the exposure follower's restarts of the stream, which reset the status bar's own count. `ClipWriteResult` now carries the group's facts (`groupFacts`).
+   - The last clip's picture is its overview's row of crops, cut with `overviewLayout`, made once per clip when the page first asks. The time-lapse's latest stack is its thumbnail. The live view is the preview as the screen shows it, as a JPEG at most every 5 s however often the page asks.
+
+**Tests.**
+- `remote` (new suite):
+  - `theSnapshotBecomesJson`: the fields, times, groups, last clip and drift, and nulls for what is unknown.
+  - `everyRequestNeedsTheKeyAndOnlyReads`: 403 without, with an empty or with a wrong key; the page, the JSON and the images with it; 404 for missing images and unknown paths; 405 for POST; 400 for a request that is not HTTP; the response's headers; the access key's form.
+  - `onlyTheLocalNetworkIsAnswered`: private, loopback, link-local, IPv4-mapped, Tailscale and IPv6 private addresses are let in, public ones are not, and the address's form.
+  - `theServerAnswersOverTheNetwork`, on the loopback: a request sent in two pieces is answered; the JSON over a real socket; 403 without the key; a second server on the same port fails and says why; nothing answers after Stop.
+  - `theAddressFitsInAReadableQrCode`: the code's size, its margin and its three finder patterns; a text too long gives no image.
+- `ui`: `thePhoneStatusPageIsOffUntilAsked`: the Session entry opens the dialog; the page is off with port 8080 and no QR code; the key is made once and kept by the next window.
+- `dependency_rules`: `remote/` uses no other folder, and only `ui/` uses it.
+- The page was rendered at a phone's width (390 px) in Edge with sample data, and long lines wrap.
+
+**Docs.** MANUAL.md (section 2.8, its contents entry, and three troubleshooting rows), README.md, DEVELOPER.md (build targets, the `remote/` folder, the test list), PROJECT_DESCRIPTION.md, THIRD_PARTY_LICENSES.md (section 9, Qt Network's use, the package list), ACKNOWLEDGEMENTS.md, and features.md (field validation).
+
+**Not done.**
+- No Release build and no real-window GUI E2E run.
+- Not tried on a phone: the Windows firewall prompt, the page over Wi-Fi, the QR code read by a phone's camera, `.local` on the observer's phones, and Tailscale.
+- No HTTPS: the page is plain HTTP on the local network, with the key in the address.
+- No push notifications.
+
+**Status & verification (23 November 2026).** Debug build (all targets). All 26 CTest suites passed when run one after another, among them the new `remote` suite, `ui` (54 of 54, with `thePhoneStatusPageIsOffUntilAsked`) and `dependency_rules`. A run with two suites in parallel (`ctest -j 2`) had two `ui` failures. Their names were not kept, and `ui` passed alone and in the sequential run, so they look like timing under load rather than this feature, but this was not proven.
+
+## Feature-48 — An ISS silhouette test signal, and documentation that shows each feature
+
+*Asked for by the observer on 23 November 2026 with the rewrite of the README, the MANUAL and the website, and built the same day.*
+
+**What the observer asked.** The documentation, README, MANUAL and website, should show the features in this order:
+1. Watching the sky (both watches, everything that happened where the camera pointed, and the report with the README's meteor).
+2. Lunar and planetary time-lapses (guiding, capture and stacking at an interval, the video, and re-processing).
+3. Shadows crossing the Moon (guiding, auto-tune, the automatic end of a session).
+4. Lunar impact flashes on the dark side.
+The text should be simple, without overstating, without file names, and readable by anyone. The circular dark test transit should stay, with an ISS silhouette at the scale expected for one of the observer's lunar recordings, blurred a little, used as a test and shown in the documentation as test data; the same for a test flash on the dark side.
+
+**What was built.**
+1. **The ISS silhouette (`paintIssSilhouette`, `BlipKind::IssSilhouette`).**
+   - The outline: the 109 m truss across the path, eight solar-array wings of 12 × 34 m and the module stack along it, and two radiators. It is drawn opaque (the share blocked is the test signal's amplitude, 95% by default).
+   - The blur: smeared along the motion during the exposure (8% of a frame's travel), and softened by the seeing (a Gaussian of a fiftieth of its length). Each pixel's coverage is sampled at 3 × 3 points and 7 places along the smear.
+   - The motion: the station flies with its modules along its path, so its motion orients it.
+   - `issTravelPerFrame`: the ISS covers its own length in about 14 ms (109 m at 7.66 km/s) at any distance, since its size and speed in the image both fall with the distance.
+   - One implementation serves the **Test flash** bar and the probe. In the bar, **ISS silhouette (transit)**:
+     - the size box becomes **Length**, and defaults to the ISS about 45° up (41″) at the site's image scale, or 120 px;
+     - the amplitude box becomes **Blocks**, in percent;
+     - the injection moves at the real speed for the stream's measured frame rate.
+2. **The scale for the observer's recordings.** The C9.25 (2350 mm) with the 3.75 µm camera gives 0.33″/px. The ISS is 54″ long overhead (162 px), 41″ about 45° up (124 px) and 29″ about 30° up (86 px). At the recordings' 18 frames a second it moves 330 to 630 px from one frame to the next, three to four of its own lengths.
+3. **What it found: the shadows watch's two-frame confirmation misses the ISS.** Feature-31 set the shadows watch to confirm a shadow over two frames, with overlapping boxes. The ISS never overlaps itself between frames below about 70 frames a second with continuous exposures. The darkening measurements of Feature-13 had caught three-frame crossings, but with one-frame triggers.
+   - `SeleneWatchProbe iss` (new) plays a recording once with ISS crossings at their real speed (depth 0.95, a crossing every 6 s from 6 s) and counts them with the shadows watch's defaults and with a one-frame trigger. Each frame shows the silhouette at the middle of that frame's stretch of the path.
+   - Results on the mare and terminator recordings of 19 December 2015 (C9.25, 18 fps, 500 frames each), for 86, 124 and 162 px:
+
+     | Detector | Crossings caught | Dark candidates on the unchanged recordings after 3 s |
+     | --- | --- | --- |
+     | Shadows watch defaults (two frames) | 0 of 24 | 0 |
+     | The same with a one-frame trigger | 23 of 24 (the one missed: 86 px on the terminator) | 0 |
+   - The defaults are unchanged; whether the shadows watch should start with one-frame triggers is the observer's decision (Feature-49 in features.md). The MANUAL tells the observer to tick **Allow a one-frame trigger** for the ISS and satellites, with these numbers.
+4. **`SeleneWatchProbe inject-clip`** (new) plays a recording through the application's own Monitoring path (a Session in a watch, with clips, overviews, previews and the report) with one marked test signal, from a small JSON configuration. The documentation's test pictures were made with it on the terminator recording:
+   - **The ISS**, shadows watch, one-frame trigger: "Moving: 14 darkening triggers on 3 frames over 0.109 s, along a straight line".
+   - **The test flash** on the unlit ground beyond the terminator, flashes watch at K 12: "Brief: 1 trigger, 44 px in a 7 × 7 box, active on 2 frames over 0.055 s, strongest 33.7 σ". At the flashes watch's default K 6 this mostly sunlit recording triggered on the seeing hundreds of times per clip.
+
+   Both runs also saved a clip in the recording's first second, when Monitoring starts on a fresh detector (4 and 86 triggers): the start-up the probes leave out. At the telescope Monitoring normally follows Preview. Noted under Ideas not yet proposed.
+5. **The documentation.**
+   - **README:** rewritten around the four uses in the observer's order, with the meteor GIF and overview, the report of 20 to 21 November, a stack of the 22 November Moon time-lapse, and the ISS and flash test pictures labelled as test data; then the other features in short, download, how far it has been tested, and the documents.
+   - **MANUAL:** restructured: getting started (1.1 to 1.9), the four uses (chapters 2 to 5), guiding, recording, the report and the files, test signals, troubleshooting, and what has been tested. It is written in plainer words, with no recording file names; output file names appear only in chapter 8. The re-sharpen quality filter (local or session median, keep sharpest, dropped-stack stepping and per-stack overrides) and the report's GIF buttons are described. The startup tips' anchors follow the new headings (the `ui` test checks each one).
+   - **New pictures in `docs/images`:**
+     - `sky-report.png`, `timelapse-moon-stack.jpg` and `phone-status.png` (sample data).
+     - `transit-iss-test.png` and `flash-test.png`, test data, with the overview's line giving the recording's path removed.
+   - **The website (SeleneWatchWeb):** the observing tabs, evidence, how-it-works and examples sections gave way to four showcase sections in the same order. Every picture is labelled Real capture, Test data or In the application. A short grid with the phone page follows, then download and the documents. It was built and looked at in Edge at 1400 px and 390 px.
+
+**Tests.** `darkening`:
+- `theIssSilhouetteBlocksTheLightUnderItsOutline`: the truss nearly black, the light around untouched, a few thousand pixels darkened, and the travel per frame.
+- `theIssAtRealSpeedNeedsAOneFrameTrigger`: on a bright synthetic field at 30 fps, the shadows watch's defaults never fire on a 124 px ISS. A one-frame trigger fires on every frame it shows, and the clip's triggers group as Moving.
+
+**Not done.** No real ISS transit has been recorded. No Release build, and no real-window GUI E2E run.
+
+**Status & verification (23 November 2026).** Debug build (all targets); all 26 CTest suites passed, run one after another, among them `darkening` (with the two new tests) and `ui`, whose startup-tips test checks every tip's anchor in the restructured MANUAL. Every internal MANUAL link and the README's links to it were checked against the headings. The website passed its TypeScript and production build and was looked at in Edge at 1400 px and 390 px.

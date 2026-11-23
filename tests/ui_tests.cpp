@@ -154,6 +154,7 @@ private slots:
     void darkeningIsForTheMoonOnly();
     void shadowsUseTheLimitsAtTheTop();
     void everyControlHasHelp();
+    void thePhoneStatusPageIsOffUntilAsked();
     void numberBoxesFitTheirWidestValue();
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
     void autoTuneTunesTheCameraLiveThenWatchesK();
@@ -1306,6 +1307,31 @@ void UiTest::shadowsUseTheLimitsAtTheTop()
 // Feature-24: every control in the window and its docks explains itself:
 // a tool tip, the same text as What's This, and a ⓘ on the label naming it.
 // Checked for both targets with a camera chosen and the testing tools on.
+// Feature-47: Session → Status on your phone opens the dialog; the page is off
+// until the observer turns it on, so no window ever listens unasked. (Turning
+// it on is checked in the remote suite, on the loopback only.)
+void UiTest::thePhoneStatusPageIsOffUntilAsked()
+{
+    QTemporaryDir directory;
+    MainWindow window(nullptr, directory.path(), std::make_shared<FakeZwoApi>());
+    QAction* action = window.findChild<QAction*>("remoteStatusAction");
+    QVERIFY(action && !action->toolTip().isEmpty());
+    action->trigger();
+    auto* dialog = window.findChild<QDialog*>("remoteStatusDialog");
+    QVERIFY(dialog && dialog->isVisible());
+    QVERIFY(!dialog->findChild<QCheckBox*>("remoteEnabled")->isChecked());
+    QCOMPARE(dialog->findChild<QSpinBox*>("remotePort")->value(), 8080);
+    QVERIFY(dialog->findChild<QLabel*>("remoteState")->text().startsWith("Off"));
+    QVERIFY(dialog->findChild<QLabel*>("remoteQrCode")->isHidden());
+    // A key is made once and kept.
+    const QString key = QSettings().value("remote/key").toString();
+    QCOMPARE(key.size(), 12);
+    MainWindow again(nullptr, directory.path(), std::make_shared<FakeZwoApi>());
+    QCOMPARE(QSettings().value("remote/key").toString(), key);
+    QVERIFY(!QSettings().value("remote/enabled", false).toBool());
+    dialog->close();
+}
+
 void UiTest::everyControlHasHelp()
 {
     QTemporaryDir directory;
@@ -2837,6 +2863,48 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
         const QImage croppedImg = afterView->image();
         QCOMPARE(croppedImg.size(), QSize(200, 140));
         cropCheck->setChecked(false);
+
+        // Verify live quality filter summary, Keep sharpest %, stack inspector table,
+        // Dropped navigation buttons, and manual per-stack keep/drop override.
+        auto* qMode = dlg.findChild<QComboBox*>("resharpenQualityMode");
+        auto* qKeepBest = dlg.findChild<QDoubleSpinBox*>("resharpenKeepBestPct");
+        auto* qSummary = dlg.findChild<QLabel*>("resharpenQualitySummary");
+        auto* nextDrop = dlg.findChild<QToolButton*>("resharpenNextDropped");
+        auto* inspectBtn = dlg.findChild<QToolButton*>("resharpenInspectStacks");
+        auto* resetBtn = dlg.findChild<QToolButton*>("resharpenResetOverrides");
+        auto* stackTable = dlg.findChild<QTableWidget*>("resharpenStackTable");
+        QVERIFY(qMode && qKeepBest && qSummary && nextDrop && inspectBtn && resetBtn && stackTable);
+        QCOMPARE(qMode->currentIndex(), 0); // Off
+        QVERIFY(qSummary->text().contains("kept"));
+        QVERIFY(!nextDrop->isEnabled());
+
+        // Switch to Keep sharpest 50% (with >=2 stacks, at least 1 is dropped).
+        const int keepBestIdx = qMode->findData(static_cast<int>(QualityFilterMode::KeepBestPct));
+        QVERIFY(keepBestIdx >= 0);
+        qMode->setCurrentIndex(keepBestIdx);
+        qKeepBest->setValue(50.0);
+        QCoreApplication::processEvents();
+        QVERIFY(qSummary->text().contains("drops"));
+        QVERIFY(nextDrop->isEnabled());
+        nextDrop->click();
+        QCoreApplication::processEvents();
+        QVERIFY(stackCombo->currentText().startsWith("[DROP] "));
+
+        // Expand stack inspector table and manually override a dropped row back to Keep.
+        inspectBtn->click();
+        QVERIFY(stackTable->isVisibleTo(&dlg));
+        QCOMPARE(stackTable->rowCount(), stackCombo->count());
+        const int droppedRow = stackCombo->currentIndex();
+        QCOMPARE(stackTable->item(droppedRow, 0)->checkState(), Qt::Unchecked);
+        stackTable->item(droppedRow, 0)->setCheckState(Qt::Checked);
+        QCoreApplication::processEvents();
+        QVERIFY(resetBtn->isEnabled());
+        QVERIFY(stackTable->item(droppedRow, 4)->text().contains("manual"));
+        resetBtn->click();
+        QCoreApplication::processEvents();
+        QVERIFY(!resetBtn->isEnabled());
+        qMode->setCurrentIndex(0);
+        QCoreApplication::processEvents();
         QCoreApplication::processEvents();
         const QImage fullImg = afterView->image();
         QVERIFY(croppedImg != fullImg);
@@ -3296,8 +3364,8 @@ void UiTest::moonAndSkyEndToEndInjectionsRecordOnDisk()
         QVERIFY(ev.contains("mode: sky"));
         QVERIFY(ev.contains("contains_test_signal: yes"));
         QVERIFY(QFileInfo::exists(clipDir.filePath("00_overview.png")));
-        if (ev.contains("kind=moving_streak") || ev.contains("suggested_kind: meteor")) sawMeteor = true;
-        if (ev.contains("kind=brightening") || ev.contains("suggested_kind: lightning")) sawLightning = true;
+        if (ev.contains("kind=moving_streak") || ev.contains("group: moving")) sawMeteor = true;
+        if (ev.contains("kind=brightening") || ev.contains("group: wide")) sawLightning = true;
     }
     QVERIFY2(sawMeteor, "Expected Sky meteor streak clip on disk");
     QVERIFY2(sawLightning, "Expected Sky lightning clip on disk");

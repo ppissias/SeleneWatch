@@ -240,6 +240,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupTimelapsePanel();
     if (detectionDock_) detectionDock_->raise();
     setupSessionMenu();
+    setupRemoteStatus();
     setupHelpMenu();
     applyTarget();
     // Only builds with an adapter, and tests supplying a test camera, get a
@@ -1551,6 +1552,10 @@ void MainWindow::setupSessionMenu()
     auto* folder = menu->addAction("Output folder…");
     folder->setObjectName("outputFolderAction");
     connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
+    auto* phone = menu->addAction("Status on your phone…");
+    phone->setObjectName("remoteStatusAction");
+    phone->setToolTip("Show what SeleneWatch is doing on a read-only page for your phone's browser, on the local network");
+    connect(phone, &QAction::triggered, this, &MainWindow::openRemoteStatus);
     menu->addSeparator();
     auto* lastReport = menu->addAction("Open last nightly report");
     lastReport->setToolTip("Open the most recently finished monitoring report in your browser.");
@@ -2405,6 +2410,7 @@ void MainWindow::setupBlipControls()
     ui_->blipKindComboBox->addItem("Moving streak (meteor)", static_cast<int>(BlipKind::MovingStreak));
     ui_->blipKindComboBox->addItem("Blinking mover (aircraft)", static_cast<int>(BlipKind::BlinkingMover));
     ui_->blipKindComboBox->addItem("Lightning", static_cast<int>(BlipKind::Lightning));
+    ui_->blipKindComboBox->addItem("ISS silhouette (transit)", static_cast<int>(BlipKind::IssSilhouette));
     connect(ui_->blipKindComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onBlipKindChanged);
 }
 
@@ -2418,6 +2424,18 @@ void MainWindow::onBlipKindChanged()
 {
     const BlipKind kind = selectedBlipKind();
     ui_->blipFwhmSpinBox->setEnabled(kind != BlipKind::Lightning);
+    // Feature-48: the ISS is sized by its length and darkens by a share of the light.
+    const bool iss = kind == BlipKind::IssSilhouette;
+    ui_->blipFwhmLabel->setText(iss ? "Length:" : "FWHM:");
+    ui_->blipFwhmSpinBox->setToolTip(iss
+        ? "The station's length in original frame pixels. The default is the ISS about 45° up (41″ long) at the "
+          "image scale of Session → Site and instrument, or 120 px without one. Overhead it is about 54″."
+        : "Full width at half maximum of the Gaussian, in original frame pixels");
+    ui_->blipAmplitudeLabel->setText(iss ? "Blocks:" : "Peak:");
+    ui_->blipAmplitudeSpinBox->setSuffix(iss ? " %" : " ADU");
+    ui_->blipAmplitudeSpinBox->setToolTip(iss
+        ? "The share of the light the station's outline blocks. Against the sunlit Moon it is nearly black."
+        : "Change in native sample units (ADU): 12-bit units for a 12-bit frame. Values clamp at the stream's limits.");
     switch (kind)
     {
     case BlipKind::BrightFlash:
@@ -2444,6 +2462,14 @@ void MainWindow::onBlipKindChanged()
         ui_->blipAmplitudeSpinBox->setValue(std::min(50.0, ui_->blipAmplitudeSpinBox->maximum()));
         ui_->blipFramesSpinBox->setValue(2);
         break;
+    case BlipKind::IssSilhouette:
+    {
+        const std::optional<double> scale = savedSite().arcsecPerPixel();
+        ui_->blipFwhmSpinBox->setValue(scale && *scale > 0 ? std::clamp(41.0 / *scale, 4.0, 1000.0) : 120.0);
+        ui_->blipAmplitudeSpinBox->setValue(95.0);
+        ui_->blipFramesSpinBox->setValue(4);
+        break;
+    }
     }
     updateBlipReadout();
 }
@@ -2451,6 +2477,12 @@ void MainWindow::onBlipKindChanged()
 void MainWindow::showMessage(const QString& text, int timeoutMs)
 {
     messageLabel_->setText(text);
+    // Feature-47: the status page shows the last message, after it has gone.
+    if (!text.isEmpty())
+    {
+        lastMessage_ = text;
+        lastMessageTime_ = QDateTime::currentDateTimeUtc();
+    }
     if (timeoutMs > 0)
         messageTimer_->start(timeoutMs);
     else
@@ -3233,6 +3265,13 @@ void MainWindow::onInjectBlipClicked()
     if (kind == BlipKind::DarkTransit) { vx = 8.0; vy = 2.0; }
     else if (kind == BlipKind::MovingStreak) { vx = 18.0; vy = 10.0; }
     else if (kind == BlipKind::BlinkingMover) { vx = 2.5; vy = 0.5; }
+    else if (kind == BlipKind::IssSilhouette)
+    {
+        // Feature-48: at its real speed for this stream's frame rate, slightly downhill.
+        const double travel = issTravelPerFrame(ui_->blipFwhmSpinBox->value(), 1.0 / std::max(1.0, measuredFps_));
+        vx = travel * 0.97;
+        vy = travel * 0.24;
+    }
     const BlipSettings settings{cx, cy, ui_->blipFwhmSpinBox->value(),
         ui_->blipAmplitudeSpinBox->value(), ui_->blipFramesSpinBox->value(), kind, vx, vy};
     if (session_->requestBlip(settings))
@@ -3303,6 +3342,7 @@ void MainWindow::showLatestFrame()
 void MainWindow::onCandidateStarted()
 {
     ++candidates_;
+    ++remoteCounts_.candidates;
     updateCandidateReadout();
     showMessage(QString("Candidate %1 detected").arg(candidates_));
 }
@@ -3317,6 +3357,19 @@ void MainWindow::onSaveNowClicked()
 void MainWindow::onClipWritten(const ClipWriteResult& result)
 {
     if (result.memoryLimited) { ++clipsLimited_; updateCandidateReadout(); }
+    // Feature-47: what the status page counts. A clip folder is named by its
+    // first trigger's UTC time.
+    if (!result.folder.isEmpty())
+    {
+        ++remoteCounts_.saved;
+        if (!result.group.isEmpty()) ++remoteCounts_.groups[result.group];
+        QDateTime time = QDateTime::fromString(QFileInfo(result.folder).fileName(), "yyyyMMdd-HHmmss-zzz");
+        time.setTimeZone(QTimeZone::UTC);
+        remoteCounts_.lastClip = RemoteStatus::Clip{time.isValid() ? time : QDateTime::currentDateTimeUtc(), result.group, result.groupFacts};
+        remoteCounts_.lastClipFolder = result.folder;
+        remoteCounts_.lastClipFrame = QSize(lastFrameWidth_, lastFrameHeight_);
+    }
+    else if (!result.notSaved.isEmpty() || result.diskReserve) ++remoteCounts_.notSaved;
     if (result.recordFailed)
     {
         recordFailed_ = true;

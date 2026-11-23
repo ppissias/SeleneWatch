@@ -2,158 +2,115 @@
 
 # SeleneWatch
 
-**Continuous lunar monitoring and automatic capture of transient phenomena.**
+SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens pointed at the sky, and keeps the moments when something changes. It saves those moments as lossless video, with the frames from just before and after, the exact times, and a picture of what changed. It also makes time-lapses of the Moon and the planets.
 
-SeleneWatch is a native Windows desktop application written in C++ and Qt 6 that monitors a live telescope camera stream—or recorded video—to detect brief, unexpected events and preserve lossless frames around them for later review.
+It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
 
-Its primary purpose is helping observers capture **lunar transient phenomena**, especially brief meteoroid impact flashes on the Moon's night side (earthshine). It also handles lunar **transits** (satellites, the ISS, aircraft), **occultations**, and an optional **Sky** mode for wide-field meteors, fireballs, lightning, satellites, and aircraft.
+> **What SeleneWatch saves are candidates, not discoveries.** A clip shows that something changed in the frame. What it was is for you to judge, and a lunar impact flash is normally confirmed only when another observer recorded it too.
 
-> **Candidates, not discoveries.** Automatic detections are candidates for human review, not confirmed lunar events. Scientific confirmation of an impact flash normally requires an independent observation from another telescope or site. SeleneWatch preserves the frames, UTC timing, camera settings, and session records needed for that comparison.
-
-**Using SeleneWatch:** See the [User Manual](MANUAL.md) for main screen orientation, camera and output setup, shared guiding, and step-by-step guides for the four observing workflows (lunar flashes, lunar transits/occultations, lunar and planetary time-lapses, and fixed-camera sky watching).
-
-![SeleneWatch monitoring a lunar terminator recording with live detection and native-ADU histogram](docs/images/readme-main-window.png)
-
-*Monitoring a lunar terminator recording (`moon_2012-08-27-205006-0000_vd.avi`, Clavius region): full-height live preview, slim top command bar with **MONITORING** badge, **Detection** controls on the right, and compact native-ADU **Histogram** below.*
+![SeleneWatch monitoring the Moon](docs/images/readme-main-window.png)
 
 ---
 
-## Real-world capture example (Sky mode)
+## What you can do with it
+
+### 1. Watch the sky through the night
+
+Point a camera at the sky, start Monitoring, and go to bed. SeleneWatch compares every frame with what it has learned the sky looks like, and saves a clip whenever something appears: meteors, lightning, aircraft, satellites, or anything else that happened where the camera was pointing.
+
+There are two ways to watch:
+- **Fast events**, with exposures up to 40 ms: meteors, lightning and anything that moves, with its path frame by frame.
+- **Slow and faint**, with exposures up to 2 seconds: faint light that lasts, such as aurora or airglow, with a time-lapse of the whole night beside it.
+
+In the morning, a report lists the night's events. It groups them by what was measured, not by guesses: **brief** (everything in one place within a fifth of a second, such as a meteor), **moving** (along a straight line, such as an aircraft), **wide** (a large part of the sky at once, such as lightning) and **other**. A long aircraft crossing saved as several clips is shown as one event. Each event shows its frames, plays its animation, and opens the original video in your SER player.
 
 <p align="center">
-  <img src="docs/images/readme-meteor-realtime.gif" alt="Real-time cropped meteor animation captured automatically by SeleneWatch" width="426">
+  <img src="docs/images/readme-meteor-realtime.gif" alt="A meteor captured automatically, played at its real speed" width="426">
 </p>
 
-![SeleneWatch automatic overview summary of the 2026-11-21 03:49:57 UTC meteor capture](docs/images/readme-meteor-overview.jpg)
+*A meteor caught automatically by a fixed camera (ZWO ASI120MM Mini) on 21 November 2026 at 03:49:57 UTC, played at its real speed.*
 
-*Automatic overnight **Sky** capture with a fixed **ZWO ASI120MM Mini** (`2026-11-21 03:49:57.409 UTC`, frame `753520`, `Peak 27.1 σ`, `K 13.9`): real-time cropped playback (top) and SeleneWatch's automatic `00_overview.png` report (bottom) showing the trigger crosshair, hatched horizon mask, `before / first / peak / after` frames, and highlighted change mask.*
+![The overview SeleneWatch made of that meteor](docs/images/readme-meteor-overview.jpg)
 
----
+*The overview SeleneWatch saved with it: where in the frame it happened, the frames before, during and after, and what changed. The hatched area is a mask over the rooftops, where nothing is tested.*
 
-## Quick start (60 seconds)
+![The morning report of that night](docs/images/sky-report.png)
 
-1. **Set your output folder & site once:** Open **Session → Output folder…** (choose a fast local SSD) and **Session → Site and instrument…** (save observer/site coordinates and telescope optics; keep several as named presets, for example home and a club field).
-2. **Choose a source & start Preview:** Select your camera (**ZWO ASI**, **QHYCCD**, **Player One**, **ToupTek**), a **Recording file** (`.ser` or uncompressed `.avi`), or **Synthetic** (via **View → Testing tools**), then click **Start preview**.
-3. **Frame, zoom & tune thresholds:** Use **Fit / 100% / 200%** or the mouse wheel (and drag to pan) to inspect actual sensor pixels. In **Preview**, switch **Watching** in **Detection** between the Moon and sky watches on the same stream. Adjust **Display and capture** and **Histogram**, tune **Sensitivity K** or load a saved **Profile**, and optionally lock onto a crater in **Guiding**.
-4. **Capture:**
-   - Click **Start monitoring** for automatic flash, darkening/transit, or sky-event capture (plus on-demand **Save now**).
-   - Click **Record** (unlimited or for a fixed frame count, or arm **Session → Schedule a recording…**) for continuous lossless SER video.
-   - Or open **Time-lapse** and click **Start time-lapse** to stack the sharpest frames at a fixed cadence and build MP4/GIF animations of planetary rotation and changing lunar shadows.
-   - For a Moon time-lapse, tick **Also watch for transits** to save lossless crossing clips in the gaps between bursts and stacks. **Configure transit detection…** opens the existing sunlit-side watch settings.
+*The report of the same night: 55 clips became 25 events, 12 of them brief (the meteor is one). The pictures are crops around each event, so its shape shows: several of the brief events are streaks.*
 
----
+### 2. Time-lapses of the Moon and the planets
 
-## What SeleneWatch does
+Shadows lengthen across lunar craters, Jupiter turns, its moons move. A time-lapse shows changes too slow to see at the eyepiece.
 
-- **Monitor continuously across multiple sources** — acquire from **ZWO ASI**, **QHYCCD**, **Player One**, and **ToupTek** (and ToupTek-OEM) cameras, replay **SER** or uncompressed **AVI** recordings (in real time, fast, or looped), or rehearse indoors with built-in **synthetic** Moon and starry Sky scenes.
-- **Tune and inspect at 1:1 pixel resolution before capturing** — run in **Preview** with a full-height live view, a single right-hand inspector sidebar (keeping Camera, Detection/Display/Guiding/Time-lapse, and optional Histogram together without squeezing the live image), one-click **Focus view (`F11`)**, and **Dark / Red night vision / System** themes (`View → Theme`) with remembered window layout. Zoom smoothly with the mouse wheel or quick **Fit / 100% / 200%** controls (dragging to pan by default while no draw tool is active), crop the sensor immediately with **Draw ROI**, centered **ROI presets**, **Center**, or **Full** (auto-rounded to each camera's hardware alignment rules), inspect the live native-ADU histogram, stretch the display for faint earthshine, and watch detector feedback (`Would trigger`) before arming **Monitoring**. Spin boxes, sliders, and closed dropdowns ignore stray mouse-wheel scrolls so parameters never drift accidentally while scrolling panels.
-- **Auto-tune in Preview** — the **Tune camera & detection…** button opens a window that measures the earthshine (outlined on the preview from a box you draw), the sunlit Moon or the sky. **Tune camera** sets exposure and gain live, round by round, measuring after each change, until the brightness is in the target's aim. For flashes and the sky, it then compares gains by their measured noise and black level, and keeps the one with the faintest threshold in photons. **Restore previous settings** undoes it. It then runs complete detectors at several K values on the same frames to suggest the lowest quiet K, which changes only when you apply it. Every change is logged.
-- **Keep pre-event history in RAM** — maintain a time-sized ring buffer of shared, immutable frames under a configurable RAM ceiling so frames from *before* a trigger are saved alongside the event.
-- **Detect flashes, transits, and sky events with named profiles** — analyse every frame per pixel against its own learned background and noise, with independent target modes and named **Detection profiles** for **The Moon** (impact flashes on the earthlit side, or silhouettes darkening the sunlit side, each watched with its own settings) and **The sky** (large brightenings, polygon horizon masks optionally saved with profiles, slow-drifter release, dusk-to-dawn scheduling, and sky-following exposure).
-- **Preserve lossless evidence and fast review previews** — save native 8-, 12-, or 16-bit pixels untouched in **SER** clips (`event.ser`) with per-frame UTC timestamps, full sidecar metadata (`event.txt`), a session log (`candidates.txt`), annotated visual summaries (`00_overview.png`) with suggested classifications, and compact animated GIF previews (`04_event_preview.gif`, `≤ 10` frames, `≤ 512 KiB`) for both lunar and sky clips.
-- **Capture manually or on schedule** — trigger an on-demand clip with **Save now**, record continuously to SER in **Preview** or **Monitoring** with **Record** (unlimited or for a chosen frame count), or schedule predicted events by UTC start and duration without silently dropping frames.
-- **End an unattended night by itself** — **Ends**, above the preview, stops Monitoring or a time-lapse at a local time, after a duration, at dawn, or when the Moon sinks below an altitude, whichever comes first. Guiding that is lost, a camera that fails and a full disk end it too. With a mount connected, you choose whether it then keeps tracking or stops tracking.
-- **Build lunar & planetary time-lapses** — watch planets turn and lunar shadows unfold in animations from your observing sessions. **Time-lapse** captures bursts at a fixed cadence (up to 100–200 best frames kept per period, processed in parallel with overload skip protection and disk-reserve stop-and-build safety), writes linear 32-bit float FITS stacks (`stacks/`, `sharpened/`), assembles `timelapse.mp4` / `timelapse.gif`, and offers non-destructive **Re-sharpen time-lapse…** with saved profiles and fast **Rebuild video only**.
-- **Review a monitoring session** — each Moon or Sky watch has a `session-<UTC start>` folder with its clips, journal and continuous recordings. Choose **Open nightly report** after the writers finish, or later **Session → Open last nightly report**. The offline page shows monitored intervals, trigger outcomes and a chronological contact sheet linked to the original evidence.
-- **Watch the sky two ways** — **fast events** (meteors, lightning) at up to 40 ms for timing and trajectory, or **slow and faint** light (aurora, airglow) at up to 2 s, each with its own settings; the slow watch can also keep a **time-lapse** alongside detection, a lossless PNG frame every 30 or 60 s and an MP4 that is ready when Monitoring stops.
-- **Organise outputs safely** — keep `events/moon/`, `events/sky/`, `recordings/`, and `timelapses/` under one remembered output folder (**Session → Output folder…**) with missing-drive/cloud-sync safety checks and one-click in-place folder recreation if a directory was removed during Preview.
-- **Measure sensitivity directly across event kinds** — inject calibrated **Test flash** signals (**Bright flash**, **Dark transit**, **Moving streak (meteor)**, **Blinking mover (aircraft)**, or **Lightning**) onto live or recorded streams to verify recovery limits; every affected frame and clip is explicitly marked as test data.
-- **Hold the field gently** — lock onto a lunar feature to track drift, and optionally guide an **ASCOM** mount with small, bounded, logged guide pulses so monitoring stays on target without slewing or syncing the telescope.
-- **Notice new releases** — once at startup, check GitHub for a newer stable release. A **New version … available** button appears at the top right; click it to open the [releases page](https://github.com/ppissias/SeleneWatch/releases). Offline and failed checks stay quiet.
+At a fixed interval, for example every minute, SeleneWatch captures a short burst of frames, keeps the sharpest, aligns and stacks them, and sharpens the result. At the end of the session it builds the video. A **feature lock** follows a crater or the planet's disk, and can guide your mount to keep it in the field for hours. A Moon time-lapse is aligned on a steady area you choose (the lunar anchor) rather than on the whole frame, where a passing cloud could turn the image; a planet is kept centred on its disk.
 
----
+Every stack is kept as a 32-bit FITS file. Afterwards you can sharpen it again, drop blurred or cloudy stacks (by their sharpness, compared with the stacks around them), check every dropped stack, and rebuild the video, without capturing again.
 
-## How it works
+![A stack from a Moon time-lapse](docs/images/timelapse-moon-stack.jpg)
 
-```text
-Synthetic source / Recording (SER, AVI) / Cameras (ZWO, QHY, Player One, ToupTek)
-                                  |
-                           Frame acquisition
-                     (a published frame is read-only
-                      and shared, never copied)
-                                  |
-                  +---------------+---------------+
-                  |                               |
-           RAM ring buffer                 Event detection
-           (recent raw frames)        (on every frame, always)
-                  |                               |
-                  +---------------+---------------+
-                                  |
-                           Event capture
-                                  |
-                  Pre- and post-event frames
-                      + metadata + overview
-                                  |
-                     Writer (separate thread)
-                                  |
-   <output folder>/{events/, recordings/, timelapses/}
+*One stack of a Moon time-lapse, sharpened, from a session of 57 stacks taken a minute apart.*
 
-            Qt GUI: live preview with stretch, histogram,
-                    controls, and status readouts
+### 3. Shadows crossing the Moon
 
-            Guide thread: feature lock, drift readout,
-                    and bounded ASCOM guide pulses
-```
+Aircraft, the International Space Station and satellites pass in front of the sunlit Moon as dark silhouettes. A watch for shadows looks only for parts of the Moon that suddenly get darker, so the shimmer of the bright surface does not set it off. Unpredicted crossings are saved as they happen; for a predicted one, SeleneWatch can record every frame over a time you set in advance.
 
-Acquisition never waits on the disk, the GUI, or the mount. The preview and the guider may skip frames; detection and recording may not.
+The feature lock and mount guiding keep the Moon in place. **Auto-tune** measures the sunlit Moon and suggests the exposure, the gain and the sensitivity. The session can end by itself: at a time, after a duration, or when the Moon sinks too low.
+
+![A test ISS silhouette crossing the Moon, as SeleneWatch saved it](docs/images/transit-iss-test.png)
+
+*Test data: an ISS silhouette at its real size and speed for a 9.25-inch telescope (0.33″ per pixel), added to a real lunar recording and saved by SeleneWatch as a crossing. No real transit was recorded here.*
+
+### 4. Impact flashes on the Moon's dark side
+
+Small meteoroids hit the Moon all the time. On the part of the Moon lit only faintly by the Earth (earthshine), a large enough impact shows as a flash lasting a few hundredths of a second. Watching for these **lunar impact flashes** is one of the ways amateurs contribute to the study of lunar transient phenomena.
+
+SeleneWatch tests each pixel against its own noise, so a faint flash on the dark side is noticed, while the bright sunlit side and the glare beside it are left out. Auto-tune sets the camera for the faint earthshine and measures the faintest flash that would be caught, by adding a marked test flash to the real frames. Guiding and the automatic end of the session work as for shadows.
+
+![A test flash on the dark side of the Moon, as SeleneWatch saved it](docs/images/flash-test.png)
+
+*Test data: a marked test flash added to the unlit part of the Moon, beyond the terminator, in a real recording, and the clip SeleneWatch saved, grouped as brief (K 12). No real impact was recorded here.*
 
 ---
 
-## Evidence principles
+## Also in SeleneWatch
 
-SeleneWatch follows strict evidence rules so saved clips remain reliable observational records:
-
-- **Raw pixels stay untouched** between the source and the evidence file; display stretch, inversion, and debayering happen only on screen.
-- **Native bit depths are preserved** lossless in SER files (8-bit or 16-bit words, with delivered sample layout recorded separately from advertised sensor ADC depth).
-- **Every frame keeps its index and UTC time**, with dropped-frame gaps recorded.
-- **Detection never goes blind** while clips collect or write; every candidate during Monitoring is logged even if disk reserve or writer backlog prevents saving its clip.
-- **Test injections are explicitly marked** per frame and per clip, and finished clips are never rewritten.
-- **Telescope motion is strictly bounded** to logged guide pulses; SeleneWatch never slews, syncs, parks, or alters mount tracking.
-
----
-
-## Installing and running
-
-Windows 64-bit releases are distributed in two forms:
-
-- **`SeleneWatch-<version>-win64.msi`** — installs per user (no administrator rights needed) under `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry; saved data under your chosen output folder (`%USERPROFILE%\SeleneWatch` by default) is kept untouched on upgrades and uninstall.
-- **`SeleneWatch-<version>-win64.zip`** — portable archive; unpack into a writable folder and run `SeleneWatch.exe`.
-
-Install your camera vendor's Windows driver before connecting a camera. ZWO's SDK library ships with SeleneWatch; for QHYCCD, Player One, and ToupTek, SeleneWatch automatically discovers the vendor's x64 SDK DLL installed on your system (or lets you pick it in **Session → Camera support…**). See [User Manual §2](MANUAL.md#2-common-setup--connecting-a-source) for exact driver, DLL, and optional ASCOM Platform setup.
+- **Cameras:** ZWO ASI, QHYCCD, Player One, and ToupTek (with the brands whose cameras it makes, such as Altair). Recordings in SER and uncompressed AVI, with FireCapture's log files. A synthetic Moon and sky for practice without hardware.
+- **Preview before you capture:** see the camera's real pixels at any zoom, set the stretch and the histogram, and see what would trigger, without saving anything.
+- **Auto-tune:** measures the scene and suggests the exposure, gain and sensitivity for what you are watching.
+- **Unattended nights:** the session ends by itself at a time, after a duration, at dawn or when the Moon sets, and also when the camera, the guiding or the disk fails. You choose whether the mount then keeps tracking.
+- **Check on it from your phone:** a read-only status page on your home network, found by scanning a QR code: what SeleneWatch is doing, whether the lock holds, and this session's events.
+- **Continuous and scheduled recording:** record every frame on demand, or over a time set in advance for a predicted event.
+- **Lossless evidence:** every saved frame is kept exactly as the camera delivered it, with its time and index, and test signals are marked on every frame they touch.
 
 ---
 
-## Scope and current status
+## Getting SeleneWatch
 
-**In scope:** multi-vendor image acquisition, candidate detection, RAM buffering, lossless event and manual/scheduled continuous recording, lunar and planetary time-lapses (FITS stacking, linear sharpening, MP4/GIF assembly, and re-sharpening), visual clip overviews, sensitivity test injection, and keeping the Moon centred via feature lock and bounded ASCOM guide pulses.
+Download the latest release from the [releases page](https://github.com/ppissias/SeleneWatch/releases). It comes as a Windows installer (per user, no administrator rights needed) or as a zip to run from any folder. Windows 10 or 11, 64-bit.
 
-**Not in scope:** pointing the telescope. SeleneWatch does not slew, sync, park, or turn mount tracking on; the observer centres the target, and guiding only holds it there. The one exception: when a session ends by itself, it stops the mount's tracking if you chose so.
-
-**Current maturity:**
-
-- **Working in software & automated checks:** the core pipeline, shared memory budget, SER/AVI playback, SER evidence and manual/scheduled continuous writers, Moon flash/darkening detection, Sky mode (masks, auto exposure), the end of a session (local time, duration, dawn, Moon altitude, lost guiding), single output folder management, lunar and planetary Time-lapse mode (CFITSIO 32-bit float FITS, OpenCV stacking/alignment, FFmpeg MP4/GIF, Re-sharpen dialog), `00_overview.png` summaries, `04_event_preview.gif` event previews, test-flash injection, feature lock, simulated/ASCOM guiding, and ZWO, QHY, Player One, and ToupTek adapters.
-- **Verified on bench & all-night fixed-camera field use:** ZWO ASI120MM Mini (RAW8/RAW16 controls, byte integrity, two 30-minute unattended soak runs, and all-night fixed-camera **Sky** patrols capturing meteors/streaks, aircraft, cosmic rays, and flashes), plus ASCOM simulator guiding checks.
-- **Pending live field & hardware checks:** physical QHY, Player One, and ToupTek camera validation; real mount guiding under the Moon; and real earthshine/transit calibration.
-- **Planned next:** additional camera families, frame registration, transit tracking, and an in-app event browser/exporter.
-
-Detailed test coverage and validation status are tracked in [User Manual §10](MANUAL.md#10-what-has-been-tested).
+Install your camera maker's driver first. ZWO's library comes with SeleneWatch; for the other cameras SeleneWatch finds the maker's library on your computer. To guide a mount, install the [ASCOM Platform](https://ascom-standards.org/) and your mount's driver. The [user manual](MANUAL.md#11-installing-and-connecting-a-camera) has the details.
 
 ---
 
-## Documentation map
+## How far it has been tested
 
-SeleneWatch is written in **C++20** with **Qt 6 Widgets** (dynamically linked under LGPLv3), keeping its processing core independent of Qt UI classes. The architecture is a working design expected to evolve as field testing progresses; only the evidence rules require an explicit recorded decision to change.
+- **In use:** the sky watch, all night with a ZWO ASI120MM Mini, catching meteors, aircraft and satellites; Moon time-lapses at the telescope.
+- **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, and test signals added to real lunar recordings.
+- **Waiting for real tests:** QHY, Player One and ToupTek cameras on hardware; a whole night of mount guiding under the Moon; an impact flash or a shadow caught at the telescope; a predicted ISS transit recorded on schedule.
 
-| Document | Audience | Contents |
+The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested, feature by feature.
+
+---
+
+## Documentation
+
+| Document | For | What it covers |
 | --- | --- | --- |
-| [MANUAL.md](MANUAL.md) | Observers | Installation, cameras, controls, detection, guiding, outputs, troubleshooting *(included in releases)* |
-| [CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md) | Observers | Recommended exposure, gain, offset, and histogram levels for lunar earthshine flashes (3–10 % rule), sunlit transits, lunar and planetary time-lapses, and sky patrols *(included in releases)* |
-| [DEVELOPER.md](DEVELOPER.md) | Contributors & maintainers | Building with Visual Studio/CMake/Qt 6, camera SDK options, CTest, probes, release packaging *(source repository)* |
-| [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md) | Architects & reviewers | Project vision, evidence rules, time model, threading/ownership, SER contract, development stages *(source repository)* |
-| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Users & packagers | Dependency versions, licenses, and binary redistribution obligations *(included in releases)* |
-| [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) | Everyone | Scientific references, libraries, and tools *(also shown under **Help → Acknowledgements**)* |
-| [features.md](features.md) & [implemented features.md](implemented%20features.md) | Contributors | Feature specifications, design rationales, validation records, and history *(source repository)* |
+| [User manual](MANUAL.md) | Observers | Setting up, the four ways of observing, the report and the files, troubleshooting |
+| [Camera settings guide](CAMERA_SETTINGS_GUIDE.md) | Observers | Exposure, gain and histogram for each kind of observing |
+| [Developer guide](DEVELOPER.md) | Contributors | Building from source, tests, packaging |
+| [Project description](PROJECT_DESCRIPTION.md) | Reviewers | The design and the rules that keep saved data trustworthy |
+| [Third-party licenses](THIRD_PARTY_LICENSES.md) | Everyone | The libraries SeleneWatch uses and their licenses |
+| [Acknowledgements](ACKNOWLEDGEMENTS.md) | Everyone | References, libraries and tools |
 
----
-
-*SeleneWatch is an early-stage project. Feedback, observing tests, and design revisions are part of the development process.*
+SeleneWatch is free software under the BSD 2-Clause license. It is written in C++ with Qt 6 and is at an early stage: observing reports and suggestions are welcome.

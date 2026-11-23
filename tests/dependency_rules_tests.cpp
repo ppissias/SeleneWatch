@@ -51,10 +51,11 @@ const std::map<QString, std::set<QString>>& allowedFolders()
         {"settings", {"core", "detection"}},
         {"session", {"core", "display", "detection", "capture", "recording", "sources", "cameras", "sky", "autotune",
             "mounts", "guiding", "timelapse", "settings"}},
+        {"remote", {}},
         {"ui/widgets", {"core"}},
         {"ui/cameras", {"core", "sources", "cameras", "ui/widgets"}},
         {"ui", {"core", "display", "detection", "capture", "recording", "sources", "cameras", "sky", "autotune", "mounts",
-            "guiding", "timelapse", "settings", "session", "ui/widgets", "ui/cameras"}},
+            "guiding", "timelapse", "settings", "session", "remote", "ui/widgets", "ui/cameras"}},
         {"app", {"core", "recording", "session", "ui"}},
     };
     return allowed;

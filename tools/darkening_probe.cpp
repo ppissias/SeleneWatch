@@ -2,6 +2,8 @@
 
 #include "detection/flash_detector.h"
 #include "recording/recording_reader.h"
+#include "detection/target_defaults.h"
+#include "session/blip_injector.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
@@ -292,6 +294,151 @@ int runDarkeningProbe(const QStringList& args)
                   "(the control's rising candidates from a detector without darkening); "
                   "a fresh detector per variant and K from the first frame; no evidence written"},
         {"levels", levels}});
+    const QByteArray bytes = document.toJson();
+    if (report.write(bytes) != bytes.size() || !report.flush()) throw std::runtime_error("cannot write the report");
+    return 0;
+}
+
+// Feature-48: the ISS at its real speed against the shadows watch. Each
+// crossing enters at the left or right edge and leaves at the other, moving
+// its own length every 14 ms (issTravelPerFrame), so it shows on a few frames
+// hundreds of pixels apart. Two detectors per variant: the shadows watch's
+// defaults, which confirm a shadow over two frames, and the same with a
+// one-frame trigger.
+int runIssProbe(const QStringList& args)
+{
+    if (args.size() != 5 && args.size() != 6)
+        throw std::invalid_argument("usage: SeleneWatchProbe iss INPUT OUTPUT.json LENGTH[,LENGTH...] [FRAME_LIMIT]");
+    std::vector<double> lengths;
+    for (const QString& part : args[4].split(','))
+    {
+        bool ok = false;
+        const double length = part.toDouble(&ok);
+        if (!ok || length < 4) throw std::invalid_argument("not a length in pixels: " + part.toStdString());
+        lengths.push_back(length);
+    }
+    std::string error;
+    auto reader = openRecordingReader(std::filesystem::path(args[2].toStdWString()), 30, error);
+    if (!reader) throw std::runtime_error(error);
+    const int count = args.size() == 6 ? std::min(reader->frameCount(), args[5].toInt()) : reader->frameCount();
+    if (count < 2) throw std::runtime_error("the recording needs at least two frames");
+    QFile report(args[3]);
+    if (!report.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+        throw std::runtime_error("cannot create a new output file: " + args[3].toStdString());
+
+    const auto start = reader->frameTime(0);
+    std::vector<double> seconds;
+    for (int i = 0; i < count; ++i) seconds.push_back(std::chrono::duration<double>(reader->frameTime(i) - start).count());
+    const double frameSeconds = seconds.back() / (count - 1);
+    auto probe = std::make_shared<Frame>();
+    probe->data.resize(reader->frameBytes());
+    if (!reader->readFrame(0, *probe, error)) throw std::runtime_error(error);
+    const int width = probe->width, height = probe->height;
+    constexpr double kDepth = 0.95;
+
+    struct IssVariant
+    {
+        double length{0};
+        double travel{0};
+        std::vector<Crossing> crossings;
+        // [two-frame, one-frame]: new falling candidates per frame.
+        std::unique_ptr<FlashDetector> detectors[2];
+        std::vector<int> falls[2];
+    };
+    std::vector<IssVariant> variants(lengths.size() + 1);
+    for (size_t v = 0; v < variants.size(); ++v)
+    {
+        IssVariant& variant = variants[v];
+        if (v > 0)
+        {
+            variant.length = lengths[v - 1];
+            variant.travel = issTravelPerFrame(variant.length, frameSeconds);
+            const int frames = static_cast<int>(std::ceil((width + variant.length) / variant.travel)) + 1;
+            variant.crossings = schedule(seconds, frames, height);
+        }
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            DetectionSettings settings = defaultDetectionSettings(Watch::MoonShadows);
+            settings.oneFrame = mode == 1;
+            variant.detectors[mode] = std::make_unique<FlashDetector>(settings);
+        }
+    }
+
+    QTextStream console(stdout);
+    for (int i = 0; i < count; ++i)
+    {
+        auto original = std::make_shared<Frame>();
+        original->data.resize(reader->frameBytes());
+        if (!reader->readFrame(i, *original, error)) throw std::runtime_error(error);
+        original->frameIndex = reader->frameNumber(i);
+        original->timestamp = reader->frameTime(i);
+        for (IssVariant& variant : variants)
+        {
+            std::shared_ptr<Frame> frame = original;
+            for (const Crossing& crossing : variant.crossings)
+            {
+                if (i < crossing.first || i > crossing.last) continue;
+                const double travelled = (i - crossing.first + 0.5) * variant.travel - variant.length / 2;
+                const double x = crossing.leftToRight ? travelled : width - travelled;
+                frame = std::make_shared<Frame>(*original);
+                paintIssSilhouette(*frame, x, crossing.row, variant.length, kDepth,
+                    crossing.leftToRight ? variant.travel : -variant.travel, 0);
+            }
+            for (int mode = 0; mode < 2; ++mode)
+            {
+                variant.detectors[mode]->analyze(*frame);
+                variant.falls[mode].push_back(static_cast<int>(variant.detectors[mode]->candidates().size()));
+                variant.detectors[mode]->updateReference(*frame);
+            }
+        }
+        if (i % 100 == 0) console << "frame " << i << " of " << count << "\n" << Qt::flush;
+    }
+
+    console << "\nfile=" << args[2] << "\nframes=" << count << " seconds=" << seconds.back() << " frame_ms="
+            << 1000 * frameSeconds << " size=" << width << "x" << height << " " << pixelFormatName(probe->format) << "\n";
+    const char* modeName[2] = {"two-frame (shadows defaults)", "one-frame"};
+    QJsonArray results;
+    for (int mode = 0; mode < 2; ++mode)
+    {
+        int controlFalls = 0;
+        for (int i = 0; i < count; ++i)
+            if (seconds[static_cast<size_t>(i)] >= kStartupSeconds) controlFalls += variants[0].falls[mode][static_cast<size_t>(i)];
+        console << modeName[mode] << ": control falls after " << kStartupSeconds << " s: " << controlFalls << "\n";
+        QJsonArray crossings;
+        for (size_t v = 1; v < variants.size(); ++v)
+        {
+            const IssVariant& variant = variants[v];
+            int fired = 0, framesFired = 0, framesShown = 0;
+            for (const Crossing& crossing : variant.crossings)
+            {
+                bool hit = false;
+                for (int i = crossing.first; i <= std::min(count - 1, crossing.last + 1); ++i)
+                {
+                    const int falls = variant.falls[mode][static_cast<size_t>(i)];
+                    hit = hit || falls > 0;
+                    framesFired += falls > 0 ? 1 : 0;
+                }
+                framesShown += crossing.last - crossing.first + 1;
+                fired += hit ? 1 : 0;
+            }
+            console << QString("  ISS %1 px, %2 px a frame: %3 of %4 crossings fired, on %5 of %6 frames\n")
+                .arg(variant.length).arg(variant.travel, 0, 'f', 0).arg(fired).arg(variant.crossings.size())
+                .arg(framesFired).arg(framesShown);
+            crossings.append(QJsonObject{{"lengthPixels", variant.length}, {"travelPixelsPerFrame", variant.travel},
+                {"crossings", static_cast<int>(variant.crossings.size())}, {"crossingsFired", fired},
+                {"framesWithFall", framesFired}, {"framesShown", framesShown}});
+        }
+        results.append(QJsonObject{{"detector", modeName[mode]}, {"controlFallingCandidates", controlFalls}, {"iss", crossings}});
+    }
+    const QJsonDocument document(QJsonObject{{"input", args[2]}, {"frames", count}, {"streamSeconds", seconds.back()},
+        {"frameSeconds", frameSeconds}, {"width", width}, {"height", height}, {"format", pixelFormatName(probe->format)},
+        {"depth", kDepth}, {"startupSeconds", kStartupSeconds},
+        {"crossing", "paintIssSilhouette: the ISS outline at its real speed (its own length every 14 ms), horizontal, "
+                     "alternating direction, on the middle, upper-third and lower-third rows in turn, from edge to edge; "
+                     "a window is the crossing and the frame after"},
+        {"scope", "the shadows watch's default detector settings, and the same with a one-frame trigger; "
+                  "a fresh detector per variant from the first frame; no evidence written"},
+        {"results", results}});
     const QByteArray bytes = document.toJson();
     if (report.write(bytes) != bytes.size() || !report.flush()) throw std::runtime_error("cannot write the report");
     return 0;

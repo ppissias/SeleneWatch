@@ -63,7 +63,7 @@ add_library(selenewatch_core STATIC
     src/recording/firecapture_log.cpp src/recording/recording_reader.cpp src/recording/ser_reader.cpp src/recording/ser_writer.cpp
     src/recording/avi_reader.cpp src/recording/event_writer.cpp src/recording/clip_overview.cpp
     src/recording/metadata_text.cpp src/recording/output_paths.cpp src/recording/nightly_report.cpp src/recording/ffmpeg_video.cpp
-    src/recording/frame_timing.cpp src/recording/recording_writer.cpp
+    src/recording/frame_timing.cpp src/recording/recording_writer.cpp src/recording/clip_groups.cpp src/recording/report_links.cpp
     src/sky/sky_schedule.cpp src/sky/sky_exposure.cpp src/sky/site_presets.cpp
     src/autotune/auto_tune.cpp src/autotune/auto_tune_watch.cpp
     src/mounts/simulated_mount.cpp src/mounts/ascom_mount.cpp
@@ -201,6 +201,17 @@ if(SELENEWATCH_TOUPTEK_SDK_DIR)
         SELENEWATCH_TOUPTEK_HEADER="${touptek_header}")
 endif()
 
+# Feature-47: the status page for a phone, on Qt Network, with Project
+# Nayuki's MIT QR code generator (third_party/qrcodegen, compiled unmodified).
+add_library(selenewatch_qrcodegen STATIC third_party/qrcodegen/qrcodegen.hpp third_party/qrcodegen/qrcodegen.cpp)
+target_include_directories(selenewatch_qrcodegen PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen)
+add_library(selenewatch_remote STATIC
+    src/remote/status_page.h src/remote/status_page.cpp src/remote/status_server.h src/remote/status_server.cpp
+    src/remote/phone_link.h src/remote/phone_link.cpp)
+target_include_directories(selenewatch_remote PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(selenewatch_remote PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE selenewatch_qrcodegen)
+selenewatch_compile_options(selenewatch_remote)
+
 add_library(selenewatch_ui STATIC
     src/ui/mainwindow.ui src/ui/mainwindow.h src/ui/mainwindow.cpp src/ui/mainwindow_autotune.cpp src/ui/mainwindow_session_end.cpp
     src/ui/auto_tune_panel.h src/ui/auto_tune_panel.cpp src/ui/detection_panel.h src/ui/detection_panel.cpp
@@ -211,6 +222,7 @@ add_library(selenewatch_ui STATIC
     src/ui/resharpen_dialog.h src/ui/resharpen_dialog.cpp src/ui/manual_dialog.h src/ui/manual_dialog.cpp
     src/ui/startup_tips.h src/ui/startup_tips.cpp src/ui/tips_dialog.h src/ui/tips_dialog.cpp
     src/ui/release_checker.h src/ui/release_checker.cpp
+    src/ui/remote_status_dialog.h src/ui/remote_status_dialog.cpp src/ui/mainwindow_remote.cpp
     src/ui/widgets/elided_label.h src/ui/widgets/elided_label.cpp src/ui/widgets/flow_layout.h src/ui/widgets/flow_layout.cpp
     src/ui/widgets/control_help.h src/ui/widgets/control_help.cpp src/ui/widgets/readout_label.h src/ui/widgets/readout_label.cpp
     src/ui/widgets/theme.h src/ui/widgets/theme.cpp
@@ -226,7 +238,7 @@ target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 # Help → Acknowledgements shows the same file that the repository holds.
 qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES ACKNOWLEDGEMENTS.md)
-target_link_libraries(selenewatch_ui PUBLIC selenewatch_core Qt6::Widgets)
+target_link_libraries(selenewatch_ui PUBLIC selenewatch_core selenewatch_remote Qt6::Widgets)
 target_link_libraries(selenewatch_ui PRIVATE Qt6::Network)
 add_dependencies(selenewatch_ui selenewatch_version)
 selenewatch_compile_options(selenewatch_ui)
@@ -430,3 +442,10 @@ target_link_libraries(SeleneWatchTimelapseTests PRIVATE selenewatch_core CFITSIO
 selenewatch_compile_options(SeleneWatchTimelapseTests)
 add_test(NAME timelapse COMMAND SeleneWatchTimelapseTests -o -,tap)
 set_tests_properties(timelapse PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Feature-47: the status page, its server on a free port, and the QR code.
+add_executable(SeleneWatchRemoteTests tests/remote_tests.cpp)
+target_link_libraries(SeleneWatchRemoteTests PRIVATE selenewatch_remote Qt6::Test)
+selenewatch_compile_options(SeleneWatchRemoteTests)
+add_test(NAME remote COMMAND SeleneWatchRemoteTests -o -,tap)
+set_tests_properties(remote PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

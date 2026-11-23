@@ -38,6 +38,7 @@ SeleneWatch's design is original work: how it detects, captures and keeps the ev
 - **OpenCV**, by the OpenCV team ([opencv.org](https://opencv.org)): debayering, phase-correlation subpixel alignment, rigid/ECC Lunar field-rotation alignment, and image stacking/sharpening utilities, under the Apache License 2.0.
 - **CFITSIO**, by NASA/GSFC HEASARC ([heasarc.gsfc.nasa.gov/fitsio](https://heasarc.gsfc.nasa.gov/fitsio/)): reading and writing linear 32-bit floating-point FITS stacks with astronomy metadata headers, under the NASA permissive open-source license.
 - **FFmpeg**, by the FFmpeg developers ([ffmpeg.org](https://ffmpeg.org)): encoding MP4 (`libopenh264`) and palette-optimized GIF time-lapse animations, shipped as an external LGPLv3 shared build (`win64-lgpl-shared`).
+- **QR Code generator library**, by Project Nayuki ([nayuki.io](https://www.nayuki.io/page/qr-code-generator-library)): the QR code that takes your phone to SeleneWatch's status page, under the MIT License.
 
 ### Camera and Mount Software
 

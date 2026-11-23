@@ -41,10 +41,38 @@ bool inSquare(int x, int y, double cx, double cy)
     return std::abs(x - cx) <= 1.0 && std::abs(y - cy) <= 1.0;
 }
 
-QString kindOf(const std::vector<FramePtr>& frames, OverviewRequest request = {})
+QString groupOf(const std::vector<FramePtr>& frames, OverviewRequest request = {})
 {
     const ClipOverview overview = makeClipOverview(frames, request);
-    return overview.suggestedKind + ": " + overview.kindReason;
+    return groupName(overview.description.group) + ": " + overview.description.facts;
+}
+
+// Feature-46: a trigger at a time after a start, with a patch around (x, y).
+TriggerPoint at(double secondsIn, double x, double y, TriggerPoint::Change change = TriggerPoint::Change::Rise)
+{
+    TriggerPoint point;
+    point.change = change;
+    point.time = utc(2026, 11, 20, 22, 11, 58) + duration_cast<system_clock::duration>(duration<double>(secondsIn));
+    point.frameIndex = static_cast<uint64_t>(std::lround(secondsIn * 30));
+    point.peak = QPoint(static_cast<int>(std::lround(x)), static_cast<int>(std::lround(y)));
+    point.box = QRect(point.peak.x() - 3, point.peak.y() - 4, 7, 9);
+    point.pixels = 40;
+    point.sigma = 55;
+    return point;
+}
+
+// An aircraft's strobe as on 20 November 2026: two blinks 0.2 s apart every
+// 1.24 s, along a straight line at about 18 px/s, from `start` seconds in.
+std::vector<TriggerPoint> strobe(double start, double end, QPointF from, QPointF velocity)
+{
+    std::vector<TriggerPoint> triggers;
+    for (double t = start; t < end; t += 1.24)
+        for (double blink : {0.0, 0.2})
+        {
+            const QPointF p = from + velocity * (t + blink);
+            triggers.push_back(at(t + blink, p.x(), p.y()));
+        }
+    return triggers;
 }
 
 } // namespace
@@ -59,7 +87,9 @@ private slots:
     void aSessionEndsAtTheFirstConditionMet();
     void theExposureFollowsTheSky();
     void theSkyLevelLeavesTheMaskOut();
-    void eachClipGetsASuggestedKind();
+    void eachClipGetsAGroup();
+    void clipGroupsComeFromWhatWasMeasured();
+    void consecutiveClipsOfOneCrossingAreOneEvent();
     void aPolygonMaskIsFilledSavedAndObeyed();
 };
 
@@ -255,8 +285,9 @@ void SkyExtrasTest::theSkyLevelLeavesTheMaskOut()
     QVERIFY(!skyLevel(*lit, everything));
 }
 
-// Done-when 3.
-void SkyExtrasTest::eachClipGetsASuggestedKind()
+// Feature-46 (it replaced Feature-15's suggested kind): the overview groups a
+// clip from its triggers and the run it follows around the peak.
+void SkyExtrasTest::eachClipGetsAGroup()
 {
     std::mt19937 random(52);
     std::vector<FramePtr> frames;
@@ -265,7 +296,7 @@ void SkyExtrasTest::eachClipGetsASuggestedKind()
         frames.push_back(frame(i, random, [i](int x, int y) { return i == 40 && inSquare(x, y, 60, 40) ? 80.0 : 0.0; }));
     OverviewRequest flash;
     flash.onsetFrameIndex = 40;
-    QVERIFY2(kindOf(frames, flash).startsWith("flash:"), qPrintable(kindOf(frames, flash)));
+    QVERIFY2(groupOf(frames, flash).startsWith("brief:"), qPrintable(groupOf(frames, flash)));
 
     // A fast straight streak: 4 px a frame for half a second.
     frames.clear();
@@ -273,7 +304,7 @@ void SkyExtrasTest::eachClipGetsASuggestedKind()
         frames.push_back(frame(i, random, [i](int x, int y) {
             return i >= 40 && i < 55 && inSquare(x, y, 20 + 4.0 * static_cast<double>(i - 40), 30 + 2.0 * static_cast<double>(i - 40)) ? 90.0 : 0.0;
         }));
-    QVERIFY2(kindOf(frames).startsWith("meteor:"), qPrintable(kindOf(frames)));
+    QVERIFY2(groupOf(frames).startsWith("moving:"), qPrintable(groupOf(frames)));
 
     // A steady light crossing slowly, 0.5 px a frame for 3 s.
     frames.clear();
@@ -281,16 +312,7 @@ void SkyExtrasTest::eachClipGetsASuggestedKind()
         frames.push_back(frame(i, random, [i](int x, int y) {
             return i >= 35 && i < 125 && inSquare(x, y, 20 + 0.5 * static_cast<double>(i - 35), 50) ? 60.0 : 0.0;
         }));
-    QVERIFY2(kindOf(frames).startsWith("satellite:"), qPrintable(kindOf(frames)));
-
-    // The same light with a strobe twice a second.
-    frames.clear();
-    for (uint64_t i = 0; i < 130; ++i)
-        frames.push_back(frame(i, random, [i](int x, int y) {
-            if (i < 35 || i >= 125 || !inSquare(x, y, 20 + 0.5 * static_cast<double>(i - 35), 50)) return 0.0;
-            return (i - 35) % 15 < 2 ? 150.0 : 40.0;
-        }));
-    QVERIFY2(kindOf(frames).startsWith("aircraft:"), qPrintable(kindOf(frames)));
+    QVERIFY2(groupOf(frames).startsWith("moving:"), qPrintable(groupOf(frames)));
 
     // A dark disk crossing a bright scene.
     frames.clear();
@@ -299,17 +321,144 @@ void SkyExtrasTest::eachClipGetsASuggestedKind()
             const double cx = 10 + 5.0 * (static_cast<double>(i) - 40);
             return i >= 40 && i < 60 && std::hypot(x - cx, y - 48.0) <= 6 ? -150.0 : 0.0;
         }, 200));
-    QVERIFY2(kindOf(frames).startsWith("dark transit:"), qPrintable(kindOf(frames)));
+    QVERIFY2(groupOf(frames).startsWith("moving:"), qPrintable(groupOf(frames)));
 
     // A large brightening, whatever else.
     OverviewRequest lightning;
-    lightning.largeBrightening = true;
-    QVERIFY(kindOf(frames, lightning).startsWith("lightning:"));
+    TriggerPoint wide = at(0, 0, 0, TriggerPoint::Change::WideRise);
+    wide.share = 0.12;
+    lightning.triggers = {wide};
+    QVERIFY2(groupOf(frames, lightning).startsWith("wide: a large brightening over 12% of the frame"), qPrintable(groupOf(frames, lightning)));
 
-    // Many triggers scattered over the frame.
-    OverviewRequest seeing;
-    for (int m = 0; m < 10; ++m) seeing.marks.push_back(QRect(10 + 11 * m, 5 + 8 * m, 3, 3));
-    QVERIFY(kindOf(frames, seeing).startsWith("seeing:"));
+    // The triggers win over the run: one blink at a time is a flash on its
+    // own, but the clip's blinks along a line are a moving light.
+    frames.clear();
+    for (uint64_t i = 0; i < 130; ++i)
+        frames.push_back(frame(i, random, [i](int x, int y) {
+            return i >= 35 && (i - 35) % 37 == 0 && inSquare(x, y, 20 + 0.5 * static_cast<double>(i - 35), 50) ? 150.0 : 0.0;
+        }));
+    OverviewRequest strobing;
+    for (uint64_t i = 35; i < 130; i += 37) strobing.triggers.push_back(at((static_cast<double>(i) - 35) / 30, 20 + 0.5 * (static_cast<double>(i) - 35), 50));
+    QVERIFY2(groupOf(frames, strobing).startsWith("moving:"), qPrintable(groupOf(frames, strobing)));
+    QVERIFY(groupOf(frames, strobing).contains("along a straight line"));
+}
+
+// Feature-46: the groups from triggers as they were on a real night (20-21
+// November 2026, a fixed camera at 30 fps), which Feature-15's kinds got wrong.
+void SkyExtrasTest::clipGroupsComeFromWhatWasMeasured()
+{
+    // An aircraft's strobe: 28 triggers in blink pairs along a line, which
+    // was "flash", then "seeing" when the line was long.
+    std::vector<TriggerPoint> aircraft = strobe(0, 16, QPointF(291, 2), QPointF(-17.5, 5.1));
+    ClipDescription d = describeClip(aircraft);
+    QCOMPARE(d.group, ClipGroup::Moving);
+    QVERIFY2(d.facts.startsWith(QString("%1 triggers on %1 frames over ").arg(aircraft.size())), qPrintable(d.facts));
+    QVERIFY2(d.facts.contains("along a straight line from (291, 2) to"), qPrintable(d.facts));
+    QVERIFY(d.facts.contains("strongest 55.0 σ"));
+
+    // A few strays elsewhere in the frame are left out and said so.
+    for (double t : {3.0, 7.0, 11.0}) aircraft.push_back(at(t, 900, 700));
+    d = describeClip(aircraft);
+    QCOMPARE(d.group, ClipGroup::Moving);
+    QVERIFY2(d.facts.contains(QString("(%1 of the %2 triggers)").arg(aircraft.size() - 3).arg(aircraft.size())), qPrintable(d.facts));
+
+    // The meteor at 03:49:57: one trigger, a streak on two frames. It was
+    // "flash, a rise in place"; it is brief, with its measured patch.
+    TriggerPoint meteor = at(0, 542, 230);
+    meteor.box = QRect(539, 226, 6, 11);
+    meteor.pixels = 22;
+    meteor.sigma = 29.2;
+    d = describeClip({meteor}, ActivityRun{2, 0.033, 0});
+    QCOMPARE(d.group, ClipGroup::Brief);
+    QCOMPARE(d.facts, QString("1 trigger, 22 px in a 6 × 11 box at (542, 230), active on 2 frames over 0.033 s, strongest 29.2 σ"));
+
+    // One trigger whose patch the detector followed as it moved for 13.7 s.
+    d = describeClip({at(0, 716, 4)}, ActivityRun{411, 13.7, 480});
+    QCOMPARE(d.group, ClipGroup::Moving);
+    QVERIFY2(d.facts.contains("moved 480 px over 13.7 s"), qPrintable(d.facts));
+
+    // A light flickering in one place for 8 s.
+    std::vector<TriggerPoint> flicker;
+    for (int i = 0; i < 10; ++i) flicker.push_back(at(0.8 * i, 400 + i % 3, 300 + i % 2));
+    d = describeClip(flicker);
+    QCOMPARE(d.group, ClipGroup::Other);
+    QVERIFY2(d.facts.contains("in one place"), qPrintable(d.facts));
+
+    // Seeing or cloud: triggers spread out, not along a line.
+    std::mt19937 random(46);
+    std::uniform_real_distribution<double> x(0, 1280), y(0, 960);
+    std::vector<TriggerPoint> scattered;
+    for (int i = 0; i < 14; ++i) scattered.push_back(at(0.7 * i, x(random), y(random)));
+    d = describeClip(scattered);
+    QCOMPARE(d.group, ClipGroup::Other);
+    QVERIFY2(d.facts.contains("not along a straight line"), qPrintable(d.facts));
+
+    // A nearby light over a large share of the frame, with many patches.
+    std::vector<TriggerPoint> light = scattered;
+    TriggerPoint wide = at(0.7 * 2, 0, 0, TriggerPoint::Change::WideRise);
+    wide.share = 0.035;
+    light.push_back(wide);
+    d = describeClip(light);
+    QCOMPARE(d.group, ClipGroup::Wide);
+    QVERIFY2(d.facts.startsWith("a large brightening over 3.5% of the frame; 15 triggers on 14 frames"), qPrintable(d.facts));
+
+    // A shadow crossing the Moon: falls along a line.
+    std::vector<TriggerPoint> transit;
+    for (int i = 0; i < 6; ++i) transit.push_back(at(0.1 * i, 100 + 12 * i, 200, TriggerPoint::Change::Fall));
+    d = describeClip(transit);
+    QCOMPARE(d.group, ClipGroup::Moving);
+    QVERIFY2(d.facts.startsWith("6 darkening triggers on 6 frames over 0.500 s"), qPrintable(d.facts));
+
+    // Two patches on one frame are brief, however far apart.
+    d = describeClip({at(0, 681, 153), at(0, 652, 178)});
+    QCOMPARE(d.group, ClipGroup::Brief);
+    QVERIFY2(d.facts.startsWith("2 triggers on 1 frame, up to 38 px apart"), qPrintable(d.facts));
+
+    // Saved by hand, with nothing measured.
+    TriggerPoint manual = at(0, 0, 0, TriggerPoint::Change::Manual);
+    QCOMPARE(describeClip({manual}).group, ClipGroup::Other);
+    QVERIFY(describeClip({manual}).facts.contains("saved by hand"));
+}
+
+// Feature-46: a long crossing is saved as several clips, which the report
+// shows as one event.
+void SkyExtrasTest::consecutiveClipsOfOneCrossingAreOneEvent()
+{
+    // The aircraft of 22:11:58: clips of at most 20 s, then single blinks.
+    const QPointF from(1276, 146), velocity(-12, 5.3);
+    const auto clipOf = [&](double start, double end) { return ClipSpan{strobe(start, end, from, velocity), false, std::nullopt}; };
+    std::vector<ClipSpan> clips = {clipOf(0, 20), clipOf(20.6, 40), clipOf(40.5, 52), ClipSpan{{at(64, 1276 - 12 * 64, 146 + 5.3 * 64)}, false, std::nullopt}};
+    // A blink 20 s later but nowhere near the line stays an event of its own,
+    // and so does a brief flash 10 s after that.
+    clips.push_back(ClipSpan{{at(84, 1000, 100)}, false, std::nullopt});
+    clips.push_back(ClipSpan{{at(94, 1010, 110)}, false, std::nullopt});
+    auto events = clipsIntoEvents(clips);
+    QCOMPARE(events.size(), size_t{3});
+    QCOMPARE(events[0], (std::vector<size_t>{0, 1, 2, 3}));
+    QCOMPARE(events[1], (std::vector<size_t>{4}));
+    QCOMPARE(events[2], (std::vector<size_t>{5}));
+    std::vector<ClipDescription> members;
+    for (size_t c : events[0]) members.push_back(describeClip(clips[c].triggers));
+    QCOMPARE(members.back().group, ClipGroup::Brief);
+    const std::vector<ClipSpan> crossing(clips.begin(), clips.begin() + 4);
+    const ClipDescription event = describeEvent(crossing, members);
+    QCOMPARE(event.group, ClipGroup::Moving);
+    QVERIFY2(event.facts.contains("over 1 min 4 s, along a straight line from (1276, 146)"), qPrintable(event.facts));
+
+    // Activity cut at a clip's limit and taken up at once by the next clip
+    // is one event, whatever its shape.
+    std::mt19937 random(7);
+    std::uniform_real_distribution<double> x(0, 1280), y(0, 960);
+    ClipSpan cut, next;
+    for (int i = 0; i < 20; ++i) cut.triggers.push_back(at(i, x(random), y(random)));
+    cut.cut = true;
+    cut.end = at(20, 0, 0).time;
+    next.triggers = {at(20.03, x(random), y(random)), at(21, x(random), y(random))};
+    events = clipsIntoEvents({cut, next});
+    QCOMPARE(events.size(), size_t{1});
+    // Not when the first clip ended by itself.
+    cut.cut = false;
+    QCOMPARE(clipsIntoEvents({cut, next}).size(), size_t{2});
 }
 
 // Done-when 4.

@@ -52,6 +52,8 @@ public:
     [[nodiscard]] Target target() const;
     // Feature-31: what is watched, of which the target is the Moon or the sky.
     [[nodiscard]] Watch watch() const;
+    // The watch as the choice box names it (Feature-47's status page).
+    [[nodiscard]] QString watchTitle() const;
     // Set before the watch's settings. Does not announce it.
     void setWatch(Watch watch);
     // The target changes only while the stream is stopped.

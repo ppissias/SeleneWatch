@@ -9,3 +9,9 @@
 // each K. Explicit paths only; the output is a new JSON file.
 //   SeleneWatchProbe darkening INPUT OUTPUT.json K[,K...] [FRAME_LIMIT]
 int runDarkeningProbe(const QStringList& arguments);
+
+// Feature-48: ISS crossings at real speed, with the shadows watch's defaults
+// (two frames) and with a one-frame trigger, and the unchanged recording's
+// falls for both. LENGTH is the station's length in pixels.
+//   SeleneWatchProbe iss INPUT OUTPUT.json LENGTH[,LENGTH...] [FRAME_LIMIT]
+int runIssProbe(const QStringList& arguments);

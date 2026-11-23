@@ -17,6 +17,10 @@
 #include <string>
 #include <thread>
 
+// A trigger as the clip's group sees it (Feature-46): the fields event.txt
+// records, from which the nightly report groups the clip again.
+[[nodiscard]] TriggerPoint triggerPointOf(const ClipTrigger& trigger);
+
 // What became of one clip handed to the writer.
 //
 // A result with neither a folder nor a reason is about the record alone: the
@@ -39,8 +43,10 @@ struct ClipWriteResult
     bool diskReserve{false};
     uint64_t freeBytes{0};
 
-    // The overview's suggested kind of the clip (Feature-15), when made.
-    QString suggestedKind;
+    // The clip's group (Feature-46): brief, moving, wide or other, and what
+    // was measured.
+    QString group;
+    QString groupFacts;
 };
 
 // A guide pulse, kept by the writer to mark candidates that fall inside a
@@ -180,11 +186,11 @@ private:
     ClipWriteResult process(Job& job);
     void deliver(const ClipWriteResult& result);
 
-    QString writeClip(EventClip& clip, QString& error, QString& suggestedKind);
+    QString writeClip(EventClip& clip, QString& error, QString& group, QString& groupFacts);
     // Writer thread. Saves the clip's overview (Feature-12) in its folder and
-    // returns its metadata line, or why it was not written. Gives the
-    // suggested kind and its reason (Feature-15) when it could measure them.
-    QString writeOverview(const EventClip& clip, const QString& folder, QString& suggestedKind, QString& kindReason,
+    // returns its metadata line, or why it was not written. Gives the clip's
+    // group (Feature-46), from its triggers alone when no overview was made.
+    QString writeOverview(const EventClip& clip, const QString& folder, ClipDescription& description,
         ClipOverview* outOverview = nullptr) const;
     // Writer thread. True, with the result filled in, when writing the clip
     // would go below its disk reserve.

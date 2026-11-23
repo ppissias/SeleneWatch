@@ -3,6 +3,7 @@
 #include "recording/ser_writer.h"
 #include "recording/recording_reader.h"
 #include "session/session.h"
+#include "detection/target_defaults.h"
 #include "sources/recording_source.h"
 #include "tools/detection_probe.h"
 #include "tools/lock_probe.h"
@@ -14,6 +15,8 @@
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QTextStream>
 #include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
@@ -35,7 +38,7 @@ int main(int argc, char** argv)
     const QStringList args = app.arguments();
     if (args.size() < 3)
     {
-        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json | register INPUT OUTPUT [CONFIG.json] | rearm INPUT OUTPUT.json CONFIG.json | lock INPUT OUTPUT.csv [X Y WIDTH HEIGHT] | guide-sim OUTPUT [SECONDS] | ascom PROGID OUTPUT.txt | guide-pulses INPUT OUTPUT.json K[,K...] [FRAME_LIMIT] | overview INPUT OUTPUT.png [FIRST [COUNT [K]]] | darkening INPUT OUTPUT.json K[,K...] [FRAME_LIMIT]\n";
+        err << "Usage: SeleneWatchProbe capture INPUT OUTPUT | sample INPUT OUTPUT | write-benchmark INPUT OUTPUT | fixtures OUTPUT | crash OUTPUT | survey LIST OUTPUT | profile INPUT OUTPUT.json [CONFIG.json] | measure INPUT CSV [CONFIG.json] | measure-batch INPUT OUTPUT CONFIG.json | register INPUT OUTPUT [CONFIG.json] | rearm INPUT OUTPUT.json CONFIG.json | lock INPUT OUTPUT.csv [X Y WIDTH HEIGHT] | guide-sim OUTPUT [SECONDS] | ascom PROGID OUTPUT.txt | guide-pulses INPUT OUTPUT.json K[,K...] [FRAME_LIMIT] | overview INPUT OUTPUT.png [FIRST [COUNT [K]]] | darkening INPUT OUTPUT.json K[,K...] [FRAME_LIMIT] | iss INPUT OUTPUT.json LENGTH[,LENGTH...] [FRAME_LIMIT] | inject-clip INPUT OUTPUT_ROOT CONFIG.json\n";
         return 2;
     }
     const QString mode = args[1];
@@ -44,9 +47,9 @@ int main(int argc, char** argv)
         try { return mode=="rearm"?runRearmingProbe(args):runDetectionProbe(args); }
         catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
     }
-    if (mode == "overview" || mode == "darkening")
+    if (mode == "overview" || mode == "darkening" || mode == "iss")
     {
-        try { return mode == "overview" ? runOverviewProbe(args) : runDarkeningProbe(args); }
+        try { return mode == "overview" ? runOverviewProbe(args) : mode == "iss" ? runIssProbe(args) : runDarkeningProbe(args); }
         catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
     }
     if (mode == "lock" || mode == "guide-sim" || mode == "ascom" || mode == "guide-pulses")
@@ -91,6 +94,61 @@ int main(int argc, char** argv)
             if (!result.notSaved.isEmpty() || result.recordFailed) return 1;
         }
         return 0;
+    }
+
+    // Feature-48: a recording through the application's own path (Monitoring
+    // in a watch, clips, overviews, previews and the nightly report), with one
+    // marked test signal requested once the given frame has been delivered.
+    // For documentation pictures of test data; every frame it touches is marked.
+    if (mode == "inject-clip" && args.size() == 5)
+    {
+        QFile file(args[4]);
+        if (!file.open(QIODevice::ReadOnly)) { err << "cannot read " << args[4] << "\n"; return 1; }
+        const QJsonObject c = QJsonDocument::fromJson(file.readAll()).object();
+        const QString watchName = c["watch"].toString("moon_shadows");
+        const Watch watch = watchName == "moon_flashes" ? Watch::MoonFlashes : watchName == "sky" ? Watch::Sky : Watch::MoonShadows;
+        DetectionSettings detection = defaultDetectionSettings(watch);
+        if (c.contains("sigma")) detection.sigma = c["sigma"].toDouble();
+        if (c.contains("oneFrame")) detection.oneFrame = c["oneFrame"].toBool();
+        const QString kindName = c["kind"].toString("iss_silhouette");
+        BlipKind kind = BlipKind::BrightFlash;
+        for (BlipKind k : {BlipKind::BrightFlash, BlipKind::DarkTransit, BlipKind::MovingStreak, BlipKind::BlinkingMover,
+                 BlipKind::Lightning, BlipKind::IssSilhouette})
+            if (kindName == blipKindName(k)) kind = k;
+        const BlipSettings blip{c["x"].toInt(), c["y"].toInt(), c["size"].toDouble(3), c["amplitude"].toDouble(100),
+            c["frames"].toInt(2), kind, c["vx"].toDouble(), c["vy"].toDouble()};
+        const uint64_t atFrame = static_cast<uint64_t>(c["atFrame"].toInt(120));
+        std::vector<ClipWriteResult> results;
+        bool requested = false;
+        {
+            Session::Notifications notices;
+            notices.ended = [&] { app.quit(); };
+            notices.failed = [&](const QString& reason) { err << reason << "\n"; app.exit(1); };
+            notices.clipWritten = [&](const ClipWriteResult& result) { results.push_back(result); };
+            Session session(&context, args[3], std::move(notices));
+            auto source = std::make_unique<RecordingSource>(std::filesystem::path(args[2].toStdWString()));
+            source->setSpeed(RecordingSource::Speed::RealTime);
+            session.setSource(std::move(source));
+            session.setWatch(watch);
+            session.setCaptureSettings(defaultCaptureSettings(watch));
+            session.setDetectionSettings(detection);
+            session.setTestingTools(true);
+            QString error;
+            if (!session.start(error, Session::Mode::Monitoring)) { err << error << "\n"; return 1; }
+            QTimer poll;
+            QObject::connect(&poll, &QTimer::timeout, &context, [&] {
+                if (!requested && session.acquiredFrames() >= atFrame) requested = session.requestBlip(blip);
+            });
+            poll.start(2);
+            if (app.exec() != 0) return 1;
+            session.stop();
+            out << "source_frames=" << session.acquiredFrames() << " requested=" << requested << "\n";
+        }
+        QCoreApplication::processEvents();
+        for (const auto& result : results)
+            out << "clip=" << result.folder << " group=" << result.group << " facts=" << result.groupFacts
+                << " error=" << result.notSaved << "\n";
+        return requested ? 0 : 1;
     }
 
     const QString output = args.back();

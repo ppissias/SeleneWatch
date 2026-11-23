@@ -1,10 +1,14 @@
 #include "nightly_report.h"
 #include "nightly_report_style.h"
 
+#include "recording/clip_groups.h"
+#include "recording/clip_overview.h"
+
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QMap>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QTextStream>
 #include <QtCore/QUrl>
@@ -12,6 +16,7 @@
 
 namespace {
 using Fields = QMap<QString, QString>;
+using Clock = std::chrono::system_clock;
 
 QString field(const QString& line, const QString& key)
 {
@@ -32,15 +37,36 @@ QString link(const QDir& root, const QString& file, const QString& title)
     return "<a href=\"" + url(file) + "\">" + h(title) + "</a> ";
 }
 
+// Feature-46: a link the report's script turns into selenewatch:open or
+// selenewatch:show, so the file opens in its own program instead of being
+// downloaded. Without the script it stays a plain link.
+QString openLink(const QDir& root, const QString& file, const QString& action, const QString& title)
+{
+    if (!QFileInfo(root.filePath(file)).isFile()) return {};
+    const QString tip = action == "show" ? "Shows the file in Explorer, through SeleneWatch. The browser asks first."
+                                         : "Opens the file with its program, through SeleneWatch. The browser asks first.";
+    return "<a data-open='" + action + "' title='" + tip + "' href=\"" + url(file) + "\">" + h(title) + "</a> ";
+}
+
+std::optional<Clock::time_point> timePoint(const QString& iso)
+{
+    const QDateTime date = QDateTime::fromString(iso, Qt::ISODateWithMs);
+    if (!date.isValid()) return std::nullopt;
+    return Clock::time_point(std::chrono::milliseconds(date.toMSecsSinceEpoch()));
+}
+
 struct Clip
 {
     QString name, path;
     Fields info;
     QStringList triggers;
+    // The time on the frame ledger's last line.
+    QString lastFrameTime;
 };
 
-// Event metadata can contain a long per-frame ledger. Keep only named fields
-// and trigger rows; generating a report never opens a raw image or SER.
+// Event metadata can contain a long per-frame ledger. Keep only named fields,
+// trigger rows and the last frame's time; generating a report never opens a
+// raw image or SER.
 Clip inspect(const QDir& root, const QString& path, const QString& metadata)
 {
     Clip clip;
@@ -52,6 +78,11 @@ Clip inspect(const QDir& root, const QString& path, const QString& metadata)
     while (!in.atEnd())
     {
         const QString line = in.readLine();
+        if (!line.isEmpty() && line[0].isDigit())
+        {
+            clip.lastFrameTime = line.section(' ', 2, 2);
+            continue;
+        }
         const auto colon = line.indexOf(": ");
         if (colon < 1 || colon > 48 || !line[0].isLetter()) continue;
         const QString key = line.left(colon), value = line.mid(colon + 2);
@@ -71,6 +102,91 @@ QString duration(double seconds)
 {
     const qint64 n = qRound64(seconds);
     return QString("%1h %2m %3s").arg(n / 3600).arg(n / 60 % 60).arg(n % 60);
+}
+
+// "(291,2)" or "(290,0,7,8)" as numbers.
+QList<int> numbers(const QString& text)
+{
+    QList<int> values;
+    for (const QString& part : QString(text).remove('(').remove(')').split(',', Qt::SkipEmptyParts)) values << part.toInt();
+    return values;
+}
+
+// A trigger line of event.txt, as the clip's group sees it: the fields that
+// event_writer's triggerFields writes.
+TriggerPoint pointOf(const QString& trigger)
+{
+    const QString line = " " + trigger;
+    TriggerPoint point;
+    point.time = timePoint(field(line, "trigger_time")).value_or(Clock::time_point{});
+    point.frameIndex = field(line, "trigger_frame_index").toULongLong();
+    const QString kind = field(line, "kind");
+    if (kind == "manual") point.change = TriggerPoint::Change::Manual;
+    else if (kind == "darkening") point.change = TriggerPoint::Change::Fall;
+    else if (kind == "brightening") point.change = TriggerPoint::Change::WideRise;
+    else if (kind == "large_darkening") point.change = TriggerPoint::Change::WideFall;
+    if (const QList<int> peak = numbers(field(line, "peak")); peak.size() == 2) point.peak = QPoint(peak[0], peak[1]);
+    if (const QList<int> box = numbers(field(line, "box")); box.size() == 4 && box[2] > 0 && box[3] > 0)
+        point.box = QRect(box[0], box[1], box[2], box[3]);
+    point.pixels = field(line, "bright_pixel_count").toInt();
+    point.sigma = field(line, "peak_sigma").toDouble();
+    point.share = field(line, "share").toDouble();
+    return point;
+}
+
+// The overview line's values, without its closing remark.
+QString overviewField(const Clip& clip, const QString& key)
+{
+    return field(" " + clip.info.value("overview").section(';', 0, 0), key);
+}
+
+std::optional<double> arcsecPerPixelOf(const Clip& clip)
+{
+    bool ok = false;
+    const double value = clip.info.value("image_scale_arcsec_per_pixel").toDouble(&ok);
+    return ok && value > 0 ? std::optional<double>(value) : std::nullopt;
+}
+
+// Clips saved before Feature-46 give the run around the peak only in the
+// words of Feature-15's suggested kind, such as "a rise in place, 2 frames
+// over 0.033 s" or "a steady light moving straight at 0.04 frame widths/s for
+// 13.7 s". Nothing when those words say nothing about a run.
+std::optional<ActivityRun> legacyRunOf(const Clip& clip)
+{
+    const QString reason = clip.info.value("suggested_kind").section(';', 0, 0);
+    static const QRegularExpression inPlace(R"((\d+) frames? over ([\d.]+) s)");
+    static const QRegularExpression still(R"(in place for ([\d.]+) s)");
+    static const QRegularExpression moving(R"(([\d.]+) (frame widths|°)/s for ([\d.]+) s)");
+    if (const auto m = inPlace.match(reason); m.hasMatch()) return ActivityRun{m.captured(1).toInt(), m.captured(2).toDouble(), 0};
+    if (const auto m = still.match(reason); m.hasMatch()) return ActivityRun{0, m.captured(1).toDouble(), 0};
+    if (const auto m = moving.match(reason); m.hasMatch())
+    {
+        const double rate = m.captured(1).toDouble(), seconds = m.captured(3).toDouble();
+        const int width = clip.info.value("frame_size").section('x', 0, 0).toInt();
+        const std::optional<double> scale = arcsecPerPixelOf(clip);
+        const double pixelsPerSecond = m.captured(2) == "frame widths" ? rate * width : scale ? rate * 3600 / *scale : 0;
+        // A run that moved at all moved at least the overview's 3 px.
+        if (pixelsPerSecond > 0) return ActivityRun{0, seconds, std::max(3.0, pixelsPerSecond * seconds)};
+    }
+    return std::nullopt;
+}
+
+// The run around the peak: recorded on the overview line since Feature-46.
+std::optional<ActivityRun> runOf(const Clip& clip)
+{
+    const QString frames = overviewField(clip, "run_frames");
+    if (frames.isEmpty()) return legacyRunOf(clip);
+    return ActivityRun{frames.toInt(), overviewField(clip, "run_seconds").toDouble(), overviewField(clip, "run_moved_px").toDouble()};
+}
+
+ClipSpan spanOf(const Clip& clip)
+{
+    ClipSpan span;
+    for (const QString& trigger : clip.triggers) span.triggers.push_back(pointOf(trigger));
+    const QString end = clip.info.value("collection_end");
+    span.cut = end == "maximum post-event interval" || end == "clip memory allowance";
+    span.end = timePoint(clip.lastFrameTime);
+    return span;
 }
 
 struct Journal
@@ -118,6 +234,12 @@ QString readableTime(const QString& iso)
 {
     const QDateTime date = QDateTime::fromString(iso, Qt::ISODateWithMs);
     return date.isValid() ? date.toUTC().toString("dd MMM yyyy, HH:mm:ss.zzz") : iso;
+}
+
+QString shortTime(const QString& iso, const QString& format = "HH:mm:ss")
+{
+    const QDateTime date = QDateTime::fromString(iso, Qt::ISODateWithMs);
+    return date.isValid() ? date.toUTC().toString(format) : iso;
 }
 
 QString activity(const QString& line)
@@ -176,32 +298,79 @@ void coverageStrip(QTextStream& out, const QStringList& lines)
     out << "</div><small>Green · Monitoring active &nbsp; / &nbsp; Grey · Between intervals</small>";
 }
 
-void card(QTextStream& out, const QDir& root, const Clip& clip, int index)
+// Feature-46: one or more consecutive clips of one event, with its group.
+struct Event
 {
-    const auto& info = clip.info;
-    const QString base = clip.path + "/";
-    const QString suggestion = info.value("suggested_kind").section(';', 0, 0);
-    const QString kind = suggestion.section(" (", 0, 0);
+    std::vector<size_t> clips;
+    ClipDescription description;
+    // The clip whose trigger was strongest, for the picture.
+    size_t shown{0};
+};
+
+const std::vector<ClipGroup> kGroupOrder = {ClipGroup::Brief, ClipGroup::Wide, ClipGroup::Other, ClipGroup::Moving};
+
+QString groupMeaning(ClipGroup group)
+{
+    switch (group)
+    {
+    case ClipGroup::Brief:
+        return "Everything happened in one place within 0.2 s: a meteor, a glint, a cosmic-ray hit, a flash, or one blink of a strobe.";
+    case ClipGroup::Moving:
+        return "The triggers advanced steadily along a straight line: usually an aircraft or a satellite; on the Moon, anything crossing it.";
+    case ClipGroup::Wide:
+        return "A large share of the frame brightened or darkened at once: lightning, headlights or a torch, a cloud, a fireball's flare.";
+    case ClipGroup::Other:
+        break;
+    }
+    return "Anything else, as measured: triggers in one place for longer, or spread out and not along a line, such as seeing or cloud.";
+}
+
+QString badge(ClipGroup group)
+{
+    return "<span class='badge " + groupName(group) + "'>" + groupTitle(group) + "</span>";
+}
+
+// The overview's row of crops (before, peak, after, change) as the event's
+// picture, cut from 00_overview.png by the page; the whole overview when the
+// frame size or the activity is not known. A click opens the full overview.
+QString picture(const QDir& root, const Clip& clip)
+{
+    const QString image = clip.path + "/00_overview.png";
+    if (!QFileInfo::exists(root.filePath(image))) return {};
+    const QStringList size = clip.info.value("frame_size").split('x');
+    const bool active = overviewField(clip, "active_frames").toInt() > 0;
+    if (size.size() == 2 && size[0].toInt() > 0 && size[1].toInt() > 0 && active)
+    {
+        const OverviewLayout layout = overviewLayout(size[0].toInt(), size[1].toInt());
+        if (layout.crops.height() > 0)
+            return QString("<a class='strip' href='%1' title='Open the whole overview' style='aspect-ratio:%2/%3'>"
+                           "<img loading='lazy' alt='Crops around the peak: before, during, after, and the change' src='%1' style='margin-top:-%4%'></a>")
+                .arg(url(image)).arg(layout.crops.width()).arg(layout.crops.height())
+                .arg(100.0 * layout.crops.top() / layout.crops.width(), 0, 'f', 3);
+    }
+    return "<a class='picture' href='" + url(image) + "'><img loading='lazy' alt='Annotated clip overview' src='" + url(image) + "'></a>";
+}
+
+QStringList tagsOf(const Clip& clip)
+{
     QStringList tags;
-    if (!kind.isEmpty()) tags << kind;
-    if (info.value("contains_test_signal") == "yes") tags << "test signal";
-    if (info.value("complete") != "yes") tags << "partial";
-    if (info.contains("gap")) tags << "frame gap";
+    if (clip.info.value("contains_test_signal") == "yes") tags << "test signal";
+    if (clip.info.value("complete") != "yes") tags << "partial";
+    if (clip.info.contains("gap")) tags << "frame gap";
     for (const auto& t : clip.triggers)
     {
         if (field(" " + t, "kind") == "manual") tags << "manual save";
         if (t.contains(" during_mount_correction=yes")) tags << "guide pulse";
     }
-    tags.removeDuplicates();
-    out << "<article id='clip-" << index << "' data-tags=\"" << h(tags.join('|')) << "\" data-key=\"" << h(clip.name) << "\">";
-    if (QFileInfo::exists(root.filePath(base + "00_overview.png")))
-        out << "<a class='picture' href='" << url(base + "00_overview.png") << "'><img loading='lazy' alt='Annotated clip overview' src='"
-            << url(base + "00_overview.png") << "'></a>";
-    out << "<div class='body'><div class='row'><h3>" << h(timeOf(clip).isEmpty() ? clip.name : readableTime(timeOf(clip)))
-        << "</h3><button class='mark' aria-pressed='false' title='Mark for follow-up'>☆</button></div>";
-    if (!suggestion.isEmpty()) out << "<p>Suggested · " << h(suggestion) << "</p>";
-    for (const auto& tag : tags.mid(kind.isEmpty() ? 0 : 1)) out << "<span class='tag'>" << h(tag) << "</span> ";
-    out << "<details><summary>" << clip.triggers.size() << " triggers &amp; measurements</summary><ul>";
+    return tags;
+}
+
+// One clip's triggers, preview and files.
+void clipDetails(QTextStream& out, const QDir& root, const Clip& clip, bool includeInlineGif = true)
+{
+    const QString base = clip.path + "/";
+    out << "<details><summary>" << clip.triggers.size() << (clip.triggers.size() == 1 ? " trigger" : " triggers")
+        << " &amp; measurements</summary><ul>";
     for (const QString& t : clip.triggers)
     {
         const QString line = " " + t;
@@ -211,11 +380,55 @@ void card(QTextStream& out, const QDir& root, const Clip& clip, int index)
         out << "</li>";
     }
     out << "</ul></details>";
-    if (QFileInfo::exists(root.filePath(base + "04_event_preview.gif")))
+    if (includeInlineGif && QFileInfo::exists(root.filePath(base + "04_event_preview.gif")))
         out << "<details class='animation'><summary>Play preview</summary><img alt='Animated event preview' data-src='"
             << url(base + "04_event_preview.gif") << "'></details>";
-    out << "<footer>" << link(root, base + "event.ser", "Raw SER") << link(root, base + "event.txt", "Clip metadata")
-        << link(root, base + "03_diff_annotated.png", "Difference image") << "</footer></div></article>";
+    const QString ser = QFileInfo(root.filePath(base + "event.ser")).isFile() ? base + "event.ser" : base + "event.txt";
+    out << "<footer>" << link(root, base + "00_overview.png", "Overview") << openLink(root, base + "event.ser", "open", "Open SER")
+        << openLink(root, ser, "show", "Show in folder") << link(root, base + "event.txt", "Clip metadata")
+        << link(root, base + "03_diff_annotated.png", "Difference image") << "</footer>";
+}
+
+void card(QTextStream& out, const QDir& root, const QList<Clip>& clips, const std::vector<ClipDescription>& described,
+    const Event& event, int index)
+{
+    const Clip& first = clips[static_cast<qsizetype>(event.clips.front())];
+    const Clip& shown = clips[static_cast<qsizetype>(event.shown)];
+    const QString gifPath = shown.path + "/04_event_preview.gif";
+    const bool hasGif = QFileInfo::exists(root.filePath(gifPath));
+    QStringList tags{groupName(event.description.group)};
+    for (size_t c : event.clips) tags << tagsOf(clips[static_cast<qsizetype>(c)]);
+    tags.removeDuplicates();
+    out << "<article id='event-" << index << "' data-tags=\"" << h(tags.join('|')) << "\" data-key=\"" << h(first.name) << "\">"
+        << picture(root, shown);
+    if (hasGif)
+        out << "<div class='cardGif' hidden><img alt='Animated event preview' data-src='" << url(gifPath) << "'></div>";
+    out << "<div class='body'><div class='row'><h3>" << h(timeOf(first).isEmpty() ? first.name : readableTime(timeOf(first)))
+        << "</h3><div class='actions'>";
+    if (hasGif)
+        out << "<button class='gifToggle' type='button' aria-pressed='false' title='Play or hide animated event preview'>▶ Play GIF</button>";
+    out << "<button class='mark' aria-pressed='false' title='Mark for follow-up'>☆</button></div></div>"
+        << "<p class='facts'>" << badge(event.description.group) << h(event.description.facts) << "</p>";
+    for (const auto& tag : tags.mid(1)) out << "<span class='tag'>" << h(tag) << "</span> ";
+    if (event.clips.size() == 1)
+    {
+        clipDetails(out, root, first, false);
+        out << "</div></article>";
+        return;
+    }
+    const Clip& last = clips[static_cast<qsizetype>(event.clips.back())];
+    const QString end = last.triggers.isEmpty() ? QString() : field(" " + last.triggers.back(), "trigger_time");
+    out << "<details><summary>" << event.clips.size() << " clips, " << h(shortTime(timeOf(first))) << " – "
+        << h(shortTime(end)) << " UTC</summary><ol class='clips'>";
+    for (size_t c : event.clips)
+    {
+        const Clip& clip = clips[static_cast<qsizetype>(c)];
+        out << "<li><b>" << h(shortTime(timeOf(clip), "HH:mm:ss.zzz")) << "</b> " << badge(described[c].group)
+            << h(described[c].facts);
+        clipDetails(out, root, clip);
+        out << "</li>";
+    }
+    out << "</ol></details></div></article>";
 }
 } // namespace
 
@@ -234,6 +447,38 @@ QString writeNightlyReport(const QString& folder, QString& error)
         clips << inspect(root, "clips/" + name, "event.txt");
     for (const QString& name : QDir(root.filePath("recordings")).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
         recordings << inspect(root, "recordings/" + name, "recording.txt");
+
+    // Feature-46: each clip's group from its triggers, then consecutive clips
+    // of one event together.
+    std::vector<ClipSpan> spans;
+    std::vector<ClipDescription> described;
+    for (const Clip& clip : clips)
+    {
+        spans.push_back(spanOf(clip));
+        described.push_back(describeClip(spans.back().triggers, runOf(clip), arcsecPerPixelOf(clip)));
+    }
+    std::vector<Event> events;
+    for (const std::vector<size_t>& members : clipsIntoEvents(spans))
+    {
+        Event event;
+        event.clips = members;
+        std::vector<ClipSpan> memberSpans;
+        std::vector<ClipDescription> memberDescriptions;
+        double strongest = -1;
+        for (size_t c : members)
+        {
+            memberSpans.push_back(spans[c]);
+            memberDescriptions.push_back(described[c]);
+            for (const TriggerPoint& t : spans[c].triggers)
+                if (t.sigma > strongest) { strongest = t.sigma; event.shown = c; }
+        }
+        if (strongest < 0) event.shown = members.front();
+        event.description = describeEvent(memberSpans, memberDescriptions, arcsecPerPixelOf(clips[static_cast<qsizetype>(members.front())]));
+        events.push_back(std::move(event));
+    }
+    QMap<ClipGroup, int> counts;
+    for (const Event& event : events) ++counts[event.description.group];
+
     QStringList boundaries;
     int starts = 0, ends = 0;
     double seconds = 0;
@@ -261,16 +506,27 @@ QString writeNightlyReport(const QString& folder, QString& error)
     out << "<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         << "<title>" << label << " watch · " << h(first) << "</title>" << QString::fromUtf8(reportStyle)
         << "<main><header><div class='brand'>SELENEWATCH &nbsp; / &nbsp; OBSERVING REPORT</div><h1>" << label << " watch</h1>"
-        << "<p>" << h(readableTime(first)) << " &nbsp;·&nbsp; UTC</p></header><div class='stats'>";
+        << "<p>" << h(readableTime(first)) << " &nbsp;·&nbsp; UTC</p>";
+    if (!clips.isEmpty())
+    {
+        QStringList parts;
+        for (ClipGroup group : kGroupOrder)
+            if (counts.value(group))
+                parts << "<a href='#group-" + groupName(group) + "'>" + QString::number(counts.value(group)) + " " + groupName(group) + "</a>";
+        out << "<p class='summary'>" << events.size() << (events.size() == 1 ? " event" : " events") << " in " << clips.size()
+            << (clips.size() == 1 ? " clip" : " clips") << ": " << parts.join(" · ") << "</p>";
+    }
+    out << "</header><div class='stats'>";
     const auto metric = [&](const QString& value, const QString& name) {
         out << "<div><strong>" << h(value) << "</strong>" << h(name) << "</div>";
     };
     metric(starts > 0 && starts == ends ? duration(seconds) : "Unknown", "Monitoring time");
-    metric(QString::number(j.automatic), "Automatic candidates");
-    metric(QString::number(clips.size()), "Clip folders");
-    metric(QString::number(j.manual), "Manual saves");
-    metric(QString::number(j.exceptions.size()), "Unsaved or unresolved triggers");
-    out << "</div><nav><a href='#coverage'>Coverage</a><a href='#findings'>Clips</a><a href='#conditions'>Observing conditions</a></nav>"
+    metric(QString::number(events.size()), "Events");
+    metric(QString::number(clips.size()), "Clips");
+    metric(QString::number(j.automatic), "Automatic triggers");
+    if (j.manual) metric(QString::number(j.manual), "Manual saves");
+    if (!j.exceptions.isEmpty()) metric(QString::number(j.exceptions.size()), "Unsaved or unresolved triggers");
+    out << "</div><nav><a href='#coverage'>Coverage</a><a href='#findings'>Events</a><a href='#conditions'>Observing conditions</a></nav>"
         << "<section id='coverage'><h2>Coverage</h2>";
     if (starts && starts == ends)
         out << "<p>" << starts << (starts == 1 ? " monitoring interval" : " monitoring intervals")
@@ -285,43 +541,57 @@ QString writeNightlyReport(const QString& folder, QString& error)
     out << "<details open><summary>Monitoring and recording timeline · UTC</summary><ul>";
     for (const auto& line : timeline) out << "<li>" << activity(line) << "</li>";
     out << "</ul></details>";
-    if (!clips.isEmpty())
+    if (!events.empty())
     {
-        out << "<h3>Clip times · source UTC</h3><div class='ruler'>";
+        out << "<h3>Event times · source UTC</h3><div class='ruler'>";
         const auto ms = [](const Clip& c) { return QDateTime::fromString(timeOf(c),Qt::ISODateWithMs).toMSecsSinceEpoch(); };
         const auto start = ms(clips.first()), end = ms(clips.last());
-        for (qsizetype i = 0; i < clips.size(); ++i)
+        for (size_t e = 0; e < events.size(); ++e)
         {
-            const double portion = end > start ? double(ms(clips[i]) - start) / double(end - start) : 0.5;
-            out << "<a style='left:" << QString::number(100 * std::clamp(portion,0.0,1.0),'f',3)
-                << "%' href='#clip-" << i << "' aria-label='Clip " << i+1 << "' title='" << h(timeOf(clips[i])) << "'></a>";
+            const Clip& clip = clips[static_cast<qsizetype>(events[e].clips.front())];
+            const double portion = end > start ? double(ms(clip) - start) / double(end - start) : 0.5;
+            out << "<a class='" << groupName(events[e].description.group) << "' style='left:"
+                << QString::number(100 * std::clamp(portion,0.0,1.0),'f',3) << "%' href='#event-" << e
+                << "' aria-label='Event " << e+1 << "' title='" << h(shortTime(timeOf(clip))) << " UTC · "
+                << groupName(events[e].description.group) << "'></a>";
         }
-        out << "</div><div class='ends'><span>" << h(timeOf(clips.first())) << "</span><span>"
-            << h(timeOf(clips.last())) << "</span></div>";
+        out << "</div><div class='ends'><span>" << h(shortTime(timeOf(clips.first()), "dd MMM HH:mm:ss")) << " UTC</span><span>"
+            << h(shortTime(timeOf(clips.last()), "dd MMM HH:mm:ss")) << " UTC</span></div>";
     }
-    out << "</section><section id='findings'><h2>Clip review</h2>";
-    QMap<QString,int> suggestions;
-    for (const auto& clip : clips)
-    {
-        const auto kind = clip.info.value("suggested_kind").section(" (",0,0).section(';',0,0);
-        if (!kind.isEmpty()) ++suggestions[kind];
-    }
-    if (!suggestions.isEmpty())
-    {
-        out << "<p class='kinds'>Suggested kinds by clip · ";
-        for (auto it = suggestions.cbegin(); it != suggestions.cend(); ++it)
-            out << "<button class='kindFilter' value=\"" << h(it.key()) << "\">" << h(it.key()) << " <b>"
-                << it.value() << "</b></button> ";
-        out << "</p>";
-    }
+    out << "</section><section id='findings'><h2>Events</h2>";
     if (clips.isEmpty()) out << "<p>No saved clips for this watch.</p>";
-    else out << "<div class='tools'><label>Show <select id='filter'><option value=''>All clips</option><option value='*'>Marked for follow-up</option></select></label>"
-        << "<span id='count' aria-live='polite'></span></div><div class='grid'>";
-    for (qsizetype i = 0; i < clips.size(); ++i) card(out, root, clips[i], static_cast<int>(i));
-    if (!clips.isEmpty()) out << "</div><details><summary>Keep follow-up marks</summary>"
-        << "<p class='hint'>Stars are remembered in this browser. Save a copy beside the report to carry your marks with the watch.</p>"
-        << "<button id='saveMarks'>Save marks</button> <label>Load marks <input id='loadMarks' type='file' accept='.json'></label>"
-        << "<p id='markStatus' aria-live='polite'></p></details>";
+    else
+    {
+        out << "<p class='hint'>Each clip is grouped by what was measured, not by what the object was. Consecutive clips "
+               "of one crossing, or of activity that went on past a clip's length, are shown as one event.</p><p class='kinds'>";
+        for (ClipGroup group : kGroupOrder)
+            if (counts.value(group))
+                out << "<button class='kindFilter' value='" << groupName(group) << "'>" << groupTitle(group) << " <b>"
+                    << counts.value(group) << "</b></button> ";
+        const bool anyGif = std::any_of(events.begin(), events.end(), [&](const Event& ev) {
+            return QFileInfo::exists(root.filePath(clips[static_cast<qsizetype>(ev.shown)].path + "/04_event_preview.gif"));
+        });
+        out << "</p><div class='tools'><label>Show <select id='filter'><option value=''>All events</option>"
+            << "<option value='*'>Marked for follow-up</option></select></label>";
+        if (anyGif) out << "<button id='toggleAllGifs' type='button' aria-pressed='false'>Play all GIFs</button>";
+        out << "<span id='count' aria-live='polite'></span></div>";
+        for (ClipGroup group : kGroupOrder)
+        {
+            if (!counts.value(group)) continue;
+            out << "<div class='groupBlock' id='group-" << groupName(group) << "'><h3 class='groupTitle'>" << badge(group) << " "
+                << counts.value(group) << (counts.value(group) == 1 ? " event" : " events") << "</h3><p class='hint'>"
+                << h(groupMeaning(group)) << "</p><div class='grid'>";
+            for (size_t e = 0; e < events.size(); ++e)
+                if (events[e].description.group == group) card(out, root, clips, described, events[e], static_cast<int>(e));
+            out << "</div></div>";
+        }
+        out << "<details><summary>Keep follow-up marks</summary>"
+            << "<p class='hint'>Stars are remembered in this browser. Save a copy beside the report to carry your marks with the watch.</p>"
+            << "<button id='saveMarks'>Save marks</button> <label>Load marks <input id='loadMarks' type='file' accept='.json'></label>"
+            << "<p id='markStatus' aria-live='polite'></p></details>"
+            << "<p class='hint'><b>Open SER</b> and <b>Show in folder</b> go through SeleneWatch, so the file opens in its own "
+               "program instead of being downloaded. The browser asks first. They work on the computer where SeleneWatch last ran.</p>";
+    }
     if (!j.exceptions.isEmpty())
     {
         out << "<details open><summary>Unsaved or unresolved triggers (" << j.exceptions.size() << ")</summary><ul>";
@@ -336,7 +606,8 @@ QString writeNightlyReport(const QString& folder, QString& error)
             out << "<li>" << h(r.info.value("first_frame_utc", r.name)) << " · " << h(r.info.value("started_by"))
                 << " · " << h(r.info.value("frames_written", "unknown")) << " frames · "
                 << (r.info.value("complete") == "yes" ? "complete" : "partial") << " "
-                << link(root,r.path+"/recording.ser","Raw SER") << link(root,r.path+"/recording.txt","Metadata") << "</li>";
+                << openLink(root, r.path + "/recording.ser", "open", "Open SER") << openLink(root, r.path + "/recording.ser", "show", "Show in folder")
+                << link(root, r.path + "/recording.txt", "Metadata") << "</li>";
         out << "</ul></section>";
     }
     out << "<section id='conditions'><details><summary>Observing conditions and source files</summary>";

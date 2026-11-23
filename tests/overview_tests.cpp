@@ -128,7 +128,7 @@ void OverviewTest::aFlashIsMarkedAndShownInPlace()
     request.onsetFrameIndex = 40;
     request.peakFrameIndex = 40;
     request.referenceTime = timeOf(40);
-    request.marks = {QRect(60, 40, 3, 3)};
+    request.triggers = {TriggerPoint{.time = timeOf(40), .frameIndex = 40, .peak = QPoint(61, 41), .box = QRect(60, 40, 3, 3), .pixels = 9, .sigma = 40}};
     request.caption = {"TEST: a constructed flash"};
     const ClipOverview overview = makeClipOverview(frames, request);
 
@@ -259,7 +259,7 @@ void OverviewTest::twoTriggersAreBothMarked()
     OverviewRequest request;
     request.onsetFrameIndex = 40;
     request.peakFrameIndex = 40;
-    request.marks = {QRect(20, 20, 3, 3), QRect(100, 70, 3, 3)};
+    request.triggers = {TriggerPoint{.box = QRect(20, 20, 3, 3)}, TriggerPoint{.box = QRect(100, 70, 3, 3)}};
     const ClipOverview overview = makeClipOverview(frames, request);
     QCOMPARE(overview.activeFrames, 2);
     QVERIFY(markNear(overview.image, QPoint(21 * 5, 21 * 5), 30));

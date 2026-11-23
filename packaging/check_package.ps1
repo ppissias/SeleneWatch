@@ -40,7 +40,7 @@ try {
         'docs\images\manual-output-folder.png', 'docs\images\manual-timelapse.png', 'docs\images\manual-resharpen.png',
         'docs\images\manual-site-instrument.png', 'docs\images\manual-darkening-transit.png',
         'docs\images\manual-transit-overview.png', 'docs\images\manual-sky-streak.jpg', 'docs\images\manual-sky-flash.jpg',
-        'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt',
+        'licenses\Qt-LICENSE.txt', 'licenses\Qt-third-party-notices.txt', 'licenses\QR-Code-generator-LICENSE.txt',
         'licenses\OpenCV-LICENSE.txt', 'licenses\CFITSIO-LICENSE.txt', 'licenses\FFmpeg-LICENSE.txt'
     foreach ($file in $expected) {
         if (-not (Test-Path (Join-Path $app $file))) { throw "The package lacks $file" }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -172,6 +173,33 @@ void paintLightning(Frame& frame, double amplitude)
     }
 }
 
+// The ISS's outline, in metres: u across its path (along the truss), w along it.
+bool insideIss(double u, double w)
+{
+    const double au = std::abs(u), aw = std::abs(w);
+    if (au <= 54.5 && aw <= 2.5) return true;                       // the integrated truss
+    if (au <= 2.5 && w >= -35.0 && w <= 38.0) return true;          // the pressurised modules
+    if (aw >= 4.0 && aw <= 38.0 && ((au >= 26.0 && au <= 38.0) || (au >= 40.0 && au <= 52.0)))
+        return true;                                                // eight solar-array wings
+    return au >= 10.0 && au <= 14.0 && aw <= 11.0;                  // two radiators
+}
+
+// Scales one pixel's samples by factor, in every channel.
+void scalePixel(uint8_t* pixel, PixelFormat format, int shift, double factor)
+{
+    if (format == PixelFormat::Mono16)
+    {
+        const uint32_t sample = (pixel[0] | (static_cast<uint32_t>(pixel[1]) << 8)) >> shift;
+        const uint32_t value = static_cast<uint32_t>(std::lround(sample * factor)) << shift;
+        pixel[0] = static_cast<uint8_t>(value & 0xFF);
+        pixel[1] = static_cast<uint8_t>(value >> 8);
+        return;
+    }
+    const int channels = format == PixelFormat::RGB888 ? 3 : 1;
+    for (int channel = 0; channel < channels; ++channel)
+        pixel[channel] = static_cast<uint8_t>(std::lround(pixel[channel] * factor));
+}
+
 void applyBlipStep(Frame& frame, const BlipSettings& settings, int step)
 {
     validateFrameForBlip(frame);
@@ -206,17 +234,105 @@ void applyBlipStep(Frame& frame, const BlipSettings& settings, int step)
     case BlipKind::Lightning:
         paintLightning(frame, settings.amplitude);
         break;
+    case BlipKind::IssSilhouette:
+        paintIssSilhouette(frame, cx, cy, settings.fwhm, settings.amplitude / 100.0, settings.vx, settings.vy);
+        break;
     }
 }
 
 } // namespace
+
+double issTravelPerFrame(double lengthPixels, double frameSeconds)
+{
+    constexpr double kOwnLengthSeconds = 109.0 / 7660.0;
+    return lengthPixels * frameSeconds / kOwnLengthSeconds;
+}
+
+void paintIssSilhouette(Frame& frame, double centreX, double centreY, double lengthPixels, double depth,
+    double vx, double vy)
+{
+    validateFrameForBlip(frame);
+    if (!(lengthPixels > 0) || !(depth > 0)) return;
+    depth = std::min(depth, 1.0);
+    const double speed = std::hypot(vx, vy);
+    // Along the path (m) and across it (t), the truss's direction.
+    const double mx = speed > 0 ? vx / speed : 1.0, my = speed > 0 ? vy / speed : 0.0;
+    const double tx = -my, ty = mx;
+    const double perMetre = lengthPixels / 109.0;
+    const double smear = 0.08 * speed;
+    const double seeing = std::max(0.8, lengthPixels / 50.0);
+    const double reach = 0.5 * std::hypot(109.0, 76.0) * perMetre + 0.5 * smear + 3.0 * seeing + 2.0;
+    const int left = std::max(0, static_cast<int>(std::floor(centreX - reach)));
+    const int right = std::min(frame.width - 1, static_cast<int>(std::ceil(centreX + reach)));
+    const int top = std::max(0, static_cast<int>(std::floor(centreY - reach)));
+    const int bottom = std::min(frame.height - 1, static_cast<int>(std::ceil(centreY + reach)));
+    if (left > right || top > bottom) return;
+    const int w = right - left + 1, h = bottom - top + 1;
+
+    // The share of each pixel the outline covers during the exposure: 3 x 3
+    // points in the pixel at 7 places along the smear.
+    constexpr int kSub = 3, kSteps = 7;
+    std::vector<double> cover(static_cast<size_t>(w) * h, 0.0);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            int hits = 0;
+            for (int step = 0; step < kSteps; ++step)
+            {
+                const double along = smear * (static_cast<double>(step) / (kSteps - 1) - 0.5);
+                for (int sy = 0; sy < kSub; ++sy)
+                    for (int sx = 0; sx < kSub; ++sx)
+                    {
+                        const double dx = left + x + (sx + 0.5) / kSub - 0.5 - (centreX + mx * along);
+                        const double dy = top + y + (sy + 0.5) / kSub - 0.5 - (centreY + my * along);
+                        if (insideIss((dx * tx + dy * ty) / perMetre, (dx * mx + dy * my) / perMetre)) ++hits;
+                    }
+            }
+            cover[static_cast<size_t>(y) * w + x] = static_cast<double>(hits) / (kSub * kSub * kSteps);
+        }
+
+    // Seeing: a separable Gaussian.
+    const int radius = static_cast<int>(std::ceil(3.0 * seeing));
+    std::vector<double> kernel(static_cast<size_t>(2 * radius + 1));
+    double sum = 0;
+    for (int i = -radius; i <= radius; ++i) sum += kernel[static_cast<size_t>(i + radius)] = std::exp(-0.5 * i * i / (seeing * seeing));
+    for (double& k : kernel) k /= sum;
+    std::vector<double> pass(cover.size(), 0.0);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            double value = 0;
+            for (int i = -radius; i <= radius; ++i)
+                value += kernel[static_cast<size_t>(i + radius)] * cover[static_cast<size_t>(y) * w + std::clamp(x + i, 0, w - 1)];
+            pass[static_cast<size_t>(y) * w + x] = value;
+        }
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            double value = 0;
+            for (int i = -radius; i <= radius; ++i)
+                value += kernel[static_cast<size_t>(i + radius)] * pass[static_cast<size_t>(std::clamp(y + i, 0, h - 1)) * w + x];
+            cover[static_cast<size_t>(y) * w + x] = value;
+        }
+
+    const int shift = frame.format == PixelFormat::Mono16 && frame.alignment == BitAlignment::High ? 16 - frame.significantBits : 0;
+    const size_t pixelBytes = static_cast<size_t>(bytesPerPixel(frame.format));
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            const double c = cover[static_cast<size_t>(y) * w + x];
+            if (c <= 1e-3) continue;
+            uint8_t* pixel = frame.data.data() + (static_cast<size_t>(top + y) * frame.width + left + x) * pixelBytes;
+            scalePixel(pixel, frame.format, shift, 1.0 - depth * c);
+        }
+}
 
 bool BlipInjector::request(const BlipSettings& settings)
 {
     if (settings.x < 0 || settings.y < 0 || !std::isfinite(settings.fwhm) || settings.fwhm <= 0.0
         || !std::isfinite(settings.amplitude) || settings.amplitude <= 0.0 || settings.amplitude > 65535.0
         || !std::isfinite(settings.vx) || !std::isfinite(settings.vy)
-        || settings.frames <= 0)
+        || settings.frames <= 0 || (settings.kind == BlipKind::IssSilhouette && settings.amplitude > 100.0))
     {
         return false;
     }

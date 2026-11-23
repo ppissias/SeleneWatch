@@ -474,61 +474,35 @@ void drawMark(QPainter& painter, const QRectF& patch, int number)
     }
 }
 
-// What the run of activity looked like, for the suggested kind (Feature-15).
-struct RunShape
+// The boxes marked on the picture: each patch trigger's (Feature-46).
+std::vector<QRect> marksOf(const OverviewRequest& request)
 {
-    bool any{false};
-    bool rise{true};
-    bool moved{false};
-    int frames{0};
-    double seconds{0};
-    double pixelsPerSecond{0};
-    // The centres stay near the line from the first to the last.
-    bool straight{false};
-    // The strength jumps up and down again at least twice: a strobe.
-    bool blinking{false};
-};
-
-// The kind a clip probably shows, with the reason. The thresholds are first
-// values: a meteor crosses at 3 degrees a second or more (a quarter of the
-// frame's width a second without an image scale), a satellite more slowly.
-std::pair<QString, QString> suggestKind(const RunShape& run, const OverviewRequest& request, int width, int height)
-{
-    if (request.largeBrightening)
-        return {"lightning", "a large share of the frame brightened at once: lightning, or a fireball's flare"};
-    if (request.marks.size() >= 8)
-    {
-        int left = width, top = height, right = 0, bottom = 0;
-        for (const QRect& mark : request.marks)
-        {
-            left = std::min(left, mark.center().x()); right = std::max(right, mark.center().x());
-            top = std::min(top, mark.center().y()); bottom = std::max(bottom, mark.center().y());
-        }
-        if (right - left >= width / 4 && bottom - top >= height / 4)
-            return {"seeing", QString("%1 triggers scattered over the frame").arg(request.marks.size())};
-    }
-    if (!run.any) return {"unclear", "no activity was found"};
-    const double degrees = request.arcsecPerPixel ? run.pixelsPerSecond * *request.arcsecPerPixel / 3600 : 0;
-    const double widths = run.pixelsPerSecond / width;
-    const QString speed = request.arcsecPerPixel ? QString("%1°/s").arg(degrees, 0, 'f', 2)
-                                                 : QString("%1 frame widths/s").arg(widths, 0, 'f', 2);
-    const QString time = QString("%1 s").arg(run.seconds, 0, 'f', run.seconds < 1 ? 3 : 1);
-    if (!run.moved)
-    {
-        if (run.rise && run.seconds <= 0.2)
-            return {"flash", QString("a rise in place, %1 %2 over %3").arg(run.frames).arg(run.frames == 1 ? "frame" : "frames", time)};
-        return {"unclear", QString("a %1 in place for %2").arg(run.rise ? "rise" : "fall", time)};
-    }
-    if (!run.rise) return {"dark transit", QString("a fall moving %1 for %2").arg(speed, time)};
-    const bool fast = request.arcsecPerPixel ? degrees >= 3 : widths >= 0.25;
-    if (fast && run.straight && run.seconds <= 3) return {"meteor", QString("a straight, fast rise at %1 for %2").arg(speed, time)};
-    if (run.blinking) return {"aircraft", QString("a blinking light moving %1 for %2").arg(speed, time)};
-    if (!fast && run.straight && run.seconds >= 2)
-        return {"satellite", QString("a steady light moving straight at %1 for %2").arg(speed, time)};
-    return {"unclear", QString("a rise moving %1 for %2").arg(speed, time)};
+    std::vector<QRect> marks;
+    for (const TriggerPoint& trigger : request.triggers)
+        if ((trigger.change == TriggerPoint::Change::Rise || trigger.change == TriggerPoint::Change::Fall) && trigger.box.isValid())
+            marks.push_back(trigger.box);
+    return marks;
 }
 
 } // namespace
+
+OverviewLayout overviewLayout(int width, int height)
+{
+    int viewWidth = width, viewHeight = height;
+    if (width > kMaxMainWidth)
+    {
+        viewWidth = kMaxMainWidth;
+        viewHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(height) * kMaxMainWidth / width)));
+    }
+    else if (width < kMinMainWidth)
+    {
+        const int factor = (kMinMainWidth + width - 1) / width;
+        viewWidth = width * factor;
+        viewHeight = height * factor;
+    }
+    const int cellSide = (viewWidth - (kStripSlots + 1) * kGap) / kStripSlots;
+    return {QSize(viewWidth, viewHeight), QRect(0, viewHeight + kGap, viewWidth, cellSide)};
+}
 
 ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const OverviewRequest& request, MemoryBudget budget)
 {
@@ -540,6 +514,7 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
     const int width = first.width, height = first.height;
     const int shift = shiftOf(first);
     const double k = request.sigma;
+    const std::vector<QRect> marks = marksOf(request);
     ClipOverview result;
 
     // What changed anywhere in the clip.
@@ -583,7 +558,7 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
         double extent = 0;
         for (size_t p : run) extent = std::max(extent, 4 * activity.frames[p].spread + 16);
         const FrameActivity& centreFrame = activity.frames[mainInRun ? main : firstActive];
-        for (const QRect& mark : request.marks)
+        for (const QRect& mark : marks)
             if (std::abs(mark.center().x() - centreFrame.centreX) <= kWindowRadius
                 && std::abs(mark.center().y() - centreFrame.centreY) <= kWindowRadius)
                 extent = std::max(extent, static_cast<double>(std::max(mark.width(), mark.height()) + 16));
@@ -610,7 +585,7 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
         double strongest = 0;
         for (size_t p : run)
             if (std::abs(activity.frames[p].peak) > std::abs(strongest)) strongest = activity.frames[p].peak;
-        result.activity = QString("Activity at K %1: %2 %3%4, strongest %5 %6 σ")
+        result.activity = QString("Around the peak at K %1: %2 %3%4, strongest %5 %6 σ")
             .arg(k, 0, 'g', 4).arg(runFrames).arg(runFrames == 1 ? "frame" : "frames")
             .arg(runFrames > 1 ? QString(" over %1 s").arg(duration, 0, 'f', 3) : QString())
             .arg(strongest >= 0 ? "rise" : "fall").arg(std::abs(strongest), 0, 'f', 1);
@@ -631,72 +606,32 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
         }
         else if (!apart) result.activity += "; in place";
 
-        // The shape of the run, for the suggested kind.
-        RunShape shape;
-        shape.any = true;
-        shape.rise = strongest >= 0;
-        shape.moved = apart && runFrames >= 3 && duration > 0;
-        shape.frames = runFrames;
-        shape.seconds = duration;
-        shape.pixelsPerSecond = result.speed;
-        const double length = std::hypot(dx, dy);
-        double furthest = 0;
-        for (size_t p : run)
-        {
-            const auto& f = activity.frames[p];
-            if (length > 0)
-                furthest = std::max(furthest, std::abs((f.centreX - start.centreX) * dy - (f.centreY - start.centreY) * dx) / length);
-        }
-        shape.straight = length > 0 && furthest <= std::max(3.0, 0.05 * length);
-        std::vector<double> strengths;
-        for (size_t p : run) strengths.push_back(std::abs(activity.frames[p].peak));
-        std::vector<double> sorted = strengths;
-        std::nth_element(sorted.begin(), sorted.begin() + static_cast<ptrdiff_t>(sorted.size() / 2), sorted.end());
-        const double typical = sorted[sorted.size() / 2];
-        int bursts = 0;
-        bool high = false;
-        for (double strength : strengths)
-        {
-            const bool now = strength >= 2.5 * typical;
-            if (now && !high) ++bursts;
-            high = now;
-        }
-        shape.blinking = bursts >= 2 && duration >= 1.5;
-        std::tie(result.suggestedKind, result.kindReason) = suggestKind(shape, request, width, height);
+        // The run, for the clip's group (Feature-46).
+        result.run = ActivityRun{runFrames, duration, apart && runFrames >= 3 && duration > 0 ? std::hypot(dx, dy) : 0.0};
     }
     else
     {
         result.activity = QString("No activity at K %1 after the first %2 s, which the overview uses to learn.")
             .arg(k, 0, 'g', 4).arg(activity.learnedSeconds, 0, 'f', 1);
-        std::tie(result.suggestedKind, result.kindReason) = suggestKind(RunShape{}, request, width, height);
     }
+    result.description = describeClip(request.triggers, result.run, request.arcsecPerPixel);
 
     // Layout: the main view, the strip, the caption.
-    int viewWidth = width, viewHeight = height;
-    if (width > kMaxMainWidth)
-    {
-        viewWidth = kMaxMainWidth;
-        viewHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(height) * kMaxMainWidth / width)));
-    }
-    else if (width < kMinMainWidth)
-    {
-        const int factor = (kMinMainWidth + width - 1) / width;
-        viewWidth = width * factor;
-        viewHeight = height * factor;
-    }
+    const OverviewLayout layout = overviewLayout(width, height);
+    const int viewWidth = layout.view.width(), viewHeight = layout.view.height();
     const double scaleX = static_cast<double>(viewWidth) / width, scaleY = static_cast<double>(viewHeight) / height;
-    const int cellSide = (viewWidth - (kStripSlots + 1) * kGap) / kStripSlots;
+    const int cellSide = layout.crops.height();
     QFont labelFont;
     labelFont.setPixelSize(12);
     QFont captionFont;
     captionFont.setPixelSize(14);
     const int labelLine = QFontMetrics(labelFont).height();
     const int captionLine = QFontMetrics(captionFont).height() + 3;
-    const int stripTop = viewHeight + kGap;
+    const int stripTop = layout.crops.top();
     const int stripHeight = cells.empty() ? 0 : cellSide + 2 * labelLine + 2 * kGap;
     QStringList caption = request.caption;
     caption << result.activity;
-    caption << QString("Suggested: %1 — %2").arg(result.suggestedKind, result.kindReason);
+    caption << QString("%1: %2").arg(groupTitle(result.description.group), result.description.facts);
     const int captionTop = stripTop + stripHeight;
     const int pictureHeight = captionTop + static_cast<int>(caption.size()) * captionLine + kGap;
 
@@ -753,12 +688,12 @@ ClipOverview makeClipOverview(const std::vector<FramePtr>& frames, const Overvie
         painter.fillPath(path, QBrush(QColor(200, 60, 60, 150), Qt::BDiagPattern));
     }
     painter.setRenderHint(QPainter::Antialiasing);
-    for (size_t m = 0; m < request.marks.size(); ++m)
+    for (size_t m = 0; m < marks.size(); ++m)
     {
-        const QRect& mark = request.marks[m];
+        const QRect& mark = marks[m];
         painter.setFont(labelFont);
         drawMark(painter, QRectF(mark.x() * scaleX, mark.y() * scaleY, mark.width() * scaleX, mark.height() * scaleY),
-            request.marks.size() > 1 ? static_cast<int>(m) + 1 : 0);
+            marks.size() > 1 ? static_cast<int>(m) + 1 : 0);
     }
     painter.setRenderHint(QPainter::Antialiasing, false);
 

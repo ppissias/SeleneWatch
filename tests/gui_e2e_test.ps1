@@ -534,8 +534,8 @@ try {
         Wait-Until { Test-Path (Join-Path $d.FullName "04_event_preview.gif") } "Sky preview GIF written" -TimeoutMs 10000
         $evTxt = Get-Content (Join-Path $d.FullName "event.txt") -Raw
         Assert-True ($evTxt -match "mode: sky") "Sky clip missing mode: sky"
-        if ($evTxt -match "moving_streak|suggested_kind: meteor") { $sawSkyMeteor = $true }
-        if ($evTxt -match "kind=brightening|suggested_kind: lightning") { $sawSkyLightning = $true }
+        if ($evTxt -match "moving_streak|group: moving") { $sawSkyMeteor = $true }
+        if ($evTxt -match "kind=brightening|group: wide") { $sawSkyLightning = $true }
     }
     Assert-True $sawSkyMeteor "Expected Sky meteor clip in events\sky"
     Assert-True $sawSkyLightning "Expected Sky lightning clip in events\sky"
