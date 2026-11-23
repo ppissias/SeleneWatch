@@ -113,4 +113,77 @@ The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested,
 | [Third-party licenses](THIRD_PARTY_LICENSES.md) | Everyone | The libraries SeleneWatch uses and their licenses |
 | [Acknowledgements](ACKNOWLEDGEMENTS.md) | Everyone | References, libraries and tools |
 
+---
+
+## Acknowledgements
+
+### Software & Utilities
+
+#### Open Source Software & Libraries
+
+SeleneWatch is built with the following open-source libraries and components (license details in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)):
+
+- **Qt 6** by The Qt Company and contributors ([qt.io](https://www.qt.io)) — desktop interface, images, networking and threads, dynamically linked under the GNU LGPL v3.
+- **OpenCV** by the OpenCV team ([opencv.org](https://opencv.org)) — edge-aware debayering, phase-correlation burst alignment, rigid Euclidean/ECC lunar alignment, Lanczos resampling, bilateral pre-denoise and linear unsharp masking, under the Apache License 2.0.
+- **CFITSIO** by NASA/GSFC HEASARC ([heasarc.gsfc.nasa.gov/fitsio](https://heasarc.gsfc.nasa.gov/fitsio/)) — reading and writing linear 32-bit floating-point FITS stacks with astronomy metadata headers.
+- **FFmpeg** by the FFmpeg developers ([ffmpeg.org](https://ffmpeg.org)) — external LGPLv3 shared build (`win64-lgpl-shared`, with `libopenh264`) for encoding MP4, palette-optimized GIF time-lapses and compact event clip previews.
+- **QR Code generator library** by Project Nayuki ([nayuki.io](https://www.nayuki.io/page/qr-code-generator-library)) — generates the QR code for **Session → Status on your phone**, under the MIT License.
+
+#### Camera & Mount Software
+
+- Camera SDKs for **ZWO**, **QHYCCD**, **Player One** and **ToupTek** cameras, and the **[ASCOM Platform](https://ascom-standards.org/)** for mount guiding. SeleneWatch ships ZWO's library; the others are installed separately by the observer.
+
+#### Development & Packaging
+
+[CMake](https://cmake.org/) and [Ninja](https://ninja-build.org/) build the application; **Qt Test** and **CTest** run the automated suites; CPack and [WiX Toolset 3](https://wixtoolset.org/) create the Windows `.msi` installer and `.zip` archive.
+
+#### AI Coding Assistants
+
+The development of SeleneWatch has been supported by these AI coding assistants:
+
+- <img src="docs/images/logos/claude.png" alt="Claude logo" width="20" height="20" /> **Claude** by Anthropic ([Claude](https://www.anthropic.com/claude))
+- <img src="docs/images/logos/openai.png" alt="OpenAI logo" width="20" height="20" /> **Codex** by OpenAI ([Codex](https://openai.com/codex/))
+- <img src="docs/images/logos/gemini.png" alt="Gemini logo" width="20" height="20" /> **Gemini** by Google ([Gemini](https://gemini.google.com/))
+- <img src="docs/images/logos/grok.png" alt="Grok logo" width="72" height="20" /> **Grok** by xAI ([Grok](https://x.ai/grok))
+
+Logos are trademarks of their respective owners.
+
+### Scientific References & Algorithms
+
+References for methods, standards and interfaces implemented in SeleneWatch. Each entry identifies its contribution; related literature is omitted unless it supplies an additional method used here. The same credits are also available in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) and inside the application via **Help → Acknowledgements**.
+
+#### Detecting changes in the image
+
+- **Wren, Azarbayejani, Darrell & Pentland (1997)** — *Pfinder: Real-Time Tracking of the Human Body*, [IEEE TPAMI 19(7), 780–785](https://doi.org/10.1109/34.598236). Per-pixel running Gaussian background model in `FlashDetector` and `clip_overview`, with an exponential time constant in seconds and firing-pixel hold-out.
+- **Hampel (1974)** — *The Influence Curve and Its Role in Robust Estimation*, [JASA 69(346), 383–393](https://doi.org/10.1080/01621459.1974.10482962). Robust MAD × 1.4826 scale estimator for the noise floor in `FlashDetector`, structured-scene pixel noise in `FeatureLock`, and residual scale in time-lapse brightness levelling (`stack_processor`).
+- **Welford (1962)** — *Note on a Method for Calculating Corrected Sums of Squares and Products*, [Technometrics 4(3), 419–420](https://doi.org/10.1080/00401706.1962.10490022). One-pass running mean and variance in `FrameTimingMeter` and `auto_tune`.
+
+#### Keeping the field (feature lock & guiding)
+
+- **Lewis (1995)** — *Fast Normalized Cross-Correlation*, Vision Interface 1995 ([author's expanded version](https://www.scribblethink.org/Work/nvisionInterface/nip.html)). Direct zero-mean normalised cross-correlation with parabolic sub-pixel peak fitting in `FeatureLock`.
+- **Immerkær (1996)** — *Fast Noise Variance Estimation*, [CVIU 64(2), 300–302](https://doi.org/10.1006/cviu.1996.0060). The 3×3 second-difference operator (factor 6), paired with Hampel's MAD × 1.4826 scale, in `FeatureLock::pixelNoise`.
+
+#### Time-lapse alignment, stacking & sharpening
+
+- **Kuglin & Hines (1975)** — *The Phase Correlation Image Alignment Method*, Proc. IEEE Int. Conf. on Cybernetics and Society, 163–165. Sub-pixel translation estimation via OpenCV `cv::phaseCorrelate` with a Hann window (`stack_processor`).
+- **Evangelidis & Psarakis (2008)** — *Parametric Image Alignment Using Enhanced Correlation Coefficient Maximization*, [IEEE TPAMI 30(10), 1858–1865](https://doi.org/10.1109/TPAMI.2008.113). Multi-scale rigid Euclidean (translation + field rotation) lunar stack alignment anchored on a chosen sunlit region via OpenCV `cv::findTransformECC` (`stack_processor`).
+- **Duchon (1979)** — *Lanczos Filtering in One and Two Dimensions*, [J. Appl. Meteorol. 18(8), 1016–1022](https://doi.org/10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2). Lanczos-4 sub-pixel resampling (`cv::INTER_LANCZOS4`) when warping burst frames and aligned session stacks.
+- **Tomasi & Manduchi (1998)** — *Bilateral Filtering for Gray and Color Images*, [Proc. 6th IEEE ICCV, 839–846](https://doi.org/10.1109/ICCV.1998.710815). Optional edge-preserving pre-denoise via OpenCV `cv::bilateralFilter` before linear unsharp masking.
+- **Huber (1964)** — *Robust Estimation of a Location Parameter*, [Ann. Math. Statist. 35(1), 73–101](https://doi.org/10.1214/aoms/1177703732). Huber-reweighted IRLS for affine brightness levelling between aligned time-lapse stacks.
+
+#### Sun and Moon positions
+
+- **Meeus (1998)** — [*Astronomical Algorithms*, 2nd ed.](https://shopatsky.com/products/astronomical-algorithms-2nd-edition), Willmann-Bell. Through NOAA's Solar Calculator ([calculation details](https://gml.noaa.gov/grad/solcalc/calcdetails.html)) for `sunAltitudeDegrees`, and the Greenwich Mean Sidereal Time expression in `moonAltitudeDegrees`.
+- **The Astronomical Almanac** (USNO / HMNAO), *Low-Precision Formulae for Geocentric Coordinates of the Moon* — adapted from **Van Flandern & Pulkkinen (1979)**, [ApJS 41, 391–411](https://doi.org/10.1086/190623). Geocentric lunar series with topocentric parallax correction in `moonAltitudeDegrees`.
+- **Reda & Andreas (2004)** — [Solar Energy 76(5), 577–589](https://doi.org/10.1016/j.solener.2003.12.003), and **NASA JPL Horizons** ([ssd.jpl.nasa.gov/horizons](https://ssd.jpl.nasa.gov/horizons/)). Published reference values used only in the automated altitude tests (neither algorithm/service is invoked at run time).
+
+#### Formats, protocols & interfaces
+
+- **FITS 3.0** — Pence et al. (2010), [A&A 524, A42](https://doi.org/10.1051/0004-6361/201015362) (`fits_io`, via CFITSIO).
+- **SER v3** — Heiko Wilkens & Grischa Hahn ([specification](https://www.grischa-hahn.homepage.t-online.de/astro/ser/SER%20Doc%20V3b.pdf)) (`SerReader` / `SerWriter`).
+- **NTPv4** — Mills et al. (2010), [RFC 5905](https://datatracker.ietf.org/doc/html/rfc5905) (`clock_check`).
+- **ASCOM Telescope interface** ([ascom-standards.org](https://ascom-standards.org/)) (`ascom_mount`) and **FireCapture** `.txt` capture logs by Torsten Edelmann ([firecapture.de](https://www.firecapture.de/)) (`firecapture_log`).
+
+---
+
 SeleneWatch is free software under the BSD 2-Clause license. It is written in C++ with Qt 6 and is at an early stage: observing reports and suggestions are welcome.

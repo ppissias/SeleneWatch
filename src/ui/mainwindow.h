@@ -48,6 +48,8 @@ class TimelapsePanel;
 class ResharpenDialog;
 class ManualDialog;
 class TipsDialog;
+class AcknowledgementsDialog;
+class AboutDialog;
 class ReleaseChecker;
 class SimulatedPointing;
 class CameraFamilyPanel;
@@ -113,6 +115,7 @@ private:
     QWidget* reportOffer_{nullptr};
     void setupHelpMenu();
     void showAcknowledgements();
+    void showAbout();
     void onSiteAndInstrument();
     void onCameraSupport();
     void onScheduleRecording();
@@ -519,6 +522,8 @@ private:
 
     ManualDialog* manualDialog_{nullptr};
     TipsDialog* tipsDialog_{nullptr};
+    AcknowledgementsDialog* acknowledgementsDialog_{nullptr};
+    AboutDialog* aboutDialog_{nullptr};
     WheelGuard* wheelGuard_{nullptr};
     QToolButton* zoomFitButton_{nullptr};
     QToolButton* zoom100Button_{nullptr};

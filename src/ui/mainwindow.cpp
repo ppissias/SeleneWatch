@@ -12,6 +12,7 @@
 #include "ui/resharpen_dialog.h"
 #include "ui/manual_dialog.h"
 #include "ui/tips_dialog.h"
+#include "ui/acknowledgements_dialog.h"
 #include "ui/release_checker.h"
 #include "ui/widgets/wheel_guard.h"
 #include "ui/cameras/camera_panel.h"
@@ -1673,9 +1674,7 @@ void MainWindow::setupHelpMenu()
     menu->addSeparator();
     auto* about = menu->addAction("About SeleneWatch");
     about->setObjectName("aboutAction");
-    connect(about, &QAction::triggered, this, [this] {
-        QMessageBox::about(this, "About SeleneWatch", aboutText());
-    });
+    connect(about, &QAction::triggered, this, &MainWindow::showAbout);
     auto* aboutQt = menu->addAction("About Qt");
     aboutQt->setObjectName("aboutQtAction");
     connect(aboutQt, &QAction::triggered, this, [this] { QMessageBox::aboutQt(this); });
@@ -1716,19 +1715,23 @@ QString MainWindow::acknowledgementsMarkdown()
 
 void MainWindow::showAcknowledgements()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle("Acknowledgements");
-    dialog.resize(760, 640);
-    auto* layout = new QVBoxLayout(&dialog);
-    auto* text = new QTextBrowser(&dialog);
-    text->setObjectName("acknowledgementsText");
-    text->setOpenExternalLinks(true);
-    text->setMarkdown(acknowledgementsMarkdown());
-    layout->addWidget(text);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addWidget(buttons);
-    dialog.exec();
+    if (!acknowledgementsDialog_) acknowledgementsDialog_ = new AcknowledgementsDialog(this);
+    acknowledgementsDialog_->show();
+    acknowledgementsDialog_->raise();
+    acknowledgementsDialog_->activateWindow();
+}
+
+void MainWindow::showAbout()
+{
+    if (!aboutDialog_)
+    {
+        aboutDialog_ = new AboutDialog(this, SELENEWATCH_RELEASE, SELENEWATCH_REVISION,
+            [this] { showAcknowledgements(); },
+            [this] { QMessageBox::aboutQt(this); });
+    }
+    aboutDialog_->show();
+    aboutDialog_->raise();
+    aboutDialog_->activateWindow();
 }
 
 QString MainWindow::aboutText()

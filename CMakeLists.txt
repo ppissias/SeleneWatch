@@ -223,6 +223,7 @@ add_library(selenewatch_ui STATIC
     src/ui/startup_tips.h src/ui/startup_tips.cpp src/ui/tips_dialog.h src/ui/tips_dialog.cpp
     src/ui/release_checker.h src/ui/release_checker.cpp
     src/ui/remote_status_dialog.h src/ui/remote_status_dialog.cpp src/ui/mainwindow_remote.cpp
+    src/ui/acknowledgements_dialog.h src/ui/acknowledgements_dialog.cpp
     src/ui/widgets/elided_label.h src/ui/widgets/elided_label.cpp src/ui/widgets/flow_layout.h src/ui/widgets/flow_layout.cpp
     src/ui/widgets/control_help.h src/ui/widgets/control_help.cpp src/ui/widgets/readout_label.h src/ui/widgets/readout_label.cpp
     src/ui/widgets/theme.h src/ui/widgets/theme.cpp
@@ -236,8 +237,17 @@ add_library(selenewatch_ui STATIC
     src/ui/cameras/touptek_camera_panel.h src/ui/cameras/touptek_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-# Help → Acknowledgements shows the same file that the repository holds.
-qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES ACKNOWLEDGEMENTS.md)
+# Help → Acknowledgements and Help → About embed the repository's credits, license and logos.
+qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES
+    ACKNOWLEDGEMENTS.md
+    LICENSE
+    docs/images/logos/claude.png
+    docs/images/logos/openai.png
+    docs/images/logos/gemini.png
+    docs/images/logos/grok.png)
+qt_add_resources(selenewatch_ui "icons" PREFIX "/" FILES
+    icons/selenewatch-16.png icons/selenewatch-32.png
+    icons/selenewatch-48.png icons/selenewatch-256.png)
 target_link_libraries(selenewatch_ui PUBLIC selenewatch_core selenewatch_remote Qt6::Widgets)
 target_link_libraries(selenewatch_ui PRIVATE Qt6::Network)
 add_dependencies(selenewatch_ui selenewatch_version)
@@ -250,9 +260,6 @@ if(WIN32)
     target_include_directories(SeleneWatch PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
     add_dependencies(SeleneWatch selenewatch_version)
 endif()
-qt_add_resources(SeleneWatch "icons" PREFIX "/" FILES
-    icons/selenewatch-16.png icons/selenewatch-32.png
-    icons/selenewatch-48.png icons/selenewatch-256.png)
 set_target_properties(SeleneWatch PROPERTIES WIN32_EXECUTABLE TRUE)
 target_link_libraries(SeleneWatch PRIVATE selenewatch_ui)
 selenewatch_compile_options(SeleneWatch)
