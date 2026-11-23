@@ -26,6 +26,17 @@ const char* sharpeningPresetName(SharpeningPreset preset)
     return "mild";
 }
 
+const char* brightnessLevellingModeName(BrightnessLevellingMode mode)
+{
+    switch (mode)
+    {
+    case BrightnessLevellingMode::Off: return "off";
+    case BrightnessLevellingMode::Global: return "global";
+    case BrightnessLevellingMode::GlobalAndPatchy: return "patchy";
+    }
+    return "global";
+}
+
 bool SharpeningSettings::valid() const
 {
     return std::isfinite(radius) && radius >= 0.3 && radius <= 20.0
@@ -145,7 +156,8 @@ QJsonObject toJson(const VideoToneSettings& v)
     obj["blackLevel"] = v.blackLevel;
     obj["whiteLevel"] = v.whiteLevel;
     obj["gamma"] = v.gamma;
-    obj["brightnessLevelling"] = v.brightnessLevelling;
+    obj["brightnessLevelling"] = (v.brightnessMode != BrightnessLevellingMode::Off);
+    obj["brightnessMode"] = brightnessLevellingModeName(v.brightnessMode);
     obj["minQualityRatio"] = v.minQualityRatio;
     obj["cropToOverlap"] = v.cropToOverlap;
     obj["fps"] = v.fps;
@@ -177,7 +189,19 @@ VideoToneSettings videoFromJson(const QJsonObject& obj)
     v.blackLevel = obj["blackLevel"].toDouble(v.blackLevel);
     v.whiteLevel = obj["whiteLevel"].toDouble(v.whiteLevel);
     v.gamma = obj["gamma"].toDouble(v.gamma);
-    v.brightnessLevelling = obj["brightnessLevelling"].toBool(v.brightnessLevelling);
+    if (obj.contains("brightnessMode") && obj["brightnessMode"].isString())
+    {
+        const QString mode = obj["brightnessMode"].toString();
+        if (mode == "off") v.brightnessMode = BrightnessLevellingMode::Off;
+        else if (mode == "patchy") v.brightnessMode = BrightnessLevellingMode::GlobalAndPatchy;
+        else v.brightnessMode = BrightnessLevellingMode::Global;
+    }
+    else
+    {
+        v.brightnessMode = obj["brightnessLevelling"].toBool(true)
+            ? BrightnessLevellingMode::Global
+            : BrightnessLevellingMode::Off;
+    }
     v.minQualityRatio = obj["minQualityRatio"].toDouble(v.minQualityRatio);
     v.cropToOverlap = obj["cropToOverlap"].toBool(v.cropToOverlap);
     v.fps = obj["fps"].toInt(v.fps);

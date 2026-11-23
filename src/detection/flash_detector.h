@@ -24,9 +24,12 @@
 // release limit is learned like the background.
 //
 // Feature-13 adds the same tests with the sign reversed, off by default:
-// dark patches with their own size limits, and a large darkening. Rising
-// and falling patches are searched and followed apart. The clip's peak
-// preview stays the strongest rising patch.
+// dark patches with their own size limits, and a large darkening. Since
+// Feature-45 a detector looks for one direction only: with darkening (the
+// shadows' watch) it tests falls and nothing that rises, and every
+// measurement it reports, the history and the sigma map are of falls. The
+// clip's peak preview stays the strongest rising patch, so a darkening
+// leaves it empty.
 class FlashDetector
 {
 public:
@@ -86,12 +89,8 @@ private:
         uint64_t onset{0};
         double seconds{0};
     };
-    LargeChange brightening_, darkening_;
+    LargeChange largeChange_;
     bool holdAll_{false};
-    // Feature-13: the dark side's threshold pixels and its active patches,
-    // kept apart from the rising ones so the two are never merged.
-    BudgetVector<size_t> darkPixels_;
-    BudgetVector<float> darkSigma_;
     // Carries a passing patch across frames for spatial matching and confirmation.
     struct Patch
     {
@@ -100,7 +99,6 @@ private:
         double seconds{0};
     };
     std::vector<Patch> active_;
-    std::vector<Patch> activeDark_;
     std::vector<DetectionSummary> candidates_;
     size_t learnedFrames_{0};
     std::deque<DetectionHistoryPoint> history_;

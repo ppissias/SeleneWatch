@@ -50,11 +50,11 @@ const std::vector<StartupTip>& allStartupTips()
             kSectionDisplay
         },
         {
-            "Zoom, pan & wheel protection",
+            "Zoom, pan, Focus view & Night theme",
             "Use the <b>View: Fit / 100% / 200%</b> bar above the preview&mdash;or roll the <b>mouse wheel</b> over "
-            "the live image&mdash;to zoom smoothly around the cursor pixel, and <b>right-drag</b> or "
-            "<b>middle-drag</b> to pan while zoomed. Spin boxes and sliders ignore stray wheel scrolls so your "
-            "settings never drift accidentally while scrolling a panel.",
+            "the live image&mdash;to zoom around the cursor and <b>drag</b> to pan. Press <b>Focus view</b> "
+            "(<code>F11</code>) to hide all side panels for a full-window live view, and switch between <b>Dark</b>, "
+            "<b>Red night vision</b>, and <b>System</b> under <b>View &rarr; Theme</b>.",
             kSectionDisplay
         },
         {
@@ -147,9 +147,9 @@ const std::vector<StartupTip>& allStartupTips()
         {
             "Catching dark transits across the Moon",
             "Choose <b>Watching: The Moon: shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
-            "or the ISS crossing the sunlit Moon. Its settings are its own and start insensitive to seeing "
-            "(<code>K 12</code>, 20-pixel shadows over two frames), so silhouettes trigger <code>dark transit</code> clips "
-            "while bright terrain stays quiet.",
+            "or the ISS crossing the sunlit Moon. It looks only for darkening, and its settings are its own and start "
+            "insensitive to seeing (<code>K 12</code>, 20-pixel shadows over two frames), so silhouettes trigger "
+            "<code>dark transit</code> clips while bright terrain stays quiet.",
             kSectionTransits
         },
         {
@@ -230,9 +230,10 @@ const std::vector<StartupTip>& allStartupTips()
         },
         {
             "Non-destructive re-sharpening",
-            "After any time-lapse, open <b>Session &rarr; Re-sharpen time-lapse&hellip;</b> to drag live sharpening "
-            "and tone-mapping sliders (<b>Before</b> vs <b>After</b>), save profiles, or run "
-            "<b>Rebuild video only</b> without altering your unsharpened <code>stacks/</code> FITS files.",
+            "After any time-lapse, open <b>Session &rarr; Re-sharpen time-lapse&hellip;</b> to zoom in and pan "
+            "synchronized full-resolution <b>Before</b> and <b>After</b> views while dragging live sharpening and "
+            "tone-mapping sliders, save profiles, or run <b>Rebuild video only</b> without altering your unsharpened "
+            "<code>stacks/</code> FITS files.",
             kSectionTimelapse
         },
         {

@@ -60,8 +60,8 @@ void MainWindow::setupAutoTune()
         autoTuneWindow_->restoreGeometry(geometry);
     connect(autoTuneWindow_, &QDialog::finished, this, [this] {
         QSettings().setValue("autotune/geometry", autoTuneWindow_->saveGeometry());
-        drawingEarthshineBox_ = false;
-        autoTunePanel_->setDrawingBox(false);
+        if (drawingEarthshineBox_) chooseDrawing(Drawing::None);
+        else autoTunePanel_->setDrawingBox(false);
         updateEarthshineArea();
     });
     tuneReadbackTimer_ = new QTimer(this);
@@ -90,10 +90,16 @@ void MainWindow::setupAutoTune()
         updateAutoTune();
     });
     connect(autoTunePanel_, &AutoTunePanel::drawBoxToggled, this, [this](bool on) {
-        drawingEarthshineBox_ = on;
-        if (!on) return;
-        chooseDrawing(Drawing::EarthshineBox);
-        showMessage("Drag a box on the preview over the earthshine.", 6000);
+        if (on)
+        {
+            drawingEarthshineBox_ = true;
+            chooseDrawing(Drawing::EarthshineBox);
+            showMessage("Drag a box on the preview over the earthshine.", 6000);
+        }
+        else if (drawingEarthshineBox_)
+        {
+            chooseDrawing(Drawing::None);
+        }
     });
     connect(autoTunePanel_, &AutoTunePanel::boxOnlyToggled, this, [this] {
         stopCameraTune("The measured area changed: tuning stopped.");
@@ -208,7 +214,7 @@ void MainWindow::setEarthshineBox(QRect box)
 {
     earthshineBox_ = box;
     QSettings().setValue("autotune/earthshineBox", box);
-    drawingEarthshineBox_ = false;
+    if (drawingEarthshineBox_) chooseDrawing(Drawing::None);
     if (autoTunePanel_)
     {
         stopCameraTune("The earthshine box changed: tuning stopped.");

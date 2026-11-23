@@ -25,16 +25,16 @@ struct DetectionSettings
     double releaseSeconds{0};
     DetectionMask mask;
 
-    // Feature-13, off in both modes until it is measured on recordings. A
-    // pixel that falls by at least K times its noise is dark. Dark pixels
-    // form their own patches, never merged with rising ones, with their own
-    // size and shape limits: a plane or the ISS against the sunlit Moon is
-    // far larger than a flash. Minimum patch and persistence are shared.
+    // Feature-13 and Feature-45: the detector looks for pixels that fall by
+    // at least K times their noise, and for nothing that rises. On only in
+    // the shadows' watch. Dark patches have their own size and shape limits:
+    // a plane or the ISS against the sunlit Moon is far larger than a flash.
+    // Minimum patch and persistence are shared.
     bool darkening{false};
     int maxDarkPixels{20000};
     double maxDarkBoxRatio{10.0};
-    // A frame where at least this share of the unmasked pixels falls by K
-    // at once fires as a large darkening. Zero is off.
+    // With darkening, a frame where at least this share of the unmasked
+    // pixels falls by K at once fires as a large darkening. Zero is off.
     double darkeningShare{0};
 
     // Feature-31, for flashes on the earthlit side: pixels whose learned
@@ -43,9 +43,14 @@ struct DetectionSettings
     // and seeing on sunlit terrain only makes false triggers. Zero is off.
     double ignoreAboveShare{0};
 
+    // Feature-45: the patch limits of the change the detector looks for, the
+    // dark ones with darkening.
+    [[nodiscard]] int patchMaxPixels() const { return darkening ? maxDarkPixels : maxPixels; }
+    [[nodiscard]] double patchMaxBoxRatio() const { return darkening ? maxDarkBoxRatio : maxPatchBoxRatio; }
+
     [[nodiscard]] bool valid() const
     {
-        return std::isfinite(sigma) && sigma > 0 && minPixels >= 1 && maxPixels >= minPixels
+        return std::isfinite(sigma) && sigma > 0 && minPixels >= 1 && maxPixels >= 1 && patchMaxPixels() >= minPixels
             && std::isfinite(maxPatchBoxRatio) && maxPatchBoxRatio >= 1.0
             && std::isfinite(referenceTimeConstantSeconds) && referenceTimeConstantSeconds > 0
             && std::isfinite(minNoiseAdu) && minNoiseAdu > 0 && minNoiseAdu <= 65535.0

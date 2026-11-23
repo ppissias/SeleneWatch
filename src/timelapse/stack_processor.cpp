@@ -516,7 +516,10 @@ RawBurstFrame captureRawBurstFrame(const Frame& raw,
     cv::Laplacian(smoothed, lap, CV_32F, 3);
     cv::Mat lapSq = lap.mul(lap);
     const double rawSharpness = cv::mean(lapSq, fgMask)[0];
-    out.sharpness = rawSharpness / (targetBrightness * targetBrightness + 1e-5);
+    // Regularize the denominator against sensor/quantization noise so thick-cloud
+    // frames with tiny targetBrightness cannot outscore sharp clear frames.
+    constexpr double kSharpnessBrightnessFloorSq = 0.004;
+    out.sharpness = rawSharpness / (targetBrightness * targetBrightness + kSharpnessBrightnessFloorSq);
     out.targetBrightness = targetBrightness;
     return out;
 }
@@ -618,7 +621,8 @@ PreparedBurstFrame prepareBurstFrame(const Frame& raw,
     cv::Laplacian(smoothed, lap, CV_32F, 3);
     cv::Mat lapSq = lap.mul(lap);
     const double rawSharpness = cv::mean(lapSq, fgMask)[0];
-    const double normSharpness = rawSharpness / (targetBrightness * targetBrightness + 1e-5);
+    constexpr double kSharpnessBrightnessFloorSq = 0.004;
+    const double normSharpness = rawSharpness / (targetBrightness * targetBrightness + kSharpnessBrightnessFloorSq);
 
     const FitsImage packed = matToFits(colorOrGray);
     out.frameIndex = raw.frameIndex;
@@ -1092,6 +1096,198 @@ FitsImage applyLinearSharpening(const FitsImage& unsharpened, const SharpeningSe
     return out;
 }
 
+namespace {
+
+cv::Mat croppedView(const cv::Mat& m, const QRect& crop)
+{
+    if (!crop.isValid() || crop.isEmpty()) return m;
+    const QRect r = crop.intersected(QRect(0, 0, m.cols, m.rows));
+    if (r.width() >= 2 && r.height() >= 2)
+        return m(cv::Rect(r.x(), r.y(), r.width(), r.height()));
+    return m;
+}
+
+std::vector<float> sampleLuminanceGrid(const cv::Mat& lum, int targetGrid = 96)
+{
+    std::vector<float> samples;
+    if (lum.empty()) return samples;
+    const int stepY = std::max(1, lum.rows / targetGrid);
+    const int stepX = std::max(1, lum.cols / targetGrid);
+    samples.reserve(static_cast<size_t>((lum.rows + stepY - 1) / stepY)
+        * static_cast<size_t>((lum.cols + stepX - 1) / stepX));
+    for (int y = 0; y < lum.rows; y += stepY)
+    {
+        const float* row = lum.ptr<float>(y);
+        for (int x = 0; x < lum.cols; x += stepX) samples.push_back(row[x]);
+    }
+    return samples;
+}
+
+double quantileOfSorted(const std::vector<float>& sorted, double frac)
+{
+    if (sorted.empty()) return 0.0;
+    const double pos = std::clamp(frac, 0.0, 1.0) * static_cast<double>(sorted.size() - 1);
+    const size_t lo = static_cast<size_t>(std::floor(pos));
+    const size_t hi = std::min(sorted.size() - 1, lo + 1);
+    const double t = pos - static_cast<double>(lo);
+    return static_cast<double>(sorted[lo]) * (1.0 - t) + static_cast<double>(sorted[hi]) * t;
+}
+
+BrightnessMatch foregroundAffineMatch(const std::vector<float>& cSorted, const std::vector<float>& rSorted)
+{
+    BrightnessMatch out;
+    if (cSorted.empty() || rSorted.empty()) return out;
+
+    const double rBg = quantileOfSorted(rSorted, 0.15);
+    const double rHi995 = quantileOfSorted(rSorted, 0.995);
+    const double rFgThresh = rBg + 0.06 * std::max(1e-4, rHi995 - rBg);
+    const auto rFirstFg = std::upper_bound(rSorted.begin(), rSorted.end(), static_cast<float>(rFgThresh));
+    const double fgFrac = static_cast<double>(rSorted.end() - rFirstFg) / static_cast<double>(rSorted.size());
+
+    double cLo = quantileOfSorted(cSorted, 0.01);
+    double cHi = quantileOfSorted(cSorted, 0.985);
+    double rLo = quantileOfSorted(rSorted, 0.01);
+    double rHi = quantileOfSorted(rSorted, 0.985);
+
+    // Small target on dark sky (e.g. a planet disc): anchor background floor and foreground upper quantile.
+    if (fgFrac < 0.30)
+    {
+        const double cBg = quantileOfSorted(cSorted, 0.15);
+        const double cHi995 = quantileOfSorted(cSorted, 0.995);
+        const double cFgThresh = cBg + 0.06 * std::max(1e-4, cHi995 - cBg);
+        const auto cFirstFg = std::upper_bound(cSorted.begin(), cSorted.end(), static_cast<float>(cFgThresh));
+        const ptrdiff_t rCount = rSorted.end() - rFirstFg;
+        const ptrdiff_t cCount = cSorted.end() - cFirstFg;
+        if (rCount >= 24 && cCount >= 24)
+        {
+            const std::vector<float> rFg(rFirstFg, rSorted.end());
+            const std::vector<float> cFg(cFirstFg, cSorted.end());
+            rLo = rBg;
+            cLo = cBg;
+            rHi = quantileOfSorted(rFg, 0.95);
+            cHi = quantileOfSorted(cFg, 0.95);
+        }
+    }
+
+    const double cSpan = cHi - cLo;
+    const double rSpan = rHi - rLo;
+    if (cSpan > 1e-4 && rSpan > 1e-4)
+    {
+        out.gain = std::clamp(rSpan / cSpan, 0.1, 15.0);
+        out.offset = rLo - out.gain * cLo;
+    }
+    return out;
+}
+
+BrightnessMatch computeBrightnessMatchMats(const cv::Mat& curLum, const cv::Mat& refLum,
+    bool alignedPixels, bool highlightGuard)
+{
+    BrightnessMatch match;
+    if (curLum.empty() || refLum.empty()) return match;
+
+    std::vector<float> cSorted = sampleLuminanceGrid(curLum, 80);
+    std::vector<float> rSorted = sampleLuminanceGrid(refLum, 80);
+    if (cSorted.empty() || rSorted.empty()) return match;
+    std::sort(cSorted.begin(), cSorted.end());
+    std::sort(rSorted.begin(), rSorted.end());
+
+    bool fittedAligned = false;
+    if (alignedPixels && curLum.size() == refLum.size())
+    {
+        const int stepY = std::max(1, curLum.rows / 64);
+        const int stepX = std::max(1, curLum.cols / 80);
+        std::vector<double> xs;
+        std::vector<double> ys;
+        xs.reserve(5200);
+        ys.reserve(5200);
+        for (int y = 0; y < curLum.rows; y += stepY)
+        {
+            const float* rRow = refLum.ptr<float>(y);
+            const float* cRow = curLum.ptr<float>(y);
+            for (int x = 0; x < curLum.cols; x += stepX)
+            {
+                xs.push_back(static_cast<double>(rRow[x]));
+                ys.push_back(static_cast<double>(cRow[x]));
+            }
+        }
+        const size_t n = xs.size();
+        if (n >= 32)
+        {
+            std::vector<double> w(n, 1.0);
+            std::vector<double> res(n, 0.0);
+            double alpha = 1.0, beta = 0.0;
+            double mx = 0.0, my = 0.0;
+            double corr = 0.0;
+            for (int iter = 0; iter < 4; ++iter)
+            {
+                double sw = 0.0, sx = 0.0, sy = 0.0;
+                for (size_t i = 0; i < n; ++i)
+                {
+                    sw += w[i];
+                    sx += w[i] * xs[i];
+                    sy += w[i] * ys[i];
+                }
+                if (sw < 16.0) break;
+                mx = sx / sw;
+                my = sy / sw;
+                double varX = 0.0, varY = 0.0, covXY = 0.0;
+                for (size_t i = 0; i < n; ++i)
+                {
+                    const double dx = xs[i] - mx;
+                    const double dy = ys[i] - my;
+                    varX += w[i] * dx * dx;
+                    varY += w[i] * dy * dy;
+                    covXY += w[i] * dx * dy;
+                }
+                if (varX < 1e-10 || varY < 1e-10) break;
+                alpha = covXY / varX;
+                beta = my - alpha * mx;
+                corr = covXY / std::sqrt(varX * varY);
+
+                for (size_t i = 0; i < n; ++i)
+                    res[i] = std::abs(ys[i] - (alpha * xs[i] + beta));
+                std::vector<double> tmp = res;
+                const size_t mid = n / 2;
+                std::nth_element(tmp.begin(), tmp.begin() + static_cast<ptrdiff_t>(mid), tmp.end());
+                const double mad = tmp[mid] * 1.4826 + 1e-4;
+                const double delta = 1.5 * mad;
+                for (size_t i = 0; i < n; ++i)
+                    w[i] = (res[i] <= delta) ? 1.0 : (delta / std::max(res[i], 1e-8));
+            }
+            if (corr >= 0.25 && alpha > 1e-4 && std::isfinite(alpha) && std::isfinite(beta))
+            {
+                match.gain = std::clamp(1.0 / alpha, 0.1, 15.0);
+                match.offset = mx - match.gain * my;
+                fittedAligned = true;
+            }
+        }
+    }
+
+    if (!fittedAligned)
+        match = foregroundAffineMatch(cSorted, rSorted);
+
+    // Highlight guard for global-only levelling: prevents a patchy cloud darkening part
+    // of the frame from boosting clear highlights past the reference white ceiling.
+    if (highlightGuard)
+    {
+        const double cLo = quantileOfSorted(cSorted, 0.01);
+        const double cHi = quantileOfSorted(cSorted, 0.99);
+        const double rLo = quantileOfSorted(rSorted, 0.01);
+        const double rHi = quantileOfSorted(rSorted, 0.99);
+        const double rSpan = std::max(1e-4, rHi - rLo);
+        const double cSpan = cHi - cLo;
+        if (cSpan > 1e-4 && cHi * match.gain + match.offset > rHi + 0.08 * rSpan)
+        {
+            const double cappedGain = std::clamp((rHi + 0.05 * rSpan - rLo) / cSpan, 0.1, match.gain);
+            match.gain = cappedGain;
+            match.offset = rLo - cappedGain * cLo;
+        }
+    }
+    return match;
+}
+
+} // namespace
+
 double measureTargetBrightness(const FitsImage& image)
 {
     if (!image.valid()) return 0.0;
@@ -1102,39 +1298,168 @@ double measureTargetBrightness(const FitsImage& image)
     return targetMean;
 }
 
-void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite)
+StackBrightnessStats measureStackBrightnessStats(const FitsImage& image, const QRect& crop)
+{
+    StackBrightnessStats stats;
+    if (!image.valid()) return stats;
+    const cv::Mat lum = matLuminance(croppedView(fitsToMat(image), crop));
+    std::vector<float> samples = sampleLuminanceGrid(lum, 96);
+    if (samples.empty()) return stats;
+    std::sort(samples.begin(), samples.end());
+    stats.p05 = quantileOfSorted(samples, 0.05);
+    stats.p98 = quantileOfSorted(samples, 0.98);
+    return stats;
+}
+
+int selectClearReferenceStack(const std::vector<double>& qualityScores, const std::vector<double>& contrastSpans)
+{
+    const size_t n = qualityScores.size();
+    if (n == 0) return -1;
+    if (contrastSpans.size() != n)
+    {
+        size_t best = 0;
+        for (size_t i = 1; i < n; ++i)
+            if (qualityScores[i] > qualityScores[best]) best = i;
+        return static_cast<int>(best);
+    }
+
+    std::vector<double> sortedSpans = contrastSpans;
+    std::sort(sortedSpans.begin(), sortedSpans.end());
+    const size_t p90Idx = std::min(n - 1, (n - 1) * 90 / 100);
+    const double minClearSpan = 0.70 * sortedSpans[p90Idx];
+
+    int best = -1;
+    for (size_t i = 0; i < n; ++i)
+    {
+        if (contrastSpans[i] < minClearSpan) continue;
+        if (best < 0 || qualityScores[i] > qualityScores[static_cast<size_t>(best)]
+            || (qualityScores[i] == qualityScores[static_cast<size_t>(best)]
+                && contrastSpans[i] > contrastSpans[static_cast<size_t>(best)]))
+        {
+            best = static_cast<int>(i);
+        }
+    }
+    if (best < 0)
+    {
+        best = 0;
+        for (size_t i = 1; i < n; ++i)
+            if (qualityScores[i] > qualityScores[static_cast<size_t>(best)]) best = static_cast<int>(i);
+    }
+    return best;
+}
+
+BrightnessMatch computeBrightnessMatch(const FitsImage& image, const FitsImage& reference,
+    const QRect& crop, bool alignedPixels)
+{
+    if (!image.valid() || !reference.valid()) return {};
+    const cv::Mat curLum = matLuminance(croppedView(fitsToMat(image), crop));
+    const cv::Mat refLum = matLuminance(croppedView(fitsToMat(reference), crop));
+    return computeBrightnessMatchMats(curLum, refLum, alignedPixels, /*highlightGuard=*/true);
+}
+
+void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite, const QRect& crop)
 {
     outBlack = 0.0;
     outWhite = 1.0;
     if (!image.valid()) return;
-    const cv::Mat lum = matLuminance(fitsToMat(image));
-    std::vector<float> grid;
-    const int stepY = std::max(1, lum.rows / 96);
-    const int stepX = std::max(1, lum.cols / 96);
-    grid.reserve(10000);
-    for (int y = 0; y < lum.rows; y += stepY)
-    {
-        const float* row = lum.ptr<float>(y);
-        for (int x = 0; x < lum.cols; x += stepX) grid.push_back(row[x]);
-    }
+    const cv::Mat lum = matLuminance(croppedView(fitsToMat(image), crop));
+    std::vector<float> grid = sampleLuminanceGrid(lum, 96);
     if (grid.empty()) return;
     std::sort(grid.begin(), grid.end());
-    outBlack = std::clamp(static_cast<double>(grid[(grid.size() - 1) / 1000]), 0.0, 0.99);
-    outWhite = std::clamp(static_cast<double>(grid[(grid.size() - 1) * 999 / 1000]), outBlack + 0.01, 1.0);
+    outBlack = std::clamp(quantileOfSorted(grid, 0.001), 0.0, 0.99);
+    outWhite = std::clamp(quantileOfSorted(grid, 0.999), outBlack + 0.01, 1.0);
 }
 
 QImage toneMapFitsToImage(const FitsImage& image,
     double black, double white, double gamma, double brightnessScale,
-    const QRect& crop, int maxLongSide)
+    const QRect& crop, int maxLongSide,
+    const FitsImage* reference,
+    BrightnessLevellingMode levelling,
+    bool alignedPixels)
 {
     if (!image.valid()) return {};
-    cv::Mat m = fitsToMat(image);
-    if (crop.isValid() && !crop.isEmpty())
+    cv::Mat m = croppedView(fitsToMat(image), crop).clone();
+
+    if (reference && reference->valid() && levelling != BrightnessLevellingMode::Off)
     {
-        const QRect r = crop.intersected(QRect(0, 0, image.width, image.height));
-        if (r.width() >= 2 && r.height() >= 2)
-            m = m(cv::Rect(r.x(), r.y(), r.width(), r.height()));
+        if (reference != &image)
+        {
+            const cv::Mat refMat = croppedView(fitsToMat(*reference), crop);
+            const cv::Mat curLum = matLuminance(m);
+            const cv::Mat refLum = matLuminance(refMat);
+            const bool doPatchy = (levelling == BrightnessLevellingMode::GlobalAndPatchy)
+                && alignedPixels && m.size() == refMat.size();
+            const BrightnessMatch bm = computeBrightnessMatchMats(curLum, refLum, alignedPixels, /*highlightGuard=*/true);
+            m = m * static_cast<float>(bm.gain) + cv::Scalar::all(bm.offset);
+
+            if (doPatchy && m.cols >= 16 && m.rows >= 16)
+            {
+                const cv::Mat mLum = matLuminance(m);
+                const int gw = std::clamp(m.cols / 24, 4, 12);
+                const int gh = std::clamp(m.rows / 24, 4, 9);
+                cv::Mat mSmall, rSmall;
+                cv::resize(mLum, mSmall, cv::Size(gw, gh), 0, 0, cv::INTER_AREA);
+                cv::resize(refLum, rSmall, cv::Size(gw, gh), 0, 0, cv::INTER_AREA);
+                const float blackF = static_cast<float>(black);
+                const float eps = static_cast<float>(0.04 * std::max(0.05, white - black));
+                cv::Mat ratioSmall(gh, gw, CV_32FC1);
+                for (int gy = 0; gy < gh; ++gy)
+                {
+                    const float* mRow = mSmall.ptr<float>(gy);
+                    const float* rRow = rSmall.ptr<float>(gy);
+                    float* outRow = ratioSmall.ptr<float>(gy);
+                    for (int gx = 0; gx < gw; ++gx)
+                    {
+                        const float rAbove = std::max(0.0f, rRow[gx] - blackF) + eps;
+                        const float mAbove = std::max(0.0f, mRow[gx] - blackF) + eps;
+                        outRow[gx] = std::clamp(rAbove / mAbove, 0.5f, 3.0f);
+                    }
+                }
+                cv::Mat ratio;
+                cv::resize(ratioSmall, ratio, m.size(), 0, 0, cv::INTER_LINEAR);
+                const float spanF = static_cast<float>(std::max(1e-5, white - black));
+                const float kneeF = 0.85f * spanF;
+                const float shoulderF = 0.15f * spanF;
+                auto applyHighlightSafeRatio = [&](cv::Mat& plane) {
+                    for (int y = 0; y < plane.rows; ++y)
+                    {
+                        float* pRow = plane.ptr<float>(y);
+                        const float* rRow = ratio.ptr<float>(y);
+                        for (int x = 0; x < plane.cols; ++x)
+                        {
+                            const float above = std::max(0.0f, pRow[x] - blackF);
+                            const float r = rRow[x];
+                            float boosted = above * r;
+                            // C1 soft shoulder above 85% of span when boosting locally,
+                            // so a bright clear rim next to a sharp cloud edge never burns flat white.
+                            if (r > 1.02f && boosted > kneeF)
+                            {
+                                const float excess = boosted - kneeF;
+                                boosted = kneeF + shoulderF * (excess / (excess + shoulderF));
+                            }
+                            pRow[x] = blackF + boosted;
+                        }
+                    }
+                };
+                if (m.channels() == 1)
+                {
+                    applyHighlightSafeRatio(m);
+                }
+                else
+                {
+                    std::vector<cv::Mat> ch;
+                    cv::split(m, ch);
+                    for (cv::Mat& c : ch) applyHighlightSafeRatio(c);
+                    cv::merge(ch, m);
+                }
+            }
+        }
     }
+    else if (std::abs(brightnessScale - 1.0) > 1e-6)
+    {
+        m = m * static_cast<float>(std::clamp(brightnessScale, 0.25, 4.0));
+    }
+
     if (maxLongSide > 0 && std::max(m.cols, m.rows) > maxLongSide)
     {
         const double scale = static_cast<double>(maxLongSide) / std::max(m.cols, m.rows);
@@ -1147,8 +1472,7 @@ QImage toneMapFitsToImage(const FitsImage& image,
 
     const double safeSpan = std::max(1e-5, white - black);
     const double invGamma = 1.0 / std::clamp(gamma, 0.2, 4.0);
-    const float bScale = static_cast<float>(std::clamp(brightnessScale, 0.25, 4.0));
-    cv::Mat scaled = (m * bScale - cv::Scalar::all(black)) * static_cast<float>(1.0 / safeSpan);
+    cv::Mat scaled = (m - cv::Scalar::all(black)) * static_cast<float>(1.0 / safeSpan);
     cv::min(scaled, 1.0f, scaled);
     cv::max(scaled, 0.0f, scaled);
     if (std::abs(invGamma - 1.0) > 1e-3)

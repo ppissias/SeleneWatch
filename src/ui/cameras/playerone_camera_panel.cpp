@@ -1,9 +1,11 @@
 #include "ui/cameras/playerone_camera_panel.h"
 #include "ui/cameras/camera_settings_editor.h"
 #include "ui/cameras/runtime_chooser.h"
+#include "ui/widgets/theme.h"
 
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
@@ -15,39 +17,46 @@ PlayerOneCameraPanel::PlayerOneCameraPanel(std::shared_ptr<PlayerOneApi> api, QW
 {
     setObjectName("playerOneCameraPanel");
     auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(5);
     runtime_ = new RuntimeChooser("Player One", "PlayerOneCamera.dll", "playerone/runtimePath", "PlayerOne", this);
     layout->addWidget(runtime_);
+    auto* topRow = new QHBoxLayout;
+    topRow->setContentsMargins(0, 0, 0, 0);
+    topRow->setSpacing(4);
     cameras_ = new QComboBox(this);
     cameras_->setObjectName("playerOneCameras");
+    cameras_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    cameras_->setMinimumContentsLength(14);
     cameras_->setToolTip("The connected Player One camera to use.");
-    refresh_ = new QPushButton("Refresh cameras", this);
+    refresh_ = new QPushButton("Refresh", this);
     refresh_->setObjectName("refreshPlayerOneCameras");
     refresh_->setToolTip("Searches again for connected Player One cameras.");
-    layout->addWidget(cameras_);
-    layout->addWidget(refresh_);
+    topRow->addWidget(cameras_, 1);
+    topRow->addWidget(refresh_);
+    layout->addLayout(topRow);
     editor_ = new CameraSettingsEditor(4, 2, this);
     layout->addWidget(editor_);
     apply_ = new QPushButton("Apply settings", this);
     apply_->setObjectName("applyPlayerOneCamera");
-    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
+    apply_->setToolTip("Sends format, binning and typed ROI edits to the camera (restarts Preview while running). Live controls, Draw ROI, Center, Full and presets apply automatically.");
     layout->addWidget(apply_);
     readback_ = new QLabel("Refresh to discover Player One cameras.", this);
     readback_->setWordWrap(true);
     readback_->setTextFormat(Qt::PlainText);
     readback_->setObjectName("playerOneReadback");
     layout->addWidget(readback_);
-    auto* hint = new QLabel("Needs Player One's camera driver and its PlayerOneCamera.dll (x64), which SeleneWatch does not ship. "
-        "It finds the copy N.I.N.A. or 64-bit SharpCap installs; otherwise put it beside SeleneWatch.exe or choose it "
-        "(Session → Camera support). Preview applies controls live; format, bin and ROI changes restart Preview. "
-        "Hardware validation is pending.", this);
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
     layout->addStretch();
     connect(runtime_, &RuntimeChooser::changed, this, &PlayerOneCameraPanel::refresh);
     connect(refresh_, &QPushButton::clicked, this, &PlayerOneCameraPanel::refresh);
     connect(cameras_, &QComboBox::currentIndexChanged, this, &PlayerOneCameraPanel::inspectSelected);
     connect(apply_, &QPushButton::clicked, this, &PlayerOneCameraPanel::applyRequested);
     connect(editor_, &CameraSettingsEditor::liveControlsRequested, this, &PlayerOneCameraPanel::liveControlsRequested);
+    connect(editor_, &CameraSettingsEditor::geometryDirtyChanged, this, [this](bool dirty) {
+        apply_->setStyleSheet(dirty && apply_->isEnabled() ? dirtyApplyStyle() : QString());
+        apply_->setText(running_ ? (dirty ? "Apply ROI / format*" : "Apply ROI / format")
+                                 : (dirty ? "Apply settings*" : "Apply settings"));
+    });
     setRunning(false);
 }
 
@@ -185,13 +194,13 @@ void PlayerOneCameraPanel::updateReadback()
         values << QString("%1: %2%3").arg(QString::fromStdString(c.name))
             .arg(exposure ? static_cast<double>(c.value) / 1000 : static_cast<double>(c.value), 0, 'g', 10).arg(exposure ? " ms" : "");
     }
-    readback_->setText(QString("Read back: %1 × %2, %3, bin %4, origin (%5, %6).\nSensor %7, ADC %8 bits. SDK %9. Serial: %10.\n"
-        "Actual controls: %11")
-        .arg(s.width).arg(s.height).arg(s.format == PixelFormat::Mono16 ? "RAW16" : s.format == PixelFormat::Mono8 ? "RAW8" : "processed mode; choose RAW")
-        .arg(s.bin).arg(s.x).arg(s.y)
-        .arg(p.camera.sensor.empty() ? QString("unknown") : QString::fromStdString(p.camera.sensor)).arg(p.camera.sensorBits)
-        .arg(QString::fromStdString(p.sdkVersion), p.camera.serial.empty() ? QString("unknown") : QString::fromStdString(p.camera.serial),
-            values.join(", ")));
+    const QString serial = p.camera.serial.empty() ? QString("unknown") : QString::fromStdString(p.camera.serial);
+    const QString fmt = s.format == PixelFormat::Mono16 ? "RAW16" : s.format == PixelFormat::Mono8 ? "RAW8" : "processed";
+    readback_->setText(QString("Actual: %1 × %2 · %3 · bin %4 · (%5, %6) · SN %7\n%8")
+        .arg(s.width).arg(s.height).arg(fmt).arg(s.bin).arg(s.x).arg(s.y).arg(serial, values.join(", ")));
+    readback_->setToolTip(QString("Sensor %1, ADC %2-bit · SDK %3 · %4\nHardware validation pending.")
+        .arg(p.camera.sensor.empty() ? QString("unknown") : QString::fromStdString(p.camera.sensor))
+        .arg(p.camera.sensorBits).arg(QString::fromStdString(p.sdkVersion), api_->loadedRuntimePath()));
 }
 
 void PlayerOneCameraPanel::setRunning(bool running, bool monitoring)
@@ -204,5 +213,8 @@ void PlayerOneCameraPanel::setRunning(bool running, bool monitoring)
     editor_->setEnabled(hasCamera() && !monitoring);
     editor_->setLiveEditing(running && !monitoring);
     apply_->setEnabled(hasCamera() && !monitoring);
-    apply_->setText(running ? "Apply format / ROI and restart Preview" : "Apply settings");
+    const bool dirty = editor_->geometryDirty();
+    apply_->setStyleSheet(dirty && apply_->isEnabled() ? dirtyApplyStyle() : QString());
+    apply_->setText(running ? (dirty ? "Apply ROI / format*" : "Apply ROI / format")
+                            : (dirty ? "Apply settings*" : "Apply settings"));
 }

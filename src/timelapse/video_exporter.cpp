@@ -66,9 +66,8 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     std::vector<double> qualities;
     qualities.reserve(files.size());
 
-    // First pass: inspect FITS headers only (no pixel I/O) to find best-quality reference.
-    QString bestPath = files.front();
-    double bestQuality = -1.0;
+    // First pass: inspect FITS headers only to apply quality filtering and read frame size.
+    int frameW = 0, frameH = 0;
     for (const QString& f : files)
     {
         if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
@@ -80,13 +79,9 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
             res.error = err;
             return res;
         }
+        if (frameW == 0 && w > 0 && h > 0) { frameW = w; frameH = h; }
         entries.push_back({f, meta.qualityScore});
         qualities.push_back(meta.qualityScore);
-        if (meta.qualityScore > bestQuality)
-        {
-            bestQuality = meta.qualityScore;
-            bestPath = f;
-        }
     }
 
     std::sort(qualities.begin(), qualities.end());
@@ -94,33 +89,59 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     const double minAllowed = tone.minQualityRatio > 0.0 ? tone.minQualityRatio * medianQuality : -1.0;
 
     std::vector<QString> keptPaths;
+    std::vector<double> keptQualities;
     for (const Entry& e : entries)
     {
-        if (e.quality >= minAllowed) keptPaths.push_back(e.path);
+        if (e.quality >= minAllowed)
+        {
+            keptPaths.push_back(e.path);
+            keptQualities.push_back(e.quality);
+        }
         else ++res.stacksDropped;
     }
     if (keptPaths.empty())
     {
-        keptPaths.push_back(bestPath);
+        const auto bestIt = std::max_element(entries.begin(), entries.end(),
+            [](const Entry& a, const Entry& b) { return a.quality < b.quality; });
+        keptPaths.push_back(bestIt->path);
+        keptQualities.push_back(bestIt->quality);
         res.stacksDropped = static_cast<int>(entries.size()) - 1;
     }
 
-    FitsImage refImg;
-    if (!readFitsFloat(bestPath, refImg, res.error)) return res;
-
-    double black = tone.blackLevel;
-    double white = tone.whiteLevel;
-    if (tone.autoStretch) computeAutoStretchLevels(refImg, black, white);
-    const double refBrightness = std::max(1e-5, measureTargetBrightness(refImg));
-
     QRect crop = (tone.cropToOverlap && commonOverlap.isValid() && !commonOverlap.isEmpty())
-        ? commonOverlap.intersected(QRect(0, 0, refImg.width, refImg.height))
-        : QRect(0, 0, refImg.width, refImg.height);
+        ? commonOverlap.intersected(QRect(0, 0, frameW, frameH))
+        : QRect(0, 0, frameW, frameH);
     if (crop.width() < 2 || crop.height() < 2)
-        crop = QRect(0, 0, refImg.width, refImg.height);
+        crop = QRect(0, 0, frameW, frameH);
     // Ensure even dimensions for H.264 yuv420p.
     crop.setWidth(std::max(2, crop.width() & ~1));
     crop.setHeight(std::max(2, crop.height() & ~1));
+
+    // Pick the sharpest clear stack by measuring contrast span strictly inside crop
+    // (one stack in RAM at a time), so heavy-cloud frames whose sensor noise inflated
+    // qualityScore never steal the reference levels.
+    int refIdx = 0;
+    if (keptPaths.size() > 1)
+    {
+        std::vector<double> keptSpans;
+        keptSpans.reserve(keptPaths.size());
+        for (const QString& p : keptPaths)
+        {
+            if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
+            FitsImage probe;
+            if (!readFitsFloat(p, probe, res.error)) return res;
+            keptSpans.push_back(measureStackBrightnessStats(probe, crop).contrastSpan());
+        }
+        refIdx = std::max(0, selectClearReferenceStack(keptQualities, keptSpans));
+    }
+
+    FitsImage refImg;
+    if (!readFitsFloat(keptPaths[static_cast<size_t>(refIdx)], refImg, res.error)) return res;
+
+    double black = tone.blackLevel;
+    double white = tone.whiteLevel;
+    if (tone.autoStretch) computeAutoStretchLevels(refImg, black, white, crop);
+    const bool alignedPixels = refImg.meta.targetPreset != "planet";
 
     QDir().mkpath(outputDir);
     const QString mp4 = tone.writeMp4 ? QDir(outputDir).filePath("timelapse.mp4") : QString();
@@ -134,13 +155,9 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     const auto produceFrame = [&](int i, QString& err) -> QImage {
         FitsImage img;
         if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, err)) return {};
-        double scale = 1.0;
-        if (tone.brightnessLevelling)
-        {
-            const double b = measureTargetBrightness(img);
-            if (b > 1e-5) scale = std::clamp(refBrightness / b, 0.4, 2.5);
-        }
-        QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, scale, crop, 0);
+        const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
+        QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, 1.0, crop, 0,
+            refPtr, tone.brightnessMode, alignedPixels);
         if (mapped.isNull())
         {
             err = "could not tone-map FITS stack";

@@ -40,6 +40,7 @@ int main(int argc, char *argv[])
         }
     }
     migrateOutputSettings();
+    applyUiTheme(loadUiTheme());
 
     // The window icon, at the sizes the title bar and the task switcher use.
     QIcon icon;

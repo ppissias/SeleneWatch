@@ -6,6 +6,7 @@
 #include "sky/sky_exposure.h"
 #include "sources/frame_source.h"
 #include "session/session.h"
+#include "ui/widgets/theme.h"
 
 #include <QtCore/QString>
 #include <QtGui/QImage>
@@ -19,6 +20,7 @@
 #include <optional>
 
 class QAction;
+class QActionGroup;
 class QCheckBox;
 class QDialog;
 class QCloseEvent;
@@ -27,6 +29,7 @@ class QMenu;
 class QPushButton;
 class QSpinBox;
 class QTimer;
+class QToolBar;
 class QToolButton;
 class WheelGuard;
 class RecordingReader;
@@ -152,8 +155,11 @@ private:
     // Guiding, the preview's mask, and the drag on the preview follow the target.
     void applyTarget();
     // Feature-28: what the next drag on the preview draws. Only one at a time.
-    enum class Drawing { None, LockBox, EarthshineBox, Anchor, Mask };
+    enum class Drawing { None, LockBox, EarthshineBox, Anchor, Mask, CameraRoi };
     void chooseDrawing(Drawing drawing);
+    void updatePreviewHint(Drawing drawing);
+    void applyCameraSettings(const QString& note);
+    void applyCameraRoiChange(const QString& note);
 public:
     // Feature-15: closes the mask shape whose corners were clicked; the
     // preview's double-click, and the window test.
@@ -319,6 +325,13 @@ private:
     // choice when it is still listed.
     void setupSourceChoice();
     void arrangeTopControls();
+    void setupViewMenuExtras();
+    void applyDefaultDockLayout();
+    void saveWindowLayout();
+    void restoreWindowLayout();
+    void resetWindowLayout();
+    void setFocusView(bool on);
+    void applyTheme(UiTheme theme, bool persist = true);
     void applyTestingTools(bool on);
     void rebuildSourceList();
     // Feature-16: a camera family's Source entry, dock and connections.
@@ -496,5 +509,21 @@ private:
     QToolButton* zoomFitButton_{nullptr};
     QToolButton* zoom100Button_{nullptr};
     QToolButton* zoom200Button_{nullptr};
+    QToolButton* histogramToggleButton_{nullptr};
+    QToolButton* focusViewButton_{nullptr};
     QLabel* zoomReadoutLabel_{nullptr};
+    ElidedLabel* previewHintLabel_{nullptr};
+    QToolBar* commandToolBar_{nullptr};
+    QWidget* recordingFileGroup_{nullptr};
+    QWidget* playbackBar_{nullptr};
+    QWidget* fpsGroup_{nullptr};
+    QWidget* recordingPlaybackGroup_{nullptr};
+    QAction* focusViewAction_{nullptr};
+    QAction* resetLayoutAction_{nullptr};
+    QActionGroup* themeActions_{nullptr};
+    QAction* themeSystemAction_{nullptr};
+    QAction* themeDarkAction_{nullptr};
+    QAction* themeNightRedAction_{nullptr};
+    bool focusView_{false};
+    std::vector<QDockWidget*> focusSavedDocks_;
 };

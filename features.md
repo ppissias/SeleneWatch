@@ -2,7 +2,7 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026, and Feature-45 on 23 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
@@ -89,6 +89,7 @@ What each implemented feature still needs outside the tests. Grouped by the kind
 | Moon, any phase | Feature-10 | An hour on the Moon with each camera: frame rate, drops, detector cost, candidates and write rate. |
 | Moon, any phase | Feature-12 | The observer reviews the overviews of real lunar clips. |
 | Moon, sunlit | Feature-13, Feature-31 | A real transit (plane or ISS) caught by the shadows watch with its defaults (K 12, 20 px). |
+| Moon, sunlit | Feature-45 | The shadows watch on a live sunlit stream: no candidate from a brightening, the readouts, trace and sigma map follow the deepest fall, and Maximum patch / Maximum box / patch change the shadow limits. |
 | Moon, sunlit | Feature-14 | A predicted ISS transit recorded with a schedule. |
 | Night sky | Feature-26 | Auto-tune in full darkness: the follower's limits and gain ceiling. |
 | Moon, earthshine | Feature-34 | **Tune camera** on a real camera: the rounds it takes, the dark rounds, and the gain chosen by noise; ideally with a camera that has a high-conversion-gain mode. |

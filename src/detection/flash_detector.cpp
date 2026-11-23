@@ -25,12 +25,6 @@ struct Samples
     }
 };
 
-// The extent of a large change, in frame pixels.
-struct Box
-{
-    int x{0}, y{0}, width{0}, height{0};
-};
-
 float median(BudgetVector<float>& values)
 {
     const auto middle = values.begin() + static_cast<ptrdiff_t>(values.size() / 2);
@@ -45,8 +39,7 @@ FlashDetector::FlashDetector(DetectionSettings settings, MemoryBudget budget)
       grid_(BudgetAllocator<float>(budget_)), thresholdPixels_(BudgetAllocator<size_t>(budget_)),
       thresholdSigma_(BudgetAllocator<float>(budget_)), visited_(BudgetAllocator<uint8_t>(budget_)),
       pending_(BudgetAllocator<size_t>(budget_)), protected_(BudgetAllocator<uint8_t>(budget_)),
-      masked_(BudgetAllocator<uint8_t>(budget_)), darkPixels_(BudgetAllocator<size_t>(budget_)),
-      darkSigma_(BudgetAllocator<float>(budget_))
+      masked_(BudgetAllocator<uint8_t>(budget_))
 {
     setSettings(settings);
 }
@@ -56,18 +49,20 @@ void FlashDetector::setSettings(const DetectionSettings& settings)
     if (!settings.valid()) throw std::invalid_argument("invalid detection settings");
     // Pending confirmation cannot combine different settings. Already firing
     // patches remain firing until absent, so an edit cannot duplicate them.
-    if (settings != settings_)
+    // Feature-45: a patch of the other direction does not continue at all.
+    if (settings.darkening != settings_.darkening)
     {
-        std::erase_if(active_, [](const Patch& patch) { return !patch.measured.firing; });
-        std::erase_if(activeDark_, [](const Patch& patch) { return !patch.measured.firing; });
+        active_.clear();
+        largeChange_ = {};
     }
+    else if (settings != settings_)
+        std::erase_if(active_, [](const Patch& patch) { return !patch.measured.firing; });
     settings_ = settings;
 }
 
 void FlashDetector::rearm()
 {
     active_.clear();
-    activeDark_.clear();
     candidates_.clear();
 }
 
@@ -84,12 +79,10 @@ void FlashDetector::reset(bool releaseBuffers)
         pending_ = BudgetVector<size_t>(pending_.get_allocator());
         protected_ = BudgetVector<uint8_t>(protected_.get_allocator());
         masked_ = BudgetVector<uint8_t>(masked_.get_allocator());
-        darkPixels_ = BudgetVector<size_t>(darkPixels_.get_allocator());
-        darkSigma_ = BudgetVector<float>(darkSigma_.get_allocator());
     }
     maskBuiltFor_ = {}; maskWidth_ = maskHeight_ = 0; unmaskedPixels_ = 0;
-    brightening_ = {}; darkening_ = {}; holdAll_ = false;
-    active_.clear(); activeDark_.clear(); candidates_.clear(); awaitingUpdate_ = false;
+    largeChange_ = {}; holdAll_ = false;
+    active_.clear(); candidates_.clear(); awaitingUpdate_ = false;
     history_.clear(); map_.reset();
     learnedFrames_ = 0;
     width_ = height_ = bits_ = 0;
@@ -132,9 +125,8 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         learnedFrames_ = 1;
         for (size_t i = 0; i < pixels; ++i) mean_[i] = samples.at(i);
         active_.clear();
-        activeDark_.clear();
         history_.clear();
-        brightening_ = {}; darkening_ = {}; holdAll_ = false;
+        largeChange_ = {}; holdAll_ = false;
     }
     else
     {
@@ -170,14 +162,14 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         for (float& value : grid_) value = std::abs(value - centre);
         summary_.noiseFloor = std::max(settings_.minNoiseAdu, 1.4826 * median(grid_));
 
+        // Feature-45: one direction of change is looked for, a rise or, with
+        // darkening, a fall. A pixel's sigma below is its change in that
+        // direction over its noise, so every measurement is of that direction.
+        const bool falls = settings_.darkening;
+        const double direction = falls ? -1.0 : 1.0;
         int left = width_, top = height_, right = -1, bottom = -1;
-        int darkLeft = width_, darkTop = height_, darkRight = -1, darkBottom = -1;
         thresholdPixels_.clear(); thresholdSigma_.clear();
-        darkPixels_.clear(); darkSigma_.clear();
-        const size_t sparseLimit = std::min(pixels, std::max(size_t{4096}, static_cast<size_t>(settings_.maxPixels) * 4));
-        // Feature-13: the dark side's search has its own bound, from its own maximum patch.
-        const size_t darkSparseLimit = std::min(pixels, std::max(size_t{4096}, static_cast<size_t>(settings_.maxDarkPixels) * 4));
-        const bool countDark = settings_.darkening || settings_.darkeningShare > 0;
+        const size_t sparseLimit = std::min(pixels, std::max(size_t{4096}, static_cast<size_t>(settings_.patchMaxPixels()) * 4));
         const double floorVariance = summary_.noiseFloor * summary_.noiseFloor;
         std::shared_ptr<DetectionMap> map;
         if (display.makeMap && display.overlay != DetectionOverlay::None)
@@ -197,7 +189,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                 const size_t i = static_cast<size_t>(y) * width_ + x;
                 const double noise = std::sqrt(std::max(static_cast<double>(variance_[i]), floorVariance));
                 const double delta = samples.at(i) - mean_[i];
-                const double sigma = delta / noise;
+                const double sigma = direction * delta / noise;
                 if (map) map->values[i] = static_cast<float>(display.overlay == DetectionOverlay::Noise ? noise : std::max(0.0, sigma));
                 if (isMasked(i)) continue;
                 if (sigma > summary_.peakSigma)
@@ -217,18 +209,6 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                     left = std::min(left, x); top = std::min(top, y);
                     right = std::max(right, x); bottom = std::max(bottom, y);
                 }
-                else if (countDark && sigma <= -settings_.sigma)
-                {
-                    ++summary_.darkPixels;
-                    summary_.deepestSigma = std::max(summary_.deepestSigma, -sigma);
-                    if (darkPixels_.size() < darkSparseLimit)
-                    {
-                        darkPixels_.push_back(i);
-                        darkSigma_.push_back(static_cast<float>(-sigma));
-                    }
-                    darkLeft = std::min(darkLeft, x); darkTop = std::min(darkTop, y);
-                    darkRight = std::max(darkRight, x); darkBottom = std::max(darkBottom, y);
-                }
             }
         }
         if (summary_.brightPixels > 0)
@@ -241,14 +221,12 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
         size_t newlyReleased = 0;
         DetectionSummary best = summary_;
         int bestPriority = -1;
-        int largestDark = 0;
         // A global bounding box lets an unrelated hot pixel veto a real
         // flash. Split the sparse threshold pixels into 8-connected patches.
         // Dense changes are rejected before this work; its storage/work is
         // bounded by max(4096, four times the observer's maximum patch size).
-        // The same search serves rises and, with Feature-13, falls: each sign
-        // with its own pixels, limits and patches from the frame before, so a
-        // rising and a falling patch are never merged.
+        // Feature-45: it searches the one direction looked for, with that
+        // direction's limits and its patches from the frame before.
         const auto searchPatches = [&](const BudgetVector<size_t>& threshold, const BudgetVector<float>& strength,
             ChangeKind change, int maxPixels, double maxBoxRatio, const std::vector<Patch>& previous, std::vector<Patch>& current)
         {
@@ -278,7 +256,6 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                         if (!visited_[pos]) { visited_[pos] = 1; pending_.push_back(pos); }
                     }
                 }
-                if (change == ChangeKind::Fall) largestDark = std::max(largestDark, count);
                 const bool passes = count >= settings_.minPixels && count <= maxPixels
                     && static_cast<double>(x1 - x0 + 1) * (y1 - y0 + 1) <= maxBoxRatio * count;
                 DetectionSummary measured = whole;
@@ -331,40 +308,30 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                 { best=measured; bestPriority=priority; }
             }
         };
-        std::vector<Patch> rising, falling;
-        const bool riseLimited = static_cast<size_t>(whole.brightPixels) > sparseLimit;
-        if (!riseLimited && !thresholdPixels_.empty())
-            searchPatches(thresholdPixels_, thresholdSigma_, ChangeKind::Rise, settings_.maxPixels, settings_.maxPatchBoxRatio, active_, rising);
-        const bool darkLimited = countDark && static_cast<size_t>(whole.darkPixels) > darkSparseLimit;
-        if (settings_.darkening && !darkLimited && !darkPixels_.empty())
-            searchPatches(darkPixels_, darkSigma_, ChangeKind::Fall, settings_.maxDarkPixels, settings_.maxDarkBoxRatio, activeDark_, falling);
+        std::vector<Patch> patches;
+        const bool limited = static_cast<size_t>(whole.brightPixels) > sparseLimit;
+        if (!limited && !thresholdPixels_.empty())
+            searchPatches(thresholdPixels_, thresholdSigma_, falls ? ChangeKind::Fall : ChangeKind::Rise,
+                settings_.patchMaxPixels(), settings_.patchMaxBoxRatio(), active_, patches);
         if (bestPriority >= 0) summary_ = best;
-        summary_.patchSearchLimited = riseLimited;
-        summary_.darkSearchLimited = darkLimited;
-        summary_.largestDarkPatch = largestDark;
+        summary_.patchSearchLimited = limited;
 
-        // Feature-11 and Feature-13: a large brightening or darkening, when a
-        // set share of the unmasked frame is at K at once. One frame is
-        // enough: a lightning stroke can be one frame. While it lasts the
-        // whole frame is held from learning, so a flash does not raise the
-        // noise of the frames after it. Returns whether it holds the frame.
-        const auto largeChange = [&](LargeChange& state, int count, double share, ChangeKind change, Box box)
+        // Feature-11, Feature-13 and Feature-45: a large brightening or, with
+        // darkening, a large darkening, when a set share of the unmasked
+        // frame is at K at once. One frame is enough: a lightning stroke can
+        // be one frame. While it lasts the whole frame is held from learning,
+        // so a flash does not raise the noise of the frames after it.
+        const double largeShare = falls ? settings_.darkeningShare : settings_.brighteningShare;
+        holdAll_ = false;
+        if (largeShare > 0 && unmaskedPixels_ > 0
+            && static_cast<double>(whole.brightPixels) >= largeShare * static_cast<double>(unmaskedPixels_))
         {
-            const bool large = share > 0 && unmaskedPixels_ > 0
-                && static_cast<double>(count) >= share * static_cast<double>(unmaskedPixels_);
-            if (!large)
-            {
-                state.active = false;
-                return false;
-            }
+            LargeChange& state = largeChange_;
             if (!state.active) { state.onset = frame.frameIndex; state.seconds = 0; }
             else state.seconds += frameInterval_;
             DetectionSummary measured = whole;
-            measured.change = change;
-            measured.brightPixels = count;
-            measured.boxX = box.x; measured.boxY = box.y; measured.boxWidth = box.width; measured.boxHeight = box.height;
-            if (change == ChangeKind::LargeFall) measured.peakSigma = whole.deepestSigma;
-            measured.share = static_cast<double>(count) / static_cast<double>(unmaskedPixels_);
+            measured.change = falls ? ChangeKind::LargeFall : ChangeKind::LargeRise;
+            measured.share = static_cast<double>(whole.brightPixels) / static_cast<double>(unmaskedPixels_);
             measured.medianDifferenceAdu = centre;
             measured.passed = true;
             measured.triggered = !state.active;
@@ -375,30 +342,21 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
             const bool released = release > 0 && state.seconds >= release;
             if (released && state.seconds - frameInterval_ < release) ++newlyReleased;
             if (measured.triggered) candidates_.push_back(measured);
-            const bool darkSearch = summary_.darkSearchLimited;
             summary_ = measured;
-            summary_.patchSearchLimited = riseLimited;
-            summary_.darkSearchLimited = darkSearch;
-            summary_.largestDarkPatch = largestDark;
-            return !released;
-        };
-        const bool holdRise = largeChange(brightening_, whole.brightPixels, settings_.brighteningShare, ChangeKind::LargeRise,
-            Box{whole.boxX, whole.boxY, whole.boxWidth, whole.boxHeight});
-        const bool holdFall = largeChange(darkening_, whole.darkPixels, settings_.darkeningShare, ChangeKind::LargeFall,
-            whole.darkPixels > 0 ? Box{darkLeft, darkTop, darkRight - darkLeft + 1, darkBottom - darkTop + 1} : Box{});
-        holdAll_ = holdRise || holdFall;
+            summary_.patchSearchLimited = limited;
+            holdAll_ = !released;
+        }
+        else largeChange_.active = false;
         summary_.newlyReleased = newlyReleased;
-        active_ = std::move(rising);
-        activeDark_ = std::move(falling);
+        active_ = std::move(patches);
         map_ = std::move(map);
     }
-    summary_.newCandidates = candidates_.size(); summary_.activePatches = active_.size() + activeDark_.size();
+    summary_.newCandidates = candidates_.size(); summary_.activePatches = active_.size();
     // A held brightening protects every pixel, so nothing learns this frame.
     summary_.protectedPixels = holdAll_ ? mean_.size()
         : static_cast<size_t>(std::count(protected_.begin(),protected_.end(),uint8_t{1}));
     summary_.learningFrames = learnedFrames_;
     for (const auto& patch:active_) summary_.longestActiveSeconds=std::max(summary_.longestActiveSeconds,patch.seconds);
-    for (const auto& patch:activeDark_) summary_.longestActiveSeconds=std::max(summary_.longestActiveSeconds,patch.seconds);
     const auto copyContext=[this](DetectionSummary& candidate) {
         candidate.newCandidates=summary_.newCandidates; candidate.activePatches=summary_.activePatches;
         candidate.protectedPixels=summary_.protectedPixels; candidate.learningFrames=summary_.learningFrames;
@@ -476,7 +434,7 @@ double FlashDetector::pixelNoise(size_t pixel) const
 size_t FlashDetector::workingBytes(size_t pixels, const DetectionSettings& settings)
 {
     // Reference and variance, the protected and mask maps, and the bounded
-    // sparse search for rising and falling patches.
-    const size_t sparse = std::max(size_t{4096}, static_cast<size_t>(std::max(settings.maxPixels, settings.maxDarkPixels)) * 4);
-    return pixels * (2 * sizeof(float) + 2) + 2 * sparse * (sizeof(size_t) + sizeof(float) + 1 + sizeof(size_t)) + 4096 * sizeof(float);
+    // sparse search for the patches of the one direction looked for.
+    const size_t sparse = std::max(size_t{4096}, static_cast<size_t>(settings.patchMaxPixels()) * 4);
+    return pixels * (2 * sizeof(float) + 2) + sparse * (sizeof(size_t) + sizeof(float) + 1 + sizeof(size_t)) + 4096 * sizeof(float);
 }

@@ -43,10 +43,11 @@ QWidget* MainWindow::makeSessionEndRow(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     sessionEndSummary_ = new ElidedLabel({}, Qt::ElideRight, row);
     sessionEndSummary_->setObjectName("sessionEndSummary");
-    sessionEndSummary_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    sessionEndSummary_->setMinimumWidth(90);
+    sessionEndSummary_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     sessionEndWarning_ = new QLabel(row);
     sessionEndWarning_->setObjectName("sessionEndWarning");
-    sessionEndWarning_->setStyleSheet("color: #b37900;");
+    sessionEndWarning_->setStyleSheet("color: #d99326;");
     sessionEndWarning_->hide();
     sessionEndChange_ = new QPushButton("Change…", row);
     sessionEndChange_->setObjectName("sessionEndChange");

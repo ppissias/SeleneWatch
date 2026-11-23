@@ -22,8 +22,9 @@ struct TimelapseExportResult
 };
 
 // Reads sorted *.fits stacks from fitsDir, applies quality filtering, overlap
-// cropping, target-masked multiplicative brightness levelling, and session-wide
-// stretch/gamma (for video export only), then writes timelapse.mp4 / .gif into outputDir.
+// cropping, clear-reference selection, robust affine (or optional patchy-cloud)
+// brightness levelling, and session-wide stretch/gamma (for video export only),
+// then writes timelapse.mp4 / .gif into outputDir.
 [[nodiscard]] TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     const QString& outputDir,
     const VideoToneSettings& tone,

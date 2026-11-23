@@ -152,6 +152,7 @@ private slots:
     void theSlowSkyKeepsATimelapseWhileMonitoring();
     void everyControlFitsOnASmallLaptopScreen();
     void darkeningIsForTheMoonOnly();
+    void shadowsUseTheLimitsAtTheTop();
     void everyControlHasHelp();
     void numberBoxesFitTheirWidestValue();
     void cameraSlidersSetTheBoxAndReachTheCameraOnce();
@@ -199,6 +200,8 @@ private slots:
     void recreateFolderWhilePreviewRunningAndWheelGuard();
     void detectionProfilesSaveLoadAndOptionalMask();
     void previewZoomControlsSyncWithWidget();
+    void cameraRoiDrawingPresetsAndAutoRounding();
+    void guiLayoutThemesFocusViewAndPersistence();
     void moonAndSkyEndToEndInjectionsRecordOnDisk();
 };
 
@@ -508,18 +511,22 @@ void UiTest::dragLocksOnAFeatureAndClickStillSelects()
             QTest::mouseMove(preview, to);
             QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
         };
-        // Feature-28: a drag locks only after Draw lock box; one box per press.
+        // Feature-28 + default pan: dragging without Draw lock box does not draw or lock;
+        // Draw lock box enables one-shot region drawing, then returns left-drag to pan.
+        QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
         drag();
-        QCOMPARE(regions.size(), 1);
+        QCOMPARE(regions.size(), 0);
         QTest::qWait(300);
         QVERIFY(state->text().contains("Off"));
         auto* drawLock = window.findChild<QPushButton*>("drawLockBox");
         QVERIFY(drawLock->isEnabled());
         drawLock->click();
         QVERIFY(drawLock->isChecked());
+        QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
         drag();
         QVERIFY(!drawLock->isChecked());
-        QCOMPARE(regions.size(), 2);
+        QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
+        QCOMPARE(regions.size(), 1);
         QCOMPARE(pixels.size(), 0);
         QVERIFY(!preview->selectedPosition());
         QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
@@ -765,15 +772,18 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
     QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: 3"),3000);
+    // Unaligned ROI width auto-rounds to camera alignment rules (127 -> 128) on Apply.
     panel->findChild<QSpinBox*>("cameraWidth")->setValue(127);
     panel->findChild<QPushButton*>("applyCamera")->click();
-    QVERIFY(stop->isEnabled()); QCOMPARE(api->starts.load(),1); QCOMPARE(api->stops.load(),0);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),2,3000);
+    QVERIFY(stop->isEnabled()); QCOMPARE(api->stops.load(),1);
+    QCOMPARE(panel->profile().current.width,128);
     panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(13);
     auto* format=panel->findChild<QComboBox*>("cameraFormat");
     format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono16)));
     panel->findChild<QSpinBox*>("cameraWidth")->setValue(64);
     panel->findChild<QPushButton*>("applyCamera")->click();
-    QTRY_VERIFY_WITH_TIMEOUT(api->starts>=2,3000);
+    QTRY_VERIFY_WITH_TIMEOUT(api->starts>=3,3000);
     QCOMPARE(panel->profile().current.format,PixelFormat::Mono16);
     QCOMPARE(panel->profile().current.width,64);
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl1")->value(),12.0);
@@ -782,21 +792,21 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QTRY_VERIFY_WITH_TIMEOUT(histogram->findChild<QLabel*>("histogramSampleRange")->text().contains("At max code (65535)"), 3000);
     QVERIFY(!save->isEnabled());
     monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
-    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),3,3000);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),4,3000);
     QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl1")->isEnabled());
     QVERIFY(window.findChild<QDoubleSpinBox*>("detectionSigma")->isEnabled());
     save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     monitoring->click(); QTRY_COMPARE_WITH_TIMEOUT(monitoring->text(),QString("Start monitoring"),3000);
-    QVERIFY(!save->isEnabled()); QCOMPARE(api->starts.load(),3); QCOMPARE(api->stops.load(),2);
+    QVERIFY(!save->isEnabled()); QCOMPARE(api->starts.load(),4); QCOMPARE(api->stops.load(),3);
     QVERIFY(panel->findChild<QDoubleSpinBox*>("cameraControl1")->isEnabled());
     panel->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(20);
     QTRY_COMPARE_WITH_TIMEOUT(panel->profile().current.controls.at(ZwoControl::Gain),int64_t{20},3000);
     format->setCurrentIndex(format->findData(static_cast<int>(PixelFormat::Mono8)));
     panel->findChild<QSpinBox*>("cameraWidth")->setValue(128);
     panel->findChild<QPushButton*>("applyCamera")->click();
-    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),4,3000);
-    monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),5,3000);
+    monitoring->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(),6,3000);
     save->click(); QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     window.findChild<QDockWidget*>("cameraDock")->raise();
     window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
@@ -1238,6 +1248,61 @@ void UiTest::darkeningIsForTheMoonOnly()
     QCOMPARE(panel.settings().ignoreAboveShare, 0.0);
 }
 
+// Feature-45: in the shadows' watch the controls at the top are the dark
+// patch limits and the readouts show falls. The bright limits, which have no
+// control there, keep their values.
+void UiTest::shadowsUseTheLimitsAtTheTop()
+{
+    DetectionPanel panel;
+    auto* minimum = panel.findChild<QSpinBox*>("detectionMinPixels");
+    auto* maximum = panel.findChild<QSpinBox*>("detectionMaxPixels");
+    auto* box = panel.findChild<QDoubleSpinBox*>("detectionMaxBoxRatio");
+    QVERIFY(minimum && maximum && box);
+    QVERIFY(!panel.findChild<QSpinBox*>("detectionMaxDarkPixels"));
+    QVERIFY(!panel.findChild<QDoubleSpinBox*>("detectionMaxDarkBoxRatio"));
+    QVERIFY(!panel.findChild<QLabel*>("darkReading"));
+
+    panel.setWatch(Watch::MoonShadows);
+    panel.setSettings(defaultDetectionSettings(Watch::MoonShadows));
+    QCOMPARE(maximum->value(), 20000);
+    QCOMPARE(box->value(), 10.0);
+    QVERIFY(maximum->toolTip().contains("shadow"));
+    maximum->setValue(5000);
+    box->setValue(8);
+    QCOMPARE(panel.settings().maxDarkPixels, 5000);
+    QCOMPARE(panel.settings().maxDarkBoxRatio, 8.0);
+    QCOMPARE(panel.settings().maxPixels, 400);
+    QCOMPARE(panel.settings().maxPatchBoxRatio, 4.0);
+    // Only the dark maximum limits the minimum here, not the bright one.
+    minimum->setValue(500);
+    QCOMPARE(panel.settings().minPixels, 500);
+    QVERIFY(panel.settings().valid());
+    // A maximum set below the minimum takes the minimum with it.
+    maximum->setValue(300);
+    QCOMPARE(panel.settings().minPixels, 300);
+    QCOMPARE(panel.settings().maxDarkPixels, 300);
+    QCOMPARE(panel.settings().maxPixels, 400);
+
+    DetectionView view;
+    view.summary.ready = true;
+    view.summary.settings = panel.settings();
+    view.summary.peakSigma = 15;
+    panel.setView(view);
+    auto* reading = panel.findChild<QLabel*>("sigmaReading");
+    QVERIFY2(reading->text().startsWith("Deepest fall 15.0 / K 12.0"), qPrintable(reading->text()));
+    QVERIFY(panel.findChild<QLabel*>("detectionState")->text().contains("Deepest fall ("));
+
+    // The flashes: the same controls are the bright limits again.
+    panel.setWatch(Watch::MoonFlashes);
+    panel.setSettings(defaultDetectionSettings(Watch::MoonFlashes));
+    QCOMPARE(maximum->value(), 400);
+    QCOMPARE(box->value(), 4.0);
+    QVERIFY(!maximum->toolTip().contains("shadow"));
+    view.summary.settings = panel.settings();
+    panel.setView(view);
+    QVERIFY2(reading->text().startsWith("Peak 15.0 / K 6.0"), qPrintable(reading->text()));
+}
+
 // Feature-24: every control in the window and its docks explains itself:
 // a tool tip, the same text as What's This, and a ⓘ on the label naming it.
 // Checked for both targets with a camera chosen and the testing tools on.
@@ -1574,35 +1639,45 @@ void UiTest::aDragDrawsOnlyWhatWasChosen()
         QTest::mouseMove(preview, to);
         QTest::mouseRelease(preview, Qt::LeftButton, Qt::NoModifier, to);
     };
-    auto* message = window.findChild<QLabel*>("statusMessage");
     auto* lockState = window.findChild<QLabel*>("lockStateLabel");
+    // With nothing chosen, dragging while zoomed pans instead of drawing a box.
+    preview->setZoom(2.0);
     drag();
-    QVERIFY2(message->text().contains("draws nothing until you choose"), qPrintable(message->text()));
+    QVERIFY(preview->panOffset() != QPointF(0.0, 0.0));
     QVERIFY(!QSettings().contains("autotune/earthshineBox"));
+    QVERIFY(lockState->text().contains("Off"));
+    preview->setFitToWindow();
 
-    // Choosing one drawing turns the other off.
+    // Choosing one drawing turns the other off and switches left-drag to Region mode.
     auto* drawLock = window.findChild<QPushButton*>("drawLockBox");
     auto* drawEarthshine = window.findChild<QToolButton*>("autoTuneDrawBox");
     drawLock->click();
     QVERIFY(drawLock->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
     drawEarthshine->click();
     QVERIFY(drawEarthshine->isChecked());
     QVERIFY(!drawLock->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
     drag();
     QVERIFY(!drawEarthshine->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
     QVERIFY(QSettings().value("autotune/earthshineBox").toRect().isValid());
     QTest::qWait(300);
     QVERIFY(lockState->text().contains("Off")); // The earthshine box is not a lock.
     drawEarthshine->click();
     drawLock->click();
     QVERIFY(!drawEarthshine->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
     drag();
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
     QTRY_VERIFY_WITH_TIMEOUT(lockState->text().contains("Locked"), 5000);
 
-    // Closing the window ends a box being drawn.
+    // Closing the window ends a box being drawn and returns left-drag to Pan mode.
     drawEarthshine->click();
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
     autoTuneWindow->close();
     QVERIFY(!drawEarthshine->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
     window.findChild<QPushButton*>("stopButton")->click();
 }
 
@@ -2615,14 +2690,44 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     dlg.show();
     QCoreApplication::processEvents();
     auto* stackCombo = dlg.findChild<QComboBox*>("resharpenStackCombo");
-    auto* beforeLbl = dlg.findChild<QLabel*>("resharpenBefore");
-    auto* afterLbl = dlg.findChild<QLabel*>("resharpenAfter");
+    auto* beforeView = dlg.findChild<PreviewWidget*>("resharpenBefore");
+    auto* afterView = dlg.findChild<PreviewWidget*>("resharpenAfter");
+    auto* zoomFit = dlg.findChild<QToolButton*>("resharpenZoomFit");
+    auto* zoom100 = dlg.findChild<QToolButton*>("resharpenZoom100");
+    auto* zoom200 = dlg.findChild<QToolButton*>("resharpenZoom200");
+    auto* zoom400 = dlg.findChild<QToolButton*>("resharpenZoom400");
+    auto* zoomLbl = dlg.findChild<QLabel*>("resharpenZoomLabel");
     auto* statusLbl = dlg.findChild<QLabel*>("resharpenStatus");
     auto* applyBtn = dlg.findChild<QPushButton*>("resharpenApply");
-    QVERIFY(stackCombo && beforeLbl && afterLbl && statusLbl && applyBtn);
+    QVERIFY(stackCombo && beforeView && afterView && zoomFit && zoom100 && zoom200 && zoom400 && zoomLbl && statusLbl && applyBtn);
     QVERIFY(stackCombo->count() >= 2);
-    QVERIFY(!beforeLbl->pixmap().isNull());
-    QVERIFY(!afterLbl->pixmap().isNull());
+    QVERIFY(!beforeView->image().isNull());
+    QVERIFY(!afterView->image().isNull());
+    QVERIFY(zoomFit->isChecked());
+
+    // Zoom controls and left-drag pan synchronize Before and After views cleanly.
+    zoom200->click();
+    QVERIFY(zoom200->isChecked());
+    QCOMPARE(zoomLbl->text(), QString("200%"));
+    QVERIFY(std::abs(beforeView->zoom() - 2.0) < 1e-6);
+    QVERIFY(std::abs(afterView->zoom() - 2.0) < 1e-6);
+    zoom400->click();
+    QVERIFY(zoom400->isChecked());
+    QCOMPARE(zoomLbl->text(), QString("400%"));
+    QVERIFY(std::abs(afterView->zoom() - 4.0) < 1e-6);
+    {
+        const QPointF start(beforeView->width() * 0.5, beforeView->height() * 0.5);
+        const QPointF end = start + QPointF(40, -25);
+        QMouseEvent press(QEvent::MouseButtonPress, start, start, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, end, end, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, end, end, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(beforeView, &press);
+        QApplication::sendEvent(beforeView, &move);
+        QApplication::sendEvent(beforeView, &release);
+    }
+    QVERIFY(beforeView->panOffset() != QPointF(0.0, 0.0));
+    QCOMPARE(afterView->panOffset(), beforeView->panOffset());
+    const QPointF savedPan = afterView->panOffset();
 
     auto* radiusSlider = dlg.findChild<QSlider*>("resharpenRadiusSlider");
     auto* amountSlider = dlg.findChild<QSlider*>("resharpenAmountSlider");
@@ -2638,11 +2743,15 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(radiusSlider && amountSlider && thresholdSlider && denoiseSlider
         && gammaSlider && blackSlider && whiteSlider && autoStretch && rebuildOnly && amountSpin && gammaSpin);
 
-    // Sync slider -> spin box and verify coalesced live after-preview refreshes.
-    const QImage afterBefore = afterLbl->pixmap().toImage();
+    // Sync slider -> spin box and verify coalesced live after-preview refreshes while keeping zoom & pan.
+    const QImage afterBefore = afterView->image();
     amountSlider->setValue(260); // 2.60
     QVERIFY(std::abs(amountSpin->value() - 2.60) < 1e-4);
-    QTRY_VERIFY_WITH_TIMEOUT(afterLbl->pixmap().toImage() != afterBefore, 2000);
+    QTRY_VERIFY_WITH_TIMEOUT(afterView->image() != afterBefore, 2000);
+    QVERIFY(std::abs(afterView->zoom() - 4.0) < 1e-6);
+    QCOMPARE(afterView->panOffset(), savedPan);
+    zoomFit->click();
+    QVERIFY(beforeView->isFitToWindow() && afterView->isFitToWindow());
 
     // Sync spin box -> slider and check enable/disable states.
     gammaSpin->setValue(1.25);
@@ -2656,7 +2765,7 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     rebuildOnly->setChecked(true);
     QVERIFY(!amountSlider->isEnabled() && !radiusSlider->isEnabled());
     // Rebuild video only must preview the existing sharpened/ stack, not the unsharpened stacks/ image.
-    QTRY_VERIFY_WITH_TIMEOUT(afterLbl->pixmap().toImage() != beforeLbl->pixmap().toImage(), 2000);
+    QTRY_VERIFY_WITH_TIMEOUT(afterView->image() != beforeView->image(), 2000);
     rebuildOnly->setChecked(false);
     QVERIFY(amountSlider->isEnabled() && radiusSlider->isEnabled());
 
@@ -2675,8 +2784,16 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     // into a non-destructive video_* folder without overwriting the original timelapse.mp4.
     {
         auto* cropCheck = dlg.findChild<QCheckBox*>("resharpenCropOverlap");
-        auto* brightCheck = dlg.findChild<QCheckBox*>("resharpenBrightnessLevel");
-        QVERIFY(cropCheck && brightCheck);
+        auto* brightCombo = dlg.findChild<QComboBox*>("resharpenBrightnessLevel");
+        QVERIFY(cropCheck && brightCombo);
+        QCOMPARE(brightCombo->count(), 3);
+        QCOMPARE(brightCombo->currentData().toInt(), static_cast<int>(BrightnessLevellingMode::Global));
+        brightCombo->setCurrentIndex(2); // GlobalAndPatchy
+        QCoreApplication::processEvents();
+        brightCombo->setCurrentIndex(0); // Off
+        QCoreApplication::processEvents();
+        brightCombo->setCurrentIndex(1); // Global
+        QCoreApplication::processEvents();
 
         // Save a distinct cropped overlap in session profile and reopen in dialog.
         SharpeningSettings ls;
@@ -2690,11 +2807,13 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
 
         cropCheck->setChecked(true);
         QCoreApplication::processEvents();
-        const QImage croppedImg = afterLbl->pixmap().toImage();
+        const QImage croppedImg = afterView->image();
+        QCOMPARE(croppedImg.size(), QSize(200, 140));
         cropCheck->setChecked(false);
         QCoreApplication::processEvents();
-        const QImage fullImg = afterLbl->pixmap().toImage();
+        const QImage fullImg = afterView->image();
         QVERIFY(croppedImg != fullImg);
+        QVERIFY(fullImg.width() > 200);
         cropCheck->setChecked(true);
 
         const QString origMp4 = QDir(sessionDir).filePath("timelapse.mp4");
@@ -3446,6 +3565,333 @@ void UiTest::theEndsDialogShowsWhenEachConditionIsMet()
     QCOMPARE(saved.value("sessionEnd/sunLimit").toDouble(), -12.0);
     QVERIFY(!saved.contains("sky/night/enabled"));
     QVERIFY(!window.findChild<QCheckBox*>("nightSchedule"));
+}
+
+void UiTest::cameraRoiDrawingPresetsAndAutoRounding()
+{
+    // 1. Pure alignment rules across all four camera families.
+    {
+        // ZWO USB2 ASI120: width % 8 == 0, height % 2 == 0, (width * height) % 1024 == 0.
+        const RoiConstraints asi120{8, 2, 1, 1, 8, 2, 1024};
+        const AlignedRoi drawn = alignRoi(1280, 960, asi120, 340, 255, 600, 450, true);
+        QVERIFY(drawn.adjusted);
+        QCOMPARE(drawn.width % 8, 0);
+        QCOMPARE(drawn.height % 2, 0);
+        QCOMPARE((static_cast<int64_t>(drawn.width) * drawn.height) % 1024, int64_t{0});
+        QCOMPARE(drawn.width, 608);
+        QCOMPARE(drawn.height, 448);
+        // Box center stays aligned (340 + 300 = 640 -> 336 + 304 = 640; 255 + 225 = 480 -> 256 + 224 = 480).
+        QCOMPARE(drawn.x, 336);
+        QCOMPARE(drawn.y, 256);
+
+        const AlignedRoi nudged = alignRoi(1280, 960, asi120, 100, 80, 640, 482, false);
+        QVERIFY(nudged.adjusted);
+        QCOMPARE(nudged.width, 640);
+        QCOMPARE(nudged.height, 480);
+        QCOMPARE(nudged.x, 100);
+        QCOMPARE(nudged.y, 80);
+
+        // Player One: width % 4 == 0, height % 2 == 0.
+        const RoiConstraints poa{4, 2, 1, 1, 4, 2, 1};
+        const AlignedRoi p = alignRoi(1920, 1080, poa, 15, 21, 501, 301, false);
+        QVERIFY(p.adjusted);
+        QCOMPARE(p.width % 4, 0);
+        QCOMPARE(p.height % 2, 0);
+        QCOMPARE(p.x, 15);
+        QCOMPARE(p.y, 21);
+
+        // ToupTek: even origin and even size >= 8.
+        const RoiConstraints tt{2, 2, 2, 2, 8, 8, 1};
+        const AlignedRoi t = alignRoi(1600, 1200, tt, 11, 17, 5, 7, false);
+        QVERIFY(t.adjusted);
+        QCOMPARE(t.width, 8);
+        QCOMPARE(t.height, 8);
+        QCOMPARE(t.x % 2, 0);
+        QCOMPARE(t.y % 2, 0);
+
+        // QHY: 1x1 step, clamped inside sensor bounds.
+        const RoiConstraints qhy{1, 1, 1, 1, 1, 1, 1};
+        const AlignedRoi q = alignRoi(640, 480, qhy, 600, 450, 100, 100, false);
+        QVERIFY(q.adjusted);
+        QCOMPARE(q.width, 100);
+        QCOMPARE(q.height, 100);
+        QCOMPARE(q.x, 540);
+        QCOMPARE(q.y, 380);
+    }
+
+    // 2. Shared editor interactive auto-rounding and ToupTek even origin steps.
+    {
+        CameraSettingsEditor editor(RoiConstraints{2, 2, 2, 2, 8, 8, 1}, nullptr);
+        editor.showGeometry(640, 480, {PixelFormat::Mono8}, {1}, {640, 480, 0, 0, 1, PixelFormat::Mono8});
+        auto* xBox = editor.findChild<QSpinBox*>("cameraX");
+        auto* yBox = editor.findChild<QSpinBox*>("cameraY");
+        auto* wBox = editor.findChild<QSpinBox*>("cameraWidth");
+        auto* hBox = editor.findChild<QSpinBox*>("cameraHeight");
+        QCOMPARE(xBox->singleStep(), 2);
+        QCOMPARE(yBox->singleStep(), 2);
+        QSignalSpy adjustedSpy(&editor, &CameraSettingsEditor::roiAdjusted);
+        wBox->setValue(301);
+        hBox->setValue(201);
+        xBox->setValue(13);
+        yBox->setValue(19);
+        emit wBox->editingFinished();
+        QCOMPARE(adjustedSpy.count(), 1);
+        const CameraGeometry g = editor.requestedGeometry();
+        QCOMPARE(g.width % 2, 0);
+        QCOMPARE(g.height % 2, 0);
+        QCOMPARE(g.x % 2, 0);
+        QCOMPARE(g.y % 2, 0);
+        QVERIFY(g.width >= 8 && g.height >= 8);
+    }
+
+    // 3. Full MainWindow workflow with USB2 ASI120 (1280x960):
+    //    Draw ROI (including nested sub-ROI), centered presets, Center, Full, and mutual exclusion.
+    QTemporaryDir dir;
+    auto api = std::make_shared<FakeZwoApi>();
+    api->camera.width = 1280;
+    api->camera.height = 960;
+    api->camera.usb3 = false; // USB2 ASI120 -> 1024-pixel multiple rule active
+    api->settings.width = 1280;
+    api->settings.height = 960;
+    MainWindow window(nullptr, dir.path(), api);
+    window.resize(1120, 760);
+    window.show();
+    chooseSource(window, "zwo");
+
+    auto* panel = window.findChild<CameraPanel*>();
+    QVERIFY(panel && panel->hasCamera());
+    auto* drawRoi = panel->findChild<QToolButton*>("cameraDrawRoi");
+    auto* centerRoi = panel->findChild<QToolButton*>("cameraRoiCenter");
+    auto* fullRoi = panel->findChild<QToolButton*>("cameraRoiFull");
+    auto* presetBox = panel->findChild<QComboBox*>("cameraRoiPreset");
+    auto* preview = window.findChild<PreviewWidget*>();
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    QVERIFY(drawRoi && centerRoi && fullRoi && presetBox && preview && start && stop);
+
+    // Draw ROI is disabled while stopped; presets fill spin boxes without opening the camera.
+    QVERIFY(!drawRoi->isEnabled());
+    QVERIFY(presetBox->count() > 3);
+    const int opensBeforePreset = api->opened.load();
+    // Pick "50% (640 × 480)" while stopped.
+    int preset50 = -1;
+    for (int i = 1; i < presetBox->count(); ++i)
+        if (presetBox->itemText(i).contains("50% (")) { preset50 = i; break; }
+    QVERIFY(preset50 > 0);
+    emit presetBox->activated(preset50);
+    QCOMPARE(presetBox->currentIndex(), 0);
+    QCOMPARE(api->opened.load(), opensBeforePreset);
+    QCOMPARE(panel->controls()->requestedGeometry().width, 640);
+    QCOMPARE(panel->controls()->requestedGeometry().height, 480);
+    QCOMPARE(panel->controls()->requestedGeometry().x, 320);
+    QCOMPARE(panel->controls()->requestedGeometry().y, 240);
+
+    // Reset to Full while stopped and start Preview.
+    fullRoi->click();
+    QCOMPARE(panel->controls()->requestedGeometry().width, 1280);
+    QCOMPARE(panel->controls()->requestedGeometry().height, 960);
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(api->delivered >= 2 && !preview->imageRect().isEmpty(), 3000);
+    QVERIFY(drawRoi->isEnabled());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
+
+    // Draw ROI switches Preview to Region mode and turns off Draw lock box (mutual exclusion).
+    auto* drawLock = window.findChild<QPushButton*>("drawLockBox");
+    QVERIFY(drawLock);
+    drawLock->click();
+    QVERIFY(drawLock->isChecked());
+    drawRoi->click();
+    QVERIFY(drawRoi->isChecked());
+    QVERIFY(!drawLock->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Region);
+
+    // Drag an unaligned 600x450 box at (340, 255): auto-rounds to 608x448 at (336, 256)
+    // and immediately restarts Preview with that ROI.
+    const int startsBeforeDraw = api->starts.load();
+    emit preview->regionSelected(QRect(340, 255, 600, 450));
+    QVERIFY(!drawRoi->isChecked());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(), startsBeforeDraw + 1, 3000);
+    QCOMPARE(panel->profile().current.width, 608);
+    QCOMPARE(panel->profile().current.height, 448);
+    QCOMPARE(panel->profile().current.x, 336);
+    QCOMPARE(panel->profile().current.y, 256);
+    QCOMPARE((static_cast<int64_t>(panel->profile().current.width) * panel->profile().current.height) % 1024, int64_t{0});
+
+    // Nested sub-ROI drag inside the already-cropped 608x448 frame:
+    // dragging (100, 50, 256, 256) in preview pixels must land at sensor origin (336+100, 256+50) = (436, 306).
+    drawRoi->click();
+    QVERIFY(drawRoi->isChecked());
+    emit preview->regionSelected(QRect(100, 50, 256, 256));
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(), startsBeforeDraw + 2, 3000);
+    QCOMPARE(panel->profile().current.width, 256);
+    QCOMPARE(panel->profile().current.height, 256);
+    QCOMPARE(panel->profile().current.x, 436);
+    QCOMPARE(panel->profile().current.y, 306);
+
+    // Center button centers the current 256x256 ROI on the 1280x960 sensor -> (512, 352) immediately.
+    centerRoi->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(), startsBeforeDraw + 3, 3000);
+    QCOMPARE(panel->profile().current.width, 256);
+    QCOMPARE(panel->profile().current.height, 256);
+    QCOMPARE(panel->profile().current.x, 512);
+    QCOMPARE(panel->profile().current.y, 352);
+
+    // Full button immediately returns to full sensor 1280x960 at (0, 0).
+    fullRoi->click();
+    QTRY_COMPARE_WITH_TIMEOUT(api->starts.load(), startsBeforeDraw + 4, 3000);
+    QCOMPARE(panel->profile().current.width, 1280);
+    QCOMPARE(panel->profile().current.height, 960);
+    QCOMPARE(panel->profile().current.x, 0);
+    QCOMPARE(panel->profile().current.y, 0);
+
+    // Clicking Full again while already at full sensor does not needlessly restart Preview.
+    fullRoi->click();
+    QTest::qWait(100);
+    QCOMPARE(api->starts.load(), startsBeforeDraw + 4);
+
+    // Stopping Preview disables Draw ROI and returns preview to Pan mode.
+    drawRoi->click();
+    QVERIFY(drawRoi->isChecked());
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
+    QVERIFY(!drawRoi->isChecked());
+    QVERIFY(!drawRoi->isEnabled());
+    QCOMPARE(preview->dragMode(), PreviewWidget::DragMode::Pan);
+}
+
+void UiTest::guiLayoutThemesFocusViewAndPersistence()
+{
+    QTemporaryDir dir;
+    auto api = std::make_shared<FakeZwoApi>();
+    {
+        MainWindow window(nullptr, dir.path(), api);
+        window.resize(1280, 760);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+        // Option B: all docks live in the single right-hand sidebar (no left or bottom dock).
+        auto* cameraDock = window.findChild<QDockWidget*>("cameraDock");
+        auto* detectionDock = window.findChild<QDockWidget*>("detectionDock");
+        auto* histogramDock = window.findChild<QDockWidget*>("histogramDock");
+        QVERIFY(cameraDock && detectionDock && histogramDock);
+        QCOMPARE(window.dockWidgetArea(cameraDock), Qt::RightDockWidgetArea);
+        QCOMPARE(window.dockWidgetArea(detectionDock), Qt::RightDockWidgetArea);
+        QCOMPARE(window.dockWidgetArea(histogramDock), Qt::RightDockWidgetArea);
+
+        // Item 2: source-irrelevant controls hide for a live camera, show for Recording.
+        chooseSource(window, "zwo");
+        auto* openFile = window.findChild<QPushButton*>("openFileButton");
+        auto* connectStartup = window.findChild<QCheckBox*>("connectAtStartup");
+        auto* playbackBar = window.findChild<QWidget*>("playbackControls");
+        auto* startBtn = window.findChild<QPushButton*>("startButton");
+        auto* stopBtn = window.findChild<QPushButton*>("stopButton");
+        auto* monitorBtn = window.findChild<QPushButton*>("monitoringButton");
+        auto* saveNowBtn = window.findChild<QPushButton*>("saveNowButton");
+        QVERIFY(openFile && connectStartup && playbackBar && startBtn && stopBtn && monitorBtn && saveNowBtn);
+        QVERIFY(!openFile->isVisibleTo(&window));
+        QVERIFY(!playbackBar->isVisibleTo(&window));
+        QVERIFY(connectStartup->isVisibleTo(&window));
+
+        // Item 6: streamlined Start / Stop / Monitor / Save now visibility by state.
+        QVERIFY(startBtn->isVisibleTo(&window));
+        QVERIFY(!stopBtn->isVisibleTo(&window));
+        QVERIFY(!monitorBtn->isVisibleTo(&window));
+        QVERIFY(!saveNowBtn->isVisibleTo(&window));
+        QCOMPARE(window.findChild<QLabel*>("captureModeLabel")->text(), QString("STOPPED"));
+
+        // Item 2: smart Apply highlight when ROI/format has unapplied edits.
+        auto* panel = window.findChild<CameraPanel*>();
+        auto* applyBtn = panel->findChild<QPushButton*>("applyCamera");
+        QVERIFY(!panel->controls()->geometryDirty());
+        QVERIFY(applyBtn->styleSheet().isEmpty());
+        panel->findChild<QSpinBox*>("cameraWidth")->setValue(64);
+        QVERIFY(panel->controls()->geometryDirty());
+        QVERIFY(!applyBtn->styleSheet().isEmpty());
+
+        startBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(api->delivered >= 2, 3000);
+        QVERIFY(!startBtn->isVisibleTo(&window));
+        QVERIFY(stopBtn->isVisibleTo(&window));
+        QVERIFY(monitorBtn->isVisibleTo(&window));
+        QVERIFY(!saveNowBtn->isVisibleTo(&window));
+        QVERIFY(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"));
+
+        monitorBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(saveNowBtn->isEnabled(), 3000);
+        QVERIFY(saveNowBtn->isVisibleTo(&window));
+        QVERIFY(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"));
+
+        stopBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(startBtn->isEnabled(), 3000);
+        QVERIFY(startBtn->isVisibleTo(&window));
+        QVERIFY(!stopBtn->isVisibleTo(&window));
+
+        // Recording source reveals Open... and playback controls, hides Connect at startup.
+        chooseSource(window, "recording");
+        QVERIFY(openFile->isVisibleTo(&window));
+        QVERIFY(playbackBar->isVisibleTo(&window));
+        QVERIFY(!connectStartup->isVisibleTo(&window));
+        chooseSource(window, "zwo");
+
+        // Focus view hides all open docks for maximum preview width, then restores them.
+        auto* histToggle = window.findChild<QToolButton*>("previewHistogramToggle");
+        auto* focusBtn = window.findChild<QToolButton*>("previewFocusView");
+        QVERIFY(histToggle && focusBtn);
+        histToggle->click();
+        QApplication::processEvents();
+        QVERIFY(!histogramDock->isHidden());
+        // Verify the 3-slot right sidebar stacks Camera above Detection and Histogram below Detection (not crushed into one tab bar).
+        QVERIFY(cameraDock->y() < detectionDock->y());
+        QVERIFY(detectionDock->y() < histogramDock->y());
+        QVERIFY(!window.tabifiedDockWidgets(detectionDock).contains(cameraDock));
+        QVERIFY(!window.tabifiedDockWidgets(detectionDock).contains(histogramDock));
+        const int previewWidthWithPanels = window.findChild<PreviewWidget*>()->width();
+        focusBtn->click();
+        QApplication::processEvents();
+        QVERIFY(cameraDock->isHidden());
+        QVERIFY(detectionDock->isHidden());
+        QVERIFY(histogramDock->isHidden());
+        QVERIFY(window.findChild<PreviewWidget*>()->width() > previewWidthWithPanels + 150);
+        focusBtn->click();
+        QApplication::processEvents();
+        QVERIFY(!cameraDock->isHidden());
+        QVERIFY(!detectionDock->isHidden());
+        QVERIFY(!histogramDock->isHidden());
+
+        // Item 1: Theme switching (Dark -> Red night vision -> System) persists via QSettings.
+        auto* nightRed = window.findChild<QAction*>("themeNightRedAction");
+        auto* darkAct = window.findChild<QAction*>("themeDarkAction");
+        auto* sysAct = window.findChild<QAction*>("themeSystemAction");
+        QVERIFY(nightRed && darkAct && sysAct);
+        nightRed->trigger();
+        QCOMPARE(currentUiTheme(), UiTheme::NightRed);
+        QCOMPARE(loadUiTheme(), UiTheme::NightRed);
+
+        // Item 4: closing saves geometry and dock state; Reset layout restores defaults.
+        window.resize(1320, 780);
+        window.close();
+    }
+
+    // Reopen: theme and window layout persist, then Reset window layout restores default state.
+    {
+        MainWindow reopened(nullptr, dir.path(), api);
+        reopened.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&reopened));
+        QCOMPARE(currentUiTheme(), UiTheme::NightRed);
+        QVERIFY(reopened.findChild<QAction*>("themeNightRedAction")->isChecked());
+        QVERIFY(!QSettings().value("ui/windowState").toByteArray().isEmpty());
+
+        reopened.findChild<QAction*>("resetLayoutAction")->trigger();
+        QVERIFY(QSettings().value("ui/windowState").toByteArray().isEmpty());
+        QCOMPARE(reopened.dockWidgetArea(reopened.findChild<QDockWidget*>("detectionDock")), Qt::RightDockWidgetArea);
+        QCOMPARE(reopened.dockWidgetArea(reopened.findChild<QDockWidget*>("histogramDock")), Qt::RightDockWidgetArea);
+        QVERIFY(reopened.findChild<QDockWidget*>("histogramDock")->isHidden());
+
+        // Restore Dark theme for any subsequent tests.
+        reopened.findChild<QAction*>("themeDarkAction")->trigger();
+        QCOMPARE(currentUiTheme(), UiTheme::Dark);
+    }
 }
 
 int main(int argc, char** argv)

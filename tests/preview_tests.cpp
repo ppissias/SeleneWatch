@@ -18,6 +18,7 @@ private slots:
     void resizingKeepsTheSelectedFramePixel();
     void selectionNeverChangesTheImage();
     void zoomPanAndCoordinateAccuracy();
+    void leftDragPansByDefaultAndDrawsOnlyInRegionMode();
 };
 
 void PreviewWidgetTest::mapsTheWholeImageIncludingItsLastPixel()
@@ -154,6 +155,79 @@ void PreviewWidgetTest::zoomPanAndCoordinateAccuracy()
     QVERIFY(preview.isFitToWindow());
     QCOMPARE(preview.panOffset(), QPointF(0, 0));
     QCOMPARE(preview.imageRect(), QRect(1, 1, 800, 600));
+}
+
+void PreviewWidgetTest::leftDragPansByDefaultAndDrawsOnlyInRegionMode()
+{
+    PreviewWidget preview;
+    preview.resize(802, 602);
+    preview.setImage(QImage(640, 480, QImage::Format_Grayscale8));
+    QCOMPARE(preview.dragMode(), PreviewWidget::DragMode::Pan);
+
+    QSignalSpy regionSpy(&preview, &PreviewWidget::regionSelected);
+    QSignalSpy pixelSpy(&preview, &PreviewWidget::positionSelected);
+    QSignalSpy viewSpy(&preview, &PreviewWidget::viewChanged);
+
+    // At 200%, a left-drag pans instead of drawing a rectangle or selecting a pixel.
+    preview.setZoom(2.0);
+    viewSpy.clear();
+    {
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(400, 300), QPointF(400, 300),
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, QPointF(480, 330), QPointF(480, 330),
+            Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(480, 330), QPointF(480, 330),
+            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(&preview, &press);
+        QApplication::sendEvent(&preview, &move);
+        QApplication::sendEvent(&preview, &release);
+    }
+    QCOMPARE(regionSpy.count(), 0);
+    QCOMPARE(pixelSpy.count(), 0);
+    QVERIFY(viewSpy.count() >= 1);
+    QCOMPARE(preview.panOffset(), QPointF(80, 30));
+
+    // A short left-click while zoomed in Pan mode still selects the exact frame pixel.
+    QTest::mouseClick(&preview, Qt::LeftButton, Qt::NoModifier, {401, 301});
+    QCOMPARE(pixelSpy.count(), 1);
+    QCOMPARE(pixelSpy.takeFirst().at(0).toPoint(), QPoint(280, 225));
+
+    // In Region mode, a left-drag selects a frame box without panning, while right-drag still pans.
+    preview.setDragMode(PreviewWidget::DragMode::Region);
+    const QPointF panBefore = preview.panOffset();
+    {
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(360, 260), QPointF(360, 260),
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, QPointF(440, 340), QPointF(440, 340),
+            Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(440, 340), QPointF(440, 340),
+            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(&preview, &press);
+        QApplication::sendEvent(&preview, &move);
+        QApplication::sendEvent(&preview, &release);
+    }
+    QCOMPARE(regionSpy.count(), 1);
+    QCOMPARE(preview.panOffset(), panBefore);
+
+    // Inspect-only mode (Re-sharpen): clicking never selects a pixel and left-drag pans immediately.
+    preview.setDragMode(PreviewWidget::DragMode::Pan);
+    preview.setPixelSelectionEnabled(false);
+    QVERIFY(!preview.selectedPosition());
+    QTest::mouseClick(&preview, Qt::LeftButton, Qt::NoModifier, {401, 301});
+    QCOMPARE(pixelSpy.count(), 0);
+    QVERIFY(!preview.selectedPosition());
+    {
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(400, 300), QPointF(400, 300),
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, QPointF(397, 298), QPointF(397, 298),
+            Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(397, 298), QPointF(397, 298),
+            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(&preview, &press);
+        QApplication::sendEvent(&preview, &move);
+        QApplication::sendEvent(&preview, &release);
+    }
+    QCOMPARE(preview.panOffset(), panBefore + QPointF(-3, -2));
 }
 
 QTEST_MAIN(PreviewWidgetTest)

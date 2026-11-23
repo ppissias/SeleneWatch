@@ -1,6 +1,7 @@
 #include "ui/histogram_panel.h"
 #include "display/preview_image.h"
-#include "ui/widgets/readout_label.h"
+#include "ui/widgets/theme.h"
+#include "ui/widgets/elided_label.h"
 
 #include <QtGui/QPainter>
 #include <QtWidgets/QCheckBox>
@@ -14,7 +15,7 @@
 namespace {
 QString sampleRangeText(int minimum, int maximum, const QString& atZero, int maximumCode, const QString& atMaximum)
 {
-    return QString("Samples %1–%2 ADU   ·   At 0 %3   ·   At max code (%4) %5")
+    return QString("Samples %1–%2 ADU · At 0 %3 · At max code (%4) %5")
         .arg(minimum).arg(maximum).arg(atZero).arg(maximumCode).arg(atMaximum);
 }
 }
@@ -25,7 +26,7 @@ class HistogramPlot final : public QWidget
 public:
     explicit HistogramPlot(QWidget* parent) : QWidget(parent)
     {
-        setMinimumHeight(108);
+        setMinimumHeight(82);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
 
@@ -45,14 +46,15 @@ protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
-        painter.fillRect(rect(), QColor("#151c27"));
+        const bool nightRed = currentUiTheme() == UiTheme::NightRed;
+        painter.fillRect(rect(), nightRed ? QColor("#0b0202") : QColor("#151c27"));
         const auto& histogram = histogram_;
         if (!histogram.sampleCount) return;
 
         const int labelHeight = painter.fontMetrics().height();
-        const QRectF plot = QRectF(rect()).adjusted(10, 9, -10, -labelHeight - 9);
+        const QRectF plot = QRectF(rect()).adjusted(8, 7, -8, -labelHeight - 7);
         if (plot.isEmpty()) return;
-        painter.setPen(QColor("#354657"));
+        painter.setPen(nightRed ? QColor("#4d1414") : QColor("#354657"));
         for (double fraction : {0.0, 0.5, 1.0})
         {
             const double y = plot.top() + fraction * plot.height();
@@ -65,16 +67,17 @@ protected:
         };
         const double top = scale(maximum);
         const double step = plot.width() / histogram.binCount;
+        const QColor barColor = nightRed ? QColor("#cc2e2e") : QColor("#65d5bd");
         for (int i = 0; i < histogram.binCount; ++i)
         {
             const uint64_t count = histogram.bins[static_cast<size_t>(i)];
             if (count == 0) continue;
             const double h = std::max(1.0, plot.height() * scale(count) / top);
-            painter.fillRect(QRectF(plot.left() + i * step, plot.bottom() - h, std::max(1.0, step), h), QColor("#65d5bd"));
+            painter.fillRect(QRectF(plot.left() + i * step, plot.bottom() - h, std::max(1.0, step), h), barColor);
         }
 
-        painter.setPen(QColor("#dbe4ed"));
-        const QRectF labels(plot.left(), plot.bottom() + 3, plot.width(), labelHeight);
+        painter.setPen(nightRed ? QColor("#e65555") : QColor("#dbe4ed"));
+        const QRectF labels(plot.left(), plot.bottom() + 2, plot.width(), labelHeight);
         painter.drawText(labels, Qt::AlignLeft, QString::number(histogram.rangeMinimum));
         if (histogram.rangeMaximum != histogram.rangeMinimum)
             painter.drawText(labels, Qt::AlignRight, QString::number(histogram.rangeMaximum));
@@ -89,13 +92,16 @@ private:
 HistogramPanel::HistogramPanel(QWidget* parent) : QWidget(parent)
 {
     auto* layout = new QVBoxLayout(this);
-    auto* controls = new QHBoxLayout;
-    // Room for the widest line, so the plot keeps its height while the numbers change.
-    sampleRange_ = new ReadoutLabel({sampleRangeText(65535, 65535, "100.00%", 65535, "100.00%")}, this);
+    layout->setContentsMargins(6, 4, 6, 6);
+    layout->setSpacing(4);
+    // Compact single-line readout that shortens gracefully in the right sidebar
+    // while keeping full text for tooltips and tests.
+    sampleRange_ = new ElidedLabel("Waiting for frames", Qt::ElideRight, this);
     sampleRange_->setObjectName("histogramSampleRange");
     sampleRange_->setTextFormat(Qt::PlainText);
-    sampleRange_->setText("Waiting for frames");
     sampleRange_->setToolTip("Counts use the original samples. The highest code is based on the stream's declared sample range.");
+    auto* controls = new QHBoxLayout;
+    controls->setContentsMargins(0, 0, 0, 0);
     fitRange_ = new QCheckBox("Fit range", this);
     fitRange_->setObjectName("histogramFitRange");
     fitRange_->setToolTip("Zoom the horizontal axis to the smallest and largest samples in the frame.");
@@ -103,9 +109,10 @@ HistogramPanel::HistogramPanel(QWidget* parent) : QWidget(parent)
     logCounts_->setObjectName("histogramLogCounts");
     logCounts_->setToolTip("Use a logarithmic count scale to reveal bins with fewer samples.");
     logCounts_->setChecked(true);
-    controls->addWidget(sampleRange_, 1);
     controls->addWidget(fitRange_);
     controls->addWidget(logCounts_);
+    controls->addStretch(1);
+    layout->addWidget(sampleRange_);
     layout->addLayout(controls);
     plot_ = new HistogramPlot(this);
     plot_->setObjectName("histogramPlot");

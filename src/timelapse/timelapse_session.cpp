@@ -931,7 +931,7 @@ void TimelapseSession::processBurst(BurstJob& job)
     try
     {
         double b = 0, w = 1;
-        computeAutoStretchLevels(sharpened, b, w);
+        computeAutoStretchLevels(sharpened, b, w, commonOverlap_);
         thumb = toneMapFitsToImage(sharpened, b, w, config_.settings.video.gamma, 1.0, {}, 512);
     }
     catch (...)

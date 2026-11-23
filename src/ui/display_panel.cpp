@@ -1,13 +1,15 @@
 #include "ui/display_panel.h"
-#include "ui/widgets/readout_label.h"
+#include "ui/widgets/elided_label.h"
 
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -15,65 +17,71 @@
 namespace {
 QString levelsText(double black, double white)
 {
-    return QString("Display: %1 to %2 ADU.\nDisplay changes never alter raw evidence or detection.")
-        .arg(black, 0, 'f', 1).arg(white, 0, 'f', 1);
+    return QString("Display: %1–%2 ADU (screen only)").arg(black, 0, 'f', 1).arg(white, 0, 'f', 1);
 }
 }
 
 DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("displayPanel");
-    setMinimumWidth(350);
-    auto* form = new QFormLayout(this);
-    mode_ = new QComboBox(this); mode_->setObjectName("displayMode");
+    setMinimumWidth(280);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget(scroll);
+    auto* form = new QFormLayout(content);
+    mode_ = new QComboBox(content); mode_->setObjectName("displayMode");
     mode_->setToolTip("How frames are shown on the screen: the camera's bits as they are, between black and white levels you set, or stretched automatically. Recorded and detected data are never changed.");
     mode_->addItems({"Linear / high bits", "Black / white levels", "Auto-stretch"});
     form->addRow("Display", mode_);
-    black_ = new QDoubleSpinBox(this); black_->setObjectName("displayBlack");
+    black_ = new QDoubleSpinBox(content); black_->setObjectName("displayBlack");
     black_->setToolTip("Pixel value (ADU) shown as black when Display is Black / white levels.");
-    white_ = new QDoubleSpinBox(this); white_->setObjectName("displayWhite");
+    white_ = new QDoubleSpinBox(content); white_->setObjectName("displayWhite");
     white_->setToolTip("Pixel value (ADU) shown as white when Display is Black / white levels.");
     for (auto* spin : {black_, white_}) { spin->setDecimals(0); spin->setSuffix(" ADU"); }
-    blackSlider_ = new QSlider(Qt::Horizontal, this); blackSlider_->setObjectName("blackSlider");
+    blackSlider_ = new QSlider(Qt::Horizontal, content); blackSlider_->setObjectName("blackSlider");
     blackSlider_->setToolTip("Black level of the display.");
-    whiteSlider_ = new QSlider(Qt::Horizontal, this); whiteSlider_->setObjectName("whiteSlider");
+    whiteSlider_ = new QSlider(Qt::Horizontal, content); whiteSlider_->setObjectName("whiteSlider");
     whiteSlider_->setToolTip("White level of the display.");
     form->addRow("Black", black_); form->addRow(blackSlider_);
     form->addRow("White", white_); form->addRow(whiteSlider_);
-    invert_ = new QCheckBox("Invert brightness", this); invert_->setObjectName("displayInvert");
+    invert_ = new QCheckBox("Invert brightness", content); invert_->setObjectName("displayInvert");
     invert_->setToolTip("Shows the preview as a negative: dark detail can be easier to see. Display only.");
-    debayer_ = new QCheckBox("Show Bayer colour", this); debayer_->setObjectName("displayDebayer");
+    debayer_ = new QCheckBox("Show Bayer colour", content); debayer_->setObjectName("displayDebayer");
     debayer_->setToolTip("Shows a colour camera's Bayer frames in colour. Display only: recordings keep the raw pixels.");
     form->addRow(invert_); form->addRow(debayer_);
-    // Room for the widest levels, so the capture settings below stay put.
-    levels_ = new ReadoutLabel({levelsText(65535.0, 65535.0)}, this);
-    levels_->setText("Display only; raw evidence and detection are unchanged.");
+    levels_ = new ElidedLabel("Display only; raw evidence and detection are unchanged.", Qt::ElideRight, content);
+    levels_->setToolTip("Display stretch never alters raw SER evidence or detection.");
     levels_->setObjectName("displayLevels"); form->addRow(levels_);
-    auto* heading = new QLabel("Capture settings (next Start)", this); form->addRow(heading);
-    history_ = new QDoubleSpinBox(this); history_->setObjectName("historySeconds");
-    post_ = new QDoubleSpinBox(this); post_->setObjectName("postSeconds");
+    auto* heading = new QLabel("Capture settings (next Start)", content); form->addRow(heading);
+    history_ = new QDoubleSpinBox(content); history_->setObjectName("historySeconds");
+    post_ = new QDoubleSpinBox(content); post_->setObjectName("postSeconds");
     post_->setToolTip("A clip continues until the event has been quiet this long.");
-    maxPost_ = new QDoubleSpinBox(this); maxPost_->setObjectName("maxPostSeconds");
+    maxPost_ = new QDoubleSpinBox(content); maxPost_->setObjectName("maxPostSeconds");
     maxPost_->setToolTip("A clip stops this long after the trigger even if the event is still active.");
     for (auto* spin : {history_, post_, maxPost_}) { spin->setRange(0.05, 3600); spin->setDecimals(2); spin->setSuffix(" s"); }
     history_->setRange(0, 600);
     history_->setToolTip("Seconds of source time, including during fast playback. The effective history is capped by the RAM allowance.");
-    memory_ = new QSpinBox(this); memory_->setObjectName("memoryMiB"); memory_->setRange(16, 65536); memory_->setSuffix(" MiB");
+    memory_ = new QSpinBox(content); memory_->setObjectName("memoryMiB"); memory_->setRange(16, 65536); memory_->setSuffix(" MiB");
     memory_->setToolTip("Most RAM used for frames: the pre-event history, clips being collected and time-lapse bursts share it. History is shortened to fit.");
     form->addRow("Pre-event history", history_); form->addRow("Quiet tail", post_);
     form->addRow("Maximum after trigger", maxPost_); form->addRow("RAM ceiling", memory_);
-    reserve_ = new QDoubleSpinBox(this); reserve_->setObjectName("diskReserveGiB");
+    reserve_ = new QDoubleSpinBox(content); reserve_->setObjectName("diskReserveGiB");
     reserve_->setRange(0, 100000); reserve_->setDecimals(0); reserve_->setSuffix(" GiB"); reserve_->setSpecialValueText("None");
     reserve_->setToolTip("A clip is not written when it would leave less than this free on the output drive. "
         "Its candidates are still logged.");
     form->addRow("Disk reserve", reserve_);
-    format_ = new QComboBox(this); format_->setObjectName("syntheticFormat");
+    format_ = new QComboBox(content); format_->setObjectName("syntheticFormat");
     format_->setToolTip("Pixel format of the synthetic test source (testing tools).");
     format_->addItems({"Mono8", "Mono12, low bits", "Mono12, high bits", "Mono16", "Bayer RGGB, 12 high"});
     form->addRow("Synthetic pixels", format_);
-    usage_ = new QLabel(this); usage_->setWordWrap(true); usage_->setObjectName("memoryUsage");
+    usage_ = new QLabel(content); usage_->setWordWrap(true); usage_->setObjectName("memoryUsage");
     usage_->setToolTip("Image and analysis allocations, including shared frames, maps and previews. Process metadata, Qt caches and codec workspaces are additional.");
     form->addRow(usage_);
+    scroll->setWidget(content);
+    outer->addWidget(scroll);
     connect(mode_, &QComboBox::currentIndexChanged, this, [this] {
         if (!updating_) { display_.mode = static_cast<DisplayMode>(mode_->currentIndex()); setDisplaySettings(display_); emit displayChanged(); }
     });

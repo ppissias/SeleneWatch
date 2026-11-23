@@ -1,6 +1,7 @@
 #include "ui/resharpen_dialog.h"
 
 #include "timelapse/stack_processor.h"
+#include "ui/preview_widget.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -9,7 +10,6 @@
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QDesktopServices>
-#include <QtGui/QPixmap>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDialogButtonBox>
@@ -25,6 +25,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
@@ -87,25 +88,57 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 
     auto* mainRow = new QHBoxLayout();
 
-    // Left: before / after previews
+    // Left: synchronized full-resolution before / after previews with zoom & pan
     auto* previewCol = new QVBoxLayout();
+    auto* zoomRow = new QHBoxLayout();
+    zoomRow->setContentsMargins(0, 0, 0, 0);
+    zoomRow->setSpacing(4);
+    auto makeZoomBtn = [&](const QString& text, const QString& objName, const QString& tip) {
+        auto* btn = new QToolButton(this);
+        btn->setObjectName(objName);
+        btn->setText(text);
+        btn->setCheckable(true);
+        btn->setToolTip(tip);
+        zoomRow->addWidget(btn);
+        return btn;
+    };
+    zoomFitBtn_ = makeZoomBtn("Fit", "resharpenZoomFit", "Fit the stack to the preview pane.");
+    zoomFitBtn_->setChecked(true);
+    zoom100Btn_ = makeZoomBtn("100%", "resharpenZoom100", "Show actual pixels (1:1) to judge sharpening.");
+    zoom200Btn_ = makeZoomBtn("200%", "resharpenZoom200", "Zoom to 200% of actual pixels.");
+    zoom400Btn_ = makeZoomBtn("400%", "resharpenZoom400", "Zoom to 400% of actual pixels.");
+    zoomReadout_ = new QLabel("Fit", this);
+    zoomReadout_->setObjectName("resharpenZoomLabel");
+    auto* zoomHint = new QLabel("Mouse wheel: zoom · Drag: pan (synced)", this);
+    zoomHint->setStyleSheet("color: #888888;");
+    zoomRow->addSpacing(6);
+    zoomRow->addWidget(zoomReadout_);
+    zoomRow->addStretch(1);
+    zoomRow->addWidget(zoomHint);
+    previewCol->addLayout(zoomRow);
+
+    auto makePreviewView = [](QWidget* parent, const QString& objName) {
+        auto* view = new PreviewWidget(parent);
+        view->setObjectName(objName);
+        view->setDragMode(PreviewWidget::DragMode::Pan);
+        view->setPixelSelectionEnabled(false);
+        view->setEmptyText("No FITS stacks found");
+        view->setMinimumSize(320, 220);
+        view->setToolTip("Mouse wheel: zoom · Drag: pan. Before and After stay synchronized.");
+        return view;
+    };
+
     auto* beforeBox = new QGroupBox("Before (unsharpened)", this);
     auto* beforeLay = new QVBoxLayout(beforeBox);
-    beforeLabel_ = new QLabel("--", beforeBox);
-    beforeLabel_->setObjectName("resharpenBefore");
-    beforeLabel_->setAlignment(Qt::AlignCenter);
-    beforeLabel_->setMinimumSize(320, 260);
-    beforeLabel_->setStyleSheet("background:#111; color:#888;");
-    beforeLay->addWidget(beforeLabel_);
+    beforeLay->setContentsMargins(4, 4, 4, 4);
+    beforeView_ = makePreviewView(beforeBox, "resharpenBefore");
+    beforeLay->addWidget(beforeView_);
 
     auto* afterBox = new QGroupBox("After (sharpened + tone preview)", this);
     auto* afterLay = new QVBoxLayout(afterBox);
-    afterLabel_ = new QLabel("--", afterBox);
-    afterLabel_->setObjectName("resharpenAfter");
-    afterLabel_->setAlignment(Qt::AlignCenter);
-    afterLabel_->setMinimumSize(320, 260);
-    afterLabel_->setStyleSheet("background:#111; color:#888;");
-    afterLay->addWidget(afterLabel_);
+    afterLay->setContentsMargins(4, 4, 4, 4);
+    afterView_ = makePreviewView(afterBox, "resharpenAfter");
+    afterLay->addWidget(afterView_);
 
     previewCol->addWidget(beforeBox, 1);
     previewCol->addWidget(afterBox, 1);
@@ -178,9 +211,15 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     gamma_->setDecimals(2);
     gamma_->setSingleStep(0.05);
     gamma_->setValue(1.0);
-    brightnessLevel_ = new QCheckBox("Brightness levelling across stacks", videoBox);
+    brightnessLevel_ = new QComboBox(videoBox);
     brightnessLevel_->setObjectName("resharpenBrightnessLevel");
-    brightnessLevel_->setChecked(true);
+    brightnessLevel_->addItem("Off", static_cast<int>(BrightnessLevellingMode::Off));
+    brightnessLevel_->addItem("Match brightness (global)", static_cast<int>(BrightnessLevellingMode::Global));
+    brightnessLevel_->addItem("Match brightness + patchy clouds (Moon)", static_cast<int>(BrightnessLevellingMode::GlobalAndPatchy));
+    brightnessLevel_->setCurrentIndex(1);
+    brightnessLevel_->setToolTip("Equalizes brightness and haze across stacks against the sharpest clear stack. "
+        "Global matches overall brightness and haze while preserving moving lunar shadows and rotating planets; "
+        "Patchy clouds also smooths uneven clouds crossing part of an aligned Moon.");
     minQualityPct_ = new QDoubleSpinBox(videoBox);
     minQualityPct_->setRange(0.0, 95.0);
     minQualityPct_->setDecimals(0);
@@ -207,7 +246,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     videoForm->addRow("Black level", makeSliderRow(videoBox, blackLevel_, blackSlider_, "resharpenBlackSlider", 0.00, 0.98, 1000.0));
     videoForm->addRow("White level", makeSliderRow(videoBox, whiteLevel_, whiteSlider_, "resharpenWhiteSlider", 0.02, 1.00, 1000.0));
     videoForm->addRow("Gamma", makeSliderRow(videoBox, gamma_, gammaSlider_, "resharpenGammaSlider", 0.20, 2.50, 100.0));
-    videoForm->addRow(brightnessLevel_);
+    videoForm->addRow("Brightness levelling", brightnessLevel_);
     videoForm->addRow("Drop below quality", minQualityPct_);
     videoForm->addRow(cropOverlap_);
     videoForm->addRow("Frame rate", fps_);
@@ -242,6 +281,18 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     btnRow->addWidget(closeBtn);
     root->addLayout(btnRow);
 
+    connect(zoomFitBtn_, &QToolButton::clicked, this, [this] { beforeView_->setFitToWindow(); });
+    connect(zoom100Btn_, &QToolButton::clicked, this, [this] { beforeView_->setZoom(1.0); });
+    connect(zoom200Btn_, &QToolButton::clicked, this, [this] { beforeView_->setZoom(2.0); });
+    connect(zoom400Btn_, &QToolButton::clicked, this, [this] { beforeView_->setZoom(4.0); });
+    connect(beforeView_, &PreviewWidget::viewChanged, this, [this](bool fit, double zoom, QPointF pan) {
+        syncPreviewView(afterView_, fit, zoom, pan);
+    });
+    connect(afterView_, &PreviewWidget::viewChanged, this, [this](bool fit, double zoom, QPointF pan) {
+        syncPreviewView(beforeView_, fit, zoom, pan);
+    });
+    connect(beforeView_, &PreviewWidget::zoomChanged, this, &ResharpenDialog::updateZoomControls);
+
     connect(browseBtn_, &QPushButton::clicked, this, [this] {
         const QString start = sessionDir_.isEmpty() ? timelapsesRoot_ : sessionDir_;
         const QString chosen = QFileDialog::getExistingDirectory(this, "Open time-lapse session folder", start);
@@ -272,7 +323,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         if (!updating_) updatePreview();
     });
     connect(cropOverlap_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
-    connect(brightnessLevel_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
+    connect(brightnessLevel_, &QComboBox::currentIndexChanged, this, [this] { if (!updating_) updatePreview(); });
 
     connect(profileCombo_, &QComboBox::currentIndexChanged, this, [this](int idx) {
         if (updating_ || idx < 0) return;
@@ -372,7 +423,8 @@ void ResharpenDialog::setControlsFromSettings(const SharpeningSettings& sharp, c
     whiteLevel_->setEnabled(!tone.autoStretch);
     whiteSlider_->setEnabled(!tone.autoStretch);
     gamma_->setValue(tone.gamma);
-    brightnessLevel_->setChecked(tone.brightnessLevelling);
+    const int bIdx = brightnessLevel_->findData(static_cast<int>(tone.brightnessMode));
+    brightnessLevel_->setCurrentIndex(std::max(0, bIdx));
     minQualityPct_->setValue(tone.minQualityRatio * 100.0);
     cropOverlap_->setChecked(tone.cropToOverlap);
     fps_->setValue(tone.fps);
@@ -409,8 +461,13 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     stackCombo_->clear();
     const QDir stacksDir(QDir(sessionDir_).filePath("stacks"));
     const QStringList names = stacksDir.entryList({"*.fits", "*.fit"}, QDir::Files | QDir::Readable, QDir::Name);
-    int bestIndex = 0;
-    double bestQual = -1.0;
+    std::vector<double> qualities;
+    std::vector<double> spans;
+    qualities.reserve(names.size());
+    spans.reserve(names.size());
+    const int sampleStride = std::max(1, static_cast<int>(names.size()) / 120);
+    const QRect statsCrop = (sessionOverlap_ && sessionOverlap_->isValid() && !sessionOverlap_->isEmpty())
+        ? *sessionOverlap_ : QRect{};
     for (int i = 0; i < names.size(); ++i)
     {
         const QString full = stacksDir.filePath(names[i]);
@@ -420,11 +477,21 @@ void ResharpenDialog::openSession(const QString& sessionDir)
         QString err;
         double q = 0.0;
         if (readFitsMetadata(full, meta, w, h, ch, err)) q = meta.qualityScore;
-        if (q > bestQual) { bestQual = q; bestIndex = i; }
+        qualities.push_back(q);
+        double span = 0.0;
+        if (i % sampleStride == 0)
+        {
+            FitsImage probe;
+            QString pErr;
+            if (readFitsFloat(full, probe, pErr))
+                span = measureStackBrightnessStats(probe, statsCrop).contrastSpan();
+        }
+        spans.push_back(span);
         stackCombo_->addItem(QString("%1 (Q=%2)").arg(names[i]).arg(q, 0, 'g', 3));
     }
     if (!stackFiles_.empty())
     {
+        const int bestIndex = std::max(0, selectClearReferenceStack(qualities, spans));
         bestStackIndex_ = bestIndex;
         FitsImage bestImg;
         QString bestErr;
@@ -441,14 +508,14 @@ void ResharpenDialog::openSession(const QString& sessionDir)
 
         stackCombo_->setCurrentIndex(bestIndex);
         loadSelectedStack();
-        statusLabel_->setText(QString("Loaded %1 stacks (defaulting preview to highest quality).").arg(stackFiles_.size()));
+        statusLabel_->setText(QString("Loaded %1 stacks (defaulting preview to sharpest clear stack).").arg(stackFiles_.size()));
     }
     else
     {
         loadedRaw_.reset();
         loadedSharpened_.reset();
-        beforeLabel_->setText("No FITS stacks found");
-        afterLabel_->setText("No FITS stacks found");
+        beforeView_->clear();
+        afterView_->clear();
         statusLabel_->setText("No stacks/ FITS files found in this folder.");
     }
     applyBtn_->setEnabled(!stackFiles_.empty());
@@ -517,7 +584,7 @@ VideoToneSettings ResharpenDialog::currentTone() const
     v.blackLevel = blackLevel_->value();
     v.whiteLevel = std::max(v.blackLevel + 0.01, whiteLevel_->value());
     v.gamma = gamma_->value();
-    v.brightnessLevelling = brightnessLevel_->isChecked();
+    v.brightnessMode = static_cast<BrightnessLevellingMode>(brightnessLevel_->currentData().toInt());
     v.minQualityRatio = minQualityPct_->value() / 100.0;
     v.cropToOverlap = cropOverlap_->isChecked();
     v.fps = fps_->value();
@@ -591,31 +658,52 @@ void ResharpenDialog::updatePreview()
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
     if (tone.autoStretch)
-        computeAutoStretchLevels(*refFits, black, white);
+        computeAutoStretchLevels(*refFits, black, white, crop);
 
-    double scale = 1.0;
-    if (tone.brightnessLevelling && refFits != afterFits)
-    {
-        const double refB = std::max(1e-5, measureTargetBrightness(*refFits));
-        const double curB = measureTargetBrightness(*afterFits);
-        if (curB > 1e-5) scale = std::clamp(refB / curB, 0.4, 2.5);
-    }
+    const bool alignedPixels = refFits->meta.targetPreset != "planet";
 
     if (cachedBeforeImg_.isNull() || cachedBeforeBlack_ != black
         || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma
         || cachedBeforeCrop_ != crop)
     {
-        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, crop, 512);
+        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, crop, 0);
         cachedBeforeBlack_ = black;
         cachedBeforeWhite_ = white;
         cachedBeforeGamma_ = tone.gamma;
         cachedBeforeCrop_ = crop;
-        beforeLabel_->setPixmap(QPixmap::fromImage(cachedBeforeImg_)
-            .scaled(beforeLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        beforeView_->setImage(cachedBeforeImg_);
     }
 
-    const QImage after = toneMapFitsToImage(*afterFits, black, white, tone.gamma, scale, crop, 512);
-    afterLabel_->setPixmap(QPixmap::fromImage(after).scaled(afterLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    const QImage after = toneMapFitsToImage(*afterFits, black, white, tone.gamma, 1.0, crop, 0,
+        refFits, tone.brightnessMode, alignedPixels);
+    afterView_->setImage(after);
+}
+
+void ResharpenDialog::syncPreviewView(PreviewWidget* target, bool fitToWindow, double zoom, QPointF pan)
+{
+    if (syncingView_) return;
+    syncingView_ = true;
+    if (fitToWindow)
+        target->setFitToWindow();
+    else
+        target->setZoomAndPan(zoom, pan);
+    updateZoomControls(zoom, fitToWindow);
+    syncingView_ = false;
+}
+
+void ResharpenDialog::updateZoomControls(double effectiveZoom, bool fitToWindow)
+{
+    if (!zoomFitBtn_ || !zoom100Btn_ || !zoom200Btn_ || !zoom400Btn_ || !zoomReadout_) return;
+    const QSignalBlocker bFit(zoomFitBtn_);
+    const QSignalBlocker b100(zoom100Btn_);
+    const QSignalBlocker b200(zoom200Btn_);
+    const QSignalBlocker b400(zoom400Btn_);
+    zoomFitBtn_->setChecked(fitToWindow);
+    zoom100Btn_->setChecked(!fitToWindow && std::abs(effectiveZoom - 1.0) < 0.01);
+    zoom200Btn_->setChecked(!fitToWindow && std::abs(effectiveZoom - 2.0) < 0.01);
+    zoom400Btn_->setChecked(!fitToWindow && std::abs(effectiveZoom - 4.0) < 0.01);
+    const int pct = std::max(1, static_cast<int>(std::lround(effectiveZoom * 100.0)));
+    zoomReadout_->setText(fitToWindow ? QString("Fit (%1%)").arg(pct) : QString("%1%").arg(pct));
 }
 
 void ResharpenDialog::setBusy(bool busy)

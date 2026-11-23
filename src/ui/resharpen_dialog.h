@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+class PreviewWidget;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -20,6 +21,7 @@ class QPushButton;
 class QSlider;
 class QSpinBox;
 class QTimer;
+class QToolButton;
 
 class ResharpenDialog : public QDialog
 {
@@ -44,6 +46,8 @@ private:
     void setControlsFromSettings(const SharpeningSettings& sharp, const VideoToneSettings& tone);
     void onApplyAll();
     void setBusy(bool busy);
+    void syncPreviewView(PreviewWidget* target, bool fitToWindow, double zoom, QPointF pan);
+    void updateZoomControls(double effectiveZoom, bool fitToWindow);
 
     QString timelapsesRoot_;
     QString sessionDir_;
@@ -90,7 +94,7 @@ private:
     QSlider* whiteSlider_{nullptr};
     QDoubleSpinBox* gamma_{nullptr};
     QSlider* gammaSlider_{nullptr};
-    QCheckBox* brightnessLevel_{nullptr};
+    QComboBox* brightnessLevel_{nullptr};
     QDoubleSpinBox* minQualityPct_{nullptr};
     QCheckBox* cropOverlap_{nullptr};
     QSpinBox* fps_{nullptr};
@@ -98,8 +102,14 @@ private:
     QCheckBox* writeGif_{nullptr};
     QCheckBox* rebuildVideoOnly_{nullptr};
 
-    QLabel* beforeLabel_{nullptr};
-    QLabel* afterLabel_{nullptr};
+    QToolButton* zoomFitBtn_{nullptr};
+    QToolButton* zoom100Btn_{nullptr};
+    QToolButton* zoom200Btn_{nullptr};
+    QToolButton* zoom400Btn_{nullptr};
+    QLabel* zoomReadout_{nullptr};
+    PreviewWidget* beforeView_{nullptr};
+    PreviewWidget* afterView_{nullptr};
+    bool syncingView_{false};
     QProgressBar* progressBar_{nullptr};
     QLabel* statusLabel_{nullptr};
     QPushButton* applyBtn_{nullptr};

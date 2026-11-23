@@ -35,15 +35,11 @@ struct DetectionSummary
     // Patches, or a large change, that reached the release limit on this
     // frame and are now learned into the background.
     size_t newlyReleased{0};
-    // Feature-13, with darkening on: pixels that fell by K, the deepest fall
-    // in units of the noise, the largest dark patch, and whether the dark
-    // pixels were too many to split into patches. For a dark patch,
-    // brightPixels, peakSigma and peakAdu describe the fall: its size, its
-    // depth in sigma, and its (negative) difference in ADU.
-    int darkPixels{0};
-    double deepestSigma{0};
-    int largestDarkPatch{0};
-    bool darkSearchLimited{false};
+    // Feature-13 and Feature-45: with darkening the detector looks for falls,
+    // and every measurement here describes them: brightPixels counts pixels
+    // that fell by K, peakSigma is the deepest fall in units of the noise,
+    // peakAdu its (negative) difference in ADU, and the box and peak place
+    // them. patchSearchLimited then says the dark pixels were too many.
     DetectionSettings settings;
     uint64_t frameIndex{0};
     std::chrono::system_clock::time_point time{};
@@ -69,6 +65,7 @@ struct DetectionSummary
 };
 
 // A compact reading for the live history plot, timestamped by the source.
+// With darkening, the deepest fall and the pixels that fell by K.
 struct DetectionHistoryPoint
 {
     std::chrono::system_clock::time_point time;
@@ -76,8 +73,9 @@ struct DetectionHistoryPoint
     int brightPixels{0};
 };
 
-// A map of the exact pre-update reference/noise used
-// for a frame's decision. The GUI colours it without accessing detector state.
+// A map of the exact pre-update reference/noise used for a frame's decision:
+// the change in sigma (a fall, with darkening), or the noise in ADU. The GUI
+// colours it without accessing detector state.
 struct DetectionMap
 {
     explicit DetectionMap(MemoryBudget budget = {}) : values(BudgetAllocator<float>(std::move(budget))) {}

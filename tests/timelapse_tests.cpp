@@ -254,6 +254,7 @@ private slots:
     void multiStackMoonRotationAndPlanetDriftEndToEnd();
     void fakeZwoCameraTimeLapseAndNonBlockingStop();
     void resharpenPreviewMatchesExportedFrame();
+    void cloudBrightnessEqualizationAndClearReferenceSelection();
     void realArchiveRecordingsIfPresent();
     void rawSerCopiesFramesWithinRamHeadroom();
     void stackCountTargetDiscardsQueuedBurst();
@@ -1924,7 +1925,7 @@ void TimelapseTests::resharpenPreviewMatchesExportedFrame()
     VideoToneSettings tone;
     tone.autoStretch = true;
     tone.gamma = 1.15;
-    tone.brightnessLevelling = true;
+    tone.brightnessMode = BrightnessLevellingMode::Global;
     tone.cropToOverlap = true;
     tone.writeMp4 = true;
     tone.writeGif = false;
@@ -1942,11 +1943,9 @@ void TimelapseTests::resharpenPreviewMatchesExportedFrame()
     const FitsImage sharp1 = applyLinearSharpening(s1, sharp);
     const FitsImage sharp2 = applyLinearSharpening(s2, sharp);
     double black = 0, white = 1;
-    computeAutoStretchLevels(sharp1, black, white);
-    const double refB = std::max(1e-5, measureTargetBrightness(sharp1));
-    const double curB = measureTargetBrightness(sharp2);
-    const double scale = std::clamp(refB / curB, 0.4, 2.5);
-    const QImage previewFrame2 = toneMapFitsToImage(sharp2, black, white, tone.gamma, scale, overlap, 0);
+    computeAutoStretchLevels(sharp1, black, white, overlap);
+    const QImage previewFrame2 = toneMapFitsToImage(sharp2, black, white, tone.gamma, 1.0, overlap, 0,
+        &sharp1, tone.brightnessMode, true);
     QCOMPARE(previewFrame2.width(), 80);
     QCOMPARE(previewFrame2.height(), 80);
 
@@ -1977,6 +1976,188 @@ void TimelapseTests::resharpenPreviewMatchesExportedFrame()
     }
     const double mae = sumAbsDiff / static_cast<double>(frameSize);
     QVERIFY2(mae < 8.0, qPrintable(QString("Preview vs MP4 frame 2 MAE=%1 (expected < 8)").arg(mae)));
+}
+
+void TimelapseTests::cloudBrightnessEqualizationAndClearReferenceSelection()
+{
+    const int w = 160, h = 128;
+    const QRect overlap(12, 12, 136, 104);
+    const auto base = makeLunarCraterField(w, h);
+
+    // 1. Clear reference selection must ignore a thick-cloud stack whose qualityScore was inflated.
+    const std::vector<double> quals{0.0015, 0.00164, 0.0014, 0.00255};
+    const std::vector<double> spans{0.40,   0.50,    0.25,   0.045};
+    QCOMPARE(selectClearReferenceStack(quals, spans), 1);
+
+    // 2. Build a clear reference stack with a 0.0 rotated border outside overlap, plus:
+    //    - heavy uniform cloud (10x dim + 0.020 additive haze)
+    //    - patchy cloud (left half 0.35x dim + haze, right half clear 1.0x)
+    //    - advancing lunar terminator shadow under 3x cloud + haze
+    auto makeMoonFits = [&](const std::vector<float>& pix, double q) {
+        FitsImage img;
+        img.width = w; img.height = h; img.channels = 1;
+        img.pixels = pix;
+        img.meta.qualityScore = q;
+        img.meta.targetPreset = "moon";
+        return img;
+    };
+
+    std::vector<float> clearPix(static_cast<size_t>(w) * h, 0.0f);
+    for (int y = overlap.top(); y <= overlap.bottom(); ++y)
+        for (int x = overlap.left(); x <= overlap.right(); ++x)
+            clearPix[static_cast<size_t>(y) * w + x] = 0.02f + 0.70f * base[static_cast<size_t>(y) * w + x];
+    const FitsImage clearRef = makeMoonFits(clearPix, 0.00164);
+
+    // Auto-stretch inside overlap must not be dragged down to 0.0 by borders outside overlap.
+    double bUncropped = 0, wUncropped = 1, bCropped = 0, wCropped = 1;
+    computeAutoStretchLevels(clearRef, bUncropped, wUncropped);
+    computeAutoStretchLevels(clearRef, bCropped, wCropped, overlap);
+    QVERIFY(bUncropped < 0.005);
+    QVERIFY2(bCropped > 0.05, qPrintable(QString("bCropped=%1").arg(bCropped)));
+
+    // Heavy 10x cloud + 0.020 scattered haze
+    std::vector<float> heavyPix = clearPix;
+    for (float& px : heavyPix) px = 0.020f + 0.10f * px;
+    const FitsImage heavyCloud = makeMoonFits(heavyPix, 0.00255);
+
+    const QImage refImg8 = toneMapFitsToImage(clearRef, bCropped, wCropped, 1.0, 1.0, overlap, 0);
+    const QImage eqHeavy8 = toneMapFitsToImage(heavyCloud, bCropped, wCropped, 1.0, 1.0, overlap, 0,
+        &clearRef, BrightnessLevellingMode::Global, true);
+    double maeHeavy = 0.0;
+    int burnedHeavy = 0;
+    for (int y = 0; y < refImg8.height(); ++y)
+    {
+        const uint8_t* r = refImg8.constScanLine(y);
+        const uint8_t* e = eqHeavy8.constScanLine(y);
+        for (int x = 0; x < refImg8.width(); ++x)
+        {
+            maeHeavy += std::abs(static_cast<int>(e[x]) - static_cast<int>(r[x]));
+            if (e[x] >= 254) ++burnedHeavy;
+        }
+    }
+    maeHeavy /= static_cast<double>(refImg8.width() * refImg8.height());
+    const double burnedHeavyPct = 100.0 * burnedHeavy / static_cast<double>(refImg8.width() * refImg8.height());
+    QVERIFY2(maeHeavy < 4.0, qPrintable(QString("10x cloud Global MAE=%1").arg(maeHeavy)));
+    QVERIFY2(burnedHeavyPct < 1.0, qPrintable(QString("10x cloud burned=%1%").arg(burnedHeavyPct)));
+
+    // Patchy cloud: left half 0.35x + haze, right half clear 1.0x.
+    // Global highlight guard must prevent burning the clear right half; GlobalAndPatchy must even both halves!
+    std::vector<float> patchyPix = clearPix;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w / 2; ++x)
+            patchyPix[static_cast<size_t>(y) * w + x] = 0.015f + 0.35f * clearPix[static_cast<size_t>(y) * w + x];
+    const FitsImage patchyCloud = makeMoonFits(patchyPix, 0.0014);
+
+    const QImage eqPatchyGlobal = toneMapFitsToImage(patchyCloud, bCropped, wCropped, 1.0, 1.0, overlap, 0,
+        &clearRef, BrightnessLevellingMode::Global, true);
+    const QImage eqPatchyLocal = toneMapFitsToImage(patchyCloud, bCropped, wCropped, 1.0, 1.0, overlap, 0,
+        &clearRef, BrightnessLevellingMode::GlobalAndPatchy, true);
+    int burnedRightGlobal = 0, burnedRightLocal = 0;
+    double leftDiffGlobal = 0, rightDiffGlobal = 0, leftDiffLocal = 0, rightDiffLocal = 0;
+    const int halfW = refImg8.width() / 2;
+    const int halfCount = halfW * refImg8.height();
+    for (int y = 0; y < refImg8.height(); ++y)
+    {
+        const uint8_t* r = refImg8.constScanLine(y);
+        const uint8_t* g = eqPatchyGlobal.constScanLine(y);
+        const uint8_t* l = eqPatchyLocal.constScanLine(y);
+        for (int x = 0; x < refImg8.width(); ++x)
+        {
+            if (x < halfW)
+            {
+                leftDiffGlobal += std::abs(static_cast<int>(g[x]) - static_cast<int>(r[x]));
+                leftDiffLocal += std::abs(static_cast<int>(l[x]) - static_cast<int>(r[x]));
+            }
+            else
+            {
+                if (g[x] >= 254) ++burnedRightGlobal;
+                if (l[x] >= 254) ++burnedRightLocal;
+                rightDiffGlobal += std::abs(static_cast<int>(g[x]) - static_cast<int>(r[x]));
+                rightDiffLocal += std::abs(static_cast<int>(l[x]) - static_cast<int>(r[x]));
+            }
+        }
+    }
+    QVERIFY2(100.0 * burnedRightGlobal / halfCount < 2.0,
+        qPrintable(QString("Global highlight guard failed: burnedRight=%1%").arg(100.0 * burnedRightGlobal / halfCount)));
+    QVERIFY2(100.0 * burnedRightLocal / halfCount < 2.0,
+        qPrintable(QString("Local patchy burnedRight=%1%").arg(100.0 * burnedRightLocal / halfCount)));
+    QVERIFY2(leftDiffLocal < leftDiffGlobal * 0.65,
+        qPrintable(QString("Local patchy should reduce left cloud error: local=%1 global=%2")
+            .arg(leftDiffLocal / halfCount).arg(leftDiffGlobal / halfCount)));
+
+    // 3. Planet (rotating small disc on dark sky, alignedPixels=false) under 5x cloud + haze.
+    auto makePlanetFits = [&](double spotOffsetX, double cloudScale, double haze) {
+        FitsImage img;
+        img.width = 160; img.height = 160; img.channels = 1;
+        img.pixels.resize(160 * 160);
+        img.meta.targetPreset = "planet";
+        for (int y = 0; y < 160; ++y)
+            for (int x = 0; x < 160; ++x)
+            {
+                const double r = std::hypot(x - 80.0, y - 80.0);
+                const double disc = 1.0 / (1.0 + std::exp((r - 20.0) / 1.4));
+                const double spot = 0.25 * std::exp(-((x - (80.0 + spotOffsetX)) * (x - (80.0 + spotOffsetX))
+                    + (y - 78.0) * (y - 78.0)) / 24.0);
+                const double v = 0.015 + haze + cloudScale * disc * (0.70 - spot);
+                img.pixels[static_cast<size_t>(y) * 160 + x] = static_cast<float>(std::clamp(v, 0.0, 1.0));
+            }
+        return img;
+    };
+    const FitsImage planetRef = makePlanetFits(-5.0, 1.0, 0.0);
+    const FitsImage planetCloud = makePlanetFits(6.0, 0.20, 0.025);
+    double pb = 0, pw = 1;
+    computeAutoStretchLevels(planetRef, pb, pw);
+    const QImage pRef8 = toneMapFitsToImage(planetRef, pb, pw, 1.0, 1.0);
+    const QImage pEq8 = toneMapFitsToImage(planetCloud, pb, pw, 1.0, 1.0, {}, 0,
+        &planetRef, BrightnessLevellingMode::Global, false);
+    double refDisc = 0, eqDisc = 0, eqSky = 0;
+    int nDisc = 0, nSky = 0;
+    for (int y = 0; y < 160; ++y)
+    {
+        const uint8_t* r = pRef8.constScanLine(y);
+        const uint8_t* e = pEq8.constScanLine(y);
+        for (int x = 0; x < 160; ++x)
+        {
+            const double d = std::hypot(x - 80.0, y - 80.0);
+            if (d < 15.0) { refDisc += r[x]; eqDisc += e[x]; ++nDisc; }
+            else if (d > 40.0) { eqSky += e[x]; ++nSky; }
+        }
+    }
+    QVERIFY2(std::abs(eqDisc / nDisc - refDisc / nDisc) < 12.0,
+        qPrintable(QString("Planet disc mean eq=%1 ref=%2").arg(eqDisc / nDisc).arg(refDisc / nDisc)));
+    QVERIFY2(eqSky / nSky < 8.0, qPrintable(QString("Planet hazy sky not removed: %1").arg(eqSky / nSky)));
+
+    // 4. Legacy sharpening_profile.json without "brightnessMode" must still parse "brightnessLevelling" bool.
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString legacyPath = tmp.filePath("legacy.json");
+    {
+        QFile f(legacyPath);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write(R"({"version":1,"video":{"brightnessLevelling":false,"fps":12}})");
+    }
+    SharpeningSettings ls;
+    VideoToneSettings lv;
+    QString lErr;
+    QVERIFY2(loadProfileJson(legacyPath, ls, lv, lErr), qPrintable(lErr));
+    QCOMPARE(lv.brightnessMode, BrightnessLevellingMode::Off);
+
+    // 5. Full exportTimelapseFromFits picks clearRef (not inflated-Q heavyCloud) and writes an unburned MP4.
+    const QString fitsDir = tmp.filePath("fits");
+    const QString outDir = tmp.filePath("out");
+    QVERIFY(QDir().mkpath(fitsDir));
+    QVERIFY2(writeFitsFloat(QDir(fitsDir).filePath("0001_clear.fits"), clearRef, lErr), qPrintable(lErr));
+    QVERIFY2(writeFitsFloat(QDir(fitsDir).filePath("0002_heavy.fits"), heavyCloud, lErr), qPrintable(lErr));
+    VideoToneSettings expTone;
+    expTone.autoStretch = true;
+    expTone.brightnessMode = BrightnessLevellingMode::Global;
+    expTone.cropToOverlap = true;
+    expTone.writeMp4 = true;
+    expTone.writeGif = false;
+    expTone.fps = 5;
+    const TimelapseExportResult expRes = exportTimelapseFromFits(fitsDir, outDir, expTone, overlap);
+    QVERIFY2(expRes.ok, qPrintable(expRes.error));
+    QVERIFY(decodeWithFfmpeg(expRes.mp4Path));
 }
 
 void TimelapseTests::realArchiveRecordingsIfPresent()

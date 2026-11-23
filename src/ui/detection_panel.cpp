@@ -1,4 +1,5 @@
 #include "ui/detection_panel.h"
+#include "ui/widgets/theme.h"
 #include "settings/detection_profiles.h"
 #include "display/preview_image.h"
 #include "ui/widgets/readout_label.h"
@@ -39,17 +40,25 @@ const QString kSettlingReading = "Settling after camera change — relearning be
 const QString kSettlingState = "Preview capture is OFF. Settling is an estimate; Monitoring starts fresh with verified camera settings.";
 const QString kOverlaySkipped = "Overlay skipped: RAM ceiling reached. Detection continues.";
 
-QString peakText(double peak, double threshold, double high)
+// Feature-45: with darkening, the peak is the deepest fall.
+QString peakText(double peak, double threshold, double high, bool falls)
 {
-    return QString("Peak %1 / K %2 sigma (%3% of threshold). Recent high %4.")
-        .arg(peak, 0, 'f', 1).arg(threshold, 0, 'f', 1).arg(100 * peak / threshold, 0, 'f', 0).arg(high, 0, 'f', 1);
+    return QString("%1 %2 / K %3 sigma (%4% of threshold). Recent %5 %6.").arg(falls ? "Deepest fall" : "Peak")
+        .arg(peak, 0, 'f', 1).arg(threshold, 0, 'f', 1).arg(100 * peak / threshold, 0, 'f', 0)
+        .arg(falls ? "deepest" : "high").arg(high, 0, 'f', 1);
 }
 
 QString patchText(int pixels, int high, double boxRatio, const DetectionSettings& settings)
 {
     return QString("Patch %1 px (allowed %2–%3 px). Recent high %4.\nBox / patch %5. Maximum %6.")
-        .arg(pixels).arg(settings.minPixels).arg(settings.maxPixels).arg(high)
-        .arg(boxRatio, 0, 'f', 2).arg(settings.maxPatchBoxRatio, 0, 'f', 2);
+        .arg(pixels).arg(settings.minPixels).arg(settings.patchMaxPixels()).arg(high)
+        .arg(boxRatio, 0, 'f', 2).arg(settings.patchMaxBoxRatio(), 0, 'f', 2);
+}
+
+// Pixels at K in the direction looked for.
+QString atKText(const DetectionSettings& settings)
+{
+    return settings.darkening ? "fell by K or more" : "at or above K";
 }
 
 QString decisionText(const DetectionSummary& summary, bool monitoring)
@@ -66,20 +75,22 @@ QString decisionText(const DetectionSummary& summary, bool monitoring)
     if (!summary.brightPixels) return "Below K";
     QStringList reasons;
     const int pixels = summary.brightPixels;
-    if (pixels < summary.settings.minPixels)
-        reasons << QString("%1 px, needs %2").arg(pixels).arg(summary.settings.minPixels);
-    else if (pixels > summary.settings.maxPixels)
-        reasons << QString("%1 px, maximum %2").arg(pixels).arg(summary.settings.maxPixels);
-    if (boxArea(summary) > summary.settings.maxPatchBoxRatio * pixels)
+    const DetectionSettings& settings = summary.settings;
+    if (pixels < settings.minPixels)
+        reasons << QString("%1 px, needs %2").arg(pixels).arg(settings.minPixels);
+    else if (pixels > settings.patchMaxPixels())
+        reasons << QString("%1 px, maximum %2").arg(pixels).arg(settings.patchMaxPixels());
+    if (boxArea(summary) > settings.patchMaxBoxRatio() * pixels)
         reasons << QString("Box / patch %1 exceeds %2")
-            .arg(boxArea(summary) / pixels, 0, 'f', 2).arg(summary.settings.maxPatchBoxRatio, 0, 'f', 2);
+            .arg(boxArea(summary) / pixels, 0, 'f', 2).arg(settings.patchMaxBoxRatio(), 0, 'f', 2);
     return reasons.join(" · ");
 }
 
 QString stateText(const DetectionSummary& summary, const QString& decision)
 {
-    return QString("Noise floor %1 ADU (minimum %2). Peak (%3, %4).\n%5   Detector %6 ms/frame\nActive patches %7. Longest %8 s. Background learning outside %9 protected pixels.\n%10")
-        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2).arg(summary.peakX).arg(summary.peakY)
+    return QString("Noise floor %1 ADU (minimum %2). %3 (%4, %5).\n%6   Detector %7 ms/frame\nActive patches %8. Longest %9 s. Background learning outside %10 protected pixels.\n%11")
+        .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2)
+        .arg(summary.settings.darkening ? "Deepest fall" : "Peak").arg(summary.peakX).arg(summary.peakY)
         .arg(decision).arg(summary.processingMs, 0, 'f', 2).arg(summary.activePatches).arg(summary.longestActiveSeconds, 0, 'f', 1)
         .arg(summary.protectedPixels)
         .arg(summary.settings.oneFrame ? "One passing frame can trigger." : "Two consecutive passing frames required.");
@@ -113,6 +124,17 @@ DetectionSummary widestSummary()
     summary.protectedPixels = 9'999'999;
     return summary;
 }
+
+// Feature-45: the same with darkening, whose words and limits differ.
+DetectionSummary widestFallSummary()
+{
+    DetectionSummary summary = widestSummary();
+    summary.settings.darkening = true;
+    summary.settings.maxDarkPixels = 99999;
+    summary.settings.maxDarkBoxRatio = 99.99;
+    summary.brightPixels = 999999;
+    return summary;
+}
 }
 
 // Logarithmic travel keeps small thresholds easy to place while a spin box
@@ -144,15 +166,16 @@ protected:
         QSlider::paintEvent(event);
         QPainter painter(this);
         const auto x = [this](int value) { return 8 + value * (width() - 16) / 1000; };
+        const bool nightRed = currentUiTheme() == UiTheme::NightRed;
         if (now_ >= 0)
         {
-            painter.setPen(QPen(QColor("#008b83"), 2));
+            painter.setPen(QPen(nightRed ? QColor("#e04444") : QColor("#008b83"), 2));
             painter.drawLine(x(now_), height() / 2 - 6, x(now_), height() / 2 + 6);
         }
         if (high_ >= 0)
         {
             painter.setPen(Qt::NoPen);
-            painter.setBrush(QColor("#b37900"));
+            painter.setBrush(nightRed ? QColor("#ff7777") : QColor("#b37900"));
             painter.drawPolygon(QPolygonF{QPointF(x(high_) - 4, height() - 1),
                 QPointF(x(high_) + 4, height() - 1), QPointF(x(high_), height() - 7)});
         }
@@ -162,22 +185,30 @@ private:
     int now_{-1}, high_{-1};
 };
 
-// Plots peak sigma against K over the last ten seconds of source time.
+// Plots peak sigma against K over the last ten seconds of source time: the
+// deepest fall with darkening (Feature-45).
 class PeakHistory : public QWidget
 {
 public:
     explicit PeakHistory(QWidget* parent) : QWidget(parent) { setMinimumHeight(105); }
-    void setView(const DetectionView& view) { points_ = view.history; threshold_ = view.summary.settings.sigma; update(); }
+    void setView(const DetectionView& view)
+    {
+        points_ = view.history;
+        threshold_ = view.summary.settings.sigma;
+        falls_ = view.summary.settings.darkening;
+        update();
+    }
 protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
-        painter.fillRect(rect(), QColor("#151c27"));
+        const bool nightRed = currentUiTheme() == UiTheme::NightRed;
+        painter.fillRect(rect(), nightRed ? QColor("#0b0202") : QColor("#151c27"));
         const QRectF plot = QRectF(rect()).adjusted(8, 8, -8, -22);
         double high = std::max(threshold_ * 1.3, 1.0);
         for (const auto& p : points_) high = std::max(high, p.peakSigma * 1.05);
         const auto y = [&](double v) { return plot.bottom() - std::log1p(std::max(0.0, v)) / std::log1p(high) * plot.height(); };
-        painter.setPen(QPen(QColor("#e3b34a"), 1, Qt::DashLine));
+        painter.setPen(QPen(nightRed ? QColor("#ff6666") : QColor("#e3b34a"), 1, Qt::DashLine));
         painter.drawLine(QPointF(plot.left(), y(threshold_)), QPointF(plot.right(), y(threshold_)));
         painter.drawText(QPointF(plot.left() + 2, y(threshold_) - 2), QString("K %1").arg(threshold_, 0, 'f', 1));
         QPolygonF trace;
@@ -190,29 +221,30 @@ protected:
                 trace << QPointF(plot.right() - std::clamp(seconds / 10, 0.0, 1.0) * plot.width(), y(p.peakSigma));
             }
         }
-        painter.setPen(QPen(QColor("#65d5bd"), 1));
+        painter.setPen(QPen(nightRed ? QColor("#cc3333") : QColor("#65d5bd"), 1));
         painter.drawPolyline(trace);
-        painter.setPen(QColor("#c8cfda"));
-        painter.drawText(8, height() - 6, "Peak sigma, last 10 s of stream time (log scale)");
+        painter.setPen(nightRed ? QColor("#d94a4a") : QColor("#c8cfda"));
+        painter.drawText(8, height() - 6, QString("%1, last 10 s of stream time (log scale)")
+            .arg(falls_ ? "Deepest fall in sigma" : "Peak sigma"));
     }
 private:
     std::vector<DetectionHistoryPoint> points_;
     double threshold_{6};
+    bool falls_{false};
 };
 
 DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("detectionPanel");
-    setMinimumWidth(380);
+    setMinimumWidth(330);
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     // Feature-26: above the scrolled settings, so it is always in view. It
     // opens auto-tune's own window (Feature-28), leaving the settings in place.
     autoTune_ = new QPushButton("Auto-tune…", this);
     autoTune_->setObjectName("autoTuneButton");
-    autoTune_->setMinimumHeight(30);
-    autoTune_->setStyleSheet("QPushButton { font-weight: bold; background: #2f6f9f; color: white; border-radius: 4px; "
-        "padding: 4px 10px; } QPushButton:pressed { background: #1d4f75; } QPushButton:disabled { background: #8aa4b8; }");
+    autoTune_->setMinimumHeight(28);
+    autoTune_->setStyleSheet(autoTuneButtonStyle());
     autoTune_->setToolTip("Opens the auto-tune window: in Preview it measures the camera's brightness and what each K "
         "would have triggered, and suggests exposure, gain and K for the Moon or the sky. Nothing changes until you "
         "apply it.");
@@ -397,17 +429,15 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     column->addWidget(grid);
     column->addStretch(1);
     layout->setColumnStretch(0, 1);
+    // Feature-45: the help of the controls for the change looked for is set
+    // with the watch, in showWatchedChange().
     sigma_ = new QDoubleSpinBox(this);
     sigma_->setObjectName("detectionSigma");
-    sigma_->setToolTip("Sensitivity K: a pixel fires when it rises K times its own noise above the learned background. Lower is more sensitive and gives more false triggers.");
     sigma_->setRange(0.1, 1000); sigma_->setDecimals(1); sigma_->setSingleStep(0.1); sigma_->setSuffix(" sigma");
     minimum_ = new QSpinBox(this); minimum_->setObjectName("detectionMinPixels");
-    minimum_->setToolTip("The fewest connected firing pixels that count as an event. Raise it to ignore single hot pixels and noise.");
     maximum_ = new QSpinBox(this); maximum_->setObjectName("detectionMaxPixels");
-    maximum_->setToolTip("The most connected firing pixels an event may have. Larger patches (a seeing ripple across a crater rim, a cloud) are ignored.");
     for (auto* spin : {minimum_, maximum_}) { spin->setRange(1, 1'000'000); spin->setSuffix(" px"); }
     sigmaSlider_ = new MeterSlider(0.1, 1000, this); sigmaSlider_->setObjectName("sigmaSlider");
-    sigmaSlider_->setToolTip("Sensitivity K. The teal mark is the frame's highest peak now, the amber mark the highest of the last seconds: a mark beyond K would trigger.");
     minSlider_ = new MeterSlider(1, 1'000'000, this); minSlider_->setObjectName("minimumSlider");
     minSlider_->setToolTip("Minimum patch. The marks show the current and recent largest patch.");
     maxSlider_ = new MeterSlider(1, 1'000'000, this); maxSlider_->setObjectName("maximumSlider");
@@ -418,19 +448,21 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     compactness_->setDecimals(2);
     compactness_->setSingleStep(0.1);
     compactness_->setSuffix(" ×");
-    compactness_->setToolTip("Largest allowed bounding-box area divided by the number of pixels in the patch.");
     compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), this);
     compactnessSlider_->setObjectName("compactnessSlider");
-    compactnessSlider_->setToolTip("Maximum box / patch: how spread out a patch may be. A compact flash is near 1-2; a long thin edge is much higher.");
     // The readouts keep room for their longest texts, so the controls below
     // them stay where they are while the texts change.
     const DetectionSummary widest = widestSummary();
-    sigmaReading_ = new ReadoutLabel({peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma), kSettlingReading}, this);
+    const DetectionSummary widestFall = widestFallSummary();
+    sigmaReading_ = new ReadoutLabel({peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, false),
+        peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, true), kSettlingReading}, this);
     sigmaReading_->setObjectName("sigmaReading");
     sigmaReading_->setText("Waiting for measurements");
-    // A measured patch is at most a few thousand pixels; the recent high
-    // counts pixels at K across the frame, which can be most of it.
-    sizeReading_ = new ReadoutLabel({patchText(widest.settings.maxPixels, 9'999'999, 99.99, widest.settings)}, this);
+    // A measured patch is at most a few thousand pixels (a shadow some tens
+    // of thousands); the recent high counts pixels at K across the frame,
+    // which can be most of it.
+    sizeReading_ = new ReadoutLabel({patchText(widest.settings.maxPixels, 9'999'999, 99.99, widest.settings),
+        patchText(widestFall.settings.maxDarkPixels, 9'999'999, 99.99, widestFall.settings)}, this);
     sizeReading_->setObjectName("patchReading");
     sizeReading_->setText("Patch: --");
     // A label naming its control, so the control's help shows on it (Feature-24).
@@ -451,16 +483,15 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(compactnessSlider_, 8, 0, 1, 2);
     layout->addWidget(sizeReading_, 9, 0, 1, 2);
     oneFrame_ = new QCheckBox("Allow a one-frame trigger", this); oneFrame_->setObjectName("oneFrameTrigger");
-    oneFrame_->setToolTip("Off requires two consecutive passing frames. A single-frame flash can then be missed.");
     layout->addWidget(oneFrame_, 10, 0, 1, 2);
     history_ = new PeakHistory(this); history_->setObjectName("peakHistory");
     layout->addWidget(history_, 11, 0, 1, 2);
-    state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)), kSettlingState}, this);
+    state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)),
+        stateText(widestFall, decisionText(widestFall, false)), kSettlingState}, this);
     state_->setObjectName("detectionState");
     state_->setText("Start a source to measure its noise.");
     layout->addWidget(state_, 12, 0, 1, 2);
     overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
-    overlay_->setToolTip("Draws a map on the preview, for the screen only: none, the sigma map (pixels at or above K in red), or the noise map.");
     overlay_->addItems({"None", "Sigma map", "Noise map"});
     layout->addWidget(named("Preview overlay", overlay_), 13, 0);
     layout->addWidget(overlay_, 13, 1);
@@ -516,31 +547,19 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "Moon's drift. Off tests every pixel.");
     flashForm->addRow("Ignore brighter than", ignoreAbove_);
     layout->addWidget(flashControls_, 17, 0, 1, 2);
+    // Feature-31: the shadows' large darkening. Their patch limits are the
+    // Maximum patch and Maximum box / patch above (Feature-45).
     auto* dark = new QWidget(content);
     darkControls_ = dark;
     auto* darkForm = new QFormLayout(dark);
     darkForm->setContentsMargins(0, 0, 0, 0);
-    maxDark_ = new QSpinBox(dark);
-    maxDark_->setObjectName("detectionMaxDarkPixels");
-    maxDark_->setToolTip("The most connected darkened pixels a dark patch may have: a plane or the ISS covers many.");
-    maxDark_->setRange(1, 1'000'000); maxDark_->setSuffix(" px");
-    darkBox_ = new QDoubleSpinBox(dark);
-    darkBox_->setObjectName("detectionMaxDarkBoxRatio");
-    darkBox_->setToolTip("How spread out a dark patch may be (box area over pixel count).");
-    darkBox_->setRange(1.0, 1000.0); darkBox_->setDecimals(2); darkBox_->setSingleStep(0.5); darkBox_->setSuffix(" ×");
     darkShare_ = new QDoubleSpinBox(dark);
     darkShare_->setObjectName("darkeningShare");
     darkShare_->setRange(0, 100); darkShare_->setDecimals(1); darkShare_->setSingleStep(0.5);
     darkShare_->setSuffix(" % of frame"); darkShare_->setSpecialValueText("Off");
     darkShare_->setToolTip("A frame fires when this share of the unmasked pixels falls by K at once: a plane or bird "
         "filling the field. A cloud edge does the same.");
-    darkForm->addRow("Maximum dark patch", maxDark_);
-    darkForm->addRow("Maximum dark box / patch", darkBox_);
     darkForm->addRow("Large darkening", darkShare_);
-    darkReading_ = new ReadoutLabel({QString("Deepest fall 9999.9 sigma. Largest dark patch 999999 px (allowed 999–999999 px). "
-        "Too many dark pixels to measure patches.")}, dark);
-    darkReading_->setObjectName("darkReading");
-    darkForm->addRow(darkReading_);
     layout->addWidget(dark, 18, 0, 1, 2);
     layout->setRowStretch(19, 1);
     background->hide();
@@ -565,9 +584,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(target_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (!updating_) emit watchRequested(static_cast<Watch>(target_->itemData(index).toInt()));
     });
-    for (auto* spin : {brightening_, release_, darkBox_, darkShare_, ignoreAbove_})
+    for (auto* spin : {brightening_, release_, darkShare_, ignoreAbove_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
-    connect(maxDark_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
     connect(follow_, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
     for (auto* spin : {minExposure_, maxExposure_, maxGain_, gainStep_})
@@ -581,15 +599,66 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(saveProfile_, &QToolButton::clicked, this, &DetectionPanel::onSaveProfileClicked);
     connect(deleteProfile_, &QToolButton::clicked, this, &DetectionPanel::onDeleteProfileClicked);
     reloadProfiles();
+    showWatchedChange();
     setSettings({});
+}
+
+// Feature-45: the controls at the top are for the change the watch looks
+// for, a rise or, in the shadows' watch, a fall. Their help says which.
+void DetectionPanel::showWatchedChange()
+{
+    const bool falls = looksForFalls(watch_);
+    sigma_->setToolTip(falls
+        ? "Sensitivity K: a pixel fires when it falls K times its own noise below the learned background. On sunlit "
+          "terrain K 12 or more keeps seeing from triggering. Lower is more sensitive and gives more false triggers."
+        : "Sensitivity K: a pixel fires when it rises K times its own noise above the learned background. Lower is more "
+          "sensitive and gives more false triggers.");
+    sigmaSlider_->setToolTip(QString("Sensitivity K. The teal mark is the frame's %1 now, the amber mark the %2 of the "
+        "last seconds: a mark beyond K would trigger.").arg(falls ? "deepest fall" : "highest peak", falls ? "deepest" : "highest"));
+    minimum_->setToolTip(falls
+        ? "The fewest connected darkened pixels that count as a shadow. Raise it to ignore noise and small seeing ripples."
+        : "The fewest connected firing pixels that count as an event. Raise it to ignore single hot pixels and noise.");
+    maximum_->setToolTip(falls
+        ? "The most connected darkened pixels a shadow may have: a plane or the ISS covers many. Larger patches (a cloud "
+          "edge) are ignored."
+        : "The most connected firing pixels an event may have. Larger patches (a seeing ripple across a crater rim, a "
+          "cloud) are ignored.");
+    minSlider_->setToolTip(QString("Minimum patch. The marks show the current and recent largest %1.").arg(falls ? "shadow" : "patch"));
+    maxSlider_->setToolTip(QString("Maximum patch. The marks show the current and recent largest %1.").arg(falls ? "shadow" : "patch"));
+    compactness_->setToolTip(QString("Largest allowed bounding-box area divided by the number of pixels in the %1.")
+        .arg(falls ? "shadow" : "patch"));
+    compactnessSlider_->setToolTip(falls
+        ? "Maximum box / patch: how spread out a shadow may be. A plane's or the ISS's silhouette is near 1-2; a seeing "
+          "ripple along a crater rim is much higher."
+        : "Maximum box / patch: how spread out a patch may be. A compact flash is near 1-2; a long thin edge is much higher.");
+    oneFrame_->setToolTip(QString("Off requires two consecutive passing frames. %1 can then be missed.")
+        .arg(falls ? "A shadow seen on one frame only" : "A single-frame flash"));
+    overlay_->setToolTip(QString("Draws a map on the preview, for the screen only: none, the sigma map (pixels that %1 "
+        "in red), or the noise map.").arg(falls ? "fell by K or more" : "are at or above K"));
 }
 
 DetectionSettings DetectionPanel::settings() const
 {
-    DetectionSettings values{sigma_->value(), minimum_->value(), maximum_->value(), oneFrame_->isChecked(),
-        compactness_->value(), referenceTime_->value(), minimumNoise_->value()};
-    values.maxDarkPixels = maxDark_->value();
-    values.maxDarkBoxRatio = darkBox_->value();
+    // shown_ holds what has no control here: the limits of the change the
+    // watch does not look for keep the values last set (Feature-45).
+    DetectionSettings values = shown_;
+    values.sigma = sigma_->value();
+    values.minPixels = minimum_->value();
+    values.oneFrame = oneFrame_->isChecked();
+    values.referenceTimeConstantSeconds = referenceTime_->value();
+    values.minNoiseAdu = minimumNoise_->value();
+    // Feature-45: Maximum patch and Maximum box / patch are the limits of
+    // the change looked for.
+    if (looksForFalls(watch_))
+    {
+        values.maxDarkPixels = maximum_->value();
+        values.maxDarkBoxRatio = compactness_->value();
+    }
+    else
+    {
+        values.maxPixels = maximum_->value();
+        values.maxPatchBoxRatio = compactness_->value();
+    }
     // Feature-31: darkening is the shadows' watch, the ceiling the flashes'.
     values.darkeningShare = darkShare_->value() / 100;
     values.ignoreAboveShare = ignoreAbove_->value() / 100;
@@ -611,6 +680,7 @@ Watch DetectionPanel::watch() const
 
 void DetectionPanel::setWatch(Watch watch)
 {
+    const DetectionSettings current = settings();
     watch_ = watch;
     const bool updating = updating_;
     updating_ = true;
@@ -621,6 +691,10 @@ void DetectionPanel::setWatch(Watch watch)
     flashControls_->setVisible(watch == Watch::MoonFlashes);
     darkControls_->setVisible(watch == Watch::MoonShadows);
     if (watchTarget(watch) != Target::Sky) drawMask_->setChecked(false);
+    // Feature-45: until the window sets the watch's own settings, the
+    // controls show these ones' limits for the change this watch looks for.
+    showWatchedChange();
+    setSettings(current);
     reloadProfiles();
 }
 
@@ -648,6 +722,12 @@ bool DetectionPanel::addMaskRect(QRect rect)
 bool DetectionPanel::drawingMask() const
 {
     return drawMask_->isChecked();
+}
+
+void DetectionPanel::setDrawingMask(bool on)
+{
+    const QSignalBlocker blocked(drawMask_);
+    drawMask_->setChecked(on);
 }
 
 SkyExtras DetectionPanel::skyExtras() const
@@ -701,21 +781,22 @@ void DetectionPanel::showMask()
     clearMask_->setEnabled(!mask_.empty());
 }
 
-void DetectionPanel::setSettings(const DetectionSettings& settings)
+void DetectionPanel::setSettings(const DetectionSettings& given)
 {
+    const DetectionSettings settings = settingsForWatch(given, watch_);
     if (!settings.valid()) return;
+    shown_ = settings;
     updating_ = true;
     brightening_->setValue(100 * settings.brighteningShare);
     release_->setValue(settings.releaseSeconds);
     mask_ = settings.mask;
     showMask();
     ignoreAbove_->setValue(100 * settings.ignoreAboveShare);
-    maxDark_->setValue(settings.maxDarkPixels);
-    darkBox_->setValue(settings.maxDarkBoxRatio);
     darkShare_->setValue(100 * settings.darkeningShare);
-    sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.maxPixels);
+    // Feature-45: the maximum patch and box are those of the change looked for.
+    sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.patchMaxPixels());
     oneFrame_->setChecked(settings.oneFrame);
-    compactness_->setValue(settings.maxPatchBoxRatio);
+    compactness_->setValue(settings.patchMaxBoxRatio());
     referenceTime_->setValue(settings.referenceTimeConstantSeconds);
     minimumNoise_->setValue(settings.minNoiseAdu);
     sigmaSlider_->setValue(sigmaSlider_->position(sigma_->value()));
@@ -730,13 +811,15 @@ void DetectionPanel::setSettings(const DetectionSettings& settings)
 void DetectionPanel::controlsChanged(bool maximumChanged)
 {
     if (updating_) return;
-    auto values = settings();
-    if (values.minPixels > values.maxPixels)
+    // The minimum and maximum patch shown are the limits of the change the
+    // watch looks for (Feature-45); the one not just changed follows.
+    if (minimum_->value() > maximum_->value())
     {
-        if (maximumChanged) values.minPixels = values.maxPixels;
-        else values.maxPixels = values.minPixels;
+        const QSignalBlocker blockMinimum(minimum_), blockMaximum(maximum_);
+        if (maximumChanged) minimum_->setValue(maximum_->value());
+        else maximum_->setValue(minimum_->value());
     }
-    setSettings(values);
+    setSettings(settings());
     if (profileCombo_->currentIndex() != 0)
     {
         const QSignalBlocker blocked(profileCombo_);
@@ -908,28 +991,21 @@ void DetectionPanel::setView(const DetectionView& view)
     noiseSlider_->markers(measuring ? summary.noiseFloor : 0);
     if (measuring)
     {
-        sigmaReading_->setText(peakText(summary.peakSigma, summary.settings.sigma, high));
+        // Feature-45: with darkening every measurement is of falls.
+        sigmaReading_->setText(peakText(summary.peakSigma, summary.settings.sigma, high, summary.settings.darkening));
         if (hasPatch)
             sizeReading_->setText(patchText(patchPixels, big, compactness, summary.settings));
         else if (summary.patchSearchLimited)
-            sizeReading_->setText(QString("%1 px at or above K across the frame.").arg(summary.brightPixels));
+            sizeReading_->setText(QString("%1 px %2 across the frame.").arg(summary.brightPixels).arg(atKText(summary.settings)));
         else
             sizeReading_->setText("Patch size and shape appear when pixels reach K.");
     }
     else
     {
         sigmaReading_->setText(view.settling ? kSettlingReading : "Learning the reference — waiting for measurements.");
-        sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(settings().minPixels).arg(settings().maxPixels));
+        const DetectionSettings shown = settings();
+        sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(shown.minPixels).arg(shown.patchMaxPixels()));
     }
-    const auto& active = summary.settings;
-    if (!active.darkening && active.darkeningShare <= 0)
-        darkReading_->setText("Darkening is off.");
-    else if (!measuring)
-        darkReading_->setText("Waiting for measurements.");
-    else
-        darkReading_->setText(QString("Deepest fall %1 sigma. Largest dark patch %2 px (allowed %3–%4 px).%5")
-            .arg(summary.deepestSigma, 0, 'f', 1).arg(summary.largestDarkPatch).arg(active.minPixels).arg(active.maxDarkPixels)
-            .arg(summary.darkSearchLimited ? " Too many dark pixels to measure patches." : ""));
     updateDecision();
     history_->setView(view);
     overlayImage_ = {};
@@ -968,7 +1044,7 @@ void DetectionPanel::setView(const DetectionView& view)
         }
     }
     mapScale_->setText(map.kind == DetectionOverlay::Sigma
-        ? QString("Red: at or above K (%1 sigma). Display only.").arg(scale, 0, 'f', 1)
+        ? QString("Red: %1 (K %2 sigma). Display only.").arg(atKText(summary.settings)).arg(scale, 0, 'f', 1)
         : noiseScaleText(scale));
 }
 
@@ -992,7 +1068,7 @@ void DetectionPanel::setTimeLapseState(bool active, bool watchingTransits, const
     }
     else if (watchingTransits)
     {
-        timeLapseBanner_->setStyleSheet("background:#164b3c; color:white; font-weight:bold; padding:5px 8px; border-radius:4px;");
+        timeLapseBanner_->setStyleSheet(timeLapseBannerStyle(true));
         QString text = "Active monitoring for shadows / transits between time-lapse bursts";
         if (!statusDetail.isEmpty()) text += " (" + statusDetail + ")";
         text += ". Settings are locked during time-lapse.";
@@ -1001,11 +1077,19 @@ void DetectionPanel::setTimeLapseState(bool active, bool watchingTransits, const
     }
     else
     {
-        timeLapseBanner_->setStyleSheet("background:#3b3f4a; color:white; font-weight:bold; padding:5px 8px; border-radius:4px;");
+        timeLapseBanner_->setStyleSheet(timeLapseBannerStyle(false));
         timeLapseBanner_->setText("Time-lapse running — detection is OFF. Settings are locked during time-lapse.");
         timeLapseBanner_->show();
     }
     updateDecision();
+}
+
+void DetectionPanel::refreshTheme()
+{
+    if (autoTune_) autoTune_->setStyleSheet(autoTuneButtonStyle());
+    if (timeLapseActive_ && timeLapseBanner_)
+        timeLapseBanner_->setStyleSheet(timeLapseBannerStyle(timeLapseTransits_));
+    update();
 }
 
 void DetectionPanel::updateDecision()

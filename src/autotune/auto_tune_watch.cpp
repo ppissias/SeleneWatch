@@ -275,10 +275,9 @@ void AutoTuneWatch::begin(const Frame& frame, const FlashDetector& live, const C
 }
 
 void AutoTuneWatch::record(KRowResult& result, const FlashDetector& detector,
-    const std::vector<DetectionSummary>& candidates, bool darkening)
+    const std::vector<DetectionSummary>& candidates)
 {
-    const DetectionSummary& summary = detector.summary();
-    if (summary.patchSearchLimited || (darkening && summary.darkSearchLimited)) ++result.limitedFrames;
+    if (detector.summary().patchSearchLimited) ++result.limitedFrames;
     for (const DetectionSummary& c : candidates)
     {
         ++result.events;
@@ -312,13 +311,13 @@ void AutoTuneWatch::measure(const Frame& frame, const FlashDetector& live, const
         {
             if (!row.result.stopped.empty()) continue;
             if (!row.detector)
-                record(row.result, live, liveCandidates, request.settings.darkening);
+                record(row.result, live, liveCandidates);
             else
             {
                 try
                 {
                     row.detector->analyze(frame);
-                    record(row.result, *row.detector, row.detector->candidates(), request.settings.darkening);
+                    record(row.result, *row.detector, row.detector->candidates());
                     row.detector->updateReference(frame);
                 }
                 catch (const MemoryLimitError&)

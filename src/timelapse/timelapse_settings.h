@@ -21,6 +21,13 @@ enum class SharpeningPreset
     Custom
 };
 
+enum class BrightnessLevellingMode
+{
+    Off,
+    Global,          // Robust affine match: removes uniform cloud dimming & haze while preserving shadows
+    GlobalAndPatchy  // Global match + smooth low-frequency spatial grid for uneven clouds (Moon)
+};
+
 // Feature-32: a time-lapse also ends with the session's Ends setting; the
 // window stops it then. The values are those saved before Duration and the
 // UTC end time moved there.
@@ -32,6 +39,7 @@ enum class StopConditionKind
 
 [[nodiscard]] const char* timelapsePresetName(TimelapsePreset preset);
 [[nodiscard]] const char* sharpeningPresetName(SharpeningPreset preset);
+[[nodiscard]] const char* brightnessLevellingModeName(BrightnessLevellingMode mode);
 
 // Linear float sharpening settings applied identically to every stack in
 // sharpened/ and in Re-sharpen (FITS remains linear; video stretch is separate).
@@ -56,7 +64,7 @@ struct VideoToneSettings
     double blackLevel{0.0};
     double whiteLevel{1.0};
     double gamma{1.0};
-    bool brightnessLevelling{true};
+    BrightnessLevellingMode brightnessMode{BrightnessLevellingMode::Global};
     double minQualityRatio{0.0}; // 0 keeps all stacks; >0 drops stacks below ratio * median stack quality
     bool cropToOverlap{true};
     int fps{12};

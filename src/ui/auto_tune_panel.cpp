@@ -342,8 +342,11 @@ void AutoTunePanel::updateButtons()
     applyK_->setEnabled(!s.busy && choice_.k.has_value());
     minPatchWatch_->setEnabled(idle && !needBox && s.workflow == TuneWorkflow::MoonFlashes && !s.recording);
     applyMinPatch_->setEnabled(!s.busy && minChoice_.minPixels.has_value());
-    checkFlash_->setEnabled(idle && s.testingTools && !s.recording);
-    checkFlash_->setVisible(s.testingTools);
+    // Feature-45: the shadows' watch looks only for falls, so a test flash
+    // there would always be missed.
+    const bool flashes = s.testingTools && s.workflow != TuneWorkflow::MoonTransits;
+    checkFlash_->setEnabled(idle && flashes && !s.recording);
+    checkFlash_->setVisible(flashes);
     cancel_->setVisible(s.busy);
     drawBox_->setEnabled(s.preview);
     QString why;

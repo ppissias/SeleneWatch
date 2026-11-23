@@ -135,8 +135,7 @@ private:
     void measure(const Frame& frame, const FlashDetector& live, const std::vector<DetectionSummary>& liveCandidates);
     void finish(TuneWatchStatus::State state, const std::string& note);
     void publish();
-    static void record(KRowResult& result, const FlashDetector& detector, const std::vector<DetectionSummary>& candidates,
-        bool darkening);
+    static void record(KRowResult& result, const FlashDetector& detector, const std::vector<DetectionSummary>& candidates);
 
     mutable std::mutex mutex_;
     std::optional<TuneWatchRequest> pending_;

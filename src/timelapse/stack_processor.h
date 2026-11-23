@@ -106,12 +106,44 @@ struct SessionAlignResult
 [[nodiscard]] FitsImage applyLinearSharpening(const FitsImage& unsharpened,
     const SharpeningSettings& settings);
 
-// Measures foreground target brightness and auto-stretch black/white quantiles.
+// Summary of a stack's luminance contrast inside the valid overlap, used to pick
+// a clear reference stack even when sensor noise inflates qualityScore under cloud.
+struct StackBrightnessStats
+{
+    double p05{0.0};
+    double p98{0.0};
+    [[nodiscard]] double contrastSpan() const { return std::max(0.0, p98 - p05); }
+};
+
+// Linear brightness match mapping a stack onto the reference stack's scale:
+// matched = input * gain + offset (in linear [0, 1] units before stretch/gamma).
+struct BrightnessMatch
+{
+    double gain{1.0};
+    double offset{0.0};
+};
+
+// Measures foreground target brightness, contrast span, and auto-stretch black/white quantiles.
 [[nodiscard]] double measureTargetBrightness(const FitsImage& image);
-void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite);
+[[nodiscard]] StackBrightnessStats measureStackBrightnessStats(const FitsImage& image,
+    const QRect& crop = {});
+[[nodiscard]] int selectClearReferenceStack(const std::vector<double>& qualityScores,
+    const std::vector<double>& contrastSpans);
+[[nodiscard]] BrightnessMatch computeBrightnessMatch(const FitsImage& image,
+    const FitsImage& reference,
+    const QRect& crop = {},
+    bool alignedPixels = true);
+void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite,
+    const QRect& crop = {});
 
 // Tone-maps a linear float FitsImage into an 8-bit QImage (Format_RGB888 or
 // Format_Grayscale8) for live thumbnails or FFmpeg video export.
+// When reference is non-null and levelling != Off, equalizes brightness (and
+// optionally low-frequency uneven clouds) to reference inside crop before
+// applying black/white stretch and gamma.
 [[nodiscard]] QImage toneMapFitsToImage(const FitsImage& image,
     double black, double white, double gamma, double brightnessScale = 1.0,
-    const QRect& crop = {}, int maxLongSide = 0);
+    const QRect& crop = {}, int maxLongSide = 0,
+    const FitsImage* reference = nullptr,
+    BrightnessLevellingMode levelling = BrightnessLevellingMode::Off,
+    bool alignedPixels = true);

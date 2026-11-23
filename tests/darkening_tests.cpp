@@ -64,7 +64,7 @@ class DarkeningTest : public QObject
 private slots:
     void aDarkPatchFiresOnlyWithDarkeningOn();
     void aDarkDiskCrossingIsOneClipShownInBlue();
-    void aRiseAndAFallSideBySideStayApart();
+    void withDarkeningOnlyTheFallIsLookedFor();
     void aLargeDarkeningFiresOnceAndASlowOneNever();
     void tooManyDarkPixelsStopTheSearchAndSaySo();
 };
@@ -162,29 +162,45 @@ void DarkeningTest::aDarkDiskCrossingIsOneClipShownInBlue()
     QVERIFY2(qBlue(pixel) > qRed(pixel) + 60, qPrintable(QString::number(pixel, 16)));
 }
 
-// Done-when 3: a rise and a fall touching on one frame are two patches.
-void DarkeningTest::aRiseAndAFallSideBySideStayApart()
+// Feature-45 (Done-when 3 of Feature-13 before it): a rise and a fall
+// touching on one frame. With darkening only the fall is looked for, and
+// what the detector reports, its history and its sigma map are of the fall;
+// without darkening only the rise.
+void DarkeningTest::withDarkeningOnlyTheFallIsLookedFor()
 {
-    std::mt19937 random(33);
-    FlashDetector detector(withDarkening());
-    for (uint64_t i = 0; i < 40; ++i) observe(detector, *scene(64, 48, i, random));
-    const auto frame = scene(64, 48, 40, random, [](int x, int y) {
+    const auto touching = [](int x, int y) {
         if (y < 20 || y >= 23) return 0.0;
         if (x >= 20 && x < 23) return 40.0;
         if (x >= 23 && x < 26) return -40.0;
         return 0.0;
-    });
-    QVERIFY(observe(detector, *frame));
-    QCOMPARE(detector.candidates().size(), size_t{2});
-    int rises = 0, falls = 0;
-    for (const DetectionSummary& candidate : detector.candidates())
+    };
+    for (const bool darkening : {true, false})
     {
+        std::mt19937 random(33);
+        DetectionSettings settings;
+        settings.darkening = darkening;
+        FlashDetector detector(settings);
+        for (uint64_t i = 0; i < 40; ++i) observe(detector, *scene(64, 48, i, random));
+        const auto frame = scene(64, 48, 40, random, touching);
+        QVERIFY(detector.analyze(*frame, {DetectionOverlay::Sigma, -1, -1, true}));
+        QCOMPARE(detector.candidates().size(), size_t{1});
+        const DetectionSummary& candidate = detector.candidates().front();
+        QCOMPARE(candidate.change, darkening ? ChangeKind::Fall : ChangeKind::Rise);
         QCOMPARE(candidate.brightPixels, 9);
-        rises += candidate.change == ChangeKind::Rise;
-        falls += candidate.change == ChangeKind::Fall;
+        QCOMPARE(candidate.boxX, darkening ? 23 : 20);
+        QVERIFY(darkening ? candidate.peakAdu < -30 : candidate.peakAdu > 30);
+        // The whole frame's measurement, as the panel and its history show it.
+        const DetectionView view = detector.view();
+        QCOMPARE(view.summary.peakSigma, candidate.peakSigma);
+        QVERIFY(view.summary.peakSigma > settings.sigma);
+        QCOMPARE(view.history.back().peakSigma, candidate.peakSigma);
+        QVERIFY(view.map);
+        const auto sigmaAt = [&view](int x) { return view.map->values[static_cast<size_t>(21) * view.map->width + x]; };
+        const int rise = 21, fall = 24;
+        QVERIFY(sigmaAt(darkening ? fall : rise) > settings.sigma);
+        QCOMPARE(sigmaAt(darkening ? rise : fall), 0.0f);
+        detector.updateReference(*frame);
     }
-    QCOMPARE(rises, 1);
-    QCOMPARE(falls, 1);
 }
 
 // Done-when 4: 30% of the frame darkened for three frames fires once. A slow
@@ -221,7 +237,8 @@ void DarkeningTest::aLargeDarkeningFiresOnceAndASlowOneNever()
 }
 
 // Done-when 5: more dark pixels than four times the maximum dark patch (at
-// least 4096) are not split into patches, as on the bright side.
+// least 4096) are not split into patches, as on the bright side. Since
+// Feature-45 a flash elsewhere is not looked for either.
 void DarkeningTest::tooManyDarkPixelsStopTheSearchAndSaySo()
 {
     std::mt19937 random(36);
@@ -229,18 +246,15 @@ void DarkeningTest::tooManyDarkPixelsStopTheSearchAndSaySo()
     settings.maxDarkPixels = 100;
     FlashDetector detector(settings);
     for (uint64_t i = 0; i < 40; ++i) observe(detector, *scene(140, 100, i, random));
-    // 5000 pixels fall, about a third of the frame; a flash elsewhere still
-    // fires. (With half the frame dark, the frame's noise floor itself rises
-    // and hides the flash; that is the floor's job, not the search's.)
+    // 5000 pixels fall, about a third of the frame, beside a flash.
     const auto frame = scene(140, 100, 40, random, [](int x, int y) {
         if (x < 50) return -60.0;
         return x >= 100 && x < 103 && y >= 70 && y < 73 ? 60.0 : 0.0;
     });
-    QVERIFY(observe(detector, *frame));
-    QVERIFY(detector.summary().darkSearchLimited);
-    QCOMPARE(detector.summary().darkPixels, 5000);
-    QCOMPARE(detector.candidates().size(), size_t{1});
-    QCOMPARE(detector.candidates().front().change, ChangeKind::Rise);
+    QVERIFY(!observe(detector, *frame));
+    QVERIFY(detector.summary().patchSearchLimited);
+    QCOMPARE(detector.summary().brightPixels, 5000);
+    QVERIFY(detector.candidates().empty());
 }
 
 int main(int argc, char** argv)

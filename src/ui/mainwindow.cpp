@@ -43,11 +43,14 @@
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
 #include <QtGui/QAction>
+#include <QtGui/QActionGroup>
 #include <QtGui/QCloseEvent>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QKeySequence>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
+#include <QtGui/QScreen>
 #include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
@@ -62,8 +65,10 @@
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QStatusBar>
 #include <QtWidgets/QTextBrowser>
+#include <QtWidgets/QToolBar>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWhatsThis>
@@ -132,7 +137,10 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     , ui_(std::make_unique<Ui::MainWindowClass>())
 {
     ui_->setupUi(this);
+    ui_->verticalLayout->setContentsMargins(6, 4, 6, 4);
+    ui_->verticalLayout->setSpacing(4);
     setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
+    applyUiTheme(loadUiTheme());
 
     // Prevent accidental mouse-wheel changes on spin boxes, sliders, and closed combo boxes.
     wheelGuard_ = new WheelGuard(this);
@@ -244,8 +252,11 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         addCameraFamily(new PlayerOneCameraPanel(std::move(api),this),"Player One camera","playerOneCameraDock");
     if (auto api=toupTekApi?std::move(toupTekApi):makeToupTekApi())
         addCameraFamily(new ToupTekCameraPanel(std::move(api),this),"ToupTek camera","toupTekCameraDock");
+    setupViewMenuExtras();
     setupSourceChoice();
     arrangeTopControls();
+    applyDefaultDockLayout();
+    restoreWindowLayout();
     loadSessionEnd();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
@@ -271,6 +282,22 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     });
     connect(ui_->previewWidget, &PreviewWidget::shapeClosed, this, [this] { closeMaskShape(); });
     connect(ui_->previewWidget, &PreviewWidget::regionSelected, this, [this](QRect region) {
+        if (CameraFamilyPanel* camera = selectedCamera();
+            camera && camera->controls() && camera->controls()->drawingRoi())
+        {
+            chooseDrawing(Drawing::None);
+            if (!session_->isRunning() || session_->mode() != Session::Mode::Preview || activeCamera() != camera)
+                return;
+            const AlignedRoi aligned = camera->controls()->setDrawnRoi(region);
+            const QString note = aligned.adjusted
+                ? QString("Camera ROI set to %1 × %2 at (%3, %4) (rounded for %5).")
+                      .arg(aligned.width).arg(aligned.height).arg(aligned.x).arg(aligned.y)
+                      .arg(camera->controls()->alignmentHint())
+                : QString("Camera ROI set to %1 × %2 at (%3, %4).")
+                      .arg(aligned.width).arg(aligned.height).arg(aligned.x).arg(aligned.y);
+            applyCameraRoiChange(note);
+            return;
+        }
         // Feature-26: the box auto-tune grows the earthshine area from.
         if (drawingEarthshineBox_)
         {
@@ -281,6 +308,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         if (timelapsePanel_ && timelapsePanel_->selectingAnchor())
         {
             timelapsePanel_->setLunarAnchor(region);
+            chooseDrawing(Drawing::None);
             ui_->previewWidget->setAnchorBox(region);
             showMessage("Lunar time-lapse anchor region set.", 4000);
             return;
@@ -297,16 +325,12 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
         // Feature-28: a drag locks only after Draw lock box, one box per press.
         if (guidingPanel_ && guidingPanel_->drawingLock())
         {
-            guidingPanel_->setDrawingLock(false);
+            chooseDrawing(Drawing::None);
             if (target() == Target::Sky || !session_->isRunning()) return;
             session_->guider().requestLock({region.x(), region.y(), region.width(), region.height()});
             showMessage("Locking on the selected region…", 3000);
             return;
         }
-        showMessage(target() == Target::Sky
-            ? "A drag draws nothing until you choose what to draw: Draw mask in Detection."
-            : "A drag draws nothing until you choose what to draw: Draw lock box in Guiding, Draw earthshine box in "
-              "Auto-tune, or Select lunar anchor in Time-lapse.", 6000);
     });
     connect(ui_->blipAmplitudeSpinBox, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateBlipReadout);
     connect(ui_->sourceComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::onSourceKindChanged);
@@ -326,6 +350,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     if (const int index = ui_->sourceComboBox->findData(startupCamera_); !startupCamera_.isEmpty() && index > 0)
         ui_->sourceComboBox->setCurrentIndex(index);
 
+    applyTheme(loadUiTheme(), false);
     updateControls();
     updateStatusLabel();
     updateBlipReadout();
@@ -344,52 +369,99 @@ void MainWindow::arrangeTopControls()
         auto* box = new QWidget(parent);
         auto* row = new QHBoxLayout(box);
         row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(4);
         for (QWidget* widget : widgets) row->addWidget(widget);
         return box;
     };
 
-    // A long recording name is shortened with "…" rather than widening the row.
-    auto* file = new ElidedLabel(ui_->fileLabel->text(), Qt::ElideMiddle, ui_->centralWidget);
+    // A long recording name is shortened with "…" rather than widening the bar.
+    auto* file = new ElidedLabel(ui_->fileLabel->text(), Qt::ElideMiddle, this);
     file->setObjectName("fileLabel");
-    file->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    file->setMaximumWidth(220);
+    file->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     delete ui_->fileLabel;
     ui_->fileLabel = file;
 
-    // The source row wraps too: the recording's name takes the rest of its line.
-    auto* source = new QWidget(ui_->centralWidget);
-    source->setObjectName("sourceControls");
-    auto* sourceFlow = new FlowLayout(source, 16, 4);
-    sourceFlow->addWidget(together(source, {ui_->sourceLabel, ui_->sourceComboBox, connectAtStartup_}));
-    QWidget* recording = together(source, {ui_->openFileButton, file});
-    recording->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    sourceFlow->addWidget(recording);
-    sourceFlow->addWidget(testingBadge_);
-    const int sourceRow = ui_->verticalLayout->indexOf(ui_->sourceLayout);
+    // Remove the legacy stacked rows from centralWidget and replace them with
+    // one full-width top command toolbar + a slim playback bar (hidden for cameras).
     ui_->verticalLayout->removeItem(ui_->sourceLayout);
     delete ui_->sourceLayout;
     ui_->sourceLayout = nullptr;
-    ui_->verticalLayout->insertWidget(sourceRow, source);
-
-    auto* stream = new QWidget(ui_->centralWidget);
-    stream->setObjectName("streamControls");
-    auto* flow = new FlowLayout(stream, 16, 4);
-    flow->addWidget(together(stream, {ui_->startButton, ui_->monitoringButton, ui_->stopButton}));
-    flow->addWidget(together(stream, {ui_->saveNowButton, recordButton_, recordFramesSpinBox_, ui_->injectFlashButton}));
-    flow->addWidget(together(stream, {ui_->fpsLabel, ui_->targetFpsSpinBox}));
-    flow->addWidget(together(stream, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox}));
-    // Feature-32: when the session ends, and what the mount does then.
-    QWidget* ends = makeSessionEndRow(stream);
-    ends->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    flow->addWidget(ends);
-    // The separators and spacer of the old single row.
     delete ui_->line;
     delete ui_->line2;
     ui_->line = ui_->line2 = nullptr;
-    const int row = ui_->verticalLayout->indexOf(ui_->controlsLayout);
     ui_->verticalLayout->removeItem(ui_->controlsLayout);
     delete ui_->controlsLayout;
     ui_->controlsLayout = nullptr;
-    ui_->verticalLayout->insertWidget(row, stream);
+
+    commandToolBar_ = new QToolBar("Controls", this);
+    commandToolBar_->setObjectName("commandToolBar");
+    commandToolBar_->setMovable(false);
+    commandToolBar_->setFloatable(false);
+    commandToolBar_->toggleViewAction()->setVisible(false);
+    // Keep the full-width command bar expanded inside QToolBar without ever
+    // collapsing the whole bar into QToolBar's ">>" overflow popup.
+    class CommandBarWidget final : public QWidget
+    {
+    public:
+        using QWidget::QWidget;
+        [[nodiscard]] QSize sizeHint() const override { return {1, QWidget::sizeHint().height()}; }
+        [[nodiscard]] QSize minimumSizeHint() const override { return {1, QWidget::minimumSizeHint().height()}; }
+    };
+    auto* bar = new CommandBarWidget(commandToolBar_);
+    bar->setObjectName("commandBar");
+    bar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* barRow = new QHBoxLayout(bar);
+    barRow->setContentsMargins(6, 2, 6, 2);
+    barRow->setSpacing(6);
+
+    barRow->addWidget(ui_->sourceLabel);
+    barRow->addWidget(ui_->sourceComboBox);
+    barRow->addWidget(connectAtStartup_);
+    recordingFileGroup_ = together(bar, {ui_->openFileButton, file});
+    barRow->addWidget(recordingFileGroup_);
+    barRow->addWidget(testingBadge_);
+
+    auto* sep1 = new QFrame(bar);
+    sep1->setFrameShape(QFrame::VLine);
+    sep1->setFrameShadow(QFrame::Sunken);
+    barRow->addWidget(sep1);
+
+    ui_->stopButton->setText("Stop");
+    barRow->addWidget(ui_->startButton);
+    barRow->addWidget(ui_->stopButton);
+    barRow->addWidget(ui_->monitoringButton);
+    barRow->addWidget(ui_->saveNowButton);
+    barRow->addWidget(recordButton_);
+    barRow->addWidget(recordFramesSpinBox_);
+    barRow->addWidget(ui_->injectFlashButton);
+
+    auto* sep2 = new QFrame(bar);
+    sep2->setFrameShape(QFrame::VLine);
+    sep2->setFrameShadow(QFrame::Sunken);
+    barRow->addWidget(sep2);
+
+    QWidget* ends = makeSessionEndRow(bar);
+    barRow->addWidget(ends);
+    barRow->addStretch(1);
+    barRow->addWidget(modeLabel_);
+
+    commandToolBar_->addWidget(bar);
+    bar->show();
+    addToolBar(Qt::TopToolBarArea, commandToolBar_);
+
+    // Recording / Synthetic playback controls live on a slim bar that hides completely for live cameras.
+    playbackBar_ = new QWidget(ui_->centralWidget);
+    playbackBar_->setObjectName("playbackControls");
+    auto* pbRow = new QHBoxLayout(playbackBar_);
+    pbRow->setContentsMargins(0, 0, 0, 0);
+    pbRow->setSpacing(10);
+    fpsGroup_ = together(playbackBar_, {ui_->fpsLabel, ui_->targetFpsSpinBox});
+    recordingPlaybackGroup_ = together(playbackBar_, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox});
+    pbRow->addWidget(fpsGroup_);
+    pbRow->addWidget(recordingPlaybackGroup_);
+    pbRow->addStretch(1);
+    ui_->verticalLayout->insertWidget(0, playbackBar_);
 
     // Labels name their controls, so each gets the control's ⓘ help (Feature-24).
     ui_->sourceLabel->setBuddy(ui_->sourceComboBox);
@@ -419,6 +491,252 @@ void MainWindow::arrangeTopControls()
     auto* column = new QVBoxLayout(blip);
     column->addWidget(blipControls);
     column->addLayout(readouts);
+}
+
+void MainWindow::setupViewMenuExtras()
+{
+    viewMenu_->addSeparator();
+    focusViewAction_ = viewMenu_->addAction("Focus view (hide panels)");
+    focusViewAction_->setObjectName("focusViewAction");
+    focusViewAction_->setCheckable(true);
+    focusViewAction_->setShortcut(QKeySequence(Qt::Key_F11));
+    focusViewAction_->setToolTip("Hide all side panels to maximize the live camera view (F11). Trigger again to restore.");
+    connect(focusViewAction_, &QAction::toggled, this, &MainWindow::setFocusView);
+    if (focusViewButton_)
+        connect(focusViewButton_, &QToolButton::toggled, this, &MainWindow::setFocusView);
+
+    QMenu* themeMenu = viewMenu_->addMenu("Theme");
+    themeMenu->setObjectName("themeMenu");
+    themeActions_ = new QActionGroup(this);
+    themeActions_->setExclusive(true);
+    auto addThemeAction = [&](const QString& text, const QString& objName, UiTheme theme) {
+        QAction* act = themeMenu->addAction(text);
+        act->setObjectName(objName);
+        act->setCheckable(true);
+        themeActions_->addAction(act);
+        connect(act, &QAction::triggered, this, [this, theme] { applyTheme(theme, true); });
+        return act;
+    };
+    themeSystemAction_ = addThemeAction("System (light)", "themeSystemAction", UiTheme::System);
+    themeDarkAction_ = addThemeAction("Dark", "themeDarkAction", UiTheme::Dark);
+    themeNightRedAction_ = addThemeAction("Red night vision", "themeNightRedAction", UiTheme::NightRed);
+
+    resetLayoutAction_ = viewMenu_->addAction("Reset window layout");
+    resetLayoutAction_->setObjectName("resetLayoutAction");
+    resetLayoutAction_->setToolTip("Restore all panels to the default single right-hand sidebar layout.");
+    connect(resetLayoutAction_, &QAction::triggered, this, &MainWindow::resetWindowLayout);
+    viewMenu_->addSeparator();
+}
+
+void MainWindow::applyDefaultDockLayout()
+{
+    setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+
+    const bool histWasVisible = histogramDock_ && !histogramDock_->isHidden();
+    for (const auto& family : cameraFamilies_)
+    {
+        family.dock->setFloating(false);
+        removeDockWidget(family.dock);
+    }
+    for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_, histogramDock_})
+    {
+        if (!dock) continue;
+        dock->setFloating(false);
+        removeDockWidget(dock);
+    }
+
+    // Three distinct vertical slots in the single right-hand sidebar:
+    //   1. Active Camera dock (top; hidden when non-camera source selected)
+    //   2. Tabbed Detection | Display | Guiding | Time-lapse (middle)
+    //   3. Compact Histogram dock (bottom; toggleable via View bar / View menu)
+    QDockWidget* firstCameraDock = nullptr;
+    for (const auto& family : cameraFamilies_)
+    {
+        addDockWidget(Qt::RightDockWidgetArea, family.dock);
+        if (!firstCameraDock) firstCameraDock = family.dock;
+        else tabifyDockWidget(firstCameraDock, family.dock);
+    }
+
+    if (detectionDock_) addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
+    if (displayDock_) addDockWidget(Qt::RightDockWidgetArea, displayDock_);
+    if (guidingDock_) addDockWidget(Qt::RightDockWidgetArea, guidingDock_);
+    if (timelapseDock_) addDockWidget(Qt::RightDockWidgetArea, timelapseDock_);
+    if (detectionDock_ && displayDock_) tabifyDockWidget(detectionDock_, displayDock_);
+    if (displayDock_ && guidingDock_) tabifyDockWidget(displayDock_, guidingDock_);
+    if (guidingDock_ && timelapseDock_) tabifyDockWidget(guidingDock_, timelapseDock_);
+
+    if (histogramDock_) addDockWidget(Qt::RightDockWidgetArea, histogramDock_);
+
+    CameraFamilyPanel* selected = selectedCamera();
+    for (const auto& family : cameraFamilies_)
+        family.dock->setVisible(family.panel == selected);
+    for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_})
+        if (dock) dock->show();
+    if (detectionDock_) detectionDock_->raise();
+    if (histogramDock_) histogramDock_->setVisible(histWasVisible);
+
+    if (detectionDock_) resizeDocks({detectionDock_}, {350}, Qt::Horizontal);
+    if (firstCameraDock && detectionDock_ && histogramDock_)
+        resizeDocks({firstCameraDock, detectionDock_, histogramDock_}, {280, 340, 140}, Qt::Vertical);
+    else if (detectionDock_ && histogramDock_)
+        resizeDocks({detectionDock_, histogramDock_}, {520, 140}, Qt::Vertical);
+}
+
+void MainWindow::saveWindowLayout()
+{
+    // Never persist the temporary Focus-view hidden state as the observer's permanent dock layout.
+    const bool wasFocus = focusView_;
+    if (wasFocus) setFocusView(false);
+    QSettings saved;
+    saved.setValue("ui/windowGeometry", saveGeometry());
+    saved.setValue("ui/windowState", saveState(2));
+    saved.sync();
+    if (wasFocus) setFocusView(true);
+}
+
+void MainWindow::restoreWindowLayout()
+{
+    QSettings saved;
+    const QByteArray geom = saved.value("ui/windowGeometry").toByteArray();
+    const QByteArray state = saved.value("ui/windowState").toByteArray();
+    if (!geom.isEmpty())
+    {
+        restoreGeometry(geom);
+        const QRect frame = frameGeometry();
+        bool onScreen = false;
+        for (const QScreen* screen : QGuiApplication::screens())
+            if (screen && screen->availableGeometry().intersects(frame)) { onScreen = true; break; }
+        if (!onScreen)
+        {
+            if (const QScreen* primary = QGuiApplication::primaryScreen())
+            {
+                const QRect avail = primary->availableGeometry();
+                resize(std::min(1280, avail.width()), std::min(760, avail.height()));
+                move(avail.topLeft() + QPoint(40, 40));
+            }
+        }
+    }
+    else
+    {
+        int w = 1280, h = 760;
+        if (const QScreen* primary = QGuiApplication::primaryScreen())
+        {
+            const QRect avail = primary->availableGeometry();
+            w = std::min(w, std::max(900, avail.width() - 60));
+            h = std::min(h, std::max(660, avail.height() - 60));
+        }
+        resize(w, h);
+    }
+    if (!state.isEmpty())
+        restoreState(state, 2);
+
+    CameraFamilyPanel* selected = selectedCamera();
+    for (const auto& family : cameraFamilies_)
+    {
+        const bool isSelected = family.panel == selected;
+        family.dock->setVisible(isSelected);
+        family.dock->toggleViewAction()->setVisible(isSelected);
+    }
+    if (histogramToggleButton_ && histogramDock_)
+    {
+        const QSignalBlocker blocked(histogramToggleButton_);
+        histogramToggleButton_->setChecked(!histogramDock_->isHidden());
+    }
+}
+
+void MainWindow::resetWindowLayout()
+{
+    if (focusView_) setFocusView(false);
+    QSettings saved;
+    saved.remove("ui/windowGeometry");
+    saved.remove("ui/windowState");
+    saved.sync();
+    applyDefaultDockLayout();
+    for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_})
+        if (dock) dock->show();
+    if (detectionDock_) detectionDock_->raise();
+    if (histogramDock_) histogramDock_->hide();
+    CameraFamilyPanel* selected = selectedCamera();
+    for (const auto& family : cameraFamilies_)
+    {
+        const bool isSelected = family.panel == selected;
+        family.dock->setVisible(isSelected);
+        family.dock->toggleViewAction()->setVisible(isSelected);
+    }
+    showMessage("Window layout reset to default.", 4000);
+}
+
+void MainWindow::setFocusView(bool on)
+{
+    if (focusView_ == on) return;
+    focusView_ = on;
+    if (focusViewAction_) { const QSignalBlocker b(focusViewAction_); focusViewAction_->setChecked(on); }
+    if (focusViewButton_) { const QSignalBlocker b(focusViewButton_); focusViewButton_->setChecked(on); }
+    if (on)
+    {
+        focusSavedDocks_.clear();
+        auto hideIfOpen = [this](QDockWidget* dock) {
+            if (dock && !dock->isHidden())
+            {
+                focusSavedDocks_.push_back(dock);
+                dock->hide();
+            }
+        };
+        for (const auto& family : cameraFamilies_) hideIfOpen(family.dock);
+        for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_, histogramDock_})
+            hideIfOpen(dock);
+    }
+    else
+    {
+        CameraFamilyPanel* selected = selectedCamera();
+        for (QDockWidget* dock : focusSavedDocks_)
+        {
+            if (!dock) continue;
+            bool isCameraDock = false, isSelectedCameraDock = false;
+            for (const auto& family : cameraFamilies_)
+            {
+                if (family.dock == dock)
+                {
+                    isCameraDock = true;
+                    isSelectedCameraDock = (family.panel == selected);
+                    break;
+                }
+            }
+            if (!isCameraDock || isSelectedCameraDock) dock->show();
+        }
+        focusSavedDocks_.clear();
+    }
+}
+
+void MainWindow::applyTheme(UiTheme theme, bool persist)
+{
+    applyUiTheme(theme);
+    if (persist) saveUiTheme(theme);
+    if (themeSystemAction_) { const QSignalBlocker b(themeSystemAction_); themeSystemAction_->setChecked(theme == UiTheme::System); }
+    if (themeDarkAction_) { const QSignalBlocker b(themeDarkAction_); themeDarkAction_->setChecked(theme == UiTheme::Dark); }
+    if (themeNightRedAction_) { const QSignalBlocker b(themeNightRedAction_); themeNightRedAction_->setChecked(theme == UiTheme::NightRed); }
+
+    ui_->startButton->setStyleSheet(primaryActionStyle(theme));
+    ui_->stopButton->setStyleSheet(stopActionStyle(theme));
+    if (testingBadge_)
+    {
+        testingBadge_->setStyleSheet(theme == UiTheme::NightRed
+            ? "background:#6b1414; color:#ff9999; font-weight:bold; padding:2px 6px; border-radius:3px;"
+            : "background:#8a5a00; color:white; font-weight:bold; padding:2px 6px; border-radius:3px;");
+    }
+    if (previewHintLabel_)
+    {
+        previewHintLabel_->setStyleSheet(theme == UiTheme::NightRed ? "color: #9e2d2d;" : "color: #888888;");
+    }
+    if (detectionPanel_) detectionPanel_->refreshTheme();
+    for (const auto& family : cameraFamilies_)
+        if (CameraSettingsEditor* c = family.panel->controls()) c->refreshTheme();
+    updateStatusLabel();
+    if (histogramPanel_) histogramPanel_->update();
+    ui_->previewWidget->update();
 }
 
 void MainWindow::setupSourceChoice()
@@ -572,7 +890,7 @@ void MainWindow::setupDetectionPanel()
     connect(skyTimer_, &QTimer::timeout, this, [this] { checkSkyExposure(std::chrono::steady_clock::now()); });
     skyTimer_->start();
     connect(detectionPanel_, &DetectionPanel::maskDrawingChanged, this, [this](bool drawing) {
-        if (drawing) chooseDrawing(Drawing::Mask);
+        chooseDrawing(drawing ? Drawing::Mask : Drawing::None);
         pendingShape_.clear();
         ui_->previewWidget->setPendingShape({});
         if (drawing) showMessage("Drag a rectangle, or click the corners of a shape and double-click to close it.", 6000);
@@ -765,7 +1083,7 @@ void MainWindow::closeMaskShape()
 }
 
 // Feature-28: one drawing on the preview at a time, each with its own colour.
-// Choosing one turns the others off.
+// Choosing one turns the others off; Drawing::None returns left-drag to panning.
 void MainWindow::chooseDrawing(Drawing drawing)
 {
     if (drawing != Drawing::EarthshineBox && drawingEarthshineBox_)
@@ -775,6 +1093,14 @@ void MainWindow::chooseDrawing(Drawing drawing)
     }
     if (drawing != Drawing::LockBox && guidingPanel_) guidingPanel_->setDrawingLock(false);
     if (drawing != Drawing::Anchor && timelapsePanel_ && timelapsePanel_->selectingAnchor()) timelapsePanel_->cancelAnchorSelection();
+    if (drawing != Drawing::Mask && detectionPanel_ && detectionPanel_->drawingMask()) detectionPanel_->setDrawingMask(false);
+    if (drawing != Drawing::CameraRoi)
+    {
+        for (const auto& family : cameraFamilies_)
+            if (CameraSettingsEditor* controls = family.panel->controls(); controls && controls->drawingRoi())
+                controls->setDrawingRoi(false);
+    }
+    ui_->previewWidget->setDragMode(drawing == Drawing::None ? PreviewWidget::DragMode::Pan : PreviewWidget::DragMode::Region);
     switch (drawing)
     {
     case Drawing::None: break;
@@ -782,6 +1108,34 @@ void MainWindow::chooseDrawing(Drawing drawing)
     case Drawing::EarthshineBox: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kEarthshineColour)); break;
     case Drawing::Anchor: ui_->previewWidget->setDragColour(QColor("#ff99dd")); break;
     case Drawing::Mask: ui_->previewWidget->setDragColour(QColor(220, 70, 70)); break;
+    case Drawing::CameraRoi: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kCameraRoiColour)); break;
+    }
+    updatePreviewHint(drawing);
+}
+
+void MainWindow::updatePreviewHint(Drawing drawing)
+{
+    if (!previewHintLabel_) return;
+    switch (drawing)
+    {
+    case Drawing::None:
+        previewHintLabel_->setText("Mouse wheel: zoom · Drag: pan");
+        break;
+    case Drawing::LockBox:
+        previewHintLabel_->setText("Drag: draw guiding lock box · Right/middle-drag: pan");
+        break;
+    case Drawing::EarthshineBox:
+        previewHintLabel_->setText("Drag: draw earthshine box · Right/middle-drag: pan");
+        break;
+    case Drawing::Anchor:
+        previewHintLabel_->setText("Drag: draw lunar anchor · Right/middle-drag: pan");
+        break;
+    case Drawing::Mask:
+        previewHintLabel_->setText("Drag or click corners: draw mask · Right/middle-drag: pan");
+        break;
+    case Drawing::CameraRoi:
+        previewHintLabel_->setText("Drag: draw camera ROI · Right/middle-drag: pan");
+        break;
     }
 }
 
@@ -821,7 +1175,7 @@ void MainWindow::applyTarget()
 void MainWindow::setupDisplayPanel()
 {
     displayPanel_ = new DisplayPanel(this);
-    displayDock_ = new QDockWidget("Display and capture", this);
+    displayDock_ = new QDockWidget("Display", this);
     displayDock_->setObjectName("displayDock"); displayDock_->setWidget(displayPanel_);
     addDockWidget(Qt::RightDockWidgetArea, displayDock_);
     tabifyDockWidget(detectionDock_, displayDock_);
@@ -862,9 +1216,7 @@ void MainWindow::setupHistogramPanel()
     histogramDock_ = new QDockWidget("Histogram", this);
     histogramDock_->setObjectName("histogramDock");
     histogramDock_->setWidget(histogramPanel_);
-    addDockWidget(Qt::BottomDockWidgetArea, histogramDock_);
-    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
-    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    addDockWidget(Qt::RightDockWidgetArea, histogramDock_);
     viewMenu_->addAction(histogramDock_->toggleViewAction());
 
     const QSettings saved;
@@ -872,8 +1224,21 @@ void MainWindow::setupHistogramPanel()
         saved.value("histogram/logCounts", true).toBool());
     histogramDock_->setVisible(saved.value("histogram/visible", false).toBool());
     connect(histogramDock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (histogramToggleButton_)
+        {
+            const QSignalBlocker blocked(histogramToggleButton_);
+            histogramToggleButton_->setChecked(visible);
+        }
         if (visible) updateHistogram(true);
     });
+    if (histogramToggleButton_)
+    {
+        const QSignalBlocker blocked(histogramToggleButton_);
+        histogramToggleButton_->setChecked(!histogramDock_->isHidden());
+        connect(histogramToggleButton_, &QToolButton::toggled, this, [this](bool on) {
+            if (histogramDock_) histogramDock_->setVisible(on);
+        });
+    }
     connect(histogramPanel_, &HistogramPanel::rangeChanged, this, [this] { updateHistogram(true); });
 }
 
@@ -920,9 +1285,8 @@ void MainWindow::setupGuidingPanel()
     guider.setCorrectionTuning(guidingPanel_->aggressivenessPercent() / 100.0, guidingPanel_->maxPulseMs());
     connect(guidingPanel_, &GuidingPanel::lockAtSelectionRequested, this, &MainWindow::onLockAtSelection);
     connect(guidingPanel_, &GuidingPanel::drawLockToggled, this, [this](bool on) {
-        if (!on) return;
-        chooseDrawing(Drawing::LockBox);
-        showMessage("Drag a box on the preview around a crater or other detail to lock guiding on it.", 6000);
+        chooseDrawing(on ? Drawing::LockBox : Drawing::None);
+        if (on) showMessage("Drag a box on the preview around a crater or other detail to lock guiding on it.", 6000);
     });
     connect(guidingPanel_, &GuidingPanel::unlockRequested, this, [&guider] { guider.requestUnlock(); });
     connect(guidingPanel_, &GuidingPanel::chooseDriverRequested, this, &MainWindow::onChooseMountDriver);
@@ -966,9 +1330,8 @@ void MainWindow::setupTimelapsePanel()
         detectionDock_->raise();
     });
     connect(timelapsePanel_, &TimelapsePanel::anchorSelectionChanged, this, [this](bool active) {
-        if (!active) return;
-        chooseDrawing(Drawing::Anchor);
-        showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
+        chooseDrawing(active ? Drawing::Anchor : Drawing::None);
+        if (active) showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
     });
     connect(timelapsePanel_, &TimelapsePanel::anchorChanged, this, [this](const std::optional<QRect>& rect) {
         ui_->previewWidget->setAnchorBox(rect);
@@ -1038,6 +1401,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     const bool timeLapsing = session_->mode() == Session::Mode::TimeLapse && !finalizing;
     if (!finalizing && !timeLapsing)
     {
+        saveWindowLayout();
         QMainWindow::closeEvent(event);
         return;
     }
@@ -1882,9 +2246,10 @@ void MainWindow::updateDetectionDisplay()
 
 void MainWindow::setupStatusBar()
 {
-    modeLabel_=new QLabel(this); modeLabel_->setObjectName("captureModeLabel");
-    modeLabel_->setWordWrap(true); modeLabel_->setMargin(8);
-    ui_->verticalLayout->insertWidget(2,modeLabel_);
+    modeLabel_ = new ElidedLabel("STOPPED", Qt::ElideRight, this);
+    modeLabel_->setObjectName("captureModeLabel");
+    modeLabel_->setMinimumWidth(84);
+    modeLabel_->setAlignment(Qt::AlignCenter);
     // Messages carry folder paths and error reasons, so they get the whole
     // width; a path that still does not fit keeps both of its ends.
     messageLabel_ = new ElidedLabel({}, Qt::ElideMiddle);
@@ -1974,16 +2339,32 @@ void MainWindow::setupPreviewZoomBar()
     zoomReadoutLabel_ = new QLabel("Fit", zoomBar);
     zoomReadoutLabel_->setObjectName("previewZoomLabel");
 
-    auto* hint = new QLabel("Mouse wheel: zoom · Right/middle-drag: pan", zoomBar);
-    hint->setStyleSheet("color: #888888;");
+    previewHintLabel_ = new ElidedLabel("Mouse wheel: zoom · Drag: pan", Qt::ElideRight, zoomBar);
+    previewHintLabel_->setObjectName("previewHintLabel");
+    previewHintLabel_->setStyleSheet("color: #888888;");
+    previewHintLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    histogramToggleButton_ = new QToolButton(zoomBar);
+    histogramToggleButton_->setObjectName("previewHistogramToggle");
+    histogramToggleButton_->setText("Histogram");
+    histogramToggleButton_->setCheckable(true);
+    histogramToggleButton_->setToolTip("Show or hide the live native-ADU histogram in the right sidebar.");
+
+    focusViewButton_ = new QToolButton(zoomBar);
+    focusViewButton_->setObjectName("previewFocusView");
+    focusViewButton_->setText("Focus view");
+    focusViewButton_->setCheckable(true);
+    focusViewButton_->setToolTip("Hide all side panels to maximize the live camera view (F11). Click again to restore.");
 
     row->addWidget(zoomFitButton_);
     row->addWidget(zoom100Button_);
     row->addWidget(zoom200Button_);
     row->addSpacing(6);
     row->addWidget(zoomReadoutLabel_);
-    row->addStretch(1);
-    row->addWidget(hint);
+    row->addSpacing(8);
+    row->addWidget(previewHintLabel_, 1);
+    row->addWidget(histogramToggleButton_);
+    row->addWidget(focusViewButton_);
 
     const int previewIndex = ui_->verticalLayout->indexOf(ui_->previewWidget);
     ui_->verticalLayout->insertWidget(std::max(0, previewIndex), zoomBar);
@@ -2076,15 +2457,37 @@ void MainWindow::addCameraFamily(CameraFamilyPanel* panel,const QString& dockTit
 {
     auto* dock=new QDockWidget(dockTitle,this);
     dock->setObjectName(dockName);
-    dock->setWidget(panel);
-    addDockWidget(Qt::LeftDockWidgetArea,dock);
+    auto* scroll=new QScrollArea(dock);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(panel);
+    dock->setWidget(scroll);
+    addDockWidget(Qt::RightDockWidgetArea,dock);
     dock->hide();
+    QAction* toggle=dock->toggleViewAction();
+    toggle->setVisible(false);
+    viewMenu_->addAction(toggle);
     connect(panel,&CameraFamilyPanel::applyRequested,this,&MainWindow::onApplyCamera);
     connect(panel,&CameraFamilyPanel::liveControlsRequested,this,&MainWindow::onApplyLiveCamera);
     connect(panel,&CameraFamilyPanel::availabilityChanged,this,&MainWindow::updateControls);
     if (CameraSettingsEditor* controls = panel->controls())
+    {
         controls->setExposureRange(watch_ == Watch::MoonShadows ? ExposureRange::Planetary
             : watch_ == Watch::SkySlow ? ExposureRange::Sky : ExposureRange::Fast);
+        connect(controls, &CameraSettingsEditor::roiDrawingChanged, this, [this, panel](bool drawing) {
+            if (drawing && selectedCamera() != panel) return;
+            chooseDrawing(drawing ? Drawing::CameraRoi : Drawing::None);
+            if (drawing) showMessage("Drag a rectangle on the preview to set the camera ROI.", 5000);
+        });
+        connect(controls, &CameraSettingsEditor::roiApplyRequested, this, [this, panel](const QString& note) {
+            if (selectedCamera() != panel) return;
+            applyCameraRoiChange(note);
+        });
+        connect(controls, &CameraSettingsEditor::roiAdjusted, this, [this, panel](const QString& note) {
+            if (selectedCamera() != panel || note.isEmpty()) return;
+            showMessage(note, 5000);
+        });
+    }
     cameraFamilies_.push_back({panel,dock});
 }
 CameraFamilyPanel* MainWindow::selectedCamera() const
@@ -2115,19 +2518,27 @@ void MainWindow::updateControls()
     const bool pending = session_->modeChangePending();
 
     CameraFamilyPanel* selected = selectedCamera();
-    const bool chosen = !ui_->sourceComboBox->currentData().toString().isEmpty();
+    const QString sourceKey = ui_->sourceComboBox->currentData().toString();
+    const bool chosen = !sourceKey.isEmpty();
+    const bool syntheticSelected = sourceKey == "synthetic";
     ui_->startButton->setEnabled(!busy && chosen && (!selected || selected->hasCamera()));
+    ui_->startButton->setVisible(!running);
     if (connectAtStartup_)
     {
+        connectAtStartup_->setVisible(selected != nullptr);
         connectAtStartup_->setEnabled(!busy && selected);
         const QSignalBlocker blocked(connectAtStartup_);
         connectAtStartup_->setChecked(selected && startupCamera_ == selected->sourceKey());
     }
+    if (recordingFileGroup_) recordingFileGroup_->setVisible(recording);
     if (testingAction_) testingAction_->setEnabled(!busy);
     ui_->stopButton->setEnabled(running);
+    ui_->stopButton->setVisible(running);
     ui_->monitoringButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && !session_->sourceFinished() && !pending);
+    ui_->monitoringButton->setVisible(running && !timeLapsing && !timeLapseFinalizing);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
+    ui_->saveNowButton->setVisible(running && monitoring);
     if (recordButton_)
     {
         updateRecordButton();
@@ -2137,6 +2548,7 @@ void MainWindow::updateControls()
     if (recordFramesSpinBox_)
         recordFramesSpinBox_->setEnabled(!session_->recordingStatus().active && !timeLapsing && !timeLapseFinalizing);
     ui_->injectFlashButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && synthetic_ != nullptr);
+    ui_->injectFlashButton->setVisible(testingTools_ && syntheticSelected);
 
     ui_->sourceComboBox->setEnabled(!busy);
     const bool watchEditable = !busy || (!timeLapseFinalizing && session_->canChangePreviewWatch());
@@ -2167,6 +2579,9 @@ void MainWindow::updateControls()
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);
     ui_->targetFpsSpinBox->setEnabled(!selected);
+    if (fpsGroup_) fpsGroup_->setVisible(!selected && chosen);
+    if (recordingPlaybackGroup_) recordingPlaybackGroup_->setVisible(recording);
+    if (playbackBar_) playbackBar_->setVisible(!selected && chosen);
     if (displayPanel_) displayPanel_->setRunning(running, recording || selected);
     for (const auto& family : cameraFamilies_)
     {
@@ -2274,28 +2689,57 @@ void MainWindow::updateStatusLabel()
     }
     const bool monitoring=session_->mode()==Session::Mode::Monitoring;
     const bool timeLapsing=session_->mode()==Session::Mode::TimeLapse;
+    const bool running=session_->isRunning();
     detectionPanel_->setMonitoring(monitoring);
-    modeLabel_->setStyleSheet(monitoring ? "background:#164b3c; color:white; font-weight:bold;"
-        : timeLapsing ? "background:#4a2f6e; color:white; font-weight:bold;"
-        : "background:#26364e; color:white; font-weight:bold;");
+    modeLabel_->setStyleSheet(modePillStyle(monitoring, timeLapsing, running));
+    QString pill;
+    QString tip;
     if (session_->previewWatchChangePending())
-        modeLabel_->setText("PREVIEW — applying the selected watch.");
+    {
+        pill = "PREVIEW · Applying watch…";
+        tip = "Applying the selected watch.";
+    }
     else if (session_->modeChangePending())
-        modeLabel_->setText(monitoring?"Stopping monitoring… finishing the current capture before returning to Preview.":"Starting monitoring… applying the capture boundary at the next frame.");
-    else if (!session_->isRunning())
-        modeLabel_->setText("STOPPED — select an input and start Preview to tune it.");
+    {
+        pill = monitoring ? "Stopping monitoring…" : "Starting monitoring…";
+        tip = monitoring ? "Finishing the current capture before returning to Preview."
+                         : "Applying the capture boundary at the next frame.";
+    }
+    else if (!running)
+    {
+        pill = "STOPPED";
+        tip = "Select an input and start Preview to tune it.";
+    }
     else if (timeLapsing)
-        modeLabel_->setText(timelapsePanel_->settings().watchTransits
-            ? "TIME-LAPSE — transit watching between bursts and stacks."
-            : "TIME-LAPSE — stacking bursts into FITS. Flash detection is OFF.");
+    {
+        pill = timelapsePanel_->settings().watchTransits ? "TIME-LAPSE · Transits" : "TIME-LAPSE";
+        tip = timelapsePanel_->settings().watchTransits
+            ? "Transit watching between bursts and stacks."
+            : "Stacking bursts into FITS. Flash detection is OFF.";
+    }
     else if (monitoring)
-        modeLabel_->setText(recordFailed_?"MONITORING — recording failed. Check the reported storage error.":"MONITORING — event capture ON. Stop monitoring to return to Preview and tune camera settings.");
+    {
+        pill = recordFailed_ ? "MONITORING · Storage error" : "MONITORING";
+        tip = recordFailed_ ? "Recording failed. Check the reported storage error."
+                            : "Event capture ON. Stop monitoring to return to Preview and tune camera settings.";
+    }
     else
-        modeLabel_->setText("PREVIEW — capture OFF. Tune the camera and detector, then start monitoring. Previously queued clips can finish writing.");
+    {
+        pill = "PREVIEW";
+        tip = "Capture OFF. Tune the camera and detector, then start monitoring. Previously queued clips can finish writing.";
+    }
     if (const QString recording = recordingReadout(); !recording.isEmpty())
-        modeLabel_->setText(modeLabel_->text() + "\n" + recording);
+    {
+        pill += " · " + recording;
+        tip += "\n" + recording;
+    }
     if (const QString timelapse = watchTimelapseReadout(); !timelapse.isEmpty())
-        modeLabel_->setText(modeLabel_->text() + "\n" + timelapse);
+    {
+        pill += " · " + timelapse;
+        tip += "\n" + timelapse;
+    }
+    modeLabel_->setText(pill);
+    modeLabel_->setToolTip(tip);
 }
 
 void MainWindow::updateFrameLabel(const Frame& frame)
@@ -2385,6 +2829,7 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
             showMessage(QString("Connect a %1 and refresh its list").arg(camera->sourceName()));
             return {};
         }
+        if (CameraSettingsEditor* controls = camera->controls()) controls->alignRequestedRoi();
         return camera->makeSource();
     }
     const QString kind = ui_->sourceComboBox->currentData().toString();
@@ -2545,6 +2990,7 @@ void MainWindow::finishStream(const std::string& reason)
 {
     bufferReadoutTimer_->stop();
     session_->stop(reason);
+    chooseDrawing(Drawing::None);
     saveDetectionPanel();
     saveDisplaySettings();
 
@@ -2647,10 +3093,13 @@ void MainWindow::onSourceKindChanged()
 {
     if (session_->isRunning()) return;
     CameraFamilyPanel* selected = selectedCamera();
+    if (focusView_ && selected) setFocusView(false);
     for (const auto& family : cameraFamilies_)
     {
-        family.dock->setVisible(family.panel == selected);
-        if (family.panel != selected) continue;
+        const bool isSelected = family.panel == selected;
+        family.dock->setVisible(isSelected && !focusView_);
+        family.dock->toggleViewAction()->setVisible(isSelected);
+        if (!isSelected) continue;
         family.dock->raise();
         detectionDock_->raise();
         family.panel->refresh();
@@ -2686,20 +3135,61 @@ bool MainWindow::validateCameraSettings()
 
 void MainWindow::onApplyCamera()
 {
+    applyCameraSettings({});
+}
+
+void MainWindow::applyCameraSettings(const QString& note)
+{
     if (session_->mode()==Session::Mode::Monitoring || session_->mode()==Session::Mode::TimeLapse
-        || session_->modeChangePending() || !validateCameraSettings()) return;
+        || session_->modeChangePending()) return;
+    QString finalNote = note;
+    if (CameraFamilyPanel* camera = selectedCamera(); camera && camera->hasCamera() && camera->controls())
+    {
+        const AlignedRoi aligned = camera->controls()->alignRequestedRoi();
+        if (aligned.adjusted && finalNote.isEmpty())
+        {
+            finalNote = QString("ROI rounded to %1 × %2 at (%3, %4) (%5).")
+                .arg(aligned.width).arg(aligned.height).arg(aligned.x).arg(aligned.y)
+                .arg(camera->controls()->alignmentHint());
+        }
+    }
+    if (!validateCameraSettings()) return;
     if (session_->isRunning())
     {
         bufferReadoutTimer_->stop(); session_->stop("camera settings changed");
         startStream(Session::Mode::Preview);
+        if (session_->isRunning() && !finalNote.isEmpty()) showMessage(finalNote, 5000);
     }
     else if (CameraFamilyPanel* camera = selectedCamera())
     {
         std::string error;
-        if (camera->readBack(error)) showMessage("Camera settings read back; ready to Start",5000);
-        else showMessage(QString::fromStdString(error));
+        if (camera->readBack(error))
+            showMessage(finalNote.isEmpty() ? "Camera settings read back; ready to Start" : finalNote, 5000);
+        else
+            showMessage(QString::fromStdString(error));
     }
     updateControls();
+}
+
+void MainWindow::applyCameraRoiChange(const QString& note)
+{
+    if (session_->mode()==Session::Mode::Monitoring || session_->mode()==Session::Mode::TimeLapse
+        || session_->modeChangePending()) return;
+    CameraFamilyPanel* camera = selectedCamera();
+    if (!camera || !camera->hasCamera() || !camera->controls()) return;
+    if (session_->isRunning() && session_->mode()==Session::Mode::Preview)
+    {
+        if (camera->controls()->requestedGeometry() == camera->controls()->actualGeometry())
+        {
+            if (!note.isEmpty()) showMessage(note, 4000);
+            return;
+        }
+        applyCameraSettings(note);
+    }
+    else if (!session_->isRunning())
+    {
+        if (!note.isEmpty()) showMessage(note + " Click Start or Apply settings to use it.", 5000);
+    }
 }
 
 void MainWindow::onApplyLiveCamera()

@@ -1,9 +1,11 @@
 #include "ui/cameras/touptek_camera_panel.h"
 #include "ui/cameras/camera_settings_editor.h"
 #include "ui/cameras/runtime_chooser.h"
+#include "ui/widgets/theme.h"
 
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
@@ -15,39 +17,46 @@ ToupTekCameraPanel::ToupTekCameraPanel(std::shared_ptr<ToupTekApi> api, QWidget*
 {
     setObjectName("toupTekCameraPanel");
     auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(5);
     runtime_ = new RuntimeChooser("ToupTek", "toupcam.dll", "touptek/runtimePath", "ToupTek", this);
     layout->addWidget(runtime_);
+    auto* topRow = new QHBoxLayout;
+    topRow->setContentsMargins(0, 0, 0, 0);
+    topRow->setSpacing(4);
     cameras_ = new QComboBox(this);
     cameras_->setObjectName("toupTekCameras");
+    cameras_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    cameras_->setMinimumContentsLength(14);
     cameras_->setToolTip("The connected ToupTek camera to use.");
-    refresh_ = new QPushButton("Refresh cameras", this);
+    refresh_ = new QPushButton("Refresh", this);
     refresh_->setObjectName("refreshToupTekCameras");
     refresh_->setToolTip("Searches again for connected ToupTek cameras.");
-    layout->addWidget(cameras_);
-    layout->addWidget(refresh_);
-    editor_ = new CameraSettingsEditor(2, 2, this);
+    topRow->addWidget(cameras_, 1);
+    topRow->addWidget(refresh_);
+    layout->addLayout(topRow);
+    editor_ = new CameraSettingsEditor(RoiConstraints{2, 2, 2, 2, 8, 8, 1}, this);
     layout->addWidget(editor_);
     apply_ = new QPushButton("Apply settings", this);
     apply_->setObjectName("applyToupTekCamera");
-    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
+    apply_->setToolTip("Sends format and typed ROI edits to the camera (restarts Preview while running). Live controls, Draw ROI, Center, Full and presets apply automatically. Bin 1 only.");
     layout->addWidget(apply_);
     readback_ = new QLabel("Refresh to discover ToupTek cameras.", this);
     readback_->setWordWrap(true);
     readback_->setTextFormat(Qt::PlainText);
     readback_->setObjectName("toupTekReadback");
     layout->addWidget(readback_);
-    auto* hint = new QLabel("For ToupTek cameras and cameras ToupTek makes for other brands. Needs the camera's driver and "
-        "ToupTek's toupcam.dll (x64), which SeleneWatch does not ship. It finds the copy N.I.N.A., 64-bit SharpCap or "
-        "ToupTek's ASCOM driver installs; otherwise put it beside SeleneWatch.exe or choose it (Session → Camera support). "
-        "Preview applies controls live; format and ROI changes restart Preview. Bin 1 only. Hardware validation is pending.", this);
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
     layout->addStretch();
     connect(runtime_, &RuntimeChooser::changed, this, &ToupTekCameraPanel::refresh);
     connect(refresh_, &QPushButton::clicked, this, &ToupTekCameraPanel::refresh);
     connect(cameras_, &QComboBox::currentIndexChanged, this, &ToupTekCameraPanel::inspectSelected);
     connect(apply_, &QPushButton::clicked, this, &ToupTekCameraPanel::applyRequested);
     connect(editor_, &CameraSettingsEditor::liveControlsRequested, this, &ToupTekCameraPanel::liveControlsRequested);
+    connect(editor_, &CameraSettingsEditor::geometryDirtyChanged, this, [this](bool dirty) {
+        apply_->setStyleSheet(dirty && apply_->isEnabled() ? dirtyApplyStyle() : QString());
+        apply_->setText(running_ ? (dirty ? "Apply ROI / format*" : "Apply ROI / format")
+                                 : (dirty ? "Apply settings*" : "Apply settings"));
+    });
     setRunning(false);
 }
 
@@ -181,11 +190,11 @@ void ToupTekCameraPanel::updateReadback()
         values << QString("%1: %2%3").arg(QString::fromStdString(c.name))
             .arg(exposure ? static_cast<double>(c.value) / 1000 : static_cast<double>(c.value), 0, 'g', 10).arg(exposure ? " ms" : "");
     }
-    readback_->setText(QString("Read back: %1 × %2, RAW%3, origin (%4, %5).\nBin 1. Deepest raw mode: %6 bits. SDK %7. Serial: %8.\n"
-        "Actual controls: %9")
-        .arg(s.width).arg(s.height).arg(s.format == PixelFormat::Mono16 ? 16 : 8).arg(s.x).arg(s.y).arg(p.camera.sensorBits)
-        .arg(QString::fromStdString(p.sdkVersion), p.serial.empty() ? QString("unknown") : QString::fromStdString(p.serial),
-            values.join(", ")));
+    const QString serial = p.serial.empty() ? QString("unknown") : QString::fromStdString(p.serial);
+    readback_->setText(QString("Actual: %1 × %2 · RAW%3 · bin 1 · (%4, %5) · SN %6\n%7")
+        .arg(s.width).arg(s.height).arg(s.format == PixelFormat::Mono16 ? 16 : 8).arg(s.x).arg(s.y).arg(serial, values.join(", ")));
+    readback_->setToolTip(QString("Deepest raw: %1-bit · SDK %2 · %3\nBin 1 only; hardware validation pending.")
+        .arg(p.camera.sensorBits).arg(QString::fromStdString(p.sdkVersion), api_->loadedRuntimePath()));
 }
 
 void ToupTekCameraPanel::setRunning(bool running, bool monitoring)
@@ -198,5 +207,8 @@ void ToupTekCameraPanel::setRunning(bool running, bool monitoring)
     editor_->setEnabled(hasCamera() && !monitoring);
     editor_->setLiveEditing(running && !monitoring);
     apply_->setEnabled(hasCamera() && !monitoring);
-    apply_->setText(running ? "Apply format / ROI and restart Preview" : "Apply settings");
+    const bool dirty = editor_->geometryDirty();
+    apply_->setStyleSheet(dirty && apply_->isEnabled() ? dirtyApplyStyle() : QString());
+    apply_->setText(running ? (dirty ? "Apply ROI / format*" : "Apply ROI / format")
+                            : (dirty ? "Apply settings*" : "Apply settings"));
 }

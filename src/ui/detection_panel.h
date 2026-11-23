@@ -25,8 +25,11 @@ class PeakHistory;
 // panel also shows the large-brightening share, the release limit and the
 // mask. Its settings carry those only in Sky mode; on the Moon they are off.
 // The window owns which settings belong to which target. Feature-31: the
-// watch is the Moon's flashes, the Moon's shadows or the sky; the darkening
-// limits are shown for the shadows, the brightness ceiling for the flashes.
+// watch is the Moon's flashes, the Moon's shadows or the sky; the large
+// darkening is shown for the shadows, the brightness ceiling for the flashes.
+// Feature-45: the controls and readouts at the top are for the change the
+// watch looks for. In the shadows' watch, Maximum patch and Maximum box /
+// patch are the dark patch limits, and the readouts show falls.
 class DetectionPanel : public QWidget
 {
     Q_OBJECT
@@ -41,6 +44,7 @@ public:
     // Feature-44: while a time-lapse runs, lock editing/Auto-tune and state
     // clearly whether shadow/transit monitoring is active between bursts.
     void setTimeLapseState(bool active, bool watchingTransits, const QString& statusDetail = {});
+    void refreshTheme();
     [[nodiscard]] QImage overlayImage() const;
 
     // The target whose settings the panel holds. The choice box only asks
@@ -58,6 +62,7 @@ public:
     bool addMaskShape(const MaskShape& shape);
     bool addMaskRect(QRect rect);
     [[nodiscard]] bool drawingMask() const;
+    void setDrawingMask(bool on);
 
     [[nodiscard]] SkyExtras skyExtras() const;
     void setSkyExtras(const SkyExtras& extras);
@@ -86,6 +91,7 @@ signals:
     void autoTuneRequested();
 
 private:
+    void showWatchedChange();
     void controlsChanged(bool maximumChanged = false);
     void updateDecision();
     void showMask();
@@ -136,12 +142,13 @@ private:
     // Feature-31: the flashes' ceiling, shown only for the flashes.
     QWidget* flashControls_;
     QDoubleSpinBox* ignoreAbove_;
-    // The darkening limits and readout, shown only for the shadows (Feature-31).
+    // The large darkening, shown only for the shadows (Feature-31).
     QWidget* darkControls_;
-    QSpinBox* maxDark_;
-    QDoubleSpinBox* darkBox_;
     QDoubleSpinBox* darkShare_;
-    QLabel* darkReading_;
+    // The settings last set, for this watch. What has no control here, the
+    // limits of the change the watch does not look for, keeps its value from
+    // here (Feature-45).
+    DetectionSettings shown_;
     QLabel* sigmaReading_;
     QLabel* sizeReading_;
     QLabel* state_;

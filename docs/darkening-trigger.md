@@ -78,6 +78,8 @@ The control columns give the unchanged recording's candidates after start-up, ri
 
 Release build; 52 detectors run on each frame, about 2 to 7 minutes per recording.
 
+*Since Feature-45 (23 November 2026)* a detector with darkening looks for falls only. The probe counts the control's rising candidates with four more detectors of their own, without darkening. Rising patches no longer hold their pixels from learning in a darkening detector, so a run today can differ slightly from the tables above.
+
 ```
 out/build/release/SeleneWatchProbe.exe darkening INPUT OUTPUT.json 6,12,18,24 [FRAME_LIMIT]
 ```

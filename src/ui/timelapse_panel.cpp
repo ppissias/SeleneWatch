@@ -354,8 +354,10 @@ void TimelapsePanel::applyPresetDefaults(TimelapsePreset preset)
     maxFrames_->setValue(def.maxFramesPerPeriod);
     if (preset == TimelapsePreset::Planet)
     {
+        const bool wasSelecting = selectAnchor_->isChecked();
         selectAnchor_->setChecked(false);
         selectAnchor_->setEnabled(false);
+        if (wasSelecting) emit anchorSelectionChanged(false);
     }
     else
     {

@@ -55,12 +55,19 @@
     return settings;
 }
 
+// Feature-45: the shadows' watch looks for falls, every other watch for rises.
+[[nodiscard]] constexpr bool looksForFalls(Watch watch)
+{
+    return watch == Watch::MoonShadows;
+}
+
 // Feature-31: the settings as a watch uses them, whatever was saved before:
-// darkening is the shadows' watch and only theirs; the ceiling is the
-// flashes' only; the large brightening, release and mask are the sky's.
+// darkening is the shadows' watch and only theirs, and with it the detector
+// looks for falls and nothing else (Feature-45); the ceiling is the flashes'
+// only; the large brightening, release and mask are the sky's.
 [[nodiscard]] inline DetectionSettings settingsForWatch(DetectionSettings settings, Watch watch)
 {
-    const bool shadows = watch == Watch::MoonShadows;
+    const bool shadows = looksForFalls(watch);
     settings.darkening = shadows;
     if (!shadows) settings.darkeningShare = 0;
     if (watch != Watch::MoonFlashes) settings.ignoreAboveShare = 0;

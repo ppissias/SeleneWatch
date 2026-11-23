@@ -16,10 +16,9 @@ PreviewWidget::PreviewWidget(QWidget* parent)
     setMinimumSize(320, 240);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setCursor(Qt::CrossCursor);
-    setToolTip("Click the image to select a pixel for a test flash. Drag a rectangle around a crater "
-        "or other detail to lock on it. In Sky mode, with Draw mask on, a dragged rectangle is left out "
-        "of detection. Use the mouse wheel to zoom and right- or middle-drag to pan while zoomed. "
-        "Coordinates refer to the original frame.");
+    setToolTip("Click the image to select a pixel for a test flash. Use the mouse wheel to zoom and drag to pan while "
+        "zoomed. Choose a draw tool (Draw lock box, Draw earthshine box, Select lunar anchor, or Draw mask) to drag a "
+        "box on the frame; right- or middle-drag still pans. Coordinates refer to the original frame.");
 }
 
 void PreviewWidget::setImage(QImage image)
@@ -33,6 +32,7 @@ void PreviewWidget::setImage(QImage image)
     image_ = std::move(image);
     if (sizeChanged)
     {
+        updateIdleCursor();
         emit zoomChanged(zoom(), fitMode_);
     }
     update();
@@ -48,9 +48,35 @@ void PreviewWidget::clear()
     foundBox_.reset();
     pressPosition_.reset();
     dragging_ = false;
+    leftPanning_ = false;
     pan_ = {0.0, 0.0};
     panning_ = false;
-    setCursor(Qt::CrossCursor);
+    updateIdleCursor();
+    update();
+}
+
+void PreviewWidget::setEmptyText(QString text)
+{
+    emptyText_ = std::move(text);
+    if (image_.isNull()) update();
+}
+
+void PreviewWidget::setDragMode(DragMode mode)
+{
+    if (dragMode_ == mode) return;
+    dragMode_ = mode;
+    pressPosition_.reset();
+    dragging_ = false;
+    leftPanning_ = false;
+    updateIdleCursor();
+    update();
+}
+
+void PreviewWidget::setPixelSelectionEnabled(bool enabled)
+{
+    pixelSelectionEnabled_ = enabled;
+    if (!enabled) selected_.reset();
+    updateIdleCursor();
     update();
 }
 
@@ -59,12 +85,20 @@ void PreviewWidget::setFitToWindow()
     fitMode_ = true;
     pan_ = {0.0, 0.0};
     panning_ = false;
-    setCursor(Qt::CrossCursor);
+    leftPanning_ = false;
+    updateIdleCursor();
     update();
-    emit zoomChanged(zoom(), true);
+    const double z = zoom();
+    emit zoomChanged(z, true);
+    emit viewChanged(true, z, pan_);
 }
 
 void PreviewWidget::setZoom(double factor)
+{
+    setZoomAndPan(factor, pan_);
+}
+
+void PreviewWidget::setZoomAndPan(double factor, QPointF panOffset)
 {
     zoom_ = std::clamp(factor, kMinZoom, kMaxZoom);
     fitMode_ = false;
@@ -73,14 +107,16 @@ void PreviewWidget::setZoom(double factor)
         const QRect area = contentsRect().adjusted(1, 1, -1, -1);
         const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
         const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
-        pan_ = clampedPanOffset(area, w, h, pan_);
+        pan_ = clampedPanOffset(area, w, h, panOffset);
     }
     else
     {
         pan_ = {0.0, 0.0};
     }
+    updateIdleCursor();
     update();
     emit zoomChanged(zoom_, false);
+    emit viewChanged(false, zoom_, pan_);
 }
 
 double PreviewWidget::zoom() const
@@ -182,6 +218,23 @@ QPointF PreviewWidget::clampedPanOffset(const QRect& area, int scaledW, int scal
     return QPointF(std::clamp(desired.x(), -maxX, maxX), std::clamp(desired.y(), -maxY, maxY));
 }
 
+bool PreviewWidget::canPan() const
+{
+    if (image_.isNull() || fitMode_) return false;
+    const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+    const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+    const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+    return w > area.width() || h > area.height();
+}
+
+void PreviewWidget::updateIdleCursor()
+{
+    if (panning_ || leftPanning_) setCursor(Qt::ClosedHandCursor);
+    else if (dragMode_ == DragMode::Region) setCursor(Qt::CrossCursor);
+    else if (canPan()) setCursor(Qt::OpenHandCursor);
+    else setCursor(pixelSelectionEnabled_ ? Qt::CrossCursor : Qt::ArrowCursor);
+}
+
 void PreviewWidget::setDetectionOverlay(QImage image, QRect frameBox)
 {
     overlay_ = std::move(image);
@@ -237,13 +290,17 @@ std::optional<QPoint> PreviewWidget::framePosition(QPointF position) const
 void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter painter(this);
-    painter.fillRect(rect(), QColor("#121212"));
+    const QColor base = palette().color(QPalette::Base);
+    const bool darkPalette = base.lightness() < 40;
+    painter.fillRect(rect(), darkPalette ? base : QColor("#121212"));
     if (image_.isNull())
     {
-        painter.setPen(QColor("#333333"));
+        const QColor border = darkPalette ? palette().color(QPalette::Mid) : QColor("#333333");
+        const QColor text = darkPalette ? palette().color(QPalette::WindowText) : QColor("#dddddd");
+        painter.setPen(border);
         painter.drawRect(rect().adjusted(0, 0, -1, -1));
-        painter.setPen(QColor("#dddddd"));
-        painter.drawText(rect(), Qt::AlignCenter, "Choose a source and press Start");
+        painter.setPen(text);
+        painter.drawText(rect(), Qt::AlignCenter, emptyText_);
         return;
     }
 
@@ -253,7 +310,10 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
 
     painter.save();
     painter.setClipRect(viewport);
+    const bool downscaled = image.width() < image_.width() || image.height() < image_.height();
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, downscaled);
     painter.drawImage(image, image_);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (!overlay_.isNull())
     {
         painter.drawImage(image, overlay_);
@@ -381,6 +441,7 @@ void PreviewWidget::resizeEvent(QResizeEvent* event)
         {
             emit zoomChanged(zoom(), true);
         }
+        updateIdleCursor();
     }
 }
 
@@ -420,14 +481,16 @@ void PreviewWidget::wheelEvent(QWheelEvent* event)
     fitMode_ = false;
     zoom_ = newZoom;
     pan_ = clampedPanOffset(area, static_cast<int>(std::lround(newW)), static_cast<int>(std::lround(newH)), desiredPan);
+    updateIdleCursor();
     update();
     emit zoomChanged(zoom_, false);
+    emit viewChanged(false, zoom_, pan_);
     event->accept();
 }
 
-// A press on the image waits for the release: a short one selects the
-// pressed pixel, a longer movement selects a region. Right- or middle-drag
-// pans when zoomed.
+// In DragMode::Pan, a left-drag pans when zoomed (and a short click still selects
+// a pixel when enabled). In DragMode::Region, a left-drag selects a frame box.
+// Right- or middle-drag always pans when zoomed.
 void PreviewWidget::mousePressEvent(QMouseEvent* event)
 {
     if ((event->button() == Qt::MiddleButton || event->button() == Qt::RightButton) && !image_.isNull() && !fitMode_)
@@ -440,9 +503,18 @@ void PreviewWidget::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() == Qt::LeftButton && framePosition(event->position()))
     {
+        if (dragMode_ == DragMode::Pan && !pixelSelectionEnabled_ && canPan())
+        {
+            leftPanning_ = true;
+            panLastPos_ = event->position();
+            setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
         pressPosition_ = event->position();
         dragPosition_ = event->position();
         dragging_ = false;
+        leftPanning_ = false;
         return;
     }
     QWidget::mousePressEvent(event);
@@ -450,7 +522,9 @@ void PreviewWidget::mousePressEvent(QMouseEvent* event)
 
 void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    if (panning_ && (event->buttons() & (Qt::MiddleButton | Qt::RightButton)))
+    const bool middleOrRightPan = panning_ && (event->buttons() & (Qt::MiddleButton | Qt::RightButton));
+    const bool activeLeftPan = leftPanning_ && (event->buttons() & Qt::LeftButton);
+    if (middleOrRightPan || activeLeftPan)
     {
         const QPointF delta = event->position() - panLastPos_;
         panLastPos_ = event->position();
@@ -461,6 +535,7 @@ void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
             const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
             pan_ = clampedPanOffset(area, w, h, pan_ + delta);
             update();
+            emit viewChanged(false, zoom_, pan_);
         }
         event->accept();
         return;
@@ -468,8 +543,37 @@ void PreviewWidget::mouseMoveEvent(QMouseEvent* event)
     if (pressPosition_ && (event->buttons() & Qt::LeftButton))
     {
         dragPosition_ = event->position();
-        if ((dragPosition_ - *pressPosition_).manhattanLength() > kDragThreshold) dragging_ = true;
-        if (dragging_) update();
+        if ((dragPosition_ - *pressPosition_).manhattanLength() > kDragThreshold)
+        {
+            if (dragMode_ == DragMode::Region)
+            {
+                dragging_ = true;
+                update();
+            }
+            else if (canPan())
+            {
+                const QPointF delta = event->position() - *pressPosition_;
+                pressPosition_.reset();
+                dragging_ = false;
+                leftPanning_ = true;
+                panLastPos_ = event->position();
+                const QRect area = contentsRect().adjusted(1, 1, -1, -1);
+                const int w = std::max(1, static_cast<int>(std::lround(image_.width() * zoom_)));
+                const int h = std::max(1, static_cast<int>(std::lround(image_.height() * zoom_)));
+                pan_ = clampedPanOffset(area, w, h, pan_ + delta);
+                setCursor(Qt::ClosedHandCursor);
+                update();
+                emit viewChanged(false, zoom_, pan_);
+            }
+            else
+            {
+                dragging_ = true;
+            }
+        }
+        else if (dragging_ && dragMode_ == DragMode::Region)
+        {
+            update();
+        }
         return;
     }
     QWidget::mouseMoveEvent(event);
@@ -480,7 +584,16 @@ void PreviewWidget::mouseReleaseEvent(QMouseEvent* event)
     if (panning_ && (event->button() == Qt::MiddleButton || event->button() == Qt::RightButton))
     {
         panning_ = false;
-        setCursor(Qt::CrossCursor);
+        updateIdleCursor();
+        event->accept();
+        return;
+    }
+    if (leftPanning_ && event->button() == Qt::LeftButton)
+    {
+        leftPanning_ = false;
+        pressPosition_.reset();
+        dragging_ = false;
+        updateIdleCursor();
         event->accept();
         return;
     }
@@ -496,10 +609,14 @@ void PreviewWidget::mouseReleaseEvent(QMouseEvent* event)
     {
         dragging_ = false;
         update();
-        const QRect region = dragRegion(press, event->position());
-        if (!region.isEmpty()) emit regionSelected(region);
+        if (dragMode_ == DragMode::Region)
+        {
+            const QRect region = dragRegion(press, event->position());
+            if (!region.isEmpty()) emit regionSelected(region);
+        }
         return;
     }
+    if (!pixelSelectionEnabled_) return;
     const auto position = framePosition(press);
     if (position)
     {

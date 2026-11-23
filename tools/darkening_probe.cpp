@@ -105,8 +105,11 @@ struct Variant
     int frames{0};
     double depth{0};
     std::vector<Crossing> crossings;
-    // Per K, per frame: new rising and falling candidates.
+    // Per K, per frame: new rising and falling candidates. Since Feature-45 a
+    // detector with darkening tests no rise, so the control's rises are
+    // counted by detectors of their own, without darkening.
     std::vector<std::unique_ptr<FlashDetector>> detectors;
+    std::vector<std::unique_ptr<FlashDetector>> risingDetectors;
     std::vector<std::vector<std::pair<int, int>>> candidates;
 
     // The silhouette's centre on frame i, or none.
@@ -174,12 +177,13 @@ int runDarkeningProbe(const QStringList& args)
     for (int shape = 0; shape < static_cast<int>(std::size(kShapes)); ++shape)
         for (const int frames : kCrossingFrames)
             for (const double depth : kDepths)
-                variants.push_back({shape, frames, depth, schedule(seconds, frames, height), {}, {}});
+                variants.push_back({shape, frames, depth, schedule(seconds, frames, height), {}, {}, {}});
     for (Variant& variant : variants)
         for (const double sigma : sigmas)
         {
             DetectionSettings settings;
             settings.sigma = sigma;
+            if (variant.shape < 0) variant.risingDetectors.push_back(std::make_unique<FlashDetector>(settings));
             settings.darkening = true;
             variant.detectors.push_back(std::make_unique<FlashDetector>(settings));
             variant.candidates.emplace_back();
@@ -204,13 +208,17 @@ int runDarkeningProbe(const QStringList& args)
             }
             for (size_t k = 0; k < sigmas.size(); ++k)
             {
-                FlashDetector& detector = *variant.detectors[k];
-                detector.analyze(*frame);
-                int rises = 0, falls = 0;
-                for (const DetectionSummary& candidate : detector.candidates())
-                    (candidate.change == ChangeKind::Fall ? falls : rises) += 1;
+                // Each detector counts its own candidates: the darkening one
+                // falls, the rising one (the control's only) rises.
+                const auto count = [&frame](FlashDetector& detector) {
+                    detector.analyze(*frame);
+                    const int found = static_cast<int>(detector.candidates().size());
+                    detector.updateReference(*frame);
+                    return found;
+                };
+                const int falls = count(*variant.detectors[k]);
+                const int rises = variant.risingDetectors.empty() ? 0 : count(*variant.risingDetectors[k]);
                 variant.candidates[k].push_back({rises, falls});
-                detector.updateReference(*frame);
             }
         }
         if (i % 100 == 0) console << "frame " << i << " of " << count << "\n" << Qt::flush;
@@ -280,7 +288,8 @@ int runDarkeningProbe(const QStringList& args)
         {"crossing", "an ellipse whose light is scaled by 1 - depth in every channel; horizontal, alternating direction, "
                      "on the middle, upper-third and lower-third rows in turn; its centre at the middle of each frame's stretch "
                      "of the path; a window is the crossing and the frame after"},
-        {"scope", "the application's default detector settings except K, with darkening on and no large darkening; "
+        {"scope", "the application's default detector settings except K, with darkening on and no large darkening "
+                  "(the control's rising candidates from a detector without darkening); "
                   "a fresh detector per variant and K from the first frame; no evidence written"},
         {"levels", levels}});
     const QByteArray bytes = document.toJson();

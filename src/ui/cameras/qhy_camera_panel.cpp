@@ -1,8 +1,10 @@
 #include "ui/cameras/qhy_camera_panel.h"
 #include "ui/cameras/camera_settings_editor.h"
 #include "ui/cameras/runtime_chooser.h"
+#include "ui/widgets/theme.h"
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
@@ -10,27 +12,38 @@
 QhyCameraPanel::QhyCameraPanel(std::shared_ptr<QhyApi> api,QWidget* parent):CameraFamilyPanel(parent),api_(std::move(api))
 {
     setObjectName("qhyCameraPanel");auto* layout=new QVBoxLayout(this);
+    layout->setContentsMargins(6,6,6,6);
+    layout->setSpacing(5);
     runtime_=new RuntimeChooser("QHY","qhyccd.dll","qhy/runtimePath","Qhy",this);
     layout->addWidget(runtime_);
+    auto* topRow=new QHBoxLayout;
+    topRow->setContentsMargins(0,0,0,0);
+    topRow->setSpacing(4);
     cameras_=new QComboBox(this);cameras_->setObjectName("qhyCameras");
+    cameras_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    cameras_->setMinimumContentsLength(14);
     cameras_->setToolTip("The connected QHY camera to use.");
-    refresh_=new QPushButton("Refresh cameras",this);refresh_->setObjectName("refreshQhyCameras");
+    refresh_=new QPushButton("Refresh",this);refresh_->setObjectName("refreshQhyCameras");
     refresh_->setToolTip("Searches again for connected QHY cameras.");
-    layout->addWidget(cameras_);layout->addWidget(refresh_);
+    topRow->addWidget(cameras_,1);topRow->addWidget(refresh_);
+    layout->addLayout(topRow);
     editor_=new CameraSettingsEditor(1,1,this);layout->addWidget(editor_);
     apply_=new QPushButton("Apply settings",this);apply_->setObjectName("applyQhyCamera");layout->addWidget(apply_);
-    apply_->setToolTip("Sends these settings to the camera. While Preview runs, a new format, binning or ROI restarts Preview; other settings apply live as you change them.");
+    apply_->setToolTip("Sends format and typed ROI edits to the camera (restarts Preview while running). Live controls, Draw ROI, Center, Full and presets apply automatically. Bin 1 only.");
     readback_=new QLabel("Refresh to discover QHY cameras.",this);
     readback_->setWordWrap(true);
     readback_->setTextFormat(Qt::PlainText);
     readback_->setObjectName("qhyReadback");layout->addWidget(readback_);
-    auto* hint=new QLabel("Preview applies supported controls live. Format and ROI changes restart Preview. Bin 1 only. QHY hardware validation is pending.",this);
-    hint->setWordWrap(true);layout->addWidget(hint);layout->addStretch();
+    layout->addStretch();
     connect(runtime_,&RuntimeChooser::changed,this,&QhyCameraPanel::refresh);
     connect(refresh_,&QPushButton::clicked,this,&QhyCameraPanel::refresh);
     connect(cameras_,&QComboBox::currentIndexChanged,this,&QhyCameraPanel::inspectSelected);
     connect(apply_,&QPushButton::clicked,this,&QhyCameraPanel::applyRequested);
     connect(editor_,&CameraSettingsEditor::liveControlsRequested,this,&QhyCameraPanel::liveControlsRequested);
+    connect(editor_,&CameraSettingsEditor::geometryDirtyChanged,this,[this](bool dirty) {
+        apply_->setStyleSheet(dirty && apply_->isEnabled()?dirtyApplyStyle():QString());
+        apply_->setText(running_?(dirty?"Apply ROI / format*":"Apply ROI / format"):(dirty?"Apply settings*":"Apply settings"));
+    });
     setRunning(false);
 }
 // Resolve the runtime and scan only while the panel can use the disconnected SDK.
@@ -143,9 +156,6 @@ void QhyCameraPanel::updateReadback()
 {
     const auto& p=*profile_;
     const auto& s=p.current;
-    QString readback=QString("Read back: %1 × %2, RAW%3, origin (%4, %5).\nBin 1 commanded. Sensor ADC: %6 bits. SDK %7.")
-        .arg(s.width).arg(s.height).arg(s.format==PixelFormat::Mono16?16:8).arg(s.x).arg(s.y).arg(p.camera.sensorBits)
-        .arg(QString::fromStdString(p.sdkVersion));
     QStringList values;
     for (const auto& c:p.controls)
     {
@@ -153,7 +163,11 @@ void QhyCameraPanel::updateReadback()
         values << QString("%1: %2%3").arg(QString::fromStdString(c.name))
             .arg(exposure?c.value/1000:c.value,0,'g',10).arg(exposure?" ms":"");
     }
-    readback_->setText(readback+"\nActual controls: "+values.join(", "));
+    readback_->setText(QString("Actual: %1 × %2 · RAW%3 · bin 1 · (%4, %5) · %6-bit\n%7")
+        .arg(s.width).arg(s.height).arg(s.format==PixelFormat::Mono16?16:8).arg(s.x).arg(s.y).arg(p.camera.sensorBits)
+        .arg(values.join(", ")));
+    readback_->setToolTip(QString("QHY SDK %1 · %2\nBin 1 only; hardware validation pending.")
+        .arg(QString::fromStdString(p.sdkVersion),api_->loadedRuntimePath()));
 }
 void QhyCameraPanel::setRunning(bool running,bool monitoring)
 {
@@ -165,5 +179,7 @@ void QhyCameraPanel::setRunning(bool running,bool monitoring)
     editor_->setEnabled(hasCamera() && !monitoring);
     editor_->setLiveEditing(running && !monitoring);
     apply_->setEnabled(hasCamera() && !monitoring);
-    apply_->setText(running?"Apply format / ROI and restart Preview":"Apply settings");
+    const bool dirty=editor_->geometryDirty();
+    apply_->setStyleSheet(dirty && apply_->isEnabled()?dirtyApplyStyle():QString());
+    apply_->setText(running?(dirty?"Apply ROI / format*":"Apply ROI / format"):(dirty?"Apply settings*":"Apply settings"));
 }
