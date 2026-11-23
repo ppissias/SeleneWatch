@@ -109,7 +109,7 @@ Spin boxes, sliders and closed lists ignore the mouse wheel, so scrolling a pane
 
 - **Use a folder on a fast local disk.** A folder synchronised to the cloud (OneDrive, Dropbox, Google Drive, iCloud) slows writing down, and SeleneWatch warns about it.
 - **Nothing is written elsewhere behind your back.** Before Monitoring, recording or a time-lapse starts, SeleneWatch checks that the folder exists, can be written, and leaves the **Disk reserve** free. If a drive is unplugged, it refuses and says why. If the folder was deleted while Preview runs, **Recreate folder** makes it again without stopping the stream.
-- **Session → Open the output folder** opens it in Explorer. Recordings you open are only read, never changed.
+- **Session → Open output folder** opens it in Explorer. Recordings you open are only read, never changed.
 
 ### 1.4 Your site and instrument
 

@@ -2017,6 +2017,12 @@ void UiTest::theReleaseIsShown()
     QVERIFY(window.findChild<QAction*>("tipsAction"));
     QVERIFY(window.findChild<QAction*>("aboutAction"));
     QVERIFY(window.findChild<QAction*>("openEventsAction"));
+    QVERIFY(window.findChild<QAction*>("exitAction"));
+    // Top-level menu order: Session | View | Help.
+    QStringList topMenus;
+    for (QAction* a : window.menuBar()->actions())
+        if (a->menu()) topMenus << a->text();
+    QCOMPARE(topMenus, QStringList({"Session", "View", "Help"}));
     // Help → Acknowledgements opens the tabbed Credits & Acknowledgements dialog,
     // and Help → About embeds the BSD 2-Clause LICENSE text.
     QVERIFY(window.findChild<QAction*>("acknowledgementsAction"));

@@ -1536,29 +1536,24 @@ void MainWindow::saveGuidingSettings()
 
 void MainWindow::setupSessionMenu()
 {
-    auto* menu = menuBar()->addMenu("Session");
-    auto* site = menu->addAction("Site and instrument…");
-    site->setObjectName("siteAction");
-    connect(site, &QAction::triggered, this, &MainWindow::onSiteAndInstrument);
-    auto* cameras = menu->addAction("Camera support…");
-    cameras->setObjectName("cameraSupportAction");
-    cameras->setToolTip("Which camera families this version supports, their SDK libraries and versions, and the connected cameras");
-    connect(cameras, &QAction::triggered, this, &MainWindow::onCameraSupport);
+    auto* menu = new QMenu("Session", menuBar());
+    menu->setObjectName("sessionMenu");
+    if (viewMenu_) menuBar()->insertMenu(viewMenu_->menuAction(), menu);
+    else menuBar()->addMenu(menu);
+
+    // During a session
     auto* schedule = menu->addAction("Schedule a recording…");
     schedule->setObjectName("scheduleAction");
     connect(schedule, &QAction::triggered, this, &MainWindow::onScheduleRecording);
-    auto* resharpen = menu->addAction("Re-sharpen time-lapse…");
-    resharpen->setObjectName("resharpenAction");
-    connect(resharpen, &QAction::triggered, this, [this] { onOpenResharpen(); });
-    auto* folder = menu->addAction("Output folder…");
-    folder->setObjectName("outputFolderAction");
-    connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
     auto* phone = menu->addAction("Status on your phone…");
     phone->setObjectName("remoteStatusAction");
     phone->setToolTip("Show what SeleneWatch is doing on a read-only page for your phone's browser, on the local network");
     connect(phone, &QAction::triggered, this, &MainWindow::openRemoteStatus);
+
+    // Review & post-processing
     menu->addSeparator();
     auto* lastReport = menu->addAction("Open last nightly report");
+    lastReport->setObjectName("lastReportAction");
     lastReport->setToolTip("Open the most recently finished monitoring report in your browser.");
     connect(lastReport, &QAction::triggered, this, [this] {
         QFileInfo newest;
@@ -1576,6 +1571,36 @@ void MainWindow::setupSessionMenu()
         if (!newest.exists() || !QDesktopServices::openUrl(QUrl::fromLocalFile(newest.absoluteFilePath())))
             showMessage("No nightly report could be opened in the selected output folder.");
     });
+    auto* resharpen = menu->addAction("Re-sharpen time-lapse…");
+    resharpen->setObjectName("resharpenAction");
+    connect(resharpen, &QAction::triggered, this, [this] { onOpenResharpen(); });
+    auto* events = menu->addAction("Open output folder");
+    events->setObjectName("openEventsAction");
+    events->setToolTip("Events (moon, sky), recordings, and time-lapses");
+    connect(events, &QAction::triggered, this, [this] {
+        QDir().mkpath(session_->outputRoot());
+        QDesktopServices::openUrl(QUrl::fromLocalFile(session_->outputRoot()));
+    });
+
+    // Setup
+    menu->addSeparator();
+    auto* folder = menu->addAction("Output folder…");
+    folder->setObjectName("outputFolderAction");
+    connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
+    auto* site = menu->addAction("Site and instrument…");
+    site->setObjectName("siteAction");
+    connect(site, &QAction::triggered, this, &MainWindow::onSiteAndInstrument);
+    auto* cameras = menu->addAction("Camera support…");
+    cameras->setObjectName("cameraSupportAction");
+    cameras->setToolTip("Which camera families this version supports, their SDK libraries and versions, and the connected cameras");
+    connect(cameras, &QAction::triggered, this, &MainWindow::onCameraSupport);
+
+    menu->addSeparator();
+    auto* exitAction = menu->addAction("Exit");
+    exitAction->setObjectName("exitAction");
+    exitAction->setShortcut(QKeySequence::Quit);
+    connect(exitAction, &QAction::triggered, this, &QWidget::close);
+
     reportOffer_ = new QWidget(this);
     auto* reportRow = new QHBoxLayout(reportOffer_);
     reportRow->setContentsMargins(0, 0, 0, 0);
@@ -1595,14 +1620,6 @@ void MainWindow::setupSessionMenu()
     });
     connect(openReport, &QPushButton::clicked, reportOffer_, &QWidget::hide);
     connect(later, &QPushButton::clicked, reportOffer_, &QWidget::hide);
-
-    auto* events = menu->addAction("Open the output folder");
-    events->setObjectName("openEventsAction");
-    events->setToolTip("Events (moon, sky), recordings, and time-lapses");
-    connect(events, &QAction::triggered, this, [this] {
-        QDir().mkpath(session_->outputRoot());
-        QDesktopServices::openUrl(QUrl::fromLocalFile(session_->outputRoot()));
-    });
 
     // Record, beside Save now: every frame until pressed again or frame limit reached (Feature-14 / Feature-17).
     // While recording it is a red Stop button showing the recording's length (Feature-33).
@@ -1667,11 +1684,10 @@ void MainWindow::setupHelpMenu()
     tips->setToolTip("Short tips on features and workflows you may not have tried yet.");
     connect(tips, &QAction::triggered, this, &MainWindow::showTips);
 
+    menu->addSeparator();
     auto* acknowledgements = menu->addAction("Acknowledgements");
     acknowledgements->setObjectName("acknowledgementsAction");
     connect(acknowledgements, &QAction::triggered, this, &MainWindow::showAcknowledgements);
-
-    menu->addSeparator();
     auto* about = menu->addAction("About SeleneWatch");
     about->setObjectName("aboutAction");
     connect(about, &QAction::triggered, this, &MainWindow::showAbout);
