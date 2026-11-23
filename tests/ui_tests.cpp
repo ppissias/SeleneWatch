@@ -1353,14 +1353,28 @@ void UiTest::everyControlHasHelp()
     emit fps->linkActivated("help");
     QWhatsThis::hideText();
 
-    // The exposure follower's fixed rules are stated where its limits are
-    // entered, including on the ⓘ of the Exposure row.
-    for (const char* name : {"followSky", "followMinExposure", "followMaxExposure", "followMaxGain"})
-    {
-        const QString help = window.findChild<QWidget*>(name)->toolTip();
-        for (const char* rule : {"between 8% and 30%", "for 60 s", "toward 15%", "at most 2", "at least 120 s apart"})
-            QVERIFY2(help.contains(rule), qPrintable(QString("%1: %2").arg(name, rule)));
-    }
+    // Tune camera & detection button and Follow the sky's brightness carry ⓘ icons,
+    // and the follower's limit rows show only while Follow the sky's brightness is checked.
+    auto* autoTuneBtn = window.findChild<QPushButton*>("autoTuneButton");
+    auto* autoTuneHelp = window.findChild<QLabel*>("autoTuneHelp");
+    QVERIFY(autoTuneBtn && autoTuneBtn->text() == QString("Tune camera & detection…"));
+    QVERIFY(autoTuneHelp && autoTuneHelp->text().contains("ⓘ"));
+
+    auto* followCheck = window.findChild<QCheckBox*>("followSky");
+    auto* followHelp = window.findChild<QLabel*>("followSkyHelp");
+    auto* followControls = window.findChild<QWidget*>("followControls");
+    QVERIFY(followCheck && followHelp && followControls);
+    QVERIFY(followHelp->text().contains("ⓘ"));
+    const QString followTip = followCheck->toolTip();
+    for (const char* rule : {"between 8% and 30%", "for 60 s", "toward 15%", "up to 2×", "at least 120 s apart"})
+        QVERIFY2(followTip.contains(rule), qPrintable(QString("followSky: %1").arg(rule)));
+    QVERIFY(!followCheck->isChecked());
+    QVERIFY(followControls->isHidden());
+    followCheck->setChecked(true);
+    QVERIFY(!followControls->isHidden());
+    followCheck->setChecked(false);
+    QVERIFY(followControls->isHidden());
+
     bool exposureRowHasHelp = false;
     for (QLabel* label : window.findChildren<QLabel*>())
         exposureRowHasHelp |= label->text().startsWith("Exposure <a") && label->buddy() == nullptr && label->text().contains("ⓘ");
@@ -2704,6 +2718,15 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     QVERIFY(!beforeView->image().isNull());
     QVERIFY(!afterView->image().isNull());
     QVERIFY(zoomFit->isChecked());
+
+    // Sharpening options carry clickable ⓘ help links.
+    for (const char* labelPrefix : {"USM radius (px)", "USM amount", "Noise threshold", "Pre-denoise"})
+    {
+        bool found = false;
+        for (QLabel* label : dlg.findChildren<QLabel*>())
+            found |= label->text().startsWith(QString("%1 <a").arg(labelPrefix)) && label->text().contains("ⓘ");
+        QVERIFY2(found, qPrintable(QString("Missing ⓘ help for %1").arg(labelPrefix)));
+    }
 
     // Zoom controls and left-drag pan synchronize Before and After views cleanly.
     zoom200->click();

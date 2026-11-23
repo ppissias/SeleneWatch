@@ -16,3 +16,8 @@ void installControlHelp(QWidget* root);
 // clicked. Does nothing when the control has no tool tip or the label
 // already has one.
 void addHelpLink(QLabel* label, QWidget* control);
+
+// Creates a compact clickable ⓘ label beside a standalone control (such as a
+// push button or checkbox) that shows the control's current tool tip when
+// clicked.
+QLabel* makeHelpIcon(QWidget* control, QWidget* parent = nullptr);

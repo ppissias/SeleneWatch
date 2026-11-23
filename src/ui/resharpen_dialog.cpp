@@ -2,6 +2,7 @@
 
 #include "timelapse/stack_processor.h"
 #include "ui/preview_widget.h"
+#include "ui/widgets/control_help.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -42,6 +43,7 @@ QWidget* makeSliderRow(QWidget* parent, QDoubleSpinBox* spin, QSlider*& outSlide
     lay->setSpacing(6);
     outSlider = new QSlider(Qt::Horizontal, row);
     outSlider->setObjectName(sliderObjectName);
+    outSlider->setToolTip(spin->toolTip());
     outSlider->setRange(static_cast<int>(std::lround(sliderMin * scale)),
                         static_cast<int>(std::lround(sliderMax * scale)));
     outSlider->setValue(std::clamp(static_cast<int>(std::lround(spin->value() * scale)),
@@ -80,8 +82,13 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     browseBtn_->setObjectName("resharpenBrowse");
     stackCombo_ = new QComboBox(this);
     stackCombo_->setObjectName("resharpenStackCombo");
+    stackCombo_->setToolTip("Choose which saved stack to preview. Defaults to the sharpest clear stack (used as the "
+        "reference for brightness levelling).");
+    browseBtn_->setToolTip("Open a different finished time-lapse session folder.");
+    auto* previewStackLabel = new QLabel("Preview stack:", this);
+    previewStackLabel->setBuddy(stackCombo_);
     topRow->addWidget(sessionLabel_, 1);
-    topRow->addWidget(new QLabel("Preview stack:", this));
+    topRow->addWidget(previewStackLabel);
     topRow->addWidget(stackCombo_);
     topRow->addWidget(browseBtn_);
     root->addLayout(topRow);
@@ -151,8 +158,11 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     auto* profLay = new QHBoxLayout(profileBox);
     profileCombo_ = new QComboBox(profileBox);
     profileCombo_->setObjectName("resharpenProfileCombo");
+    profileCombo_->setToolTip("Load a saved sharpening and video tone-mapping profile.");
     saveProfileBtn_ = new QPushButton("Save…", profileBox);
+    saveProfileBtn_->setToolTip("Save the current sharpening and video tone-mapping settings as a reusable profile.");
     deleteProfileBtn_ = new QPushButton("Delete", profileBox);
+    deleteProfileBtn_->setToolTip("Delete the currently selected saved profile.");
     profLay->addWidget(profileCombo_, 1);
     profLay->addWidget(saveProfileBtn_);
     profLay->addWidget(deleteProfileBtn_);
@@ -162,24 +172,33 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     auto* sharpForm = new QFormLayout(sharpBox);
     radius_ = new QDoubleSpinBox(sharpBox);
     radius_->setObjectName("resharpenRadius");
+    radius_->setToolTip("Size of details to sharpen (Gaussian blur radius in pixels). Small values (1–2 px) crisp "
+        "fine crater edges; larger values (2.5–5 px) boost broader lunar or planetary structure.");
     radius_->setRange(0.3, 15.0);
     radius_->setDecimals(2);
     radius_->setSingleStep(0.1);
     radius_->setValue(1.4);
     amount_ = new QDoubleSpinBox(sharpBox);
     amount_->setObjectName("resharpenAmount");
+    amount_->setToolTip("Strength of unsharp-mask sharpening (0 = off). Higher values increase edge contrast, while "
+        "too much creates bright/dark halos and amplifies grain. Zoom to 100% or 200% to judge accurately.");
     amount_->setRange(0.0, 6.0);
     amount_->setDecimals(2);
     amount_->setSingleStep(0.1);
     amount_->setValue(0.6);
     threshold_ = new QDoubleSpinBox(sharpBox);
     threshold_->setObjectName("resharpenThreshold");
+    threshold_->setToolTip("Ignores tiny brightness differences below this level (on a 0–1 scale) so sharpening "
+        "enhances real features instead of background noise. Set to 0 to sharpen all detail; values above ~0.01 "
+        "suppress most fine texture.");
     threshold_->setRange(0.0, 0.25);
     threshold_->setDecimals(4);
     threshold_->setSingleStep(0.001);
     threshold_->setValue(0.004);
     denoise_ = new QDoubleSpinBox(sharpBox);
     denoise_->setObjectName("resharpenDenoise");
+    denoise_->setToolTip("Gentle edge-preserving smoothing applied before sharpening to reduce grain without blurring "
+        "sharp crater rims (0 = off).");
     denoise_->setRange(0.0, 1.0);
     denoise_->setDecimals(2);
     denoise_->setSingleStep(0.05);
@@ -190,23 +209,41 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     sharpForm->addRow("Pre-denoise", makeSliderRow(sharpBox, denoise_, denoiseSlider_, "resharpenDenoiseSlider", 0.00, 1.00, 100.0));
     ctrlCol->addWidget(sharpBox);
 
+    auto checkboxRowWithHelp = [](QCheckBox* cb, QWidget* parent) {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(6);
+        row->addWidget(cb);
+        row->addWidget(makeHelpIcon(cb, parent));
+        row->addStretch(1);
+        return row;
+    };
+
     auto* videoBox = new QGroupBox("Video tone-mapping && export (MP4/GIF only)", this);
     auto* videoForm = new QFormLayout(videoBox);
     autoStretch_ = new QCheckBox("Auto stretch black/white", videoBox);
     autoStretch_->setObjectName("resharpenAutoStretch");
+    autoStretch_->setToolTip("Automatically chooses black and white display levels for the video from the sharpest "
+        "clear stack. Uncheck to adjust Black level and White level manually.");
     autoStretch_->setChecked(true);
     blackLevel_ = new QDoubleSpinBox(videoBox);
+    blackLevel_->setToolTip("Normalized pixel brightness mapped to pure black in the exported video (used when Auto "
+        "stretch is off).");
     blackLevel_->setRange(0.0, 0.98);
     blackLevel_->setDecimals(3);
     blackLevel_->setSingleStep(0.01);
     blackLevel_->setValue(0.0);
     whiteLevel_ = new QDoubleSpinBox(videoBox);
+    whiteLevel_->setToolTip("Normalized pixel brightness mapped to pure white in the exported video (used when Auto "
+        "stretch is off).");
     whiteLevel_->setRange(0.02, 1.0);
     whiteLevel_->setDecimals(3);
     whiteLevel_->setSingleStep(0.01);
     whiteLevel_->setValue(1.0);
     gamma_ = new QDoubleSpinBox(videoBox);
     gamma_->setObjectName("resharpenGamma");
+    gamma_->setToolTip("Midtone brightness curve for the exported video (1.0 = linear; above 1.0 brightens shadows "
+        "and midtones, below 1.0 darkens them).");
     gamma_->setRange(0.2, 3.5);
     gamma_->setDecimals(2);
     gamma_->setSingleStep(0.05);
@@ -219,39 +256,48 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     brightnessLevel_->setCurrentIndex(1);
     brightnessLevel_->setToolTip("Equalizes brightness and haze across stacks against the sharpest clear stack. "
         "Global matches overall brightness and haze while preserving moving lunar shadows and rotating planets; "
-        "Patchy clouds also smooths uneven clouds crossing part of an aligned Moon.");
+        "Patchy clouds also smooths uneven clouds crossing part of an aligned Moon. Pick a non-reference stack in "
+        "Preview stack to see its effect here.");
     minQualityPct_ = new QDoubleSpinBox(videoBox);
+    minQualityPct_->setToolTip("Drops blurry or cloudy stacks whose sharpness quality is below this share of the "
+        "session's median quality (applies during Apply to all, not the single-stack preview).");
     minQualityPct_->setRange(0.0, 95.0);
     minQualityPct_->setDecimals(0);
     minQualityPct_->setSuffix(" % of median");
     minQualityPct_->setSpecialValueText("Keep all stacks");
     cropOverlap_ = new QCheckBox("Crop to valid overlap", videoBox);
     cropOverlap_->setObjectName("resharpenCropOverlap");
+    cropOverlap_->setToolTip("Crops the video to the region covered by every stack so drifting black borders do not appear.");
     cropOverlap_->setChecked(true);
     fps_ = new QSpinBox(videoBox);
     fps_->setObjectName("resharpenFps");
+    fps_->setToolTip("Playback frame rate of the exported MP4/GIF video (applies on export, not preview).");
     fps_->setRange(1, 60);
     fps_->setValue(12);
     fps_->setSuffix(" fps");
     auto* fmtRow = new QHBoxLayout();
     writeMp4_ = new QCheckBox("MP4", videoBox);
+    writeMp4_->setToolTip("Export an H.264 MP4 video.");
     writeMp4_->setChecked(true);
     writeGif_ = new QCheckBox("GIF", videoBox);
+    writeGif_->setToolTip("Also export a looping animated GIF.");
     fmtRow->addWidget(writeMp4_);
     fmtRow->addWidget(writeGif_);
     rebuildVideoOnly_ = new QCheckBox("Rebuild video only (reuse sharpened/)", videoBox);
     rebuildVideoOnly_->setObjectName("resharpenRebuildOnly");
+    rebuildVideoOnly_->setToolTip("Re-encodes the video directly from the existing sharpened/ FITS stacks without "
+        "re-running sharpening.");
 
-    videoForm->addRow(autoStretch_);
+    videoForm->addRow(checkboxRowWithHelp(autoStretch_, videoBox));
     videoForm->addRow("Black level", makeSliderRow(videoBox, blackLevel_, blackSlider_, "resharpenBlackSlider", 0.00, 0.98, 1000.0));
     videoForm->addRow("White level", makeSliderRow(videoBox, whiteLevel_, whiteSlider_, "resharpenWhiteSlider", 0.02, 1.00, 1000.0));
     videoForm->addRow("Gamma", makeSliderRow(videoBox, gamma_, gammaSlider_, "resharpenGammaSlider", 0.20, 2.50, 100.0));
     videoForm->addRow("Brightness levelling", brightnessLevel_);
     videoForm->addRow("Drop below quality", minQualityPct_);
-    videoForm->addRow(cropOverlap_);
+    videoForm->addRow(checkboxRowWithHelp(cropOverlap_, videoBox));
     videoForm->addRow("Frame rate", fps_);
     videoForm->addRow("Formats", fmtRow);
-    videoForm->addRow(rebuildVideoOnly_);
+    videoForm->addRow(checkboxRowWithHelp(rebuildVideoOnly_, videoBox));
     ctrlCol->addWidget(videoBox);
 
     ctrlCol->addStretch(1);
@@ -378,6 +424,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     blackSlider_->setEnabled(!autoStretch_->isChecked());
     whiteLevel_->setEnabled(!autoStretch_->isChecked());
     whiteSlider_->setEnabled(!autoStretch_->isChecked());
+    installControlHelp(this);
 
     QString startDir = initialSessionDir;
     if (startDir.isEmpty() && !timelapsesRoot_.isEmpty())

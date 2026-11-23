@@ -130,6 +130,7 @@ private:
     DetectionMask mask_;
     // Feature-15: the exposure follower.
     QCheckBox* follow_;
+    QWidget* followControls_;
     QDoubleSpinBox* minExposure_;
     QDoubleSpinBox* maxExposure_;
     QDoubleSpinBox* maxGain_;

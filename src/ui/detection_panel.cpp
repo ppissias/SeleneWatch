@@ -1,4 +1,5 @@
 #include "ui/detection_panel.h"
+#include "ui/widgets/control_help.h"
 #include "ui/widgets/theme.h"
 #include "settings/detection_profiles.h"
 #include "display/preview_image.h"
@@ -241,14 +242,21 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     outer->setContentsMargins(0, 0, 0, 0);
     // Feature-26: above the scrolled settings, so it is always in view. It
     // opens auto-tune's own window (Feature-28), leaving the settings in place.
-    autoTune_ = new QPushButton("Auto-tune…", this);
+    auto* autoTuneRow = new QHBoxLayout;
+    autoTuneRow->setContentsMargins(6, 4, 6, 2);
+    autoTuneRow->setSpacing(6);
+    autoTune_ = new QPushButton("Tune camera & detection…", this);
     autoTune_->setObjectName("autoTuneButton");
-    autoTune_->setMinimumHeight(28);
     autoTune_->setStyleSheet(autoTuneButtonStyle());
-    autoTune_->setToolTip("Opens the auto-tune window: in Preview it measures the camera's brightness and what each K "
-        "would have triggered, and suggests exposure, gain and K for the Moon or the sky. Nothing changes until you "
-        "apply it.");
-    outer->addWidget(autoTune_);
+    autoTune_->setToolTip("Measures the live Preview to suggest and apply camera settings (exposure, gain, offset) "
+        "and detection thresholds (sensitivity K and minimum patch) for what you are watching. Nothing changes until "
+        "you apply it.");
+    auto* autoTuneHelp = makeHelpIcon(autoTune_, this);
+    autoTuneHelp->setObjectName("autoTuneHelp");
+    autoTuneRow->addWidget(autoTune_);
+    autoTuneRow->addWidget(autoTuneHelp);
+    autoTuneRow->addStretch(1);
+    outer->addLayout(autoTuneRow);
     connect(autoTune_, &QPushButton::clicked, this, &DetectionPanel::autoTuneRequested);
     timeLapseBanner_ = new QLabel(this);
     timeLapseBanner_->setObjectName("detectionTimeLapseBanner");
@@ -346,55 +354,63 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     follow_->setObjectName("followSky");
     // The fixed rules come from the follower itself, so the help cannot disagree with it.
     const SkyExposureRule rule;
-    const QString fixedRules = QString("Fixed rules, not editable: the sky's median outside the mask is kept between %1% and %2% "
-        "of full scale. Once it has been outside that band for %3 s, one change is made: the exposure moves toward %4%, "
-        "multiplied or divided by at most %5, within Exposure from … to …; when the exposure is at that limit, gain "
-        "moves by one step instead, up to Gain up to (a brighter sky lowers gain first, down to the camera's minimum, "
-        "then shortens the exposure). Changes are at least %6 s apart.")
+    follow_->setToolTip(QString(
+        "Automatically adjusts camera exposure (and optionally gain) overnight to keep the sky between %1% and %2% "
+        "brightness—bright enough for faint events, dark enough to avoid clipping at dusk or dawn.<br><br>"
+        "If the sky stays outside that range for %3 s, it adjusts exposure toward %4% (up to %5× per step) within "
+        "your limits, then steps gain; changes are at least %6 s apart. During Monitoring, each change briefly "
+        "pauses and restarts capture.")
         .arg(100 * rule.low, 0, 'f', 0).arg(100 * rule.high, 0, 'f', 0).arg(rule.hold.count())
-        .arg(100 * rule.aim, 0, 'f', 0).arg(rule.maxFactor, 0, 'g', 3).arg(rule.spacing.count());
-    follow_->setToolTip("With a camera, keeps the sky at a useful brightness through the night: bright enough that faint "
-        "meteors stand above the camera's noise, dark enough that nothing saturates.<br><br>" + fixedRules
-        + "<br><br>While Monitoring, each change saves the clip in hand, stops Monitoring and starts it again with the new "
-        "settings (a gap of a few seconds), and is logged as exposure_change in candidates.txt.");
-    minExposure_ = new QDoubleSpinBox(sky_);
+        .arg(100 * rule.aim, 0, 'f', 0).arg(rule.maxFactor, 0, 'g', 3).arg(rule.spacing.count()));
+    auto* followRow = new QHBoxLayout;
+    followRow->setContentsMargins(0, 0, 0, 0);
+    followRow->setSpacing(6);
+    auto* followHelp = makeHelpIcon(follow_, sky_);
+    followHelp->setObjectName("followSkyHelp");
+    followRow->addWidget(follow_);
+    followRow->addWidget(followHelp);
+    followRow->addStretch(1);
+    skyForm->addRow(followRow);
+
+    followControls_ = new QWidget(sky_);
+    followControls_->setObjectName("followControls");
+    auto* followForm = new QFormLayout(followControls_);
+    followForm->setContentsMargins(16, 0, 0, 0);
+    minExposure_ = new QDoubleSpinBox(followControls_);
     minExposure_->setObjectName("followMinExposure");
-    minExposure_->setToolTip("The exposure range the follower may use: the shortest, for the brightest sky (dusk and "
-        "dawn), and the longest, before it raises gain.<br><br>" + fixedRules);
-    maxExposure_ = new QDoubleSpinBox(sky_);
+    minExposure_->setToolTip("Shortest exposure the follower may use (for a bright dusk or dawn sky).");
+    maxExposure_ = new QDoubleSpinBox(followControls_);
     maxExposure_->setObjectName("followMaxExposure");
-    maxExposure_->setToolTip("The longest exposure the follower uses before it raises gain. A longer exposure shows "
-        "fainter still or slow light (aurora, airglow); a moving meteor leaves no more light in a pixel, only more sky. "
-        "Each sky watch keeps its own limits.<br><br>" + fixedRules);
+    maxExposure_->setToolTip("Longest exposure the follower may use before raising gain. Each sky watch keeps its own limits.");
     for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); }
-    maxGain_ = new QDoubleSpinBox(sky_);
+    maxGain_ = new QDoubleSpinBox(followControls_);
     maxGain_->setObjectName("followMaxGain");
-    maxGain_->setToolTip("The highest gain the follower uses once the exposure is at its longest. With Gain fixed "
-        "(a step of 0) the follower changes only the exposure.<br><br>" + fixedRules);
-    gainStep_ = new QDoubleSpinBox(sky_);
+    maxGain_->setToolTip("Highest gain the follower may use once exposure reaches its longest limit. Set the step to Gain fixed (0) to adjust only exposure.");
+    gainStep_ = new QDoubleSpinBox(followControls_);
     gainStep_->setObjectName("followGainStep");
-    gainStep_->setToolTip("How much the follower changes gain at a time.");
+    gainStep_->setToolTip("How much the follower changes gain per step (0 = Gain fixed).");
     for (auto* spin : {maxGain_, gainStep_}) { spin->setRange(0, 10000); spin->setDecimals(0); }
     gainStep_->setSpecialValueText("Gain fixed");
-    followReading_ = new QLabel(sky_);
+    followReading_ = new QLabel(followControls_);
     followReading_->setObjectName("followReading");
     followReading_->setWordWrap(true);
     followReading_->hide();
-    skyForm->addRow(follow_);
     auto* exposureRow = new QHBoxLayout;
     exposureRow->addWidget(minExposure_);
-    exposureRow->addWidget(new QLabel("to", sky_));
+    exposureRow->addWidget(new QLabel("to", followControls_));
     exposureRow->addWidget(maxExposure_);
     // Each box is as wide as its widest value; the rest of the row stays empty.
     exposureRow->addStretch(1);
-    skyForm->addRow("Exposure", exposureRow);
+    followForm->addRow("Exposure", exposureRow);
     auto* gainRow = new QHBoxLayout;
     gainRow->addWidget(maxGain_);
-    gainRow->addWidget(new QLabel("in steps of", sky_));
+    gainRow->addWidget(new QLabel("in steps of", followControls_));
     gainRow->addWidget(gainStep_);
     gainRow->addStretch(1);
-    skyForm->addRow("Gain up to", gainRow);
-    skyForm->addRow(followReading_);
+    followForm->addRow("Gain up to", gainRow);
+    followForm->addRow(followReading_);
+    followControls_->hide();
+    skyForm->addRow(followControls_);
     // Feature-36: the slow sky's time-lapse.
     timelapseRow_ = new QWidget(sky_);
     auto* timelapseLayout = new QHBoxLayout(timelapseRow_);
@@ -587,7 +603,10 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     for (auto* spin : {brightening_, release_, darkShare_, ignoreAbove_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(drawMask_, &QToolButton::toggled, this, [this](bool on) { emit maskDrawingChanged(on); });
-    connect(follow_, &QCheckBox::toggled, this, [this] { if (!updating_) emit skyExtrasChanged(); });
+    connect(follow_, &QCheckBox::toggled, this, [this](bool on) {
+        followControls_->setVisible(on);
+        if (!updating_) emit skyExtrasChanged();
+    });
     for (auto* spin : {minExposure_, maxExposure_, maxGain_, gainStep_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) emit skyExtrasChanged(); });
     connect(clearMask_, &QToolButton::clicked, this, [this] {
@@ -740,6 +759,7 @@ void DetectionPanel::setSkyExtras(const SkyExtras& extras)
     const bool updating = updating_;
     updating_ = true;
     follow_->setChecked(extras.follow);
+    followControls_->setVisible(extras.follow);
     minExposure_->setValue(extras.minExposureMs);
     maxExposure_->setValue(extras.maxExposureMs);
     maxGain_->setValue(extras.maxGain);

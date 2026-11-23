@@ -47,6 +47,22 @@ void addHelpLink(QLabel* label, QWidget* control)
     });
 }
 
+QLabel* makeHelpIcon(QWidget* control, QWidget* parent)
+{
+    auto* icon = new QLabel(parent ? parent : (control ? control->parentWidget() : nullptr));
+    icon->setProperty(kHasHelpLink, true);
+    icon->setTextFormat(Qt::RichText);
+    icon->setText(QStringLiteral("<a href=\"help\" style=\"text-decoration:none; font-family:'Segoe UI Symbol'\">ⓘ</a>"));
+    icon->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    icon->setOpenExternalLinks(false);
+    icon->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    QObject::connect(icon, &QLabel::linkActivated, icon, [icon, explained = QPointer<QWidget>(control)] {
+        if (explained && !explained->toolTip().isEmpty())
+            QWhatsThis::showText(icon->mapToGlobal(QPoint(0, icon->height())), explained->toolTip(), icon);
+    });
+    return icon;
+}
+
 void installControlHelp(QWidget* root)
 {
     if (!root) return;

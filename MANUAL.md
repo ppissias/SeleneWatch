@@ -157,7 +157,7 @@ Everything in **Display and capture** (right dock tab) and **View → Histogram*
 
 ### 2.6 Auto-tune: suggested camera settings and K
 
-The blue **Auto-tune…** button at the top of the **Detection** dock opens the **Auto-tune** window beside the main one (the Detection settings stay where they are). It measures the Preview and suggests settings. Its size and place are remembered. Nothing changes until you tick a suggestion and apply it, and auto-tune works only in **Preview**: its buttons are off while Monitoring, and Monitoring starting (also by **Watch from dusk to dawn**) cancels a measurement.
+The **Tune camera & detection…** button (with its **ⓘ** help icon) at the top of the **Detection** dock opens the **Tune camera & detection** window beside the main one (the Detection settings stay where they are). It measures the Preview and suggests settings. Its size and place are remembered. Nothing changes until you tick a suggestion and apply it, and auto-tune works only in **Preview**: its buttons are off while Monitoring, and Monitoring starting (also by **Watch from dusk to dawn**) cancels a measurement.
 
 The aims follow what you are watching ([CAMERA_SETTINGS_GUIDE.md](CAMERA_SETTINGS_GUIDE.md)):
 
@@ -273,7 +273,7 @@ Continuous multi-hour patrolling of the Moon's dark earthshine limb to detect br
 4. Open **View → Detection** with **Watching** set to **The Moon: flashes on the earthlit side**. These settings are the flashes' own (the Moon's settings from before the two Moon watches existed). **Ignore brighter than** (`30 %` of full scale by default) leaves out the sunlit side and the glare by the terminator, where no flash can be seen and seeing only makes false triggers; it follows the Moon's drift. The **Test flash** readout says when a chosen pixel is above it (the **Synthetic** Moon is all sunlit: set it to **Off** to rehearse flashes on it).
    - **Saved detection profiles:** Use the **Profile** row right below **Watching** to load a saved lunar threshold configuration, or click **Save…** after tuning to store named presets (for example *"Earthshine quiet seeing"* vs. *"Terminator windy night"*).
    - **Optional sensitivity test:** Enable **View → Testing tools**, click on the earthshine area (zoom in to **100%** or **200%** if helpful), choose **Kind: Bright flash** in **Test flash** (`FWHM`, `Peak ADU`, `Duration frames`), and press **Inject blip** to verify the faintest flash your current **K** catches without false triggers. Remember to turn **View → Testing tools** OFF before a real observing run (`testing_tools="off"`).
-   - **Auto-tune:** press **Auto-tune…** at the top of the dock, draw a box on the earthshine, then measure the camera and watch K ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
+   - **Auto-tune:** press **Tune camera & detection…** at the top of the dock, draw a box on the earthshine, then measure the camera and watch K ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
    - Alternatively watch **Peak sigma** and the 10-second trace for ~1 minute in Preview: set **K** comfortably above normal quiet seeing peaks (often `8–16 sigma` depending on seeing and limb proximity; `6.0 sigma` is the starting value).
 5. Turn on **Guiding** if using a mount, then press **Start monitoring**. If using a camera, SeleneWatch briefly reopens the camera with verified locked settings and relearns the reference (re-arm **Start guiding** after the reopen).
 6. Leave Monitoring running. If you spot a flash or anomaly by eye that fell under threshold, press **Save now** to force a manual clip of the pre-event ring + post-event tail.
@@ -405,7 +405,7 @@ Recording hours-long sequences of **lunar terminator crater shadows creeping acr
 
 ### Transit coverage during a Moon time-lapse
 
-The camera and guiding continue while the transit watch alternates with the time-lapse. Both the **Time-lapse** progress panel and a banner at the top of the **Detection** dock show that active shadow/transit monitoring is running (watching, saving, or paused for burst capture or stacking), while Detection controls and **Auto-tune…** stay locked until the time-lapse ends. A transit that happens during a pause can be missed.
+The camera and guiding continue while the transit watch alternates with the time-lapse. Both the **Time-lapse** progress panel and a banner at the top of the **Detection** dock show that active shadow/transit monitoring is running (watching, saving, or paused for burst capture or stacking), while Detection controls and **Tune camera & detection…** stay locked until the time-lapse ends. A transit that happens during a pause can be missed.
 
 If a clip is already collecting or saving when a burst is due, the burst can wait up to five seconds. A delayed burst needs room for its full capture window before the next scheduled one. If it runs out of room or grace, SeleneWatch skips that burst and keeps the original schedule. The `timelapse.txt` log records the skip.
 
@@ -469,13 +469,13 @@ Leaving a fixed camera with a wide-angle or all-sky lens unattended overnight to
    - **Testing indoors:** With **View → Testing tools** enabled and **Watching** set to **The sky**, the **Synthetic** source generates a realistic starry sky and horizon silhouette, and **Test flash → Kind** lets you inject **Moving streak (meteor)**, **Blinking mover (aircraft)**, **Lightning** (whole frame), or **Bright flash** inside or outside your mask.
 4. Configure unattended options in **The sky** group:
    - Under **Ends**, above the preview, press **Change…** and tick **At dawn** (it needs the site's position), and if you like **At a local time**. The row shows when Monitoring will end, in local time with UTC in brackets (for example `Ends: 06:41 local (05:41 UTC), dawn (the Sun above -10°)`).
-   - Optionally tick **Follow the sky's brightness** and enter safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation. Only these limits are yours to set. The rest is fixed, and the tooltip and the ⓘ beside **Exposure** repeat it:
+   - Optionally tick **Follow the sky's brightness** (click **ⓘ** beside it for a summary) to reveal and set safe **Exposure** (`from ... to ... ms`) and **Gain up to ... in steps of ...** bounds for twilight-to-midnight adaptation (these rows stay hidden while unchecked to save space). Only these limits are yours to set; the rest is fixed:
      - The sky's median outside the mask is kept between **8 % and 30 %** of full scale.
      - Once it has been outside that band for **60 s**, one change is made. The exposure moves toward **15 %**, multiplied or divided by at most **2** per change. When the exposure is at your limit, gain moves by one step instead. A brighter sky lowers gain first, then shortens the exposure.
      - Changes are at least **120 s** apart.
      - With **Gain fixed** (the default), only the exposure changes.
      - While Monitoring, each change saves the clip in hand and restarts Monitoring with the new settings, a gap of a few seconds.
-   - **Auto-tune** (in full darkness): **Auto-tune…** at the top of the Detection dock measures the sky, suggests exposure and gain, fills in the follower's limits, and watches what each K would trigger ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
+   - **Auto-tune** (in full darkness): **Tune camera & detection…** at the top of the Detection dock measures the sky, suggests exposure and gain, fills in the follower's limits, and watches what each K would trigger ([Section 2.6](#26-auto-tune-suggested-camera-settings-and-k)).
    - **Time-lapse while monitoring** (slow and faint only, Feature-36): tick it and set **every** (30 s by default; 60 s halves the files) before starting Monitoring. Alongside detection, one frame is kept every interval of source time in the watch's `timelapse/` folder:
      - each as a PNG with the camera's samples unchanged (16-bit for RAW16, the Bayer mosaic as delivered), with its time in `frames.txt`;
      - in `timelapse.mp4`, 25 frames a second, stretched for display like the preview's auto-stretch, its levels eased from frame to frame. The video is written as the night goes, so it is ready the moment Monitoring stops. It is a fragmented MP4: if the computer crashes or loses power, it still plays up to its last few frames.

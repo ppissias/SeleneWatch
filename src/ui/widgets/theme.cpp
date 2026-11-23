@@ -261,12 +261,16 @@ QString dirtyApplyStyle(UiTheme theme)
 QString autoTuneButtonStyle(UiTheme theme)
 {
     if (theme == UiTheme::NightRed)
-        return "QPushButton { font-weight: bold; background: #5c1010; color: #ff9999; border: 1px solid #8f1f1f; border-radius: 4px; padding: 5px 10px; }"
-               "QPushButton:hover { background: #731616; }"
-               "QPushButton:disabled { background: #1e0606; color: #662020; border-color: #360e0e; }";
-    return "QPushButton { font-weight: bold; background: #2f6f9f; color: white; border-radius: 4px; padding: 5px 10px; }"
-           "QPushButton:hover { background: #3b82b8; }"
-           "QPushButton:disabled { background: palette(mid); color: palette(button-text); }";
+        return "QPushButton { font-weight: bold; background: #3d0b0b; color: #e88080; border: 1px solid #701a1a; border-radius: 3px; padding: 3px 10px; }"
+               "QPushButton:hover { background: #521010; }"
+               "QPushButton:disabled { background: #1a0505; color: #662020; border-color: #360e0e; }";
+    if (theme == UiTheme::System)
+        return "QPushButton { font-weight: bold; background: #dce8f4; color: #1c3d5c; border: 1px solid #8eb1d4; border-radius: 3px; padding: 3px 10px; }"
+               "QPushButton:hover { background: #cde0f2; }"
+               "QPushButton:disabled { background: palette(button); color: palette(mid); border: 1px solid palette(mid); }";
+    return "QPushButton { font-weight: bold; background: #223548; color: #d8e6f5; border: 1px solid #3a5c7d; border-radius: 3px; padding: 3px 10px; }"
+           "QPushButton:hover { background: #2b445c; }"
+           "QPushButton:disabled { background: #1f242e; color: #737c8e; border: 1px solid #2c3340; }";
 }
 
 QString timeLapseBannerStyle(bool active, UiTheme theme)

@@ -484,8 +484,8 @@ try {
     # so only K is tuned). It must end with a suggestion or say why not.
     # Feature-28: auto-tune opens in its own window.
     $autoTuneBtn = Find-UiaElement -Root $mainWin -IdSuffix "autoTuneButton"
-    Invoke-UiaClick $autoTuneBtn "Open the auto-tune window"
-    $tuneWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Auto-tune" -OwnerWindow $mainWin -TimeoutMs 8000
+    Invoke-UiaClick $autoTuneBtn "Open the Tune camera & detection window"
+    $tuneWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Tune camera & detection" -OwnerWindow $mainWin -TimeoutMs 8000
     $watchBtn = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneWatch"
     Wait-Until { $watchBtn.Current.IsEnabled } "Auto-tune Watch enabled in Sky Preview" -TimeoutMs 8000
     Assert-True (-not (Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneCamera").Current.IsEnabled) "Tune camera must be off for a non-camera source"

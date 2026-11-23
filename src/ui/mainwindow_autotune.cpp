@@ -45,7 +45,7 @@ void MainWindow::setupAutoTune()
     // earthshine outline; a measurement in progress goes on.
     autoTuneWindow_ = new QDialog(this, Qt::Window);
     autoTuneWindow_->setObjectName("autoTuneWindow");
-    autoTuneWindow_->setWindowTitle("Auto-tune");
+    autoTuneWindow_->setWindowTitle("Tune camera & detection");
     auto* scroll = new QScrollArea(autoTuneWindow_);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
