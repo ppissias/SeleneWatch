@@ -140,8 +140,6 @@ public:
     bool recreateOutputFolder(QString& error);
     // Help → About: the release, the source revision and the licenses.
     [[nodiscard]] static QString aboutText();
-    // Help → Acknowledgements: ACKNOWLEDGEMENTS.md, built into the program.
-    [[nodiscard]] static QString acknowledgementsMarkdown();
     // Help → User Manual & Help → Tips (and non-modal startup tips).
     void showManual(const QString& section = {});
     void showTips();

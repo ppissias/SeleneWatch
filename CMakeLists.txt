@@ -237,9 +237,8 @@ add_library(selenewatch_ui STATIC
     src/ui/cameras/touptek_camera_panel.h src/ui/cameras/touptek_camera_panel.cpp)
 target_include_directories(selenewatch_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(selenewatch_ui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-# Help → Acknowledgements and Help → About embed the repository's credits, license and logos.
+# Help → Acknowledgements and Help → About embed the repository's license and logos.
 qt_add_resources(selenewatch_ui "acknowledgements" PREFIX "/" FILES
-    ACKNOWLEDGEMENTS.md
     LICENSE
     docs/images/logos/claude.png
     docs/images/logos/openai.png

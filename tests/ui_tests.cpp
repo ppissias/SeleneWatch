@@ -18,6 +18,7 @@
 #include "ui/cameras/camera_support_dialog.h"
 #include "ui/cameras/runtime_chooser.h"
 #include "ui/mainwindow.h"
+#include "ui/acknowledgements_dialog.h"
 #include "ui/manual_dialog.h"
 #include "ui/preview_widget.h"
 #include "ui/site_dialog.h"
@@ -1999,18 +2000,29 @@ void UiTest::theReleaseIsShown()
     QVERIFY(window.findChild<QAction*>("tipsAction"));
     QVERIFY(window.findChild<QAction*>("aboutAction"));
     QVERIFY(window.findChild<QAction*>("openEventsAction"));
-    // Help → Acknowledgements shows ACKNOWLEDGEMENTS.md, built in.
+    // Help → Acknowledgements opens the tabbed Credits & Acknowledgements dialog,
+    // and Help → About embeds the BSD 2-Clause LICENSE text.
     QVERIFY(window.findChild<QAction*>("acknowledgementsAction"));
     QVERIFY(about.contains("Acknowledgements"));
-    const QString acknowledgements = MainWindow::acknowledgementsMarkdown();
-    QVERIFY(acknowledgements.startsWith("# Acknowledgements"));
-    QVERIFY(acknowledgements.contains("## Scientific References & Algorithms"));
-    QVERIFY(acknowledgements.contains("**Welford (1962)**"));
-    QVERIFY(acknowledgements.contains("### AI Coding Assistants"));
-    QVERIFY(acknowledgements.contains("**Claude** by Anthropic") && acknowledgements.contains("**Codex** by OpenAI"));
-    QFile source(QString(SELENEWATCH_SOURCE_DIR) + "/ACKNOWLEDGEMENTS.md");
-    QVERIFY(source.open(QIODevice::ReadOnly));
-    QCOMPARE(acknowledgements, QString::fromUtf8(source.readAll()));
+    AcknowledgementsDialog ackDialog;
+    auto* software = ackDialog.findChild<QTextBrowser*>("acknowledgementsSoftwareBrowser");
+    auto* refs = ackDialog.findChild<QTextBrowser*>("acknowledgementsReferencesBrowser");
+    auto* formats = ackDialog.findChild<QTextBrowser*>("acknowledgementsFormatsBrowser");
+    QVERIFY(software && refs && formats);
+    const QString softwareText = software->toPlainText();
+    const QString refsText = refs->toPlainText();
+    const QString formatsText = formats->toPlainText();
+    QVERIFY(softwareText.contains("OpenCV") && softwareText.contains("CFITSIO") && softwareText.contains("FFmpeg"));
+    QVERIFY(softwareText.contains("Claude by Anthropic") && softwareText.contains("Codex by OpenAI")
+        && softwareText.contains("Gemini by Google") && softwareText.contains("Grok by xAI"));
+    QVERIFY(QFile::exists(":/docs/images/logos/claude.png") && QFile::exists(":/docs/images/logos/openai.png")
+        && QFile::exists(":/docs/images/logos/gemini.png") && QFile::exists(":/docs/images/logos/grok.png"));
+    QVERIFY(refsText.contains("Welford (1962)") && refsText.contains("Immerkær (1996)")
+        && refsText.contains("Huber (1964)") && refsText.contains("Van Flandern & Pulkkinen (1979)"));
+    QVERIFY(!refsText.contains("Evangelidis") && !refsText.contains("Kuglin"));
+    QVERIFY(formatsText.contains("SER Format (v3)") && formatsText.contains("RFC 5905")
+        && formatsText.contains("ASCOM") && !formatsText.contains("Pence"));
+    QVERIFY(AboutDialog::licenseText().contains("BSD 2-Clause"));
 }
 
 void UiTest::aNewReleaseAppearsAtTheTopRight()

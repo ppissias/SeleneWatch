@@ -111,7 +111,6 @@ The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested,
 | [Developer guide](DEVELOPER.md) | Contributors | Building from source, tests, packaging |
 | [Project description](PROJECT_DESCRIPTION.md) | Reviewers | The design and the rules that keep saved data trustworthy |
 | [Third-party licenses](THIRD_PARTY_LICENSES.md) | Everyone | The libraries SeleneWatch uses and their licenses |
-| [Acknowledgements](ACKNOWLEDGEMENTS.md) | Everyone | References, libraries and tools |
 
 ---
 
@@ -150,7 +149,7 @@ Logos are trademarks of their respective owners.
 
 ### Scientific References & Algorithms
 
-References for methods, standards and interfaces implemented in SeleneWatch. Each entry identifies its contribution; related literature is omitted unless it supplies an additional method used here. The same credits are also available in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) and inside the application via **Help → Acknowledgements**.
+References for established methods, standards and interfaces implemented directly in SeleneWatch's own code (algorithms and formats supplied by libraries such as OpenCV and CFITSIO are credited through those libraries above). Each entry identifies its contribution; related literature is omitted unless it supplies an additional method used here. The same credits are available inside the application via **Help → Acknowledgements**.
 
 #### Detecting changes in the image
 
@@ -163,13 +162,9 @@ References for methods, standards and interfaces implemented in SeleneWatch. Eac
 - **Lewis (1995)** — *Fast Normalized Cross-Correlation*, Vision Interface 1995 ([author's expanded version](https://www.scribblethink.org/Work/nvisionInterface/nip.html)). Direct zero-mean normalised cross-correlation with parabolic sub-pixel peak fitting in `FeatureLock`.
 - **Immerkær (1996)** — *Fast Noise Variance Estimation*, [CVIU 64(2), 300–302](https://doi.org/10.1006/cviu.1996.0060). The 3×3 second-difference operator (factor 6), paired with Hampel's MAD × 1.4826 scale, in `FeatureLock::pixelNoise`.
 
-#### Time-lapse alignment, stacking & sharpening
+#### Time-lapse brightness levelling
 
-- **Kuglin & Hines (1975)** — *The Phase Correlation Image Alignment Method*, Proc. IEEE Int. Conf. on Cybernetics and Society, 163–165. Sub-pixel translation estimation via OpenCV `cv::phaseCorrelate` with a Hann window (`stack_processor`).
-- **Evangelidis & Psarakis (2008)** — *Parametric Image Alignment Using Enhanced Correlation Coefficient Maximization*, [IEEE TPAMI 30(10), 1858–1865](https://doi.org/10.1109/TPAMI.2008.113). Multi-scale rigid Euclidean (translation + field rotation) lunar stack alignment anchored on a chosen sunlit region via OpenCV `cv::findTransformECC` (`stack_processor`).
-- **Duchon (1979)** — *Lanczos Filtering in One and Two Dimensions*, [J. Appl. Meteorol. 18(8), 1016–1022](https://doi.org/10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2). Lanczos-4 sub-pixel resampling (`cv::INTER_LANCZOS4`) when warping burst frames and aligned session stacks.
-- **Tomasi & Manduchi (1998)** — *Bilateral Filtering for Gray and Color Images*, [Proc. 6th IEEE ICCV, 839–846](https://doi.org/10.1109/ICCV.1998.710815). Optional edge-preserving pre-denoise via OpenCV `cv::bilateralFilter` before linear unsharp masking.
-- **Huber (1964)** — *Robust Estimation of a Location Parameter*, [Ann. Math. Statist. 35(1), 73–101](https://doi.org/10.1214/aoms/1177703732). Huber-reweighted IRLS for affine brightness levelling between aligned time-lapse stacks.
+- **Huber (1964)** — *Robust Estimation of a Location Parameter*, [Ann. Math. Statist. 35(1), 73–101](https://doi.org/10.1214/aoms/1177703732). Huber-reweighted iteratively reweighted least squares (IRLS) implemented in `stack_processor` to fit affine brightness levelling between aligned time-lapse stacks without cloud-edge bias.
 
 #### Sun and Moon positions
 
@@ -179,7 +174,6 @@ References for methods, standards and interfaces implemented in SeleneWatch. Eac
 
 #### Formats, protocols & interfaces
 
-- **FITS 3.0** — Pence et al. (2010), [A&A 524, A42](https://doi.org/10.1051/0004-6361/201015362) (`fits_io`, via CFITSIO).
 - **SER v3** — Heiko Wilkens & Grischa Hahn ([specification](https://www.grischa-hahn.homepage.t-online.de/astro/ser/SER%20Doc%20V3b.pdf)) (`SerReader` / `SerWriter`).
 - **NTPv4** — Mills et al. (2010), [RFC 5905](https://datatracker.ietf.org/doc/html/rfc5905) (`clock_check`).
 - **ASCOM Telescope interface** ([ascom-standards.org](https://ascom-standards.org/)) (`ascom_mount`) and **FireCapture** `.txt` capture logs by Torsten Edelmann ([firecapture.de](https://www.firecapture.de/)) (`firecapture_log`).

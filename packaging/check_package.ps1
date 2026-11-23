@@ -33,7 +33,7 @@ try {
         'avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll',
         'swresample-7.dll', 'swscale-10.dll', 'LICENSE.txt', 'README.md', 'MANUAL.md',
         'CAMERA_SETTINGS_GUIDE.md', 'THIRD_PARTY_LICENSES.md',
-        'ACKNOWLEDGEMENTS.md', 'icons\selenewatch-256.png', 'docs\images\readme-main-window.png',
+        'icons\selenewatch-256.png', 'docs\images\readme-main-window.png',
         'docs\images\manual-camera-settings.png', 'docs\images\manual-display-histogram.png',
         'docs\images\manual-test-flash.png', 'docs\images\manual-sky-mask.png',
         'docs\images\manual-clip-overview.png', 'docs\images\manual-guiding.png',

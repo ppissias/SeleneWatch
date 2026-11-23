@@ -1707,12 +1707,6 @@ void MainWindow::checkForUpdates()
     releaseChecker_->check();
 }
 
-QString MainWindow::acknowledgementsMarkdown()
-{
-    QFile file(":/ACKNOWLEDGEMENTS.md");
-    return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
-}
-
 void MainWindow::showAcknowledgements()
 {
     if (!acknowledgementsDialog_) acknowledgementsDialog_ = new AcknowledgementsDialog(this);

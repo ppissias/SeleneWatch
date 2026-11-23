@@ -273,7 +273,7 @@ These targets are built alongside the application and are never executed by CTes
 
 - `selenewatch_core` (static library): everything under `src/` except `remote/`, `ui/` and `app/`. Depends on `Qt6::Core` and `Qt6::Gui` only.
 - `selenewatch_remote` (static library): `src/remote/`, the status page for a phone (Feature-47). Depends on `Qt6::Core`, `Qt6::Gui` and `Qt6::Network`, and on `selenewatch_qrcodegen`, Project Nayuki's MIT QR code generator, compiled unmodified from `third_party/qrcodegen/`.
-- `selenewatch_ui` (static library): `src/ui/`: `MainWindow`, preview widget, docks, dialogs, camera family panels, and the embedded [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) resource.
+- `selenewatch_ui` (static library): `src/ui/`: `MainWindow`, preview widget, docks, dialogs (including `AcknowledgementsDialog` and `AboutDialog` with embedded `LICENSE` and logos), and camera family panels.
 - `SeleneWatch` (executable): `src/app/`: the entry point (`main.cpp`) and the Windows resource script (`selenewatch.rc`).
 
 All application code is under `src/`, one folder per job (Design-2). `src/` is the include root, so an include names the folder: `#include "cameras/zwo_api.h"`. Paths in this guide such as `cameras/vendor_runtime` are under `src/`. The folders, from the bottom up; each uses only the folders listed for it:
@@ -349,7 +349,7 @@ Both packages contain:
 - Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`; Universal CRT comes from Windows 10/11)
 - `ASICamera2.dll` (when configured with `SELENEWATCH_ZWO_SDK_DIR`)
 - `opencv_world4140.dll`, `cfitsio.dll`, and external LGPLv3 `ffmpeg.exe` + FFmpeg shared DLLs (`avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`)
-- `LICENSE.txt`, `README.md`, `MANUAL.md`, `CAMERA_SETTINGS_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `ACKNOWLEDGEMENTS.md`
+- `LICENSE.txt`, `README.md`, `MANUAL.md`, `CAMERA_SETTINGS_GUIDE.md`, `THIRD_PARTY_LICENSES.md`
 - `icons/selenewatch-256.png` and `docs/images/` (logo and documentation screenshots referenced by `README.md` and `MANUAL.md`)
 - `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), `ZWO-ASI-SDK.txt` (when built with ZWO), `OpenCV-LICENSE.txt`, `CFITSIO-LICENSE.txt`, and `FFmpeg-LICENSE.txt`
 
