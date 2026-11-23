@@ -1126,6 +1126,16 @@ void TimelapseSession::writeMetadataLog(const QString& reason, const TimelapseEx
     QTextStream out(&file);
     out << "software: SeleneWatch " << QString::fromStdString(config_.softwareVersion) << "\n";
     out << "preset: " << timelapsePresetName(config_.settings.preset) << "\n";
+    // Where the Moon's alignment between stacks was fitted: inside the anchor,
+    // or over the whole frame. A planet does not use one.
+    const std::optional<QRect>& anchor = config_.settings.lunarAnchor;
+    if (config_.settings.preset == TimelapsePreset::Planet)
+        out << "lunar_anchor: not used (planet)\n";
+    else if (anchor && anchor->isValid())
+        out << "lunar_anchor: x=" << anchor->x() << " y=" << anchor->y() << " width=" << anchor->width()
+            << " height=" << anchor->height() << " in frame pixels\n";
+    else
+        out << "lunar_anchor: none (alignment fitted over the whole frame)\n";
     out << "interval_seconds: " << config_.settings.intervalSeconds << "\n";
     out << "capture_window_seconds: " << config_.settings.captureWindowSeconds << "\n";
     if (config_.settings.watchTransits) out << "transit_watch: transits/session.txt\n";

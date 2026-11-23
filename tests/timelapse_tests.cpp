@@ -1012,6 +1012,7 @@ void TimelapseTests::sessionStartTimeLapseAndResharpenRebuild()
     const QString tlLog = readTextFile(sDir.filePath("timelapse.txt"));
     QVERIFY2(tlLog.contains("stacks_completed: 2"), qPrintable(tlLog));
     QVERIFY2(tlLog.contains("periods_skipped: 0"), qPrintable(tlLog));
+    QVERIFY2(tlLog.contains("lunar_anchor: none (alignment fitted over the whole frame)\n"), qPrintable(tlLog));
     QVERIFY(QFileInfo::exists(sDir.filePath("sharpening_profile.json")));
     QCOMPARE(QDir(sDir.filePath("stacks")).entryList({"*.fits"}, QDir::Files).size(), 2);
     QCOMPARE(QDir(sDir.filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size(), 2);
@@ -1735,6 +1736,9 @@ void TimelapseTests::multiStackMoonRotationAndPlanetDriftEndToEnd()
         QCOMPARE(st.stacksCompleted, 3);
         const QString mp4 = QDir(st.sessionDir).filePath("timelapse.mp4");
         QVERIFY(QFileInfo::exists(mp4) && decodeWithFfmpeg(mp4));
+        // The record says where the alignment was fitted.
+        const QString moonLog = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+        QVERIFY2(moonLog.contains("lunar_anchor: x=128 y=48 width=80 height=80 in frame pixels\n"), qPrintable(moonLog));
 
         SharpeningSettings loadedS;
         VideoToneSettings loadedV;
@@ -1818,6 +1822,8 @@ void TimelapseTests::multiStackMoonRotationAndPlanetDriftEndToEnd()
         const TimelapseStatus st = session.status();
         QCOMPARE(st.stacksCompleted, 3);
         QVERIFY(decodeWithFfmpeg(QDir(st.sessionDir).filePath("timelapse.mp4")));
+        const QString planetLog = readTextFile(QDir(st.sessionDir).filePath("timelapse.txt"));
+        QVERIFY2(planetLog.contains("lunar_anchor: not used (planet)\n"), qPrintable(planetLog));
 
         // Verify the third aligned stack moved the drifted planet back near (80, 80).
         const QDir stacksDir(QDir(st.sessionDir).filePath("stacks"));
