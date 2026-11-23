@@ -365,14 +365,14 @@ Aircraft, the International Space Station and satellites pass in front of the su
 **The Moon: shadows on the sunlit side**, under **Watching**, looks only for pixels that get darker. Nothing that brightens triggers it: the bright surface shimmers with the seeing, and that would otherwise trigger all night. Its starting settings are chosen to stay quiet on the sunlit Moon:
 - **K 12**: a pixel must fall twelve times its own noise. On five recordings of the sunlit Moon, nothing triggered at this K.
 - **A shadow of at least 20 pixels**, and up to 20 000 pixels, enough for a close aircraft.
-- **Confirmed over two frames.** This suits aircraft, which take about a quarter of a second to move their own length.
+- **One frame is enough**, so that the ISS and satellites are caught.
 
-**The ISS and satellites need one more setting.** They move their own length in a hundredth of a second or so: the ISS covers its 109 metres in 14 ms, at any distance. So between two frames they jump hundreds of pixels, and their shadow never appears twice in the same place. To catch them, tick **Allow a one-frame trigger**. On two recordings of the sunlit Moon, test ISS crossings at their real size and speed were caught 0 times out of 24 with two frames, and 23 times out of 24 with one; with either, nothing else triggered at K 12.
+**Why one frame.** The ISS covers its own length, 109 metres, in about 14 ms, at any distance, and a satellite in less. So it shows on a few frames as it crosses the field, but each time hundreds of pixels further on: its shadow never appears twice in the same place. A watch that waited for the same shadow on two frames in a row would never catch it. On two recordings of the sunlit Moon, test ISS crossings at their real size and speed were caught 23 times out of 24 with one frame, and never with two; with either, nothing else triggered at K 12. Aircraft are slower (one takes about a quarter of a second to move its own length) and are caught either way. If seeing makes one-frame shadows on your nights, untick **Allow a one-frame trigger**: aircraft are still caught, the ISS and satellites no longer.
 
 ### Automatic: catching crossings as they happen
 
 1. In Preview, frame the sunlit Moon, and lock and guide if you have a mount ([chapter 6](#6-feature-lock-and-guiding)).
-2. Under **Watching**, choose **The Moon: shadows on the sunlit side**. For the ISS and satellites, tick **Allow a one-frame trigger**.
+2. Under **Watching**, choose **The Moon: shadows on the sunlit side**.
 3. **Auto-tune** ([1.7](#17-auto-tune)) measures the brightest sunlit areas, sets the exposure (up to 10 ms) and the gain, and suggests K. Keep K at 12 or higher on the sunlit Moon.
 4. Set when the session ends ([1.8](#18-ending-a-session-by-itself)), for example when the Moon sinks below 10°.
 5. Press **Start monitoring**. The readouts under K show the deepest fall and the largest shadow, and the graph plots the deepest fall against K. Each crossing is saved as a clip, with its path drawn in blue on its overview.
@@ -387,7 +387,7 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 
 ![A test ISS silhouette crossing the Moon, as SeleneWatch saved it](docs/images/transit-iss-test.png)
 
-*Test data: an ISS silhouette at its real size and speed for a 9.25-inch telescope (0.33″ per pixel, the ISS about 45° up), added to a real recording of the sunlit Moon, and saved by the shadows watch with a one-frame trigger. It shows on a few frames, far apart. No real transit was recorded here.*
+*Test data: an ISS silhouette at its real size and speed for a 9.25-inch telescope (0.33″ per pixel, the ISS about 45° up), added to a real recording of the sunlit Moon, and saved by the shadows watch. It shows on three frames, far apart. No real transit was recorded here.*
 
 ### Shadows controls
 
@@ -397,7 +397,7 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 | **Sensitivity K** | How far below its own noise a pixel must fall | 12 |
 | **Minimum / Maximum patch** | The size of a shadow, in darkened pixels | 20 to 20 000 |
 | **Maximum box / patch** | How long and thin a shadow may be | 10 times |
-| **Allow a one-frame trigger** | Off: a shadow must be seen on two frames. On: one is enough (the ISS, satellites) | Off |
+| **Allow a one-frame trigger** | On: one frame is enough, as the ISS and satellites need. Off: the same shadow must be seen on two frames in a row, which only aircraft and slower objects do | On |
 | **Large darkening** | The share of the frame that, darkening at once, triggers | Off |
 
 ---
@@ -581,7 +581,7 @@ Every frame a test signal touches is marked as test data, and so is every clip t
 | *RAM ceiling* or *writer busy* messages | Shorten **Pre-event history** or **Maximum after trigger**, use a smaller region of interest, or raise the **RAM ceiling**. |
 | The sky watch triggers all night on one star | Check that **Learn a patch after** is on (20 s). |
 | Too many candidates on the Moon | Raise K (12 or more for shadows on the sunlit side), keep **Ignore brighter than** on for flashes, or adjust the patch limits. The **Sigma map** overlay shows what passes K. |
-| The shadows watch misses the ISS or satellites | Tick **Allow a one-frame trigger** ([chapter 4](#4-shadows-crossing-the-moon)). |
+| The shadows watch misses the ISS or satellites | Check that **Allow a one-frame trigger** is ticked ([chapter 4](#4-shadows-crossing-the-moon)). |
 | The lock is refused: *one direction only* | Lock on a crater, not a straight limb or a flat sea. |
 | Calibration fails, or guiding stops | Check that tracking is on, that guide pulses move the image, and calibrate again after a meridian flip. |
 | A time-lapse skips periods: *processing fell behind* | Lengthen the interval, shorten the capture window, keep fewer frames, or crop. |
@@ -598,7 +598,7 @@ Every frame a test signal touches is marked as test data, and so is every clip t
 | --- | --- |
 | **Watching the sky** | Automated tests with a synthetic sky and test signals, and **all-night use outdoors with a ZWO ASI120MM Mini**: meteors, aircraft, satellites and short flashes caught, a horizon mask, the exposure follower, and the report of the night |
 | **Time-lapses** | Automated tests of stacking, alignment, rotation, planets, FITS files, the video and re-sharpening, recordings of the Moon and planets from 2010 to 2019, and **Moon time-lapses at the telescope** |
-| **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with a one-frame trigger, never with two frames). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
+| **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with one frame, the default since then; never with two). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
 | **Impact flashes** | Automated tests, and test flashes added to real lunar recordings to measure the faintest caught. **Waiting for a calibrated night on the earthshine** |
 | **Guiding** | Automated tests with a simulated mount, drift followed on lunar recordings, and the ASCOM simulator. **Waiting for a whole night of guiding under the Moon** |
 | **Cameras** | ZWO ASI120MM Mini on the bench (8 and 16 bit, half-hour runs) and outdoors. QHY, Player One and ToupTek with automated tests and their libraries found on Windows; **waiting for real cameras** |

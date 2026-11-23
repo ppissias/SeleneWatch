@@ -148,8 +148,8 @@ const std::vector<StartupTip>& allStartupTips()
             "Catching dark transits across the Moon",
             "Choose <b>Watching: The Moon: shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
             "or the ISS crossing the sunlit Moon. It looks only for darkening, and its settings are its own and start "
-            "insensitive to seeing (<code>K 12</code>, 20-pixel shadows over two frames), so silhouettes trigger "
-            "<code>dark transit</code> clips while bright terrain stays quiet.",
+            "insensitive to seeing (<code>K 12</code>, 20-pixel shadows, one frame enough for the fast ISS), so silhouettes trigger "
+            "clips while bright terrain stays quiet.",
             kSectionTransits
         },
         {

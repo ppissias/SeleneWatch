@@ -28,8 +28,12 @@
 //   sunlit side and its glare (above 30 % of full scale) left out.
 // - Shadows on the sunlit side: the reverse aim, no false triggers from
 //   seeing on bright terrain. K 12 (12-16 in CAMERA_SETTINGS_GUIDE.md), a
-//   shadow must cover 20 pixels and last two frames, and darkening is on with
+//   shadow must cover 20 pixels, and darkening is on with
 //   room for a plane's whole silhouette. A large darkening (clouds) is off.
+//   Feature-49: one frame is enough. The ISS and satellites move more than
+//   their own length between frames, so they never show twice in one place;
+//   a two-frame confirmation missed every test ISS crossing, and one frame
+//   added no false trigger at K 12 on the recordings measured.
 [[nodiscard]] inline DetectionSettings defaultDetectionSettings(Watch watch)
 {
     DetectionSettings settings = defaultDetectionSettings(watchTarget(watch));
@@ -38,7 +42,7 @@
     {
         settings.sigma = 12;
         settings.minPixels = 20;
-        settings.oneFrame = false;
+        settings.oneFrame = true;
         settings.darkening = true;
         settings.maxDarkPixels = 20000;
         settings.maxDarkBoxRatio = 10;

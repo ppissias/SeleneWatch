@@ -976,7 +976,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QVERIFY(panel->settings().darkening);
     QCOMPARE(panel->settings().sigma, 12.0);
     QCOMPARE(panel->settings().minPixels, 20);
-    QVERIFY(!panel->settings().oneFrame);
+    QVERIFY(panel->settings().oneFrame); // Feature-49: the ISS needs one frame.
     QCOMPARE(panel->settings().ignoreAboveShare, 0.0);
     QCOMPARE(display->captureSettings().target, Target::Moon);
     QCOMPARE(display->captureSettings().postSeconds, 4.0);

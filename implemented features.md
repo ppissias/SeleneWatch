@@ -53,6 +53,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-46 — A nightly report that shows what was measured](#feature-46--a-nightly-report-that-shows-what-was-measured)
 - [Feature-47 — Checking on SeleneWatch from a phone](#feature-47--checking-on-selenewatch-from-a-phone)
 - [Feature-48 — An ISS silhouette test signal, and documentation that shows each feature](#feature-48--an-iss-silhouette-test-signal-and-documentation-that-shows-each-feature)
+- [Feature-49 — The shadows watch and the ISS](#feature-49--the-shadows-watch-and-the-iss)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3555,7 +3556,7 @@ The text should be simple, without overstating, without file names, and readable
      | --- | --- | --- |
      | Shadows watch defaults (two frames) | 0 of 24 | 0 |
      | The same with a one-frame trigger | 23 of 24 (the one missed: 86 px on the terminator) | 0 |
-   - The defaults are unchanged; whether the shadows watch should start with one-frame triggers is the observer's decision (Feature-49 in features.md). The MANUAL tells the observer to tick **Allow a one-frame trigger** for the ISS and satellites, with these numbers.
+   - The defaults were left unchanged here; the observer then chose one-frame triggers for the shadows watch (Feature-49).
 4. **`SeleneWatchProbe inject-clip`** (new) plays a recording through the application's own Monitoring path (a Session in a watch, with clips, overviews, previews and the report) with one marked test signal, from a small JSON configuration. The documentation's test pictures were made with it on the terminator recording:
    - **The ISS**, shadows watch, one-frame trigger: "Moving: 14 darkening triggers on 3 frames over 0.109 s, along a straight line".
    - **The test flash** on the unlit ground beyond the terminator, flashes watch at K 12: "Brief: 1 trigger, 44 px in a 7 × 7 box, active on 2 frames over 0.055 s, strongest 33.7 σ". At the flashes watch's default K 6 this mostly sunlit recording triggered on the seeing hundreds of times per clip.
@@ -3576,3 +3577,40 @@ The text should be simple, without overstating, without file names, and readable
 **Not done.** No real ISS transit has been recorded. No Release build, and no real-window GUI E2E run.
 
 **Status & verification (23 November 2026).** Debug build (all targets); all 26 CTest suites passed, run one after another, among them `darkening` (with the two new tests) and `ui`, whose startup-tips test checks every tip's anchor in the restructured MANUAL. Every internal MANUAL link and the README's links to it were checked against the headings. The website passed its TypeScript and production build and was looked at in Edge at 1400 px and 390 px.
+
+## Feature-49 — The shadows watch and the ISS
+
+*Proposed on 23 November 2026 from Feature-48's measurements, accepted by the observer and built the same day. The proposal follows as it was written.*
+
+**The problem.** The shadows watch starts with **Allow a one-frame trigger** off (Feature-31): a shadow must show on two frames, with overlapping boxes. That suits aircraft, which take about a quarter of a second to move their own length. The ISS covers its own length in about 14 ms, at any distance, and a satellite in less. Below about 70 frames a second its shadow never overlaps itself from one frame to the next. So with its defaults the shadows watch misses the ISS and satellites altogether.
+
+**The measurements** (Feature-48, `SeleneWatchProbe iss`, C9.25 at 0.33″/px, 18 fps, ISS silhouettes of 86, 124 and 162 px at their real speed):
+
+| Detector | ISS crossings caught | Dark candidates on the unchanged recordings |
+| --- | --- | --- |
+| Two frames (today's default) | 0 of 24 | 0 |
+| One frame | 23 of 24 | 0 |
+
+Feature-13's darkening measurements, on five recordings of the sunlit Moon with one-frame triggers, also had no dark candidate on any unchanged recording at K 12.
+
+**Proposal.** Start the shadows watch with one-frame triggers on, at K 12. A saved shadows watch keeps its own choice. The MANUAL's chapter 4 and the startup tip would then say that the ISS and satellites are caught as they are, and the troubleshooting row would go.
+
+**Not known.** How often seeing, a flicker or a bird makes a one-frame dark candidate on a long real session; the five recordings are 27 to 104 s long. A night on the sunlit Moon with one-frame triggers on would show it (field validation).
+
+
+**The observer's question, and the answer.** The observer asked whether the ISS really shows on only one frame. It does not: in the test clip it showed on three frames as it crossed the field, but each about 480 px further on, three to four of its own lengths. The two-frame rule asks for the same shadow on two frames in a row: a patch whose box overlaps the box of a patch on the frame before. So it is never met, however many frames the ISS shows on. With a wider field (the whole Moon, at a shorter focal length) the ISS stays in view longer and shows on more frames, but still never twice in one place. Only a camera running near 70 frames a second with continuous exposures, or exposures so long that the smear of one frame reaches the next, would let it overlap.
+
+**Decision (the observer's).** Accepted: the shadows watch starts with one-frame triggers.
+
+**What was built.**
+1. **The default (`target_defaults.h`):** the shadows watch's `oneFrame` is true. K 12, 20 to 20 000 px and 10 × are unchanged.
+2. **Settings already saved (`watch_settings`).** The window saves each watch's settings, so an observer's shadows watch already held `oneFrame` false: the old default, not a choice. These settings are now written with `oneFrameSinceFeature49`. Shadows settings without it, saved by an earlier version (the watch's own settings or a named profile), start with one frame. Settings saved since keep the observer's choice, on or off. The flashes watch is not touched.
+3. **Documentation:**
+   - MANUAL chapter 4: why one frame, with the numbers; how to untick it if seeing makes one-frame shadows, catching aircraft only; and the table's starting value. The step that told the observer to tick it is gone.
+   - The troubleshooting row now says to check it is ticked.
+   - The camera settings guide and the startup tip on dark transits.
+
+**Tests.**
+- `watch_settings`, in `theKeysEarlierVersionsWroteAreRead`: shadows settings saved with `oneFrame` false by an earlier version read as one frame, while the flashes' saved value stays. Shadows settings unticked and saved since read as unticked, and the default is one frame.
+- `ui`, `eachTargetKeepsItsOwnSettings`: the shadows watch starts with one frame.
+- `darkening`, `theIssAtRealSpeedNeedsAOneFrameTrigger` (Feature-48): still checks both settings explicitly.

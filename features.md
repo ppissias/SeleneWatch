@@ -2,14 +2,13 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026, and Feature-45 to Feature-48 on 23 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026, and Feature-45 to Feature-49 on 23 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
 | Feature | Focus | Status |
 | --- | --- | --- |
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Item 3 (nightly review) implemented; items 1 and 2 proposed |
-| [Feature-49 — The shadows watch and the ISS](#feature-49--the-shadows-watch-and-the-iss) | Start the shadows watch with one-frame triggers, so the ISS and satellites are caught | Proposed, waiting for the observer's decision |
 | [Ideas not yet proposed](#ideas-not-yet-proposed) | Work set aside in earlier features, waiting for data, hardware or a decision | Not proposed |
 | [Field validation](#field-validation) | Checks of implemented features that need the sky, a mount or a camera | Open |
 
@@ -43,27 +42,6 @@ Let the observer step through candidates using the existing overviews and animat
 - Exercise Preview and Monitoring with continuous recording both on and off. In each combination the banner correctly names both activities, including after recording stops or fails.
 - Review a watch with zero candidates and a watch containing a known interruption, a saved clip and an unsaved candidate. The observer can account for each outcome, open a saved preview and find their follow-up mark after reopening the night.
 - Make a representative earthshine recording the next lunar validation milestone. Replay the same span with candidate settings under consideration for Feature-26. Count candidates and clips requiring review on the original data. In separate marked trials, report flashes recovered out of those injected, with their positions, amplitudes and durations. Use both measurements when choosing an observing profile. [Open lunar calibration work](docs/feature-9-validation.md)
-
----
-
-## Feature-49 — The shadows watch and the ISS
-
-*Proposed on 23 November 2026, from Feature-48's measurements. Waiting for the observer's decision.*
-
-**The problem.** The shadows watch starts with **Allow a one-frame trigger** off (Feature-31): a shadow must show on two frames, with overlapping boxes. That suits aircraft, which take about a quarter of a second to move their own length. The ISS covers its own length in about 14 ms, at any distance, and a satellite in less. Below about 70 frames a second its shadow never overlaps itself from one frame to the next. So with its defaults the shadows watch misses the ISS and satellites altogether.
-
-**The measurements** (Feature-48, `SeleneWatchProbe iss`, C9.25 at 0.33″/px, 18 fps, ISS silhouettes of 86, 124 and 162 px at their real speed):
-
-| Detector | ISS crossings caught | Dark candidates on the unchanged recordings |
-| --- | --- | --- |
-| Two frames (today's default) | 0 of 24 | 0 |
-| One frame | 23 of 24 | 0 |
-
-Feature-13's darkening measurements, on five recordings of the sunlit Moon with one-frame triggers, also had no dark candidate on any unchanged recording at K 12.
-
-**Proposal.** Start the shadows watch with one-frame triggers on, at K 12. A saved shadows watch keeps its own choice. The MANUAL's chapter 4 and the startup tip would then say that the ISS and satellites are caught as they are, and the troubleshooting row would go.
-
-**Not known.** How often seeing, a flicker or a bird makes a one-frame dark candidate on a long real session; the five recordings are 27 to 104 s long. A night on the sunlit Moon with one-frame triggers on would show it (field validation).
 
 ---
 
@@ -121,6 +99,7 @@ What each implemented feature still needs outside the tests. Grouped by the kind
 | Night sky | Feature-36 | The slow sky's time-lapse from dusk with the follower on: the frames, the video's stretch through the night, and the disk use. |
 | Night sky | Feature-46 | **Open SER** and **Show in folder** from a real report in Edge or Chrome after a Release start: the browser's prompt, the SER player opening the clip, Explorer selecting it. |
 | Night sky | Feature-46 | The groups over more nights: brief events kept apart from aircraft crossings, a long crossing shown as one event, a meteor on three frames or more (moving), and the Moon's watches. |
+| Moon, sunlit | Feature-49 | A night on the sunlit Moon with the shadows watch's one-frame default: how often seeing, a flicker or a bird makes a one-frame dark candidate, and a real ISS or satellite crossing caught. |
 | Any session | Feature-47 | **Status on your phone** at the telescope: the Windows firewall's question, the QR code read by the phone's camera, the page over Wi-Fi through a night (lock lost, clips, the session's end), `<name>.local` on the observer's phones, and Tailscale away from home. |
 | Overnight | Feature-18 | A Moon and a planet time-lapse at the telescope. |
 | Moon, sunlit | Feature-37 | A Moon time-lapse with **Also watch for transits** on a real sunlit lunar stream: gap coverage, throughput, burst grace, and saved clips. |

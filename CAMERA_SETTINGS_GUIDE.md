@@ -109,7 +109,7 @@ Before pressing **Start monitoring**:
 - **Goal:** Keep the entire **sunlit lunar disk** unsaturated so aircraft, birds, satellites, or the ISS produce crisp, high-SNR negative contrast dips rather than dipping inside a clipped plateau.
 - **Histogram target:** Peak sunlit crater rims around **60 % – 80 %** of full scale (`~150–205 ADU` in `RAW8`, `~40000–52000 ADU` in `RAW16`), with **`At max code` reading `0.00%`** (especially important if recording continuously via **Record** or **Session → Schedule a recording…** for occultations or ISS transits).
 - **Exposure & Gain:** Use **low gain** and fast shutter speeds (**`1 – 10 ms`**, `60 – 200+ fps`) so fast transits (`0.5 s` ISS pass) remain sharp across many frames.
-- **Detection:** Set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on there, and its own settings start at **`K 12`** (raise to `16` if seeing still triggers), `20 px` shadows confirmed over two frames.
+- **Detection:** Set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on there, and its own settings start at **`K 12`** (raise to `16` if seeing still triggers), `20 px` shadows, and one frame is enough, so the ISS and satellites, which never show twice in the same place, are caught too.
 
 ### 2.2 Lunar & Planetary Time-Lapses
 

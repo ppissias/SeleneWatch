@@ -79,6 +79,9 @@ QVariantMap detectionFields(const DetectionSettings& settings, Watch watch)
         fields.insert("brighteningShare", settings.brighteningShare);
         fields.insert("releaseSeconds", settings.releaseSeconds);
     }
+    // Feature-49: this oneFrame was saved by a version whose shadows watch
+    // starts with one-frame triggers, so it is the observer's own choice.
+    if (watch == Watch::MoonShadows) fields.insert("oneFrameSinceFeature49", true);
     return fields;
 }
 
@@ -105,6 +108,10 @@ DetectionSettings detectionFromFields(const QVariantMap& fields, Watch watch)
         real("brighteningShare", settings.brighteningShare);
         real("releaseSeconds", settings.releaseSeconds);
     }
+    // Feature-49: shadows settings saved before one frame became the default
+    // hold that old default, not a choice: they start with one frame too.
+    if (watch == Watch::MoonShadows && !fields.contains("oneFrameSinceFeature49"))
+        settings.oneFrame = defaultDetectionSettings(watch).oneFrame;
     // Feature-31: whatever an older version saved, darkening is the shadows'.
     settings = settingsForWatch(settings, watch);
     return settings.valid() ? settings : defaultDetectionSettings(watch);

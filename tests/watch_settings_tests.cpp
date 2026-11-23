@@ -184,6 +184,19 @@ void WatchSettingsTest::theKeysEarlierVersionsWroteAreRead()
     QSettings().setValue("target", 0);
     QSettings().setValue("moon/watch", "shadows");
     QCOMPARE(savedWatch(), Watch::MoonShadows);
+
+    // Feature-49: shadows settings saved before one frame became the default
+    // hold the old default (off) and start with one frame; one saved since
+    // keeps the observer's choice, on or off. The flashes' value is untouched.
+    QSettings().setValue("moonShadows/detection/oneFrame", false);
+    QSettings().setValue("detection/oneFrame", false);
+    QVERIFY(savedDetectionSettings(Watch::MoonShadows).oneFrame);
+    QVERIFY(!savedDetectionSettings(Watch::MoonFlashes).oneFrame);
+    DetectionSettings unticked = savedDetectionSettings(Watch::MoonShadows);
+    unticked.oneFrame = false;
+    saveDetectionSettings(Watch::MoonShadows, unticked);
+    QVERIFY(!savedDetectionSettings(Watch::MoonShadows).oneFrame);
+    QVERIFY(defaultDetectionSettings(Watch::MoonShadows).oneFrame);
 }
 
 // A named profile stores the same fields as the watch's settings, and reads back as it was saved.
