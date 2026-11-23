@@ -29,3 +29,9 @@ These guidelines apply to all development agents and should be revisited when in
 - **Explicit feature IDs:** Proposals and completed work are identified by explicit IDs (e.g., `Feature-2`, `Feature-3`, `Feature-4`).
 - **Preserve full detail in history:** When moving completed features from [`features.md`](features.md) to [`implemented features.md`](implemented%20features.md), do not condense, summarize, or remove details. Append the entire section—including specifications, review notes, decision rationales, and acceptance criteria. `implemented features.md` is an append-only historical record of what was built and why.
 
+## Commits and Attribution
+
+- **Always commit verified work:** After completing and verifying a change, stage only your own changes, commit them with a descriptive message and validation summary, and push—unless pausing at a design or decision point that needs the maintainer's input first.
+- **Credit AI assistance:** Always credit the AI coding assistant used (for example, `Co-Authored-By:` trailer and a brief note in the commit body).
+
+
