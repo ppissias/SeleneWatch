@@ -81,7 +81,20 @@ void QhyCameraPanel::refresh()
 void QhyCameraPanel::inspectSelected()
 {
     if(running_ || cameras_->currentIndex()<0) return;
-    try { profile_=QhySource::inspect(api_,cameras_->currentData().toString().toStdString());showProfile(); }
+    try
+    {
+        profile_=QhySource::inspect(api_,cameras_->currentData().toString().toStdString());
+        showProfile();
+        // Start with the fastest readout defaults (max transfer speed, minimum USB traffic / H-blank)
+        // instead of the SDK's conservative boot defaults; observer edits and live readbacks still rule afterwards.
+        for (const auto& c : profile_->controls)
+        {
+            if (c.kind == QhyControl::TransferSpeed)
+                editor_->setControlValue(static_cast<int>(c.kind), c.maximum);
+            else if (c.kind == QhyControl::UsbTraffic)
+                editor_->setControlValue(static_cast<int>(c.kind), c.minimum);
+        }
+    }
     catch(const std::exception& ex) { profile_.reset();readback_->setText(QString::fromUtf8(ex.what())); }
     setRunning(false);
     emit availabilityChanged();

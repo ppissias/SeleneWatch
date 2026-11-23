@@ -94,7 +94,17 @@ void PlayerOneCameraPanel::refresh()
 void PlayerOneCameraPanel::inspectSelected()
 {
     if (running_ || cameras_->currentIndex() < 0) return;
-    try { profile_ = PlayerOneSource::inspect(api_, cameras_->currentData().toInt()); showProfile(); }
+    try
+    {
+        profile_ = PlayerOneSource::inspect(api_, cameras_->currentData().toInt());
+        showProfile();
+        // Start with maximum USB bandwidth (when writable) for max FPS on connect.
+        for (const auto& c : profile_->controls)
+        {
+            if (c.writable && c.kind == PlayerOneControl::UsbBandwidth)
+                editor_->setControlValue(static_cast<int>(c.kind), static_cast<double>(c.maximum));
+        }
+    }
     catch (const std::exception& ex) { profile_.reset(); readback_->setText(QString::fromUtf8(ex.what())); }
     setRunning(false);
     emit availabilityChanged();

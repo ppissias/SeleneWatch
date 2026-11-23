@@ -201,8 +201,11 @@ public:
             check(functions().GetQHYCCDParamMinMaxStep(handle_,native(kind),&c.minimum,&c.maximum,&c.step),"Reading QHY control range");
             c.value=value(native(kind));
             if (!std::isfinite(c.minimum) || !std::isfinite(c.maximum) || !std::isfinite(c.step) || c.step<=0
-                || c.maximum<c.minimum || c.value<c.minimum || c.value>c.maximum)
+                || c.maximum<c.minimum || !std::isfinite(c.value))
                 throw std::runtime_error("QHY control readback is outside a valid SDK range: "+c.name);
+            // Some QHY cameras (e.g. QHY5LII-C) can read back a finite control slightly outside their own
+            // declared [min, max] after reopen (such as Offset = 0 when min = 1); clamp to stay usable.
+            c.value=std::clamp(c.value,c.minimum,c.maximum);
             p.controls.push_back(c); p.current.controls[kind]=c.value;
         }
         if (rawConfigured_ && available(CONTROL_CHANNELS)==QHYCCD_SUCCESS && value(CONTROL_CHANNELS)!=1)

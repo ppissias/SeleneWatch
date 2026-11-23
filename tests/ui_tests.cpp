@@ -373,8 +373,11 @@ void UiTest::playerOneAndToupTekInTheWindow()
     QVERIFY(window.findChild<QLabel*>("playerOneReadback")->text().contains("TEST-POA-0001"));
     QVERIFY(start->isEnabled());
     QVERIFY(!window.findChild<QSpinBox*>("targetFpsSpinBox")->isEnabled());
+    // Fastest USB bandwidth default is selected on initial connect.
+    QCOMPARE(poa->findChild<QDoubleSpinBox*>("cameraControl3")->value(), 100.0);
     start->click();
     QTRY_VERIFY_WITH_TIMEOUT(playerOne->delivered >= 2, 3000);
+    QCOMPARE(poa->profile().current.controls.at(PlayerOneControl::UsbBandwidth), int64_t{100});
     QTRY_VERIFY_WITH_TIMEOUT(frames->text().contains("SDK drops: 0"), 3000);
     // A control changed in Preview applies live on the same connection and reads back.
     poa->findChild<QDoubleSpinBox*>("cameraControl1")->setValue(250);
@@ -401,8 +404,13 @@ void UiTest::playerOneAndToupTekInTheWindow()
     QVERIFY(window.findChild<QDockWidget*>("toupTekCameraDock")->isVisible());
     QVERIFY(window.findChild<QDockWidget*>("playerOneCameraDock")->isHidden());
     QVERIFY(window.findChild<QLabel*>("toupTekReadback")->text().contains("TEST-TT-0001"));
+    // Fastest speed level and USB bandwidth defaults are selected on initial connect.
+    QCOMPARE(toupTekPanel->findChild<QDoubleSpinBox*>("cameraControl3")->value(), 100.0);
+    QCOMPARE(toupTekPanel->findChild<QDoubleSpinBox*>("cameraControl4")->value(), 2.0);
     start->click();
     QTRY_VERIFY_WITH_TIMEOUT(toupTek->delivered >= 4, 3000);
+    QCOMPARE(toupTekPanel->profile().current.controls.at(ToupTekControl::Speed), int64_t{2});
+    QCOMPARE(toupTekPanel->profile().current.controls.at(ToupTekControl::UsbBandwidth), int64_t{100});
     QTRY_VERIFY_WITH_TIMEOUT(frames->text().contains("SDK drops: 1"), 3000);
     stop->click();
     QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 3000);
@@ -634,14 +642,20 @@ void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
     QVERIFY(panel->hasCamera());
     QVERIFY(!window.findChild<QSpinBox*>("targetFpsSpinBox")->isEnabled());
     QCOMPARE(panel->findChild<QComboBox*>("cameraBin")->count(),1);
+    QVERIFY(panel->findChild<QComboBox*>("cameraBin")->isHidden()); // Single bin option hidden; shown in Actual readout.
     auto* start=window.findChild<QPushButton*>("startButton");
     auto* stop=window.findChild<QPushButton*>("stopButton");
     auto* save=window.findChild<QPushButton*>("saveNowButton");
     auto* monitoring=window.findChild<QPushButton*>("monitoringButton");
     auto* apply=panel->findChild<QPushButton*>("applyQhyCamera");
     auto* preview=window.findChild<PreviewWidget*>();
+    // Fastest QHY defaults (USB traffic min = 0, Transfer speed max = 2) are selected on connect.
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl3")->value(),0.0);
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl4")->value(),2.0);
     start->click();
     QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(),3000);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::UsbTraffic),0.0);
+    QCOMPARE(panel->profile().current.controls.at(QhyControl::TransferSpeed),2.0);
     auto* gain=panel->findChild<QDoubleSpinBox*>("cameraControl1");
     QCOMPARE(gain->value(),12.25);
     QVERIFY(!save->isEnabled());
@@ -752,10 +766,13 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->decimals(),3);
     QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl0")->singleStep(),1.0);
     QVERIFY(!panel->findChild<QDoubleSpinBox*>("cameraControl4")); // Unsupported high-speed control is absent.
+    // Fastest ZWO USB bandwidth default is selected on initial connect.
+    QCOMPARE(panel->findChild<QDoubleSpinBox*>("cameraControl3")->value(),100.0);
     auto* start=window.findChild<QPushButton*>("startButton");
     auto* stop=window.findChild<QPushButton*>("stopButton");
     auto* save=window.findChild<QPushButton*>("saveNowButton");
     start->click(); QTRY_VERIFY_WITH_TIMEOUT(api->delivered>=2,3000);
+    QCOMPARE(panel->profile().current.controls.at(ZwoControl::Bandwidth),int64_t{100});
     auto* monitoring=window.findChild<QPushButton*>("monitoringButton");
     QVERIFY(!save->isEnabled());
     QVERIFY(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"));

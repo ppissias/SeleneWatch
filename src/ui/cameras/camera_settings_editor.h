@@ -109,6 +109,7 @@ private:
     QComboBox *format_,*bin_,*roiPreset_;
     QToolButton *drawRoi_,*centerRoi_,*fullRoi_;
     QSpinBox *width_,*height_,*x_,*y_;
+    QFormLayout* form_{nullptr};
     QFormLayout* controlForm_;
     // The spin box uses display units. Scale converts its value back to SDK units.
     // Feature-25/39: ranged writable controls have a slider beside the box;

@@ -111,9 +111,12 @@ QString cameraControlHelp(const QString& name)
     if (key.contains("offset") || key.contains("black") || key=="brightness")
         return "Black level added to every pixel, so the darkest pixels are not clipped at zero. "
                "Raise it until the histogram's left edge is clear of zero.";
-    if (key.contains("bandwidth") || key.contains("traffic") || key.contains("transfer") || key.contains("speed"))
-        return "USB transfer rate. Lower it if frames are dropped or the camera stalls; "
-               "higher gives the highest frame rate the cable and computer can sustain.";
+    if (key.contains("traffic"))
+        return "Horizontal blanking delay (QHY USB traffic). Lower gives a higher frame rate (0 is fastest); "
+               "raise it if frames are dropped or a shared USB hub stalls.";
+    if (key.contains("bandwidth") || key.contains("transfer") || key.contains("speed"))
+        return "USB transfer rate or sensor speed. Higher gives the highest frame rate the cable and computer can sustain; "
+               "lower it if frames are dropped or the camera stalls.";
     if (key.contains("gamma"))
         return "Camera-side gamma. Leave at the neutral value for measurements: it changes pixel values non-linearly.";
     if (key.contains("wb"))
@@ -221,9 +224,9 @@ CameraSettingsEditor::CameraSettingsEditor(RoiConstraints constraints,QWidget* p
     // Coalesce a burst of edits into one live SDK request.
     liveTimer_=new QTimer(this); liveTimer_->setSingleShot(true); liveTimer_->setInterval(180);
     connect(liveTimer_,&QTimer::timeout,this,[this] { if (liveEditing_) emit liveControlsRequested(); });
-    auto* form=new QFormLayout(this);
-    form->setContentsMargins(0,0,0,0);
-    form->setVerticalSpacing(4);
+    form_=new QFormLayout(this);
+    form_->setContentsMargins(0,0,0,0);
+    form_->setVerticalSpacing(4);
     format_=new QComboBox(this);format_->setObjectName("cameraFormat");
     bin_=new QComboBox(this);bin_->setObjectName("cameraBin");
     auto* roiButtons=new QWidget(this);
@@ -283,10 +286,10 @@ CameraSettingsEditor::CameraSettingsEditor(RoiConstraints constraints,QWidget* p
     originRow->addWidget(new QLabel(",",originRowWidget));
     originRow->addWidget(y_,1);
     originRowWidget->setToolTip("Top-left origin (x, y) of the region of interest on the sensor, in pixels after binning. Automatically rounded to the camera's alignment rules.");
-    form->addRow("Raw format",format_);form->addRow("Binning",bin_);
-    form->addRow("ROI",roiButtons);form->addRow("ROI preset",roiPreset_);
-    form->addRow("ROI size",sizeRowWidget);form->addRow("ROI origin",originRowWidget);
-    auto* controls=new QWidget(this);controlForm_=new QFormLayout(controls);controlForm_->setContentsMargins(0,0,0,0);controlForm_->setVerticalSpacing(4);form->addRow(controls);
+    form_->addRow("Raw format",format_);form_->addRow("Binning",bin_);
+    form_->addRow("ROI",roiButtons);form_->addRow("ROI preset",roiPreset_);
+    form_->addRow("ROI size",sizeRowWidget);form_->addRow("ROI origin",originRowWidget);
+    auto* controls=new QWidget(this);controlForm_=new QFormLayout(controls);controlForm_->setContentsMargins(0,0,0,0);controlForm_->setVerticalSpacing(4);form_->addRow(controls);
     connect(format_,&QComboBox::currentIndexChanged,this,&CameraSettingsEditor::notifyGeometryDirty);
     connect(bin_,&QComboBox::currentIndexChanged,this,[this] {
         updateBounds();
@@ -348,6 +351,13 @@ void CameraSettingsEditor::showGeometry(int sensorWidth,int sensorHeight,const s
     format_->setCurrentIndex(std::max(0,format_->findData(static_cast<int>(g.format))));
     for(auto bin:bins) bin_->addItem(QString::number(bin),bin);
     bin_->setCurrentIndex(std::max(0,bin_->findData(g.bin)));
+    // Hide single-choice selectors (e.g. bin 1 only on QHY / ToupTek / colour cameras);
+    // the Actual readout at the bottom of the panel still shows the fixed value.
+    if (form_)
+    {
+        form_->setRowVisible(format_, formats.size() > 1);
+        form_->setRowVisible(bin_, bins.size() > 1);
+    }
     const int minW=std::max(1,std::max(constraints_.widthStep,constraints_.minWidth));
     const int minH=std::max(1,std::max(constraints_.heightStep,constraints_.minHeight));
     width_->setRange(std::min(minW,std::max(1,sensorWidth)),std::max(1,sensorWidth));

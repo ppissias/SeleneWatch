@@ -94,7 +94,17 @@ void ToupTekCameraPanel::refresh()
 void ToupTekCameraPanel::inspectSelected()
 {
     if (running_ || cameras_->currentIndex() < 0) return;
-    try { profile_ = ToupTekSource::inspect(api_, cameras_->currentData().toString().toStdString()); showProfile(); }
+    try
+    {
+        profile_ = ToupTekSource::inspect(api_, cameras_->currentData().toString().toStdString());
+        showProfile();
+        // Start with maximum speed level and USB bandwidth for max FPS on connect.
+        for (const auto& c : profile_->controls)
+        {
+            if (c.kind == ToupTekControl::Speed || c.kind == ToupTekControl::UsbBandwidth)
+                editor_->setControlValue(static_cast<int>(c.kind), static_cast<double>(c.maximum));
+        }
+    }
     catch (const std::exception& ex) { profile_.reset(); readback_->setText(QString::fromUtf8(ex.what())); }
     setRunning(false);
     emit availabilityChanged();
