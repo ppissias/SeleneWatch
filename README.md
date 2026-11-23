@@ -6,7 +6,19 @@ SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens po
 
 It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
 
+[Download releases](https://github.com/ppissias/SeleneWatch/releases) · [Website](https://startales.eu/SeleneWatch/) · [User manual](MANUAL.md) · [Camera settings guide](CAMERA_SETTINGS_GUIDE.md)
+
 > **What SeleneWatch saves are candidates, not discoveries.** A clip shows that something changed in the frame. What it was is for you to judge, and a lunar impact flash is normally confirmed only when another observer recorded it too.
+
+## Start here
+
+- [What you can do with it](#what-you-can-do-with-it) ([Sky](#1-watch-the-sky-through-the-night) · [Time-lapses](#2-time-lapses-of-the-moon-and-the-planets) · [Lunar shadows](#3-shadows-crossing-the-moon) · [Impact flashes](#4-impact-flashes-on-the-moons-dark-side))
+- [Surface-feature and planetary guiding](#surface-feature-and-planetary-guiding)
+- [Also in SeleneWatch](#also-in-selenewatch)
+- [Getting SeleneWatch](#getting-selenewatch)
+- [How far it has been tested](#how-far-it-has-been-tested)
+- [Documentation](#documentation)
+- [Acknowledgements](#acknowledgements)
 
 ![SeleneWatch monitoring the Moon](docs/images/readme-main-window.png)
 
