@@ -2,7 +2,7 @@
 
 # SeleneWatch
 
-SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens pointed at the sky, and keeps the moments when something changes. It saves those moments as lossless video, with the frames from just before and after, the exact times, and a picture of what changed. It also makes time-lapses of the Moon and the planets.
+SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens pointed at the sky, and keeps the moments when something changes. It saves those moments as lossless video, with the frames from just before and after, the exact times, and a picture of what changed. It also makes time-lapses of the Moon and the planets, and can lock directly onto a lunar crater or planetary disk to guide your ASCOM mount through the main camera—no guide scope or guide star required.
 
 It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
 
@@ -69,6 +69,18 @@ SeleneWatch tests each pixel against its own noise, so a faint flash on the dark
 ![A test flash on the dark side of the Moon, as SeleneWatch saved it](docs/images/flash-test.png)
 
 *Test data: a marked test flash added to the unlit part of the Moon, beyond the terminator, in a real recording, and the clip SeleneWatch saved, grouped as brief (K 12). No real impact was recorded here.*
+
+---
+
+## Surface-feature and planetary guiding
+
+Keeping a lunar region or a planet centred for hours usually fails with standard star guiders—there are no guide stars on the Moon, and the Moon moves at its own rate against the stars. SeleneWatch guides directly on the main camera's live stream instead.
+
+Draw a box around a crisp lunar crater, terminator detail, or a planet's disk, and SeleneWatch tracks its drift to sub-pixel precision in real time. Once calibrated against your [ASCOM](https://ascom-standards.org/) mount, it sends **guide pulses only** (never slews, parks, or unexpected tracking changes) to hold the feature steady through time-lapses, shadow-transit watches, impact-flash runs, or long continuous recordings. If clouds break the lock, guiding pauses and waits through a grace period before ending safely; you can also watch live drift speed along RA and Dec to refine polar alignment.
+
+![Feature lock tracking a lunar crater in SeleneWatch](docs/images/readme-guiding.png)
+
+*Feature lock tracking a sunlit lunar crater on a real recording: the dashed cyan box marks the reference position, the solid green box follows the crater as the field drifts, and the Guiding panel reports sub-pixel drift, drift speed, match quality, and ASCOM pulse-guiding controls.*
 
 ---
 
