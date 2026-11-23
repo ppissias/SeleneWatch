@@ -28,6 +28,13 @@ enum class BrightnessLevellingMode
     GlobalAndPatchy  // Global match + smooth low-frequency spatial grid for uneven clouds (Moon)
 };
 
+enum class QualityFilterMode
+{
+    LocalMedian,     // Compare each stack against median of surrounding neighbors (robust to airmass/shadow drift)
+    GlobalMedian,    // Compare each stack against overall session median
+    KeepBestPct      // Keep the sharpest N% of stacks overall
+};
+
 // Feature-32: a time-lapse also ends with the session's Ends setting; the
 // window stops it then. The values are those saved before Duration and the
 // UTC end time moved there.
@@ -40,6 +47,7 @@ enum class StopConditionKind
 [[nodiscard]] const char* timelapsePresetName(TimelapsePreset preset);
 [[nodiscard]] const char* sharpeningPresetName(SharpeningPreset preset);
 [[nodiscard]] const char* brightnessLevellingModeName(BrightnessLevellingMode mode);
+[[nodiscard]] const char* qualityFilterModeName(QualityFilterMode mode);
 
 // Linear float sharpening settings applied identically to every stack in
 // sharpened/ and in Re-sharpen (FITS remains linear; video stretch is separate).
@@ -65,7 +73,9 @@ struct VideoToneSettings
     double whiteLevel{1.0};
     double gamma{1.0};
     BrightnessLevellingMode brightnessMode{BrightnessLevellingMode::Global};
-    double minQualityRatio{0.0}; // 0 keeps all stacks; >0 drops stacks below ratio * median stack quality
+    QualityFilterMode qualityFilterMode{QualityFilterMode::LocalMedian};
+    double minQualityRatio{0.0}; // 0 keeps all stacks; >0 drops stacks below ratio * local/global median quality
+    double keepBestPercent{100.0}; // KeepBestPct mode: 100 keeps all; <100 keeps sharpest N% of stacks
     bool cropToOverlap{true};
     int fps{12};
     bool writeMp4{true};

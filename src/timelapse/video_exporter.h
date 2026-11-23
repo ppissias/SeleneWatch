@@ -8,8 +8,27 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <vector>
+
+struct StackFilterDecision
+{
+    bool kept{true};
+    double referenceQuality{0.0};
+    bool overridden{false};
+};
+
+// Pure quality-filter decision shared by Re-sharpen preview and video export.
+// Applies tone.qualityFilterMode / minQualityRatio / keepBestPercent, then any
+// manual per-stack overrides, guaranteeing at least the single sharpest stack
+// remains kept when qualities is non-empty.
+[[nodiscard]] std::vector<StackFilterDecision> evaluateStackQualityFilter(
+    const std::vector<double>& qualities,
+    const VideoToneSettings& tone,
+    const std::vector<std::optional<bool>>& manualOverrides = {},
+    int localWindowRadius = 5);
 
 struct TimelapseExportResult
 {
@@ -30,7 +49,8 @@ struct TimelapseExportResult
     const VideoToneSettings& tone,
     const QRect& commonOverlap = {},
     std::function<void(int done, int total)> progress = {},
-    std::atomic<bool>* cancel = nullptr);
+    std::atomic<bool>* cancel = nullptr,
+    const std::map<QString, bool>& stackOverrides = {});
 
 // Re-sharpens every stack in <sessionDir>/stacks/ into a non-destructive
 // <sessionDir>/sharpened_<profile>_<UTC>/ folder and builds its MP4/GIF.
@@ -44,4 +64,5 @@ struct TimelapseExportResult
     bool rebuildVideoOnly,
     QString& outTargetDir,
     std::function<void(int done, int total, const QString& stage)> progress = {},
-    std::atomic<bool>* cancel = nullptr);
+    std::atomic<bool>* cancel = nullptr,
+    const std::map<QString, bool>& stackOverrides = {});

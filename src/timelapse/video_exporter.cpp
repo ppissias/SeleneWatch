@@ -10,8 +10,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <numeric>
 
 namespace {
+
+double medianOf(std::vector<double> values)
+{
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
 
 QStringList sortedFitsFiles(const QString& dirPath)
 {
@@ -35,12 +43,97 @@ QString createUniqueChildDir(const QString& parentPath, const QString& baseName)
 }
 } // namespace
 
+std::vector<StackFilterDecision> evaluateStackQualityFilter(
+    const std::vector<double>& qualities,
+    const VideoToneSettings& tone,
+    const std::vector<std::optional<bool>>& manualOverrides,
+    int localWindowRadius)
+{
+    const size_t n = qualities.size();
+    std::vector<StackFilterDecision> out(n);
+    if (n == 0) return out;
+
+    const int radius = std::max(1, localWindowRadius);
+
+    if (tone.qualityFilterMode == QualityFilterMode::KeepBestPct)
+    {
+        const double pct = std::clamp(tone.keepBestPercent, 1.0, 100.0);
+        if (pct >= 100.0)
+        {
+            const double minQ = *std::min_element(qualities.begin(), qualities.end());
+            for (auto& d : out) { d.kept = true; d.referenceQuality = minQ; }
+        }
+        else
+        {
+            std::vector<size_t> order(n);
+            std::iota(order.begin(), order.end(), size_t{0});
+            std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+                return qualities[a] > qualities[b];
+            });
+            const size_t keepCount = std::clamp(
+                static_cast<size_t>(std::ceil(static_cast<double>(n) * pct / 100.0)),
+                size_t{1}, n);
+            const double cutoff = qualities[order[keepCount - 1]];
+            for (size_t rank = 0; rank < n; ++rank)
+            {
+                const size_t idx = order[rank];
+                out[idx].kept = (rank < keepCount);
+                out[idx].referenceQuality = cutoff;
+            }
+        }
+    }
+    else if (tone.qualityFilterMode == QualityFilterMode::GlobalMedian)
+    {
+        const double globalMedian = medianOf(qualities);
+        const double minAllowed = tone.minQualityRatio > 0.0 ? tone.minQualityRatio * globalMedian : -1.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            out[i].referenceQuality = globalMedian;
+            out[i].kept = (qualities[i] >= minAllowed);
+        }
+    }
+    else // QualityFilterMode::LocalMedian
+    {
+        std::vector<double> window;
+        window.reserve(static_cast<size_t>(2 * radius + 1));
+        for (size_t i = 0; i < n; ++i)
+        {
+            const size_t lo = i > static_cast<size_t>(radius) ? i - static_cast<size_t>(radius) : 0;
+            const size_t hi = std::min(n - 1, i + static_cast<size_t>(radius));
+            window.clear();
+            for (size_t j = lo; j <= hi; ++j) window.push_back(qualities[j]);
+            const double localMed = medianOf(window);
+            out[i].referenceQuality = localMed;
+            out[i].kept = (tone.minQualityRatio <= 0.0) || (qualities[i] >= tone.minQualityRatio * localMed);
+        }
+    }
+
+    for (size_t i = 0; i < std::min(n, manualOverrides.size()); ++i)
+    {
+        if (manualOverrides[i].has_value())
+        {
+            out[i].kept = *manualOverrides[i];
+            out[i].overridden = true;
+        }
+    }
+
+    const bool anyKept = std::any_of(out.begin(), out.end(), [](const StackFilterDecision& d) { return d.kept; });
+    if (!anyKept)
+    {
+        const auto bestIt = std::max_element(qualities.begin(), qualities.end());
+        const size_t bestIdx = static_cast<size_t>(bestIt - qualities.begin());
+        out[bestIdx].kept = true;
+    }
+    return out;
+}
+
 TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     const QString& outputDir,
     const VideoToneSettings& tone,
     const QRect& commonOverlap,
     std::function<void(int done, int total)> progress,
-    std::atomic<bool>* cancel)
+    std::atomic<bool>* cancel,
+    const std::map<QString, bool>& stackOverrides)
 {
     TimelapseExportResult res;
     if (!tone.writeMp4 && !tone.writeGif)
@@ -84,28 +177,28 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
         qualities.push_back(meta.qualityScore);
     }
 
-    std::sort(qualities.begin(), qualities.end());
-    const double medianQuality = qualities[qualities.size() / 2];
-    const double minAllowed = tone.minQualityRatio > 0.0 ? tone.minQualityRatio * medianQuality : -1.0;
+    std::vector<std::optional<bool>> manualOverrides;
+    if (!stackOverrides.empty())
+    {
+        manualOverrides.resize(entries.size());
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            const auto it = stackOverrides.find(QFileInfo(entries[i].path).fileName());
+            if (it != stackOverrides.end()) manualOverrides[i] = it->second;
+        }
+    }
+    const std::vector<StackFilterDecision> decisions = evaluateStackQualityFilter(qualities, tone, manualOverrides);
 
     std::vector<QString> keptPaths;
     std::vector<double> keptQualities;
-    for (const Entry& e : entries)
+    for (size_t i = 0; i < entries.size(); ++i)
     {
-        if (e.quality >= minAllowed)
+        if (decisions[i].kept)
         {
-            keptPaths.push_back(e.path);
-            keptQualities.push_back(e.quality);
+            keptPaths.push_back(entries[i].path);
+            keptQualities.push_back(entries[i].quality);
         }
         else ++res.stacksDropped;
-    }
-    if (keptPaths.empty())
-    {
-        const auto bestIt = std::max_element(entries.begin(), entries.end(),
-            [](const Entry& a, const Entry& b) { return a.quality < b.quality; });
-        keptPaths.push_back(bestIt->path);
-        keptQualities.push_back(bestIt->quality);
-        res.stacksDropped = static_cast<int>(entries.size()) - 1;
     }
 
     QRect crop = (tone.cropToOverlap && commonOverlap.isValid() && !commonOverlap.isEmpty())
@@ -185,7 +278,8 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     bool rebuildVideoOnly,
     QString& outTargetDir,
     std::function<void(int done, int total, const QString& stage)> progress,
-    std::atomic<bool>* cancel)
+    std::atomic<bool>* cancel,
+    const std::map<QString, bool>& stackOverrides)
 {
     TimelapseExportResult res;
 
@@ -221,7 +315,7 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
         if (progress) progress(0, 1, "Encoding video…");
         res = exportTimelapseFromFits(fitsDir, outTargetDir, tone, overlapRect, [&](int d, int t) {
             if (progress) progress(d, t, "Encoding video…");
-        }, cancel);
+        }, cancel, stackOverrides);
         return res;
     }
 
@@ -266,6 +360,6 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
 
     res = exportTimelapseFromFits(sharpOut, outTargetDir, tone, overlapRect, [&](int d, int t) {
         if (progress) progress(d, t, "Encoding video…");
-    }, cancel);
+    }, cancel, stackOverrides);
     return res;
 }

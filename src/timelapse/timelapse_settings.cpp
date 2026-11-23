@@ -37,6 +37,17 @@ const char* brightnessLevellingModeName(BrightnessLevellingMode mode)
     return "global";
 }
 
+const char* qualityFilterModeName(QualityFilterMode mode)
+{
+    switch (mode)
+    {
+    case QualityFilterMode::LocalMedian: return "local_median";
+    case QualityFilterMode::GlobalMedian: return "global_median";
+    case QualityFilterMode::KeepBestPct: return "keep_best_pct";
+    }
+    return "local_median";
+}
+
 bool SharpeningSettings::valid() const
 {
     return std::isfinite(radius) && radius >= 0.3 && radius <= 20.0
@@ -51,6 +62,7 @@ bool VideoToneSettings::valid() const
         && blackLevel >= 0.0 && whiteLevel <= 1.0 && blackLevel < whiteLevel
         && std::isfinite(gamma) && gamma >= 0.2 && gamma <= 4.0
         && std::isfinite(minQualityRatio) && minQualityRatio >= 0.0 && minQualityRatio <= 0.99
+        && std::isfinite(keepBestPercent) && keepBestPercent >= 1.0 && keepBestPercent <= 100.0
         && fps >= 1 && fps <= 60;
 }
 
@@ -158,7 +170,9 @@ QJsonObject toJson(const VideoToneSettings& v)
     obj["gamma"] = v.gamma;
     obj["brightnessLevelling"] = (v.brightnessMode != BrightnessLevellingMode::Off);
     obj["brightnessMode"] = brightnessLevellingModeName(v.brightnessMode);
+    obj["qualityFilterMode"] = qualityFilterModeName(v.qualityFilterMode);
     obj["minQualityRatio"] = v.minQualityRatio;
+    obj["keepBestPercent"] = v.keepBestPercent;
     obj["cropToOverlap"] = v.cropToOverlap;
     obj["fps"] = v.fps;
     obj["writeMp4"] = v.writeMp4;
@@ -203,6 +217,19 @@ VideoToneSettings videoFromJson(const QJsonObject& obj)
             : BrightnessLevellingMode::Off;
     }
     v.minQualityRatio = obj["minQualityRatio"].toDouble(v.minQualityRatio);
+    v.keepBestPercent = obj["keepBestPercent"].toDouble(v.keepBestPercent);
+    if (obj.contains("qualityFilterMode") && obj["qualityFilterMode"].isString())
+    {
+        const QString mode = obj["qualityFilterMode"].toString();
+        if (mode == "global_median") v.qualityFilterMode = QualityFilterMode::GlobalMedian;
+        else if (mode == "keep_best_pct") v.qualityFilterMode = QualityFilterMode::KeepBestPct;
+        else v.qualityFilterMode = QualityFilterMode::LocalMedian;
+    }
+    else if (v.minQualityRatio > 0.0)
+    {
+        // Legacy profiles without qualityFilterMode used global session median.
+        v.qualityFilterMode = QualityFilterMode::GlobalMedian;
+    }
     v.cropToOverlap = obj["cropToOverlap"].toBool(v.cropToOverlap);
     v.fps = obj["fps"].toInt(v.fps);
     v.writeMp4 = obj["writeMp4"].toBool(v.writeMp4);

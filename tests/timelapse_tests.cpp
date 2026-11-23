@@ -263,6 +263,7 @@ private slots:
     void eventPreviewGifStopsFfmpegAtTimeLimit();
     void skyTimelapseKeepsAFrameEveryIntervalAndItsVideo();
     void skyTimelapseStopsAtTheDiskReserve();
+    void qualityFilterModesAndManualOverrides();
     void anUnclosedVideoStillPlays();
 };
 
@@ -2520,6 +2521,75 @@ void TimelapseTests::anUnclosedVideoStillPlays()
     QVERIFY2(decoded >= 30, qPrintable(QString::number(decoded)));
     QVERIFY(stream.close(error));
     QVERIFY(decodeWithFfmpeg(path));
+}
+
+void TimelapseTests::qualityFilterModesAndManualOverrides()
+{
+    // Simulate a 15-stack session whose sharpness drifts down gradually (1.0 -> 0.52)
+    // as altitude/shadows change, plus one sudden cloud dip at index 7 (0.15).
+    const std::vector<double> qs = {
+        1.00, 0.97, 0.94, 0.90, 0.87,
+        0.84, 0.80, 0.15, 0.75, 0.72,
+        0.68, 0.64, 0.60, 0.56, 0.52
+    };
+
+    // 1. Local rolling median at 75%: drops ONLY the sudden cloud dip (index 7),
+    // preserving the smoothly drifting late-session stacks.
+    VideoToneSettings localTone;
+    localTone.qualityFilterMode = QualityFilterMode::LocalMedian;
+    localTone.minQualityRatio = 0.75;
+    const auto localDec = evaluateStackQualityFilter(qs, localTone);
+    QCOMPARE(localDec.size(), qs.size());
+    for (size_t i = 0; i < qs.size(); ++i)
+        QCOMPARE(localDec[i].kept, i != 7);
+
+    // 2. Global session median at 75% (median = 0.75, cutoff = 0.5625):
+    // drops index 7 AND the healthy low-altitude tail (indices 13, 14).
+    VideoToneSettings globalTone;
+    globalTone.qualityFilterMode = QualityFilterMode::GlobalMedian;
+    globalTone.minQualityRatio = 0.75;
+    const auto globalDec = evaluateStackQualityFilter(qs, globalTone);
+    QVERIFY(!globalDec[7].kept);
+    QVERIFY(!globalDec[13].kept);
+    QVERIFY(!globalDec[14].kept);
+    QVERIFY(globalDec[0].kept);
+
+    // 3. Keep sharpest 60% of 15 stacks -> ceil(9.0) = 9 kept, 6 dropped.
+    VideoToneSettings pctTone;
+    pctTone.qualityFilterMode = QualityFilterMode::KeepBestPct;
+    pctTone.keepBestPercent = 60.0;
+    const auto pctDec = evaluateStackQualityFilter(qs, pctTone);
+    int pctKept = 0;
+    for (const auto& d : pctDec) if (d.kept) ++pctKept;
+    QCOMPARE(pctKept, 9);
+    QVERIFY(pctDec[0].kept && !pctDec[7].kept && !pctDec[14].kept);
+
+    // 4. Manual overrides: force-keep index 7 and force-drop index 0.
+    std::vector<std::optional<bool>> overrides(qs.size());
+    overrides[7] = true;
+    overrides[0] = false;
+    const auto ovDec = evaluateStackQualityFilter(qs, localTone, overrides);
+    QVERIFY(ovDec[7].kept && ovDec[7].overridden);
+    QVERIFY(!ovDec[0].kept && ovDec[0].overridden);
+
+    // 5. Safety guard: even if every stack is overridden to drop, the single sharpest stays kept.
+    std::vector<std::optional<bool>> dropAll(qs.size(), false);
+    const auto safeDec = evaluateStackQualityFilter(qs, localTone, dropAll);
+    int safeKept = 0;
+    for (const auto& d : safeDec) if (d.kept) ++safeKept;
+    QCOMPARE(safeKept, 1);
+    QVERIFY(safeDec[0].kept);
+
+    // 6. Profile JSON round-trip preserves qualityFilterMode and keepBestPercent.
+    QTemporaryDir tmp;
+    const QString profPath = tmp.filePath("profile.json");
+    QString err;
+    QVERIFY(saveProfileJson(profPath, SharpeningSettings{}, pctTone, err));
+    SharpeningSettings ls;
+    VideoToneSettings lv;
+    QVERIFY(loadProfileJson(profPath, ls, lv, err));
+    QCOMPARE(lv.qualityFilterMode, QualityFilterMode::KeepBestPct);
+    QCOMPARE(lv.keepBestPercent, 60.0);
 }
 
 QTEST_MAIN(TimelapseTests)

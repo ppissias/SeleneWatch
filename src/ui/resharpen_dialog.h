@@ -7,6 +7,7 @@
 #include <QtWidgets/QDialog>
 
 #include <atomic>
+#include <map>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -20,6 +21,8 @@ class QProgressBar;
 class QPushButton;
 class QSlider;
 class QSpinBox;
+class QTableWidget;
+class QTableWidgetItem;
 class QTimer;
 class QToolButton;
 
@@ -48,11 +51,19 @@ private:
     void setBusy(bool busy);
     void syncPreviewView(PreviewWidget* target, bool fitToWindow, double zoom, QPointF pan);
     void updateZoomControls(double effectiveZoom, bool fitToWindow);
+    void updateQualityFilterControls();
+    void refreshQualityFilter();
+    void stepDroppedStack(int direction);
+    void onStackTableItemChanged(QTableWidgetItem* item);
+    [[nodiscard]] std::map<QString, bool> currentStackOverrides() const;
 
     QString timelapsesRoot_;
     QString sessionDir_;
     QString lastOutputDir_;
     std::vector<QString> stackFiles_;
+    std::vector<double> stackQualities_;
+    std::vector<std::optional<bool>> stackManualOverrides_;
+    std::vector<StackFilterDecision> filterDecisions_;
     int bestStackIndex_{-1};
     std::optional<QRect> sessionOverlap_;
     std::optional<FitsImage> loadedRaw_;
@@ -95,7 +106,17 @@ private:
     QDoubleSpinBox* gamma_{nullptr};
     QSlider* gammaSlider_{nullptr};
     QComboBox* brightnessLevel_{nullptr};
+    QComboBox* qualityMode_{nullptr};
     QDoubleSpinBox* minQualityPct_{nullptr};
+    QDoubleSpinBox* keepBestPct_{nullptr};
+    QLabel* qualitySummary_{nullptr};
+    QToolButton* prevDroppedBtn_{nullptr};
+    QToolButton* nextDroppedBtn_{nullptr};
+    QToolButton* inspectStacksBtn_{nullptr};
+    QToolButton* resetOverridesBtn_{nullptr};
+    QWidget* stackListBox_{nullptr};
+    QTableWidget* stackTable_{nullptr};
+    bool updatingTable_{false};
     QCheckBox* cropOverlap_{nullptr};
     QSpinBox* fps_{nullptr};
     QCheckBox* writeMp4_{nullptr};

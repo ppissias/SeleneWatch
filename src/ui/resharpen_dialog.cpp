@@ -19,6 +19,7 @@
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QHeaderView>
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMessageBox>
@@ -26,6 +27,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QTableWidget>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 
@@ -149,6 +151,29 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 
     previewCol->addWidget(beforeBox, 1);
     previewCol->addWidget(afterBox, 1);
+
+    stackListBox_ = new QGroupBox("Stack quality filter inspector (click a stack to preview; tick/untick to override)", this);
+    stackListBox_->setObjectName("resharpenStackListBox");
+    auto* stackListLay = new QVBoxLayout(stackListBox_);
+    stackListLay->setContentsMargins(6, 6, 6, 6);
+    stackTable_ = new QTableWidget(0, 5, stackListBox_);
+    stackTable_->setObjectName("resharpenStackTable");
+    stackTable_->setHorizontalHeaderLabels({"Keep", "Stack", "Quality", "Reference", "Status"});
+    stackTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    stackTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    stackTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    stackTable_->verticalHeader()->setVisible(false);
+    stackTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    stackTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    stackTable_->setMaximumHeight(175);
+    stackTable_->setToolTip("Every stack in the session with its sharpness score and keep/drop status. Click any row "
+        "to inspect that frame in the Before/After preview, or toggle Keep to manually override the quality filter.");
+    stackListLay->addWidget(stackTable_);
+    stackListBox_->hide();
+    previewCol->addWidget(stackListBox_);
     mainRow->addLayout(previewCol, 3);
 
     // Right: controls
@@ -258,13 +283,73 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         "Global matches overall brightness and haze while preserving moving lunar shadows and rotating planets; "
         "Patchy clouds also smooths uneven clouds crossing part of an aligned Moon. Pick a non-reference stack in "
         "Preview stack to see its effect here.");
+    qualityMode_ = new QComboBox(videoBox);
+    qualityMode_->setObjectName("resharpenQualityMode");
+    qualityMode_->addItem("Off (keep all stacks)", -1);
+    qualityMode_->addItem("Local rolling median (best for long runs)", static_cast<int>(QualityFilterMode::LocalMedian));
+    qualityMode_->addItem("Session median (global)", static_cast<int>(QualityFilterMode::GlobalMedian));
+    qualityMode_->addItem("Keep sharpest %", static_cast<int>(QualityFilterMode::KeepBestPct));
+    qualityMode_->setToolTip("How blurry or cloudy stacks are excluded before building the video. Local rolling "
+        "median compares each stack to its surrounding neighbors (avoids dropping good frames when altitude or lunar "
+        "shadows drift slowly over hours). Session median compares to the whole night. Keep sharpest % keeps the top "
+        "fraction overall. Use Inspect stacks or Dropped buttons below to view every dropped frame before exporting.");
     minQualityPct_ = new QDoubleSpinBox(videoBox);
-    minQualityPct_->setToolTip("Drops blurry or cloudy stacks whose sharpness quality is below this share of the "
-        "session's median quality (applies during Apply to all, not the single-stack preview).");
-    minQualityPct_->setRange(0.0, 95.0);
+    minQualityPct_->setObjectName("resharpenMinQuality");
+    minQualityPct_->setToolTip("Drops stacks whose sharpness score is below this percentage of the local or session "
+        "median quality.");
+    minQualityPct_->setRange(1.0, 95.0);
     minQualityPct_->setDecimals(0);
-    minQualityPct_->setSuffix(" % of median");
-    minQualityPct_->setSpecialValueText("Keep all stacks");
+    minQualityPct_->setValue(75.0);
+    minQualityPct_->setSuffix(" % of nearby median");
+    keepBestPct_ = new QDoubleSpinBox(videoBox);
+    keepBestPct_->setObjectName("resharpenKeepBestPct");
+    keepBestPct_->setToolTip("Keeps only this percentage of the sharpest stacks in the session.");
+    keepBestPct_->setRange(5.0, 100.0);
+    keepBestPct_->setDecimals(0);
+    keepBestPct_->setValue(80.0);
+    keepBestPct_->setSuffix(" % sharpest");
+    auto* qualThreshRow = new QHBoxLayout();
+    qualThreshRow->setContentsMargins(0, 0, 0, 0);
+    qualThreshRow->addWidget(minQualityPct_);
+    qualThreshRow->addWidget(keepBestPct_);
+    qualThreshRow->addStretch(1);
+
+    auto* qualInspectCol = new QVBoxLayout();
+    qualInspectCol->setContentsMargins(0, 0, 0, 0);
+    qualInspectCol->setSpacing(4);
+    qualitySummary_ = new QLabel("No stacks loaded", videoBox);
+    qualitySummary_->setObjectName("resharpenQualitySummary");
+    auto* qualBtnRow = new QHBoxLayout();
+    qualBtnRow->setContentsMargins(0, 0, 0, 0);
+    qualBtnRow->setSpacing(4);
+    prevDroppedBtn_ = new QToolButton(videoBox);
+    prevDroppedBtn_->setObjectName("resharpenPrevDropped");
+    prevDroppedBtn_->setText("◀ Dropped");
+    prevDroppedBtn_->setToolTip("Jump the Before/After preview to the previous dropped stack.");
+    prevDroppedBtn_->setEnabled(false);
+    nextDroppedBtn_ = new QToolButton(videoBox);
+    nextDroppedBtn_->setObjectName("resharpenNextDropped");
+    nextDroppedBtn_->setText("Dropped ▶");
+    nextDroppedBtn_->setToolTip("Jump the Before/After preview to the next dropped stack.");
+    nextDroppedBtn_->setEnabled(false);
+    inspectStacksBtn_ = new QToolButton(videoBox);
+    inspectStacksBtn_->setObjectName("resharpenInspectStacks");
+    inspectStacksBtn_->setText("Inspect stacks");
+    inspectStacksBtn_->setCheckable(true);
+    inspectStacksBtn_->setToolTip("Show the full stack quality list so you can inspect dropped frames and manually "
+        "keep or drop individual stacks.");
+    resetOverridesBtn_ = new QToolButton(videoBox);
+    resetOverridesBtn_->setObjectName("resharpenResetOverrides");
+    resetOverridesBtn_->setText("Reset");
+    resetOverridesBtn_->setToolTip("Clear any manual per-stack keep/drop overrides.");
+    resetOverridesBtn_->setEnabled(false);
+    qualBtnRow->addWidget(prevDroppedBtn_);
+    qualBtnRow->addWidget(nextDroppedBtn_);
+    qualBtnRow->addWidget(inspectStacksBtn_);
+    qualBtnRow->addWidget(resetOverridesBtn_);
+    qualBtnRow->addStretch(1);
+    qualInspectCol->addWidget(qualitySummary_);
+    qualInspectCol->addLayout(qualBtnRow);
     cropOverlap_ = new QCheckBox("Crop to valid overlap", videoBox);
     cropOverlap_->setObjectName("resharpenCropOverlap");
     cropOverlap_->setToolTip("Crops the video to the region covered by every stack so drifting black borders do not appear.");
@@ -293,7 +378,9 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     videoForm->addRow("White level", makeSliderRow(videoBox, whiteLevel_, whiteSlider_, "resharpenWhiteSlider", 0.02, 1.00, 1000.0));
     videoForm->addRow("Gamma", makeSliderRow(videoBox, gamma_, gammaSlider_, "resharpenGammaSlider", 0.20, 2.50, 100.0));
     videoForm->addRow("Brightness levelling", brightnessLevel_);
-    videoForm->addRow("Drop below quality", minQualityPct_);
+    videoForm->addRow("Quality filter", qualityMode_);
+    videoForm->addRow("Filter threshold", qualThreshRow);
+    videoForm->addRow(qualInspectCol);
     videoForm->addRow(checkboxRowWithHelp(cropOverlap_, videoBox));
     videoForm->addRow("Frame rate", fps_);
     videoForm->addRow("Formats", fmtRow);
@@ -370,6 +457,24 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     });
     connect(cropOverlap_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
     connect(brightnessLevel_, &QComboBox::currentIndexChanged, this, [this] { if (!updating_) updatePreview(); });
+    connect(qualityMode_, &QComboBox::currentIndexChanged, this, [this] {
+        updateQualityFilterControls();
+        if (!updating_) refreshQualityFilter();
+    });
+    connect(minQualityPct_, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) refreshQualityFilter(); });
+    connect(keepBestPct_, &QDoubleSpinBox::valueChanged, this, [this] { if (!updating_) refreshQualityFilter(); });
+    connect(prevDroppedBtn_, &QToolButton::clicked, this, [this] { stepDroppedStack(-1); });
+    connect(nextDroppedBtn_, &QToolButton::clicked, this, [this] { stepDroppedStack(1); });
+    connect(inspectStacksBtn_, &QToolButton::toggled, this, [this](bool on) { stackListBox_->setVisible(on); });
+    connect(resetOverridesBtn_, &QToolButton::clicked, this, [this] {
+        std::fill(stackManualOverrides_.begin(), stackManualOverrides_.end(), std::nullopt);
+        refreshQualityFilter();
+    });
+    connect(stackTable_, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (row >= 0 && row < stackCombo_->count() && stackCombo_->currentIndex() != row)
+            stackCombo_->setCurrentIndex(row);
+    });
+    connect(stackTable_, &QTableWidget::itemChanged, this, &ResharpenDialog::onStackTableItemChanged);
 
     connect(profileCombo_, &QComboBox::currentIndexChanged, this, [this](int idx) {
         if (updating_ || idx < 0) return;
@@ -424,6 +529,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     blackSlider_->setEnabled(!autoStretch_->isChecked());
     whiteLevel_->setEnabled(!autoStretch_->isChecked());
     whiteSlider_->setEnabled(!autoStretch_->isChecked());
+    updateQualityFilterControls();
     installControlHelp(this);
 
     QString startDir = initialSessionDir;
@@ -472,12 +578,27 @@ void ResharpenDialog::setControlsFromSettings(const SharpeningSettings& sharp, c
     gamma_->setValue(tone.gamma);
     const int bIdx = brightnessLevel_->findData(static_cast<int>(tone.brightnessMode));
     brightnessLevel_->setCurrentIndex(std::max(0, bIdx));
-    minQualityPct_->setValue(tone.minQualityRatio * 100.0);
+    const bool filterActive = (tone.qualityFilterMode == QualityFilterMode::KeepBestPct)
+        ? (tone.keepBestPercent < 100.0)
+        : (tone.minQualityRatio > 0.0);
+    if (!filterActive)
+    {
+        qualityMode_->setCurrentIndex(0);
+    }
+    else
+    {
+        const int qIdx = qualityMode_->findData(static_cast<int>(tone.qualityFilterMode));
+        qualityMode_->setCurrentIndex(std::max(0, qIdx));
+    }
+    if (tone.minQualityRatio > 0.0) minQualityPct_->setValue(tone.minQualityRatio * 100.0);
+    if (tone.keepBestPercent < 100.0) keepBestPct_->setValue(tone.keepBestPercent);
+    updateQualityFilterControls();
     cropOverlap_->setChecked(tone.cropToOverlap);
     fps_->setValue(tone.fps);
     writeMp4_->setChecked(tone.writeMp4);
     writeGif_->setChecked(tone.writeGif);
     updating_ = false;
+    refreshQualityFilter();
 }
 
 void ResharpenDialog::openSession(const QString& sessionDir)
@@ -499,6 +620,9 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     }
 
     stackFiles_.clear();
+    stackQualities_.clear();
+    stackManualOverrides_.clear();
+    filterDecisions_.clear();
     bestStackIndex_ = -1;
     bestRaw_.reset();
     bestSharpened_.reset();
@@ -536,6 +660,9 @@ void ResharpenDialog::openSession(const QString& sessionDir)
         spans.push_back(span);
         stackCombo_->addItem(QString("%1 (Q=%2)").arg(names[i]).arg(q, 0, 'g', 3));
     }
+    stackQualities_ = qualities;
+    stackManualOverrides_.assign(stackFiles_.size(), std::nullopt);
+    refreshQualityFilter();
     if (!stackFiles_.empty())
     {
         const int bestIndex = std::max(0, selectClearReferenceStack(qualities, spans));
@@ -608,6 +735,11 @@ void ResharpenDialog::loadSelectedStack()
     }
 
     cachedBeforeImg_ = {};
+    if (stackTable_ && idx < stackTable_->rowCount())
+    {
+        const QSignalBlocker bt(stackTable_);
+        stackTable_->selectRow(idx);
+    }
     updatePreview();
 }
 
@@ -632,7 +764,27 @@ VideoToneSettings ResharpenDialog::currentTone() const
     v.whiteLevel = std::max(v.blackLevel + 0.01, whiteLevel_->value());
     v.gamma = gamma_->value();
     v.brightnessMode = static_cast<BrightnessLevellingMode>(brightnessLevel_->currentData().toInt());
-    v.minQualityRatio = minQualityPct_->value() / 100.0;
+    const int qMode = qualityMode_->currentData().toInt();
+    if (qMode < 0)
+    {
+        v.qualityFilterMode = QualityFilterMode::LocalMedian;
+        v.minQualityRatio = 0.0;
+        v.keepBestPercent = 100.0;
+    }
+    else
+    {
+        v.qualityFilterMode = static_cast<QualityFilterMode>(qMode);
+        if (v.qualityFilterMode == QualityFilterMode::KeepBestPct)
+        {
+            v.minQualityRatio = 0.0;
+            v.keepBestPercent = keepBestPct_->value();
+        }
+        else
+        {
+            v.minQualityRatio = minQualityPct_->value() / 100.0;
+            v.keepBestPercent = 100.0;
+        }
+    }
     v.cropToOverlap = cropOverlap_->isChecked();
     v.fps = fps_->value();
     v.writeMp4 = writeMp4_->isChecked();
@@ -753,6 +905,151 @@ void ResharpenDialog::updateZoomControls(double effectiveZoom, bool fitToWindow)
     zoomReadout_->setText(fitToWindow ? QString("Fit (%1%)").arg(pct) : QString("%1%").arg(pct));
 }
 
+void ResharpenDialog::updateQualityFilterControls()
+{
+    if (!qualityMode_ || !minQualityPct_ || !keepBestPct_) return;
+    const int mode = qualityMode_->currentData().toInt();
+    const bool isOff = (mode < 0);
+    const bool isKeepBest = (!isOff && static_cast<QualityFilterMode>(mode) == QualityFilterMode::KeepBestPct);
+    const bool isMedian = (!isOff && !isKeepBest);
+    minQualityPct_->setVisible(isMedian);
+    minQualityPct_->setEnabled(isMedian);
+    if (isMedian)
+    {
+        minQualityPct_->setSuffix(static_cast<QualityFilterMode>(mode) == QualityFilterMode::LocalMedian
+            ? " % of nearby median" : " % of session median");
+    }
+    keepBestPct_->setVisible(isKeepBest);
+    keepBestPct_->setEnabled(isKeepBest);
+}
+
+void ResharpenDialog::refreshQualityFilter()
+{
+    if (!qualitySummary_ || !stackTable_ || !stackCombo_) return;
+    const size_t n = stackFiles_.size();
+    if (n == 0)
+    {
+        filterDecisions_.clear();
+        qualitySummary_->setText("No stacks loaded");
+        prevDroppedBtn_->setEnabled(false);
+        nextDroppedBtn_->setEnabled(false);
+        resetOverridesBtn_->setEnabled(false);
+        updatingTable_ = true;
+        stackTable_->setRowCount(0);
+        updatingTable_ = false;
+        return;
+    }
+
+    filterDecisions_ = evaluateStackQualityFilter(stackQualities_, currentTone(), stackManualOverrides_);
+    int keptCount = 0;
+    int droppedCount = 0;
+    int overrideCount = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        if (filterDecisions_[i].kept) ++keptCount;
+        else ++droppedCount;
+        if (stackManualOverrides_[i].has_value()) ++overrideCount;
+    }
+
+    QString summary = droppedCount == 0
+        ? QString("All %1 stacks kept").arg(n)
+        : QString("Keeps %1 of %2 stacks · drops %3").arg(keptCount).arg(n).arg(droppedCount);
+    if (overrideCount > 0)
+        summary += QString(" (%1 manual)").arg(overrideCount);
+    qualitySummary_->setText(summary);
+    prevDroppedBtn_->setEnabled(droppedCount > 0);
+    nextDroppedBtn_->setEnabled(droppedCount > 0);
+    resetOverridesBtn_->setEnabled(overrideCount > 0);
+
+    // Update combo box prefixes so dropped stacks stand out even when the table is hidden.
+    {
+        const QSignalBlocker bc(stackCombo_);
+        for (size_t i = 0; i < n && static_cast<int>(i) < stackCombo_->count(); ++i)
+        {
+            const QString base = QFileInfo(stackFiles_[i]).fileName();
+            const QString prefix = filterDecisions_[i].kept ? QString() : QString("[DROP] ");
+            stackCombo_->setItemText(static_cast<int>(i),
+                QString("%1%2 (Q=%3)").arg(prefix, base).arg(stackQualities_[i], 0, 'g', 3));
+        }
+    }
+
+    // Rebuild / update the stack inspector table.
+    updatingTable_ = true;
+    stackTable_->setRowCount(static_cast<int>(n));
+    const QBrush droppedBg(QColor(130, 38, 38, 70));
+    const QBrush clearBg;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const int row = static_cast<int>(i);
+        const StackFilterDecision& d = filterDecisions_[i];
+        auto* checkItem = stackTable_->item(row, 0);
+        if (!checkItem)
+        {
+            checkItem = new QTableWidgetItem();
+            checkItem->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            stackTable_->setItem(row, 0, checkItem);
+        }
+        checkItem->setCheckState(d.kept ? Qt::Checked : Qt::Unchecked);
+
+        auto setTextCell = [&](int col, const QString& text) {
+            auto* item = stackTable_->item(row, col);
+            if (!item)
+            {
+                item = new QTableWidgetItem();
+                stackTable_->setItem(row, col, item);
+            }
+            item->setText(text);
+            item->setBackground(d.kept ? clearBg : droppedBg);
+        };
+        checkItem->setBackground(d.kept ? clearBg : droppedBg);
+        setTextCell(1, QFileInfo(stackFiles_[i]).fileName());
+        setTextCell(2, QString::number(stackQualities_[i], 'g', 4));
+        setTextCell(3, d.referenceQuality > 0.0 ? QString::number(d.referenceQuality, 'g', 4) : QString("--"));
+        const QString status = d.overridden
+            ? (d.kept ? "Kept (manual)" : "Dropped (manual)")
+            : (d.kept ? "Kept" : "Dropped");
+        setTextCell(4, status);
+    }
+    const int cur = stackCombo_->currentIndex();
+    if (cur >= 0 && cur < stackTable_->rowCount()) stackTable_->selectRow(cur);
+    updatingTable_ = false;
+}
+
+void ResharpenDialog::stepDroppedStack(int direction)
+{
+    const int n = static_cast<int>(filterDecisions_.size());
+    if (n == 0) return;
+    const int start = std::clamp(stackCombo_->currentIndex(), 0, n - 1);
+    for (int step = 1; step <= n; ++step)
+    {
+        const int idx = (start + direction * step + n) % n;
+        if (!filterDecisions_[static_cast<size_t>(idx)].kept)
+        {
+            stackCombo_->setCurrentIndex(idx);
+            return;
+        }
+    }
+}
+
+void ResharpenDialog::onStackTableItemChanged(QTableWidgetItem* item)
+{
+    if (updatingTable_ || !item || item->column() != 0) return;
+    const int row = item->row();
+    if (row < 0 || row >= static_cast<int>(stackManualOverrides_.size())) return;
+    const bool wantKeep = (item->checkState() == Qt::Checked);
+    stackManualOverrides_[static_cast<size_t>(row)] = wantKeep;
+    refreshQualityFilter();
+}
+
+std::map<QString, bool> ResharpenDialog::currentStackOverrides() const
+{
+    std::map<QString, bool> out;
+    for (size_t i = 0; i < std::min(stackFiles_.size(), stackManualOverrides_.size()); ++i)
+        if (stackManualOverrides_[i].has_value())
+            out[QFileInfo(stackFiles_[i]).fileName()] = *stackManualOverrides_[i];
+    return out;
+}
+
 void ResharpenDialog::setBusy(bool busy)
 {
     applyBtn_->setEnabled(!busy && !stackFiles_.empty());
@@ -778,8 +1075,9 @@ void ResharpenDialog::onApplyAll()
     const SharpeningSettings sharp = currentSharpening();
     const VideoToneSettings tone = currentTone();
     const bool rebuildOnly = rebuildVideoOnly_->isChecked();
+    const std::map<QString, bool> overrides = currentStackOverrides();
 
-    worker_ = std::jthread([this, dir, sharp, tone, rebuildOnly] {
+    worker_ = std::jthread([this, dir, sharp, tone, rebuildOnly, overrides] {
         QString outDir;
         TimelapseExportResult res;
         // This thread's exception boundary: a failure ends this run with a
@@ -795,7 +1093,7 @@ void ResharpenDialog::onApplyAll()
                         statusLabel_->setText(QString("%1 (%2/%3)").arg(stage).arg(done).arg(total));
                     }, Qt::QueuedConnection);
                 },
-                &cancelFlag_);
+                &cancelFlag_, overrides);
         }
         catch (const std::exception& ex)
         {
@@ -815,8 +1113,10 @@ void ResharpenDialog::onApplyAll()
             if (res.ok)
             {
                 progressBar_->setValue(progressBar_->maximum());
-                statusLabel_->setText(QString("Done: %1 stacks encoded to %2.")
-                    .arg(res.stacksUsed).arg(QDir::toNativeSeparators(lastOutputDir_)));
+                const QString droppedNote = res.stacksDropped > 0
+                    ? QString(" (%1 dropped)").arg(res.stacksDropped) : QString();
+                statusLabel_->setText(QString("Done: %1 stacks encoded%2 to %3.")
+                    .arg(res.stacksUsed).arg(droppedNote, QDir::toNativeSeparators(lastOutputDir_)));
             }
             else
             {
