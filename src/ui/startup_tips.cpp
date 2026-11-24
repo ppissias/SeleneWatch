@@ -181,7 +181,7 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 3: Transits, continuous recording & guiding ────────────────
         {
             "Catching dark transits across the Moon",
-            "Choose <b>Watching: The Moon: shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
+            "Choose <b>Watching: The Moon (or Sun): shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
             "or the ISS crossing the sunlit Moon. It looks only for darkening, and its settings start insensitive to "
             "seeing (<code>K 12</code>, 20-pixel shadows, one frame enough for the fast ISS), so silhouettes trigger "
             "clips while bright terrain stays quiet.",

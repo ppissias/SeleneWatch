@@ -204,8 +204,10 @@ QStringList overviewCaption(const EventClip& clip, bool duringCorrection)
         : featured->change == ChangeKind::LargeRise ? "large brightening"
         : featured->change == ChangeKind::LargeFall ? "large darkening"
         : featured->change == ChangeKind::Fall ? "darkening" : "automatic trigger";
+    const QString targetLabel = clip.captureSettings.target == Target::Sky ? "Sky"
+        : first.settings.darkening ? "Moon / Sun" : "Moon";
     QString heading = QString("%1 · frame %2 · %3 · %4 mode").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
-        .arg(kind).arg(clip.captureSettings.target == Target::Sky ? "Sky" : "Moon");
+        .arg(kind, targetLabel);
     if (clip.triggers.size() > 1) heading += QString(" · %1 triggers").arg(clip.triggers.size());
     if (first.continuesPreviousClip) heading += " · continues the previous clip";
     lines << heading;

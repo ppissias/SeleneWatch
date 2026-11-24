@@ -316,7 +316,7 @@ QString groupMeaning(ClipGroup group)
     case ClipGroup::Brief:
         return "Everything happened in one place within 0.2 s: a meteor, a glint, a cosmic-ray hit, a flash, or one blink of a strobe.";
     case ClipGroup::Moving:
-        return "The triggers advanced steadily along a straight line: usually an aircraft or a satellite; on the Moon, anything crossing it.";
+        return "The triggers advanced steadily along a straight line: usually an aircraft or a satellite; on the Moon or Sun, anything crossing it.";
     case ClipGroup::Wide:
         return "A large share of the frame brightened or darkened at once: lightning, headlights or a torch, a cloud, a fireball's flare.";
     case ClipGroup::Other:
@@ -482,6 +482,7 @@ QString writeNightlyReport(const QString& folder, QString& error)
     QStringList boundaries;
     int starts = 0, ends = 0;
     double seconds = 0;
+    bool hasShadowsWatch = false, hasFlashWatch = false;
     QFile manifest(root.filePath("session.txt"));
     if (manifest.open(QIODevice::ReadOnly | QIODevice::Text))
     {
@@ -489,17 +490,38 @@ QString writeNightlyReport(const QString& folder, QString& error)
         while (!in.atEnd())
         {
             const QString line = in.readLine();
-            if (line.contains(" monitoring_start ")) { ++starts; boundaries << line; }
+            if (line.contains(" monitoring_start "))
+            {
+                ++starts;
+                boundaries << line;
+                const QString watch = field(line, "watch");
+                if (watch == "moon_shadows") hasShadowsWatch = true;
+                else if (watch == "moon_flashes") hasFlashWatch = true;
+            }
             if (line.contains(" monitoring_stop ")) { ++ends; seconds += field(line, "seconds").toDouble(); boundaries << line; }
             if (line.contains(" mount_at_end ")) boundaries << line;
         }
     }
+    bool allDarkeningClips = !spans.empty();
+    for (const ClipSpan& span : spans)
+    {
+        bool clipHasDarkening = false;
+        for (const TriggerPoint& t : span.triggers)
+        {
+            if (t.change == TriggerPoint::Change::Fall || t.change == TriggerPoint::Change::WideFall) clipHasDarkening = true;
+            else if (t.change == TriggerPoint::Change::Rise || t.change == TriggerPoint::Change::WideRise) allDarkeningClips = false;
+        }
+        if (!clipHasDarkening) allDarkeningClips = false;
+    }
+    const bool shadowsOnly = hasShadowsWatch ? !hasFlashWatch : (!hasFlashWatch && allDarkeningClips);
     QDir parent = root;
     parent.cdUp();
     const QString targetName = parent.dirName();
     const QString first = j.starts.isEmpty() ? root.dirName() : j.starts.front().section(' ',0,0);
     const QString label = targetName.compare("sky", Qt::CaseInsensitive) == 0 ? "Sky" :
-        targetName.compare("moon", Qt::CaseInsensitive) == 0 ? "Moon" : "Monitoring";
+        targetName.compare("moon", Qt::CaseInsensitive) == 0
+            ? (shadowsOnly ? "Moon (or Sun) shadows" : "Moon")
+            : "Monitoring";
     QSaveFile report(root.filePath("report.html"));
     if (!report.open(QIODevice::WriteOnly)) { error = report.errorString(); return {}; }
     QTextStream out(&report);

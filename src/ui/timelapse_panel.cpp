@@ -469,7 +469,7 @@ void TimelapsePanel::updateTransitControls()
     watchTransits_->setEnabled(transitEditable_);
     transitHelp_->setVisible(selected);
     transitHelp_->setText(transitSettingsSaved_
-        ? "Uses your saved The Moon: shadows on the sunlit side settings. Watching pauses during burst capture and stacking."
+        ? "Uses your saved The Moon (or Sun): shadows on the sunlit side settings. Watching pauses during burst capture and stacking."
         : "Using default transit settings. Watching pauses during burst capture and stacking.");
     configureTransits_->setVisible(selected);
     configureTransits_->setEnabled(transitEditable_);

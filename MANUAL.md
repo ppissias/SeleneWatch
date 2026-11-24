@@ -368,7 +368,7 @@ Aircraft, the International Space Station and satellites pass in front of the su
 
 ### How the shadows watch works
 
-**The Moon: shadows on the sunlit side**, under **Watching**, looks only for pixels that get darker. Nothing that brightens triggers it: the bright surface shimmers with the seeing, and that would otherwise trigger all night. Its starting settings are chosen to stay quiet on the sunlit Moon:
+**The Moon (or Sun): shadows on the sunlit side**, under **Watching**, looks only for pixels that get darker. Nothing that brightens triggers it: the bright surface shimmers with the seeing, and that would otherwise trigger all night. Its starting settings are chosen to stay quiet on the sunlit Moon:
 - **K 12**: a pixel must fall twelve times its own noise. On five recordings of the sunlit Moon, nothing triggered at this K.
 - **A shadow of at least 20 pixels**, and up to 20 000 pixels, enough for a close aircraft.
 - **One frame is enough**, so that the ISS and satellites are caught.
@@ -378,7 +378,7 @@ Aircraft, the International Space Station and satellites pass in front of the su
 ### Automatic: catching crossings as they happen
 
 1. In Preview, frame the sunlit Moon, and lock and guide if you have a mount ([chapter 6](#6-feature-lock-and-guiding)).
-2. Under **Watching**, choose **The Moon: shadows on the sunlit side**.
+2. Under **Watching**, choose **The Moon (or Sun): shadows on the sunlit side**.
 3. **Auto-tune** ([1.7](#17-auto-tune)) measures the brightest sunlit areas, sets the exposure (up to 10 ms) and the gain, and suggests K. Keep K at 12 or higher on the sunlit Moon.
 4. Set when the session ends ([1.8](#18-ending-a-session-by-itself)), for example when the Moon sinks below 10°.
 5. Press **Start monitoring**. The readouts under K show the deepest fall and the largest shadow, and the graph plots the deepest fall against K. Each crossing is saved as a clip, with its path drawn in blue on its overview.
@@ -407,7 +407,7 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 
 | Control | What it does | Starting value |
 | --- | --- | --- |
-| **Watching** | **The Moon: shadows on the sunlit side** | — |
+| **Watching** | **The Moon (or Sun): shadows on the sunlit side** | — |
 | **Sensitivity K** | How far below its own noise a pixel must fall | 12 |
 | **Minimum / Maximum patch** | The size of a shadow, in darkened pixels | 20 to 20 000 |
 | **Maximum box / patch** | How long and thin a shadow may be | 10 times |

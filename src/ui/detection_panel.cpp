@@ -279,7 +279,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     target_->setObjectName("targetChoice");
     // Feature-31: the Moon's flashes and its shadows are watched apart.
     target_->addItem("The Moon: flashes on the earthlit side", static_cast<int>(Watch::MoonFlashes));
-    target_->addItem("The Moon: shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
+    target_->addItem("The Moon (or Sun): shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
     // Feature-35: the sky's fast events and its slow, faint ones are watched apart.
     target_->addItem("The sky: fast events (meteors, lightning)", static_cast<int>(Watch::Sky));
     target_->addItem("The sky: slow and faint (long exposures)", static_cast<int>(Watch::SkySlow));

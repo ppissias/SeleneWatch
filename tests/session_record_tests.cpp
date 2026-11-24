@@ -625,6 +625,32 @@ void SessionRecordTest::nightlyReportIncludesInlineAnimatedGifControls()
     QVERIFY(html.contains("class='cardGif'"));
     QVERIFY(html.contains("clips/20261123-010203-000/04_event_preview.gif"));
     QVERIFY(html.contains("briefGifs.length<=20"));
+
+    // A shadows watch under events/moon labels its report for Moon (or Sun),
+    // while a lunar impact-flash watch keeps "Moon watch".
+    const QString moonShadowsDir = QDir(dir.path()).filePath("events/moon/session-shadows");
+    const QString moonFlashesDir = QDir(dir.path()).filePath("events/moon/session-flashes");
+    QVERIFY(QDir().mkpath(moonShadowsDir) && QDir().mkpath(moonFlashesDir));
+    for (const auto& [folder, watchName, expectedHeading] : {
+             std::tuple{moonShadowsDir, "moon_shadows", "<h1>Moon (or Sun) shadows watch</h1>"},
+             std::tuple{moonFlashesDir, "moon_flashes", "<h1>Moon watch</h1>"}})
+    {
+        {
+            QFile cand(QDir(folder).filePath("candidates.txt"));
+            QVERIFY(cand.open(QIODevice::WriteOnly | QIODevice::Text));
+            cand.write("2026-11-24T14:57:32.000Z session_start target=moon source=\"Test\"\n");
+        }
+        {
+            QFile sess(QDir(folder).filePath("session.txt"));
+            QVERIFY(sess.open(QIODevice::WriteOnly | QIODevice::Text));
+            sess.write(QString("2026-11-24T14:57:32.000Z monitoring_start target=moon watch=%1\n").arg(watchName).toUtf8());
+        }
+        QString reportErr;
+        const QString p = writeNightlyReport(folder, reportErr);
+        QVERIFY2(!p.isEmpty(), qPrintable(reportErr));
+        const QString reportHtml = contents(p);
+        QVERIFY2(reportHtml.contains(expectedHeading), qPrintable(reportHtml));
+    }
 }
 
 int main(int argc, char** argv)

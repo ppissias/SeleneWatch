@@ -971,7 +971,7 @@ void MainWindow::onWatchRequested(Watch watch)
     updateStatusLabel();
     showMessage(watch_ == Watch::Sky ? "Watching the sky for fast events: their settings are loaded. Guiding is for the Moon and is off."
         : watch_ == Watch::SkySlow ? "Watching the sky for slow and faint light: its settings are loaded. Guiding is for the Moon and is off."
-        : watch_ == Watch::MoonShadows ? "Watching the Moon for shadows on the sunlit side: their settings are loaded."
+        : watch_ == Watch::MoonShadows ? "Watching the Moon (or Sun) for shadows on the sunlit side: their settings are loaded."
         : "Watching the Moon for flashes on the earthlit side: their settings are loaded.", 6000);
 }
 
