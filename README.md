@@ -70,9 +70,17 @@ Aircraft, the International Space Station and satellites pass in front of the su
 
 The feature lock and mount guiding keep the Moon in place. **Auto-tune** measures the sunlit Moon and suggests the exposure, the gain and the sensitivity. The session can end by itself: at a time, after a duration, or when the Moon sinks too low.
 
+<p align="center">
+  <img src="docs/images/transit-iss-nasa-moon.gif" alt="Animated preview of the ISS crossing the Moon on a public-domain NASA sequence" width="384">
+  &nbsp;&nbsp;
+  <img src="docs/images/transit-iss-nasa-sun.gif" alt="Animated preview of the ISS crossing the Sun on a public-domain NASA sequence" width="384">
+</p>
+
+*Sample data: animated clip previews (`04_event_preview.gif`) saved automatically by SeleneWatch for public-domain NASA lunar (left, 16 March 2019, `NHQ201903160004`) and solar (right, 24 June 2020, `NHQ202006240004`) ISS transit sequences (credit: NASA / Joel Kowsky).*
+
 ![An ISS silhouette crossing the Moon, detected by SeleneWatch on a public-domain NASA sequence](docs/images/transit-iss-nasa-moon.png)
 
-*Sample data: a public-domain NASA lunar ISS transit sequence (16 March 2019, credit: NASA / Joel Kowsky, `NHQ201903160004`), replayed through the shadows watch at its default K 12 with a one-frame trigger. SeleneWatch detected all five crossing frames in a straight line (grouped as **Moving**, 220 σ deepest fall) and centred the crop strip on the ISS silhouette. The [user manual](MANUAL.md#4-shadows-crossing-the-moon) also shows a public-domain NASA solar ISS transit and a test-signal run.*
+*Sample data: the overview SeleneWatch saved for the same public-domain NASA lunar ISS transit sequence (credit: NASA / Joel Kowsky, `NHQ201903160004`), replayed through the shadows watch at its default K 12 with a one-frame trigger. SeleneWatch detected all five crossing frames in a straight line (grouped as **Moving**, 220 σ deepest fall) and centred the crop strip on the ISS silhouette. The [user manual](MANUAL.md#4-shadows-crossing-the-moon) also shows the solar ISS transit overview and a test-signal run.*
 
 ### 4. Impact flashes on the Moon's dark side
 
@@ -80,9 +88,15 @@ Small meteoroids hit the Moon all the time. On the part of the Moon lit only fai
 
 SeleneWatch tests each pixel against its own noise, so a faint flash on the dark side is noticed, while the bright sunlit side and the glare beside it are left out. Auto-tune sets the camera for the faint earthshine and measures the faintest flash that would be caught, by adding a marked test flash to the real frames. Guiding and the automatic end of the session work as for shadows.
 
+<p align="center">
+  <img src="docs/images/flash-nasa-2013.gif" alt="Animated preview of the 17 March 2013 Mare Imbrium lunar impact flash on NASA MSFC telescope footage" width="420">
+</p>
+
+*Sample data: animated clip preview (`04_event_preview.gif`) saved automatically by SeleneWatch for the 17 March 2013 Mare Imbrium lunar impact flash recorded by NASA's Marshall Space Flight Center (Meteoroid Environment Office) and published by NASA's Goddard Space Flight Center (`SVS 11806`, public domain).*
+
 ![The 17 March 2013 Mare Imbrium lunar impact flash, detected by SeleneWatch on NASA MSFC's public-domain telescope recording](docs/images/flash-nasa-2013.png)
 
-*Sample data: the 17 March 2013 Mare Imbrium lunar impact flash recorded by NASA's Marshall Space Flight Center (Meteoroid Environment Office) and published by NASA's Goddard Space Flight Center (`SVS 11806`, public domain), replayed through SeleneWatch's flashes watch. SeleneWatch detected the onset, tracked the flash across 12 frames (0.37 s, strongest rise 81.3 σ) in place, and built the crop strip showing the rise and cooling decay. The [user manual](MANUAL.md#5-impact-flashes-on-the-moons-dark-side) also shows a marked test-flash run.*
+*Sample data: the overview SeleneWatch saved for the same 17 March 2013 Mare Imbrium lunar impact flash (credit: NASA MSFC / NASA GSFC, `SVS 11806`, public domain). SeleneWatch detected the onset, tracked the flash across 12 frames (0.37 s, strongest rise 81.3 σ) in place, and built the crop strip showing the rise and cooling decay. The [user manual](MANUAL.md#5-impact-flashes-on-the-moons-dark-side) also shows a marked test-flash run.*
 
 ---
 
