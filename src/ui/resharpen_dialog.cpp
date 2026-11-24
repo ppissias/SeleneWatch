@@ -74,6 +74,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 {
     setObjectName("resharpenDialog");
     setWindowTitle("Re-sharpen & rebuild time-lapse");
+    setWindowFlags((windowFlags() & ~Qt::WindowContextHelpButtonHint) | Qt::WindowMinMaxButtonsHint);
+    setSizeGripEnabled(true);
     resize(1040, 740);
 
     auto* root = new QVBoxLayout(this);

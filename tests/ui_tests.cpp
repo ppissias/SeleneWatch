@@ -2766,6 +2766,8 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
     stopKindCombo->setCurrentIndex(0);
 
     ResharpenDialog dlg(tlRoot, sessionDir, &window);
+    QVERIFY(dlg.windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
+    QVERIFY(dlg.windowFlags().testFlag(Qt::WindowMinimizeButtonHint));
     dlg.show();
     QCoreApplication::processEvents();
     auto* stackCombo = dlg.findChild<QComboBox*>("resharpenStackCombo");
