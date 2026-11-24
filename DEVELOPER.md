@@ -15,7 +15,7 @@ The user-facing feature name is **Time-lapse** or **lunar and planetary time-lap
 1. [Principles and design rules](#1-principles-and-design-rules)
 2. [Design patterns in use](#2-design-patterns-in-use)
 3. [How to add](#3-how-to-add)
-4. [Working rules](#4-working-rules)
+4. [Working rules](#4-working-rules), including [Writing the user documentation](#writing-the-user-documentation)
 5. [Technology stack](#5-technology-stack)
 6. [Prerequisites](#6-prerequisites)
 7. [Configuring and building](#7-configuring-and-building)
@@ -116,6 +116,19 @@ These apply to everyone, including coding agents.
 - **Keep documentation current in the same change:** behaviour in MANUAL.md, design in this guide or PROJECT_DESCRIPTION.md, pending work only in features.md or DESIGN-IMPROVEMENTS.md.
 - **Diagnostic programs and test output** go in a scratch folder or the ignored `out\`, never in tracked files. Manual probes that are kept belong in `tools/`.
 - **Commits:** descriptive messages with the validation in the body; stage only your own changes; never put private details or the observer's location in a commit message, a screenshot or a tracked file.
+
+### Writing the user documentation
+
+The README, the MANUAL and the website are read by observers, most of them not programmers. They should be able to read them with pleasure and understand them the first time.
+
+- **Lead with what the observer can do,** in one order, the same in the README, the MANUAL and the website: watching the sky, lunar and planetary time-lapses, shadows crossing the Moon, lunar impact flashes. For each: what it is for, how it works in a few sentences, the steps, what the result looks like, and a table of its controls with their starting values.
+- **Plain words.** Short sentences, one idea to a paragraph, everyday words before technical ones. Explain a term the first time it appears ("K: how far above its own noise a pixel must rise"), and prefer "the frames from just before and after" to "the pre-event ring buffer". Name each control exactly as the window shows it, in bold.
+- **Say what was measured, and no more.** No selling words ("powerful", "seamless"). Give numbers with their scope ("on two recordings, 23 of 24 test crossings"). A detection is a candidate, never a discovery. Say what has been tested and what still waits for a real night or a real camera.
+- **The README is brief, the MANUAL complete.** The README says what SeleneWatch does, shows each use with one picture, lists the other features in a line each, and says how to get it and how far it has been tested. Defaults, limits, every control and the files belong in the MANUAL, which the README links to.
+- **Every picture shows the feature and says what it is.** Prefer a real capture. Without one, make test data through the application's own path (the probe's `inject-clip`). Say so in the caption: *Test data*, what was added, and that no real event was recorded. Label sample data as sample data. A caption says what to look at.
+- **Nothing private or incidental.** No recording file names or paths in the text, the captions or the pictures; remove an overview's source line before using it. Output file names only where the observer needs them, in the MANUAL's chapter on the saved files. Never the site's position.
+- **Keep it true as the code changes.** A change of behaviour updates the MANUAL in the same change. A fact (a default, a limit, a measurement) is stated once in detail and linked from elsewhere, not repeated.
+- **Keep the links working.** The window opens MANUAL sections by their heading's anchor (the startup tips, checked by the `ui` suite), and the README and the website link to them too. When a heading changes, update all three, and check that every image exists and every anchor resolves. Use plain Markdown in the MANUAL, which the window shows with its own viewer: no HTML layout.
 
 ---
 

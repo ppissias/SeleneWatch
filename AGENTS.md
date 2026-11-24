@@ -27,6 +27,7 @@ These guidelines apply to all development agents and should be revisited when in
 ## Feature Tracking and Documentation
 
 - **Explicit feature IDs:** Proposals and completed work are identified by explicit IDs (e.g., `Feature-2`, `Feature-3`, `Feature-4`).
+- **Writing user documentation:** For the README, the MANUAL and the website, follow [DEVELOPER.md, Writing the user documentation](DEVELOPER.md#writing-the-user-documentation): plain words, the observer's four uses in one order, only what was measured, and every picture labelled for what it is.
 - **Preserve full detail in history:** When moving completed features from [`features.md`](features.md) to [`implemented features.md`](implemented%20features.md), do not condense, summarize, or remove details. Append the entire section—including specifications, review notes, decision rationales, and acceptance criteria. `implemented features.md` is an append-only historical record of what was built and why.
 
 ## Commits and Attribution
