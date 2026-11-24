@@ -346,9 +346,13 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     QString& outTargetDir,
     std::function<void(int done, int total, const QString& stage)> progress,
     std::atomic<bool>* cancel,
-    const std::map<QString, bool>& stackOverrides)
+    const std::map<QString, bool>& stackOverrides,
+    const RealignOptions& realign)
 {
     TimelapseExportResult res;
+
+    const bool doRealign = (realign.mode != StackRealignMode::Off);
+    if (doRealign) rebuildVideoOnly = false;
 
     // Load persisted commonOverlap from the session profile (if present) so
     // "Crop to valid overlap" works identically on re-sharpen and rebuild runs.
@@ -394,12 +398,71 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
         return res;
     }
 
+    const int total = static_cast<int>(files.size());
+    std::vector<StackFilterDecision> decisions;
+    int refIdx = 0;
+    FitsImage refStack;
+
+    if (doRealign)
+    {
+        // Pre-evaluate quality filtering so the new commonOverlap is intersected
+        // strictly across kept stacks (dropped cloudy frames never shrink the crop).
+        std::vector<double> qualities;
+        qualities.reserve(static_cast<size_t>(total));
+        std::vector<std::optional<bool>> manualOverrides;
+        if (!stackOverrides.empty()) manualOverrides.resize(static_cast<size_t>(total));
+        for (int i = 0; i < total; ++i)
+        {
+            if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
+            FitsMetadata meta;
+            int w = 0, h = 0, ch = 0;
+            if (!readFitsMetadata(files[static_cast<size_t>(i)], meta, w, h, ch, res.error))
+                return res;
+            qualities.push_back(meta.qualityScore);
+            if (!stackOverrides.empty())
+            {
+                const auto it = stackOverrides.find(QFileInfo(files[static_cast<size_t>(i)]).fileName());
+                if (it != stackOverrides.end()) manualOverrides[static_cast<size_t>(i)] = it->second;
+            }
+        }
+        decisions = evaluateStackQualityFilter(qualities, tone, manualOverrides);
+
+        int foundRef = -1;
+        if (!realign.referenceFileName.isEmpty())
+        {
+            for (int i = 0; i < total; ++i)
+            {
+                if (QFileInfo(files[static_cast<size_t>(i)]).fileName() == realign.referenceFileName)
+                {
+                    foundRef = i;
+                    break;
+                }
+            }
+        }
+        if (foundRef < 0)
+        {
+            double bestQ = -1.0;
+            for (int i = 0; i < total; ++i)
+            {
+                if (decisions[static_cast<size_t>(i)].kept && qualities[static_cast<size_t>(i)] > bestQ)
+                {
+                    bestQ = qualities[static_cast<size_t>(i)];
+                    foundRef = i;
+                }
+            }
+        }
+        refIdx = std::max(0, foundRef);
+        if (!readFitsFloat(files[static_cast<size_t>(refIdx)], refStack, res.error))
+            return res;
+    }
+
     const QString stamp = utcStamp(std::chrono::system_clock::now());
     const QString prof = sanitizeProfileName(sharpening.profileName);
-    outTargetDir = createUniqueChildDir(sessionDir, QString("sharpened_%1_%2").arg(prof, stamp));
+    const QString prefix = doRealign ? QString("realigned") : QString("sharpened");
+    outTargetDir = createUniqueChildDir(sessionDir, QString("%1_%2_%3").arg(prefix, prof, stamp));
     if (outTargetDir.isEmpty())
     {
-        res.error = QString("Could not create re-sharpen folder under %1").arg(sessionDir);
+        res.error = QString("Could not create output folder under %1").arg(sessionDir);
         return res;
     }
     const QString sharpOut = QDir(outTargetDir).filePath("sharpened");
@@ -408,24 +471,73 @@ TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
         res.error = QString("Could not create %1").arg(sharpOut);
         return res;
     }
+    QString alignedStacksOut;
+    if (doRealign && realign.saveAlignedStacks)
+    {
+        alignedStacksOut = QDir(outTargetDir).filePath("stacks");
+        if (!QDir().mkpath(alignedStacksOut))
+        {
+            res.error = QString("Could not create %1").arg(alignedStacksOut);
+            return res;
+        }
+    }
 
-    const int total = static_cast<int>(files.size());
+    std::optional<QRect> newOverlap;
     for (int i = 0; i < total; ++i)
     {
         if (cancel && cancel->load()) { res.error = "cancelled"; return res; }
-        FitsImage raw;
-        if (!readFitsFloat(files[static_cast<size_t>(i)], raw, res.error)) return res;
-        const FitsImage sharpened = applyLinearSharpening(raw, sharpening);
+        FitsImage work;
+        if (!readFitsFloat(files[static_cast<size_t>(i)], work, res.error)) return res;
+
+        if (doRealign)
+        {
+            QRect stackValid;
+            if (i == refIdx)
+            {
+                work.meta.shiftX = 0.0;
+                work.meta.shiftY = 0.0;
+                work.meta.rotationDeg = 0.0;
+                stackValid = fitsValidOverlapRect(work);
+            }
+            else
+            {
+                SessionAlignResult aligned = realignStackToReference(
+                    work, refStack, realign.mode, realign.allowRotation, realign.featureBox);
+                work = std::move(aligned.aligned);
+                stackValid = aligned.validOverlap;
+            }
+            if (decisions[static_cast<size_t>(i)].kept && stackValid.isValid() && !stackValid.isEmpty())
+            {
+                newOverlap = newOverlap ? newOverlap->intersected(stackValid) : stackValid;
+            }
+            if (!alignedStacksOut.isEmpty())
+            {
+                const QString alignedFile = QDir(alignedStacksOut).filePath(QFileInfo(files[static_cast<size_t>(i)]).fileName());
+                if (!writeFitsFloat(alignedFile, work, res.error)) return res;
+            }
+        }
+
+        const FitsImage sharpened = applyLinearSharpening(work, sharpening);
         const QString outFile = QDir(sharpOut).filePath(QFileInfo(files[static_cast<size_t>(i)]).fileName());
         if (!writeFitsFloat(outFile, sharpened, res.error)) return res;
-        if (progress) progress(i + 1, total, "Sharpening FITS stacks…");
+        if (progress)
+            progress(i + 1, total, doRealign ? QString("Re-aligning & sharpening stacks…") : QString("Sharpening FITS stacks…"));
+    }
+
+    std::optional<QRect> finalOverlap = savedOverlap;
+    if (doRealign)
+    {
+        if (newOverlap && newOverlap->width() >= 2 && newOverlap->height() >= 2)
+            finalOverlap = newOverlap;
+        else
+            finalOverlap = QRect(0, 0, refStack.width, refStack.height);
     }
 
     QString profileErr;
     (void)saveProfileJson(QDir(outTargetDir).filePath("sharpening_profile.json"),
-        sharpening, tone, profileErr, savedOverlap);
+        sharpening, tone, profileErr, finalOverlap);
 
-    res = exportTimelapseFromFits(sharpOut, outTargetDir, tone, overlapRect, [&](int d, int t) {
+    res = exportTimelapseFromFits(sharpOut, outTargetDir, tone, finalOverlap.value_or(QRect{}), [&](int d, int t) {
         if (progress) progress(d, t, "Encoding video…");
     }, cancel, stackOverrides);
     return res;

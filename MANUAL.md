@@ -318,10 +318,16 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
 ### Improving it afterwards
 
 **Session → Re-sharpen time-lapse…** opens a finished time-lapse and works on its stacks without changing them:
+- **Re-align stacks (optional):** re-align every saved stack onto a chosen reference stack before sharpening and exporting (never modifies the original `stacks/`):
+  - **Feature box:** pick a reference stack, click **Draw feature box**, and drag a square around a crisp crater or steady region on the **Before** preview.
+  - **Auto multi-point (rigid, Moon):** automatically selects crisp lunar features across the reference stack, tracks each point across the session, ignores moving shadows or passing clouds, and fits a rigid alignment.
+  - **Correct rotation** (on by default for Moon sessions, off for planets) fits both shift and field rotation; untick it for shift-only alignment.
+  - Switch **Preview stack** to any other stack to inspect its re-aligned result and measured shift/rotation live in **After** before rebuilding.
+  - **Save re-aligned FITS stacks** (off by default) also saves the unsharpened re-aligned FITS stacks into the new run folder's `stacks/` subfolder so you can re-open it later to adjust sharpening without re-aligning again.
 - **Sharpening:** sliders for the strength and width of the sharpening and for noise, with the stack before and after side by side, at any zoom.
 - **Brightness:** match the brightness of the stacks, overall or also under patchy clouds (Moon).
 - **Quality filter:** drop blurred or cloudy stacks. **Local rolling median** compares each stack's sharpness with the stacks around it, which suits a long session where the Moon's height and the shadows change slowly; **Session median** compares with the whole session; **Keep sharpest %** keeps the best share. The panel says how many stacks are kept and dropped. **◀ Dropped / Dropped ▶** steps through the dropped stacks, and **Inspect stacks** lists them all, where you can keep or drop any stack by hand.
-- **Rebuild video only** makes the video again quickly from the sharpened stacks; **Apply to all** sharpens every stack again into a new folder, beside the original ones. Settings can be saved as profiles.
+- **Rebuild video only** makes the video again quickly from the sharpened stacks; **Apply to all** sharpens (and re-aligns, if chosen) every stack into a new folder, beside the original ones. Settings can be saved as profiles.
 
 ![A stack from a Moon time-lapse](docs/images/timelapse-moon-stack.jpg)
 

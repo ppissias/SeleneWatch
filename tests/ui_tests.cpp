@@ -2980,6 +2980,63 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
         QVERIFY(QFileInfo::exists(rebuiltDir.filePath("timelapse.mp4")));
         QVERIFY(QFileInfo::exists(rebuiltDir.filePath("timelapse.ser")));
         QCOMPARE(QFileInfo(origMp4).lastModified(), origMtime);
+
+        // Verify post-capture stack re-alignment controls: Feature box + Auto multi-point
+        // live After preview, rebuildVideoOnly auto-disable, and Save re-aligned FITS stacks.
+        auto* realignMode = dlg.findChild<QComboBox*>("resharpenRealignMode");
+        auto* drawBoxBtn = dlg.findChild<QToolButton*>("resharpenDrawFeatureBox");
+        auto* clearBoxBtn = dlg.findChild<QToolButton*>("resharpenClearFeatureBox");
+        auto* setRefBtn = dlg.findChild<QToolButton*>("resharpenSetRealignRef");
+        auto* corrRot = dlg.findChild<QCheckBox*>("resharpenCorrectRotation");
+        auto* saveAligned = dlg.findChild<QCheckBox*>("resharpenSaveAlignedStacks");
+        auto* realignStat = dlg.findChild<QLabel*>("resharpenRealignStatus");
+        QVERIFY(realignMode && drawBoxBtn && clearBoxBtn && setRefBtn && corrRot && saveAligned && realignStat);
+        QCOMPARE(realignMode->currentData().toInt(), static_cast<int>(StackRealignMode::Off));
+        QVERIFY(corrRot->isChecked());
+        QVERIFY(!saveAligned->isChecked());
+
+        // Switch to Feature box mode -> unchecks and disables Rebuild video only.
+        realignMode->setCurrentIndex(realignMode->findData(static_cast<int>(StackRealignMode::FeatureBox)));
+        QCoreApplication::processEvents();
+        QVERIFY(!rebuildOnly->isChecked() && !rebuildOnly->isEnabled());
+        QVERIFY(drawBoxBtn->isVisibleTo(&dlg));
+        QVERIFY(!clearBoxBtn->isEnabled());
+
+        // Simulate drawing a feature box on Before preview.
+        drawBoxBtn->setChecked(true);
+        QCOMPARE(beforeView->dragMode(), PreviewWidget::DragMode::Region);
+        emit beforeView->regionSelected(QRect(64, 48, 128, 128));
+        QCoreApplication::processEvents();
+        QVERIFY(!drawBoxBtn->isChecked());
+        QCOMPARE(beforeView->dragMode(), PreviewWidget::DragMode::Pan);
+        QVERIFY(clearBoxBtn->isEnabled());
+        QVERIFY(realignStat->text().contains("Reference:"));
+
+        // Switch Preview stack to a non-reference stack -> live alignment readout appears.
+        const int otherIdx = (stackCombo->currentIndex() == 0) ? 1 : 0;
+        stackCombo->setCurrentIndex(otherIdx);
+        QCoreApplication::processEvents();
+        QVERIFY2(realignStat->text().contains("Aligned to"), qPrintable(realignStat->text()));
+
+        // Switch to Auto multi-point, enable Save re-aligned FITS stacks, and run Apply to all.
+        realignMode->setCurrentIndex(realignMode->findData(static_cast<int>(StackRealignMode::AutoMultiPoint)));
+        QCoreApplication::processEvents();
+        QVERIFY(setRefBtn->isVisibleTo(&dlg));
+        saveAligned->setChecked(true);
+        dlgSer->setChecked(false);
+        applyBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(statusLbl->text().startsWith("Done:"), 15000);
+        const QStringList realignDirs = QDir(sessionDir).entryList({"realigned_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
+        QCOMPARE(realignDirs.size(), 1);
+        const QDir realignOut(QDir(sessionDir).filePath(realignDirs.first()));
+        QVERIFY(QFileInfo::exists(realignOut.filePath("timelapse.mp4")));
+        QVERIFY(QDir(realignOut.filePath("stacks")).entryList({"*.fits"}, QDir::Files).size() >= 2);
+        QVERIFY(QDir(realignOut.filePath("sharpened")).entryList({"*.fits"}, QDir::Files).size() >= 2);
+
+        // Switching back to Off re-enables Rebuild video only cleanly.
+        realignMode->setCurrentIndex(realignMode->findData(static_cast<int>(StackRealignMode::Off)));
+        QCoreApplication::processEvents();
+        QVERIFY(rebuildOnly->isEnabled());
     }
 
     window.findChild<QPushButton*>("stopButton")->click();

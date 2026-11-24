@@ -800,6 +800,283 @@ BurstStackResult stackBurstImpl(size_t count, int w, int h, int ch, double rawMa
     return result;
 }
 
+// Marks pixels strictly outside border-connected exact-zero warp margins as valid (255).
+// Preserves interior dark shadows and leaves frames with >35% dark sky (e.g. planets or
+// thin crescents) intact as all-valid.
+cv::Mat buildSourceValidMask(const cv::Mat& lum)
+{
+    const int w = lum.cols;
+    const int h = lum.rows;
+    cv::Mat ones(h, w, CV_8UC1, cv::Scalar(255));
+    if (w <= 2 || h <= 2) return ones;
+
+    cv::Mat isZero;
+    cv::compare(lum, 0.0f, isZero, cv::CMP_LE);
+    const int zeroCount = cv::countNonZero(isZero);
+    const int total = w * h;
+    if (zeroCount == 0 || zeroCount > static_cast<int>(total * 0.35))
+        return ones;
+
+    cv::Mat padded(h + 2, w + 2, CV_8UC1, cv::Scalar(255));
+    isZero.copyTo(padded(cv::Rect(1, 1, w, h)));
+    cv::Mat labels;
+    cv::connectedComponents(padded, labels, 4, CV_32S);
+    const int borderLabel = labels.at<int>(0, 0);
+
+    cv::Mat valid(h, w, CV_8UC1, cv::Scalar(255));
+    for (int y = 0; y < h; ++y)
+    {
+        const int* lRow = labels.ptr<int>(y + 1) + 1;
+        uint8_t* vRow = valid.ptr<uint8_t>(y);
+        for (int x = 0; x < w; ++x)
+            if (lRow[x] == borderLabel) vRow[x] = 0;
+    }
+    if (cv::countNonZero(valid) < 16) return ones;
+    return valid;
+}
+
+// Applies a 2x3 affine transform (forward or inverse map) with Lanczos-4 interpolation,
+// updates alignment telemetry + FITS headers, and computes the largest inscribed valid
+// overlap strictly inside both pre-existing and newly warped borders.
+void warpAndMeasureOverlap(const cv::Mat& srcMat, const cv::Mat& srcLum,
+    const cv::Mat& M, bool inverseMap, const FitsMetadata& meta, SessionAlignResult& out)
+{
+    const int w = srcMat.cols;
+    const int h = srcMat.rows;
+    const int flags = cv::INTER_LANCZOS4 | (inverseMap ? cv::WARP_INVERSE_MAP : 0);
+    cv::Mat warped;
+    cv::warpAffine(srcMat, warped, M, cv::Size(w, h), flags, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+    cv::min(warped, 1.0f, warped);
+    cv::max(warped, 0.0f, warped);
+
+    cv::Mat M64;
+    M.convertTo(M64, CV_64F);
+    cv::Mat fwdM;
+    if (inverseMap)
+        cv::invertAffineTransform(M64, fwdM);
+    else
+        fwdM = M64;
+
+    const double cx = w * 0.5;
+    const double cy = h * 0.5;
+    const double nx = fwdM.at<double>(0, 0) * cx + fwdM.at<double>(0, 1) * cy + fwdM.at<double>(0, 2);
+    const double ny = fwdM.at<double>(1, 0) * cx + fwdM.at<double>(1, 1) * cy + fwdM.at<double>(1, 2);
+    out.shiftX = nx - cx;
+    out.shiftY = ny - cy;
+    out.rotationDeg = std::atan2(fwdM.at<double>(1, 0), fwdM.at<double>(0, 0)) * 180.0 / 3.14159265358979323846;
+
+    const cv::Mat srcValid = buildSourceValidMask(srcLum);
+    cv::Mat validMask;
+    cv::warpAffine(srcValid, validMask, M, cv::Size(w, h),
+        cv::INTER_NEAREST | (inverseMap ? cv::WARP_INVERSE_MAP : 0),
+        cv::BORDER_CONSTANT, cv::Scalar(0));
+    cv::Mat erodedMask;
+    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
+        cv::Size(2 * kLanczosRadius + 1, 2 * kLanczosRadius + 1));
+    cv::erode(validMask, erodedMask, kernel, cv::Point(-1, -1), 1, cv::BORDER_CONSTANT, cv::Scalar(255));
+    QRect inscribed = largestInscribedRect(erodedMask);
+    if (inscribed.width() < 2 || inscribed.height() < 2)
+        inscribed = largestInscribedRect(validMask);
+    if (inscribed.width() >= 2 && inscribed.height() >= 2)
+        out.validOverlap = inscribed;
+
+    out.aligned = matToFits(warped, meta);
+    out.aligned.meta.shiftX = out.shiftX;
+    out.aligned.meta.shiftY = out.shiftY;
+    out.aligned.meta.rotationDeg = out.rotationDeg;
+}
+
+double wrapAngleRad(double a)
+{
+    constexpr double kPi = 3.14159265358979323846;
+    while (a > kPi) a -= 2.0 * kPi;
+    while (a < -kPi) a += 2.0 * kPi;
+    return a;
+}
+
+struct Rigid2D
+{
+    double theta{0.0};
+    double tx{0.0};
+    double ty{0.0};
+};
+
+// Closed-form exact 2D Procrustes / Kabsch rigid fit (scale strictly 1.0) mapping p_i -> q_i.
+Rigid2D fitRigid2D(const std::vector<cv::Point2d>& srcPts,
+    const std::vector<cv::Point2d>& refPts,
+    const std::vector<size_t>& indices)
+{
+    Rigid2D r;
+    if (indices.empty()) return r;
+    cv::Point2d mp(0.0, 0.0), mq(0.0, 0.0);
+    for (size_t idx : indices)
+    {
+        mp += srcPts[idx];
+        mq += refPts[idx];
+    }
+    const double invN = 1.0 / static_cast<double>(indices.size());
+    mp *= invN;
+    mq *= invN;
+
+    double C = 0.0;
+    double S = 0.0;
+    for (size_t idx : indices)
+    {
+        const cv::Point2d dp = srcPts[idx] - mp;
+        const cv::Point2d dq = refPts[idx] - mq;
+        C += dp.x * dq.x + dp.y * dq.y;
+        S += dp.x * dq.y - dp.y * dq.x;
+    }
+    r.theta = std::atan2(S, C);
+    const double c = std::cos(r.theta);
+    const double s = std::sin(r.theta);
+    r.tx = mq.x - (c * mp.x - s * mp.y);
+    r.ty = mq.y - (s * mp.x + c * mp.y);
+    return r;
+}
+
+// Shared coarse-to-fine pyramid ECC alignment for Moon stacks and FeatureBox re-alignment.
+// Uses MOTION_EUCLIDEAN (shift + rotation) when allowRotation is true, or
+// MOTION_TRANSLATION (shift-only) when false, weighted strictly inside anchor if given.
+SessionAlignResult alignMoonEcc(const cv::Mat& srcMat, const cv::Mat& refMat,
+    const cv::Mat& srcLum, const cv::Mat& refLum,
+    const FitsMetadata& meta, bool allowRotation,
+    const std::optional<QRect>& anchorBox)
+{
+    Q_UNUSED(refMat);
+    const int w = srcMat.cols;
+    const int h = srcMat.rows;
+    SessionAlignResult out;
+    out.validOverlap = QRect(0, 0, w, h);
+
+    cv::Mat fullHann;
+    cv::createHanningWindow(fullHann, refLum.size(), CV_32F);
+    double coarseResp = 0.0;
+    const cv::Point2d coarse = estimateShiftPhase(refLum, srcLum, fullHann, &coarseResp);
+
+    std::vector<cv::Point2d> initialShifts;
+    cv::Mat mask(h, w, CV_8UC1, cv::Scalar(255));
+    if (anchorBox && anchorBox->isValid())
+    {
+        const QRect anchor = clampRect(*anchorBox, w, h);
+        mask.setTo(0);
+        mask(cv::Rect(anchor.x(), anchor.y(), anchor.width(), anchor.height())).setTo(255);
+
+        if (anchor.width() >= 32 && anchor.height() >= 32)
+        {
+            cv::Mat aHann;
+            cv::createHanningWindow(aHann, cv::Size(anchor.width(), anchor.height()), CV_32F);
+            const cv::Rect ar(anchor.x(), anchor.y(), anchor.width(), anchor.height());
+            double anchorResp = 0.0;
+            const cv::Point2d anchorShift = estimateShiftPhase(refLum(ar), srcLum(ar), aHann, &anchorResp);
+            if (anchorResp > 0.04) initialShifts.push_back(anchorShift);
+        }
+    }
+    initialShifts.push_back(coarse);
+    if (std::hypot(coarse.x, coarse.y) > 1.0)
+        initialShifts.emplace_back(0.0, 0.0);
+
+    std::vector<cv::Mat> pyrRef{refLum};
+    std::vector<cv::Mat> pyrSrc{srcLum};
+    std::vector<cv::Mat> pyrMask{mask};
+    while (pyrRef.size() < 3 && pyrRef.back().cols >= 192 && pyrRef.back().rows >= 192)
+    {
+        cv::Mat rDown, sDown, mDown;
+        cv::pyrDown(pyrRef.back(), rDown);
+        cv::pyrDown(pyrSrc.back(), sDown);
+        cv::resize(pyrMask.back(), mDown, rDown.size(), 0, 0, cv::INTER_NEAREST);
+        if (cv::countNonZero(mDown) < 64) break;
+        pyrRef.push_back(std::move(rDown));
+        pyrSrc.push_back(std::move(sDown));
+        pyrMask.push_back(std::move(mDown));
+    }
+
+    const int motionType = allowRotation ? cv::MOTION_EUCLIDEAN : cv::MOTION_TRANSLATION;
+    const int topLvl = static_cast<int>(pyrRef.size()) - 1;
+    const float scaleDown = static_cast<float>(1 << topLvl);
+    cv::Mat warpMatrix;
+    bool eccOk = false;
+    try
+    {
+        double bestTopCc = -2.0;
+        for (const cv::Point2d& init : initialShifts)
+        {
+            cv::Mat cand(cv::Matx23f(
+                1.0f, 0.0f, static_cast<float>(-init.x / scaleDown),
+                0.0f, 1.0f, static_cast<float>(-init.y / scaleDown)));
+            try
+            {
+                const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 60, 1e-4);
+                const double cc = cv::findTransformECC(pyrRef[static_cast<size_t>(topLvl)],
+                    pyrSrc[static_cast<size_t>(topLvl)], cand, motionType, criteria,
+                    pyrMask[static_cast<size_t>(topLvl)]);
+                if (cc > bestTopCc)
+                {
+                    bestTopCc = cc;
+                    warpMatrix = cand.clone();
+                }
+                if (bestTopCc >= 0.99) break;
+            }
+            catch (const cv::Exception&) {}
+        }
+
+        if (!warpMatrix.empty())
+        {
+            for (int lvl = topLvl - 1; lvl >= 0; --lvl)
+            {
+                cv::Mat scaled = warpMatrix.clone();
+                scaled.at<float>(0, 2) *= 2.0f;
+                scaled.at<float>(1, 2) *= 2.0f;
+                try
+                {
+                    const int iters = lvl == 0 ? 80 : 60;
+                    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, iters, 1e-4);
+                    cv::findTransformECC(pyrRef[static_cast<size_t>(lvl)], pyrSrc[static_cast<size_t>(lvl)],
+                        scaled, motionType, criteria, pyrMask[static_cast<size_t>(lvl)]);
+                    warpMatrix = std::move(scaled);
+                }
+                catch (const cv::Exception&)
+                {
+                    warpMatrix = std::move(scaled);
+                }
+            }
+            const double cosT = warpMatrix.at<float>(0, 0);
+            const double sinT = warpMatrix.at<float>(1, 0);
+            const double angleDeg = std::atan2(sinT, cosT) * 180.0 / 3.14159265358979323846;
+            const double tx = warpMatrix.at<float>(0, 2);
+            const double ty = warpMatrix.at<float>(1, 2);
+            if (std::isfinite(angleDeg) && std::abs(angleDeg) <= 25.0
+                && std::abs(tx) < w * 0.5 && std::abs(ty) < h * 0.5)
+            {
+                eccOk = true;
+            }
+        }
+    }
+    catch (const cv::Exception&)
+    {
+        eccOk = false;
+    }
+
+    if (eccOk)
+    {
+        warpAndMeasureOverlap(srcMat, srcLum, warpMatrix, /*inverseMap=*/true, meta, out);
+        if (!allowRotation)
+        {
+            out.rotationDeg = 0.0;
+            out.aligned.meta.rotationDeg = 0.0;
+        }
+    }
+    else
+    {
+        out.usedFallback = true;
+        const cv::Mat M(cv::Matx23d(1.0, 0.0, coarse.x, 0.0, 1.0, coarse.y));
+        warpAndMeasureOverlap(srcMat, srcLum, M, /*inverseMap=*/false, meta, out);
+        out.rotationDeg = 0.0;
+        out.aligned.meta.rotationDeg = 0.0;
+    }
+    return out;
+}
+
 } // namespace
 
 BurstStackResult stackBurst(const std::vector<PreparedBurstFrame>& kept,
@@ -896,167 +1173,306 @@ SessionAlignResult alignStackToReference(const FitsImage& stack,
     }
 
     // Moon: 2D rigid translation + rotation, anchored to lunarAnchor if selected.
-    cv::Mat fullHann;
-    cv::createHanningWindow(fullHann, refLum.size(), CV_32F);
-    double coarseResp = 0;
-    cv::Point2d coarse = estimateShiftPhase(refLum, srcLum, fullHann, &coarseResp);
+    return alignMoonEcc(srcMat, refMat, srcLum, refLum, stack.meta, /*allowRotation=*/true, lunarAnchor);
+}
 
-    std::vector<cv::Point2d> initialShifts;
-    cv::Mat mask(h, w, CV_8UC1, cv::Scalar(255));
-    if (lunarAnchor && lunarAnchor->isValid())
-    {
-        const QRect anchor = clampRect(*lunarAnchor, w, h);
-        mask.setTo(0);
-        mask(cv::Rect(anchor.x(), anchor.y(), anchor.width(), anchor.height())).setTo(255);
+QRect fitsValidOverlapRect(const FitsImage& image)
+{
+    if (!image.valid()) return {};
+    const cv::Mat lum = matLuminance(fitsToMat(image));
+    const cv::Mat valid = buildSourceValidMask(lum);
+    if (cv::countNonZero(valid) == image.width * image.height)
+        return QRect(0, 0, image.width, image.height);
+    cv::Mat eroded;
+    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
+        cv::Size(2 * kLanczosRadius + 1, 2 * kLanczosRadius + 1));
+    cv::erode(valid, eroded, kernel, cv::Point(-1, -1), 1, cv::BORDER_CONSTANT, cv::Scalar(255));
+    QRect r = largestInscribedRect(eroded);
+    if (r.width() < 2 || r.height() < 2) r = largestInscribedRect(valid);
+    if (r.width() < 2 || r.height() < 2) r = QRect(0, 0, image.width, image.height);
+    return r;
+}
 
-        // If user selected a constant sunlit anchor, prefer coarse shift inside the anchor
-        // so moving shadows outside the anchor cannot bias the initial translation.
-        if (anchor.width() >= 32 && anchor.height() >= 32)
-        {
-            cv::Mat aHann;
-            cv::createHanningWindow(aHann, cv::Size(anchor.width(), anchor.height()), CV_32F);
-            const cv::Rect ar(anchor.x(), anchor.y(), anchor.width(), anchor.height());
-            double anchorResp = 0;
-            const cv::Point2d anchorShift = estimateShiftPhase(refLum(ar), srcLum(ar), aHann, &anchorResp);
-            if (anchorResp > 0.04) initialShifts.push_back(anchorShift);
-        }
-    }
-    initialShifts.push_back(coarse);
-    if (std::hypot(coarse.x, coarse.y) > 1.0)
-        initialShifts.emplace_back(0.0, 0.0);
-
-    // Build coarse-to-fine Gaussian pyramid for large shifts + off-center rotation.
-    std::vector<cv::Mat> pyrRef{refLum};
-    std::vector<cv::Mat> pyrSrc{srcLum};
-    std::vector<cv::Mat> pyrMask{mask};
-    while (pyrRef.size() < 3 && pyrRef.back().cols >= 192 && pyrRef.back().rows >= 192)
-    {
-        cv::Mat rDown, sDown, mDown;
-        cv::pyrDown(pyrRef.back(), rDown);
-        cv::pyrDown(pyrSrc.back(), sDown);
-        cv::resize(pyrMask.back(), mDown, rDown.size(), 0, 0, cv::INTER_NEAREST);
-        if (cv::countNonZero(mDown) < 64) break;
-        pyrRef.push_back(std::move(rDown));
-        pyrSrc.push_back(std::move(sDown));
-        pyrMask.push_back(std::move(mDown));
-    }
-
-    const int topLvl = static_cast<int>(pyrRef.size()) - 1;
-    const float scaleDown = static_cast<float>(1 << topLvl);
-    cv::Mat warpMatrix;
-    bool eccOk = false;
-    try
-    {
-        double bestTopCc = -2.0;
-        for (const cv::Point2d& init : initialShifts)
-        {
-            cv::Mat cand(cv::Matx23f(
-                1.0f, 0.0f, static_cast<float>(-init.x / scaleDown),
-                0.0f, 1.0f, static_cast<float>(-init.y / scaleDown)));
-            try
-            {
-                const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 60, 1e-4);
-                const double cc = cv::findTransformECC(pyrRef[static_cast<size_t>(topLvl)],
-                    pyrSrc[static_cast<size_t>(topLvl)], cand, cv::MOTION_EUCLIDEAN, criteria,
-                    pyrMask[static_cast<size_t>(topLvl)]);
-                if (cc > bestTopCc)
-                {
-                    bestTopCc = cc;
-                    warpMatrix = cand.clone();
-                }
-                if (bestTopCc >= 0.99) break;
-            }
-            catch (const cv::Exception&) {}
-        }
-
-        if (!warpMatrix.empty())
-        {
-            for (int lvl = topLvl - 1; lvl >= 0; --lvl)
-            {
-                cv::Mat scaled = warpMatrix.clone();
-                scaled.at<float>(0, 2) *= 2.0f;
-                scaled.at<float>(1, 2) *= 2.0f;
-                try
-                {
-                    const int iters = lvl == 0 ? 80 : 60;
-                    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, iters, 1e-4);
-                    cv::findTransformECC(pyrRef[static_cast<size_t>(lvl)], pyrSrc[static_cast<size_t>(lvl)],
-                        scaled, cv::MOTION_EUCLIDEAN, criteria, pyrMask[static_cast<size_t>(lvl)]);
-                    warpMatrix = std::move(scaled);
-                }
-                catch (const cv::Exception&)
-                {
-                    // Keep the previous converged level's transform scaled to this level's resolution.
-                    warpMatrix = std::move(scaled);
-                }
-            }
-            const double cosT = warpMatrix.at<float>(0, 0);
-            const double sinT = warpMatrix.at<float>(1, 0);
-            const double angleDeg = std::atan2(sinT, cosT) * 180.0 / 3.14159265358979323846;
-            const double tx = warpMatrix.at<float>(0, 2);
-            const double ty = warpMatrix.at<float>(1, 2);
-            if (std::isfinite(angleDeg) && std::abs(angleDeg) <= 25.0
-                && std::abs(tx) < w * 0.5 && std::abs(ty) < h * 0.5)
-            {
-                eccOk = true;
-            }
-        }
-    }
-    catch (const cv::Exception&)
-    {
-        eccOk = false;
-    }
-
-    cv::Mat warped;
-    if (eccOk)
-    {
-        cv::warpAffine(srcMat, warped, warpMatrix, cv::Size(w, h),
-            cv::INTER_LANCZOS4 | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT, cv::Scalar::all(0));
-        // Compute forward translation of frame center and rotation angle for telemetry.
-        const cv::Matx23d invM(
-            warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
-            warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
-        cv::Mat fwdM;
-        cv::invertAffineTransform(cv::Mat(invM), fwdM);
-        const double cx = w * 0.5;
-        const double cy = h * 0.5;
-        const double nx = fwdM.at<double>(0, 0) * cx + fwdM.at<double>(0, 1) * cy + fwdM.at<double>(0, 2);
-        const double ny = fwdM.at<double>(1, 0) * cx + fwdM.at<double>(1, 1) * cy + fwdM.at<double>(1, 2);
-        out.shiftX = nx - cx;
-        out.shiftY = ny - cy;
-        out.rotationDeg = std::atan2(fwdM.at<double>(1, 0), fwdM.at<double>(0, 0)) * 180.0 / 3.14159265358979323846;
-
-        // Compute the largest inscribed valid rectangle strictly inside the warped mask,
-        // eroding warped black borders by the Lanczos-4 kernel radius (4 px) while keeping
-        // unshifted image edges intact via BORDER_CONSTANT=255.
-        cv::Mat ones(h, w, CV_8UC1, cv::Scalar(255));
-        cv::Mat validMask;
-        cv::warpAffine(ones, validMask, warpMatrix, cv::Size(w, h),
-            cv::INTER_NEAREST | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT, cv::Scalar(0));
-        cv::Mat erodedMask;
-        const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
-            cv::Size(2 * kLanczosRadius + 1, 2 * kLanczosRadius + 1));
-        cv::erode(validMask, erodedMask, kernel, cv::Point(-1, -1), 1, cv::BORDER_CONSTANT, cv::Scalar(255));
-        QRect inscribed = largestInscribedRect(erodedMask);
-        if (inscribed.width() < 2 || inscribed.height() < 2)
-            inscribed = largestInscribedRect(validMask);
-        if (inscribed.width() >= 2 && inscribed.height() >= 2)
-            out.validOverlap = inscribed;
-    }
-    else
+SessionAlignResult realignStackToReference(const FitsImage& stack,
+    const FitsImage& reference,
+    StackRealignMode mode,
+    bool allowRotation,
+    const std::optional<QRect>& featureBox)
+{
+    SessionAlignResult out;
+    out.aligned = stack;
+    out.validOverlap = QRect(0, 0, stack.width, stack.height);
+    if (mode == StackRealignMode::Off)
+        return out;
+    if (!stack.valid() || !reference.valid() || stack.width != reference.width || stack.height != reference.height)
     {
         out.usedFallback = true;
-        out.shiftX = coarse.x;
-        out.shiftY = coarse.y;
-        out.rotationDeg = 0.0;
-        const cv::Matx23d M(1.0, 0.0, coarse.x, 0.0, 1.0, coarse.y);
-        cv::warpAffine(srcMat, warped, M, cv::Size(w, h), cv::INTER_LANCZOS4, cv::BORDER_CONSTANT, cv::Scalar::all(0));
-        out.validOverlap = validShiftOverlap(w, h, coarse.x, coarse.x, coarse.y, coarse.y);
+        return out;
     }
 
-    cv::min(warped, 1.0f, warped);
-    cv::max(warped, 0.0f, warped);
-    out.aligned = matToFits(warped, stack.meta);
+    const int w = stack.width;
+    const int h = stack.height;
+    const cv::Mat srcMat = fitsToMat(stack);
+    const cv::Mat refMat = fitsToMat(reference);
+    const cv::Mat srcLum = matLuminance(srcMat);
+    const cv::Mat refLum = matLuminance(refMat);
+
+    // 1. Feature box mode: shared pyramid ECC (Euclidean when allowRotation, Translation otherwise).
+    if (mode == StackRealignMode::FeatureBox)
+        return alignMoonEcc(srcMat, refMat, srcLum, refLum, stack.meta, allowRotation, featureBox);
+
+    // 2. Auto multi-point (rigid) mode.
+    cv::Mat fullHann;
+    cv::createHanningWindow(fullHann, refLum.size(), CV_32F);
+    double coarseResp = 0.0;
+    const cv::Point2d coarse = estimateShiftPhase(refLum, srcLum, fullHann, &coarseResp);
+
+    const int minDim = std::min(w, h);
+    int tplSize = std::clamp(minDim / 6, 32, 64) & ~1;
+    if (tplSize > minDim - 16) tplSize = std::max(20, (minDim - 16) & ~1);
+    const int halfT = tplSize / 2;
+    const int searchRadius = std::clamp(minDim / 10, 16, 48);
+
+    const auto fallbackMultiPoint = [&]() -> SessionAlignResult {
+        if (allowRotation)
+        {
+            SessionAlignResult fb = alignMoonEcc(srcMat, refMat, srcLum, refLum, stack.meta, true, {});
+            fb.usedFallback = true;
+            fb.inliers = 0;
+            fb.totalPoints = out.totalPoints;
+            return fb;
+        }
+        out.usedFallback = true;
+        out.inliers = 0;
+        const cv::Mat M(cv::Matx23d(1.0, 0.0, coarse.x, 0.0, 1.0, coarse.y));
+        warpAndMeasureOverlap(srcMat, srcLum, M, /*inverseMap=*/false, stack.meta, out);
+        out.rotationDeg = 0.0;
+        out.aligned.meta.rotationDeg = 0.0;
+        return out;
+    };
+
+    if (w < tplSize + 12 || h < tplSize + 12)
+        return fallbackMultiPoint();
+
+    // Select well-spaced high-contrast control points across illuminated surface of reference.
+    cv::Mat refValid;
+    cv::bitwise_and(buildSourceValidMask(refLum), targetForegroundMask(refLum), refValid);
+
+    cv::Mat gx, gy, gradMag, smoothGrad;
+    cv::Sobel(refLum, gx, CV_32F, 1, 0, 3);
+    cv::Sobel(refLum, gy, CV_32F, 0, 1, 3);
+    cv::magnitude(gx, gy, gradMag);
+    const int boxK = std::max(5, (tplSize / 2) | 1);
+    cv::boxFilter(gradMag, smoothGrad, CV_32F, cv::Size(boxK, boxK));
+
+    const int gridCols = minDim >= 512 ? 6 : (minDim >= 200 ? 5 : 4);
+    const int gridRows = minDim >= 512 ? 5 : (minDim >= 200 ? 5 : 4);
+    const int usableX0 = halfT;
+    const int usableY0 = halfT;
+    const int usableW = w - 2 * halfT;
+    const int usableH = h - 2 * halfT;
+
+    std::vector<cv::Point> refCenters;
+    refCenters.reserve(static_cast<size_t>(gridCols * gridRows));
+    for (int gyi = 0; gyi < gridRows; ++gyi)
+    {
+        const int cy0 = usableY0 + (gyi * usableH) / gridRows;
+        const int cy1 = usableY0 + ((gyi + 1) * usableH) / gridRows;
+        if (cy1 <= cy0) continue;
+        for (int gxi = 0; gxi < gridCols; ++gxi)
+        {
+            const int cx0 = usableX0 + (gxi * usableW) / gridCols;
+            const int cx1 = usableX0 + ((gxi + 1) * usableW) / gridCols;
+            if (cx1 <= cx0) continue;
+
+            const cv::Rect cell(cx0, cy0, cx1 - cx0, cy1 - cy0);
+            double maxVal = 0.0;
+            cv::Point maxLoc;
+            cv::minMaxLoc(smoothGrad(cell), nullptr, &maxVal, nullptr, &maxLoc, refValid(cell));
+            if (maxVal <= 1e-4) continue;
+            const cv::Point center(cx0 + maxLoc.x, cy0 + maxLoc.y);
+            const cv::Rect patchR(center.x - halfT, center.y - halfT, tplSize, tplSize);
+            if (cv::countNonZero(refValid(patchR)) < static_cast<int>(tplSize * tplSize * 0.70))
+                continue;
+            cv::Scalar patchStd;
+            cv::meanStdDev(refLum(patchR), cv::noArray(), patchStd);
+            if (patchStd[0] < 0.005) continue;
+            refCenters.push_back(center);
+        }
+    }
+
+    out.totalPoints = static_cast<int>(refCenters.size());
+    if (refCenters.size() < 4)
+        return fallbackMultiPoint();
+
+    // Track each reference patch in srcLum via zero-mean normalized cross-correlation
+    // (TM_CCOEFF_NORMED) + 2D parabolic sub-pixel peak refinement.
+    const int cix = static_cast<int>(std::lround(coarse.x));
+    const int ciy = static_cast<int>(std::lround(coarse.y));
+
+    std::vector<cv::Point2d> srcPts;
+    std::vector<cv::Point2d> refPts;
+    srcPts.reserve(refCenters.size());
+    refPts.reserve(refCenters.size());
+
+    for (const cv::Point& rc : refCenters)
+    {
+        const cv::Rect refR(rc.x - halfT, rc.y - halfT, tplSize, tplSize);
+        const int sx0 = rc.x - cix;
+        const int sy0 = rc.y - ciy;
+        const int x0 = std::max(0, sx0 - halfT - searchRadius);
+        const int y0 = std::max(0, sy0 - halfT - searchRadius);
+        const int x1 = std::min(w, sx0 + halfT + searchRadius);
+        const int y1 = std::min(h, sy0 + halfT + searchRadius);
+        if (x1 - x0 < tplSize + 4 || y1 - y0 < tplSize + 4)
+            continue;
+
+        const cv::Rect searchR(x0, y0, x1 - x0, y1 - y0);
+        cv::Mat corr;
+        cv::matchTemplate(srcLum(searchR), refLum(refR), corr, cv::TM_CCOEFF_NORMED);
+        double maxCorr = 0.0;
+        cv::Point maxLoc;
+        cv::minMaxLoc(corr, nullptr, &maxCorr, nullptr, &maxLoc);
+        if (maxCorr < 0.55) continue;
+        // Reject boundary peaks where the true match may lie outside the search window.
+        if (maxLoc.x <= 0 || maxLoc.y <= 0 || maxLoc.x >= corr.cols - 1 || maxLoc.y >= corr.rows - 1)
+            continue;
+
+        const double cC = corr.at<float>(maxLoc.y, maxLoc.x);
+        const double cL = corr.at<float>(maxLoc.y, maxLoc.x - 1);
+        const double cR = corr.at<float>(maxLoc.y, maxLoc.x + 1);
+        const double cU = corr.at<float>(maxLoc.y - 1, maxLoc.x);
+        const double cD = corr.at<float>(maxLoc.y + 1, maxLoc.x);
+        const double denX = cL - 2.0 * cC + cR;
+        const double denY = cU - 2.0 * cC + cD;
+        const double subX = (std::abs(denX) > 1e-6) ? std::clamp(0.5 * (cL - cR) / denX, -0.5, 0.5) : 0.0;
+        const double subY = (std::abs(denY) > 1e-6) ? std::clamp(0.5 * (cU - cD) / denY, -0.5, 0.5) : 0.0;
+
+        srcPts.emplace_back(x0 + maxLoc.x + subX + halfT, y0 + maxLoc.y + subY + halfT);
+        refPts.emplace_back(static_cast<double>(rc.x), static_cast<double>(rc.y));
+    }
+
+    const size_t nMatches = srcPts.size();
+    if (!allowRotation)
+    {
+        if (nMatches < 2) return fallbackMultiPoint();
+        constexpr double kShiftTol = 1.75;
+        std::vector<size_t> bestInliers;
+        double bestErr = std::numeric_limits<double>::max();
+        for (size_t i = 0; i < nMatches; ++i)
+        {
+            const cv::Point2d di = refPts[i] - srcPts[i];
+            std::vector<size_t> inl;
+            double errSum = 0.0;
+            for (size_t k = 0; k < nMatches; ++k)
+            {
+                const cv::Point2d dk = refPts[k] - srcPts[k];
+                const double e = std::hypot(dk.x - di.x, dk.y - di.y);
+                if (e <= kShiftTol) { inl.push_back(k); errSum += e * e; }
+            }
+            if (inl.size() > bestInliers.size() || (inl.size() == bestInliers.size() && errSum < bestErr))
+            {
+                bestInliers = std::move(inl);
+                bestErr = errSum;
+            }
+        }
+        if (bestInliers.size() < 2) return fallbackMultiPoint();
+
+        cv::Point2d meanShift(0.0, 0.0);
+        for (size_t idx : bestInliers) meanShift += (refPts[idx] - srcPts[idx]);
+        meanShift *= (1.0 / static_cast<double>(bestInliers.size()));
+
+        out.inliers = static_cast<int>(bestInliers.size());
+        const cv::Mat M(cv::Matx23d(1.0, 0.0, meanShift.x, 0.0, 1.0, meanShift.y));
+        warpAndMeasureOverlap(srcMat, srcLum, M, /*inverseMap=*/false, stack.meta, out);
+        out.rotationDeg = 0.0;
+        out.aligned.meta.rotationDeg = 0.0;
+        return out;
+    }
+
+    // Rigid 2D (rotation + translation) deterministic pair consensus + Kabsch refit.
+    if (nMatches < 4) return fallbackMultiPoint();
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr double kMaxRotRad = 25.0 * kPi / 180.0;
+    constexpr double kInlierTol = 1.75;
+    const double minBaseline = std::max(24.0, minDim * 0.12);
+
+    std::vector<size_t> bestInliers;
+    double bestErr = std::numeric_limits<double>::max();
+    for (size_t i = 0; i < nMatches; ++i)
+    {
+        for (size_t j = i + 1; j < nMatches; ++j)
+        {
+            const cv::Point2d vp = srcPts[j] - srcPts[i];
+            const cv::Point2d vq = refPts[j] - refPts[i];
+            const double lp = std::hypot(vp.x, vp.y);
+            const double lq = std::hypot(vq.x, vq.y);
+            if (lp < minBaseline || std::abs(lq - lp) > 2.5) continue;
+
+            const double theta = wrapAngleRad(std::atan2(vq.y, vq.x) - std::atan2(vp.y, vp.x));
+            if (std::abs(theta) > kMaxRotRad) continue;
+
+            const double c = std::cos(theta);
+            const double s = std::sin(theta);
+            const cv::Point2d mp = 0.5 * (srcPts[i] + srcPts[j]);
+            const cv::Point2d mq = 0.5 * (refPts[i] + refPts[j]);
+            const double tx = mq.x - (c * mp.x - s * mp.y);
+            const double ty = mq.y - (s * mp.x + c * mp.y);
+
+            std::vector<size_t> inl;
+            double errSum = 0.0;
+            for (size_t k = 0; k < nMatches; ++k)
+            {
+                const double px = c * srcPts[k].x - s * srcPts[k].y + tx;
+                const double py = s * srcPts[k].x + c * srcPts[k].y + ty;
+                const double e = std::hypot(px - refPts[k].x, py - refPts[k].y);
+                if (e <= kInlierTol) { inl.push_back(k); errSum += e * e; }
+            }
+            if (inl.size() > bestInliers.size() || (inl.size() == bestInliers.size() && errSum < bestErr))
+            {
+                bestInliers = std::move(inl);
+                bestErr = errSum;
+            }
+        }
+    }
+
+    if (bestInliers.size() < 4)
+        return fallbackMultiPoint();
+
+    // Exact closed-form Kabsch fit + one tightened inlier refinement pass.
+    Rigid2D fit = fitRigid2D(srcPts, refPts, bestInliers);
+    {
+        const double c = std::cos(fit.theta);
+        const double s = std::sin(fit.theta);
+        std::vector<size_t> refined;
+        for (size_t k = 0; k < nMatches; ++k)
+        {
+            const double px = c * srcPts[k].x - s * srcPts[k].y + fit.tx;
+            const double py = s * srcPts[k].x + c * srcPts[k].y + fit.ty;
+            if (std::hypot(px - refPts[k].x, py - refPts[k].y) <= 1.5)
+                refined.push_back(k);
+        }
+        if (refined.size() >= 4)
+        {
+            bestInliers = std::move(refined);
+            fit = fitRigid2D(srcPts, refPts, bestInliers);
+        }
+    }
+
+    const double angleDeg = fit.theta * 180.0 / kPi;
+    const double c = std::cos(fit.theta);
+    const double s = std::sin(fit.theta);
+    const double centerDx = (c * (w * 0.5) - s * (h * 0.5) + fit.tx) - w * 0.5;
+    const double centerDy = (s * (w * 0.5) + c * (h * 0.5) + fit.ty) - h * 0.5;
+    if (!std::isfinite(angleDeg) || std::abs(angleDeg) > 25.0
+        || std::abs(centerDx) >= w * 0.5 || std::abs(centerDy) >= h * 0.5)
+    {
+        return fallbackMultiPoint();
+    }
+
+    out.inliers = static_cast<int>(bestInliers.size());
+    const cv::Mat fwdM(cv::Matx23d(c, -s, fit.tx, s, c, fit.ty));
+    warpAndMeasureOverlap(srcMat, srcLum, fwdM, /*inverseMap=*/false, stack.meta, out);
     return out;
 }
 

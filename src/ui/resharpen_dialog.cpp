@@ -25,6 +25,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressBar>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QTableWidget>
@@ -73,7 +74,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 {
     setObjectName("resharpenDialog");
     setWindowTitle("Re-sharpen & rebuild time-lapse");
-    resize(980, 680);
+    resize(1040, 740);
 
     auto* root = new QVBoxLayout(this);
 
@@ -143,14 +144,14 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     beforeView_ = makePreviewView(beforeBox, "resharpenBefore");
     beforeLay->addWidget(beforeView_);
 
-    auto* afterBox = new QGroupBox("After (sharpened + tone preview)", this);
-    auto* afterLay = new QVBoxLayout(afterBox);
+    afterBox_ = new QGroupBox("After (sharpened + tone preview)", this);
+    auto* afterLay = new QVBoxLayout(afterBox_);
     afterLay->setContentsMargins(4, 4, 4, 4);
-    afterView_ = makePreviewView(afterBox, "resharpenAfter");
+    afterView_ = makePreviewView(afterBox_, "resharpenAfter");
     afterLay->addWidget(afterView_);
 
     previewCol->addWidget(beforeBox, 1);
-    previewCol->addWidget(afterBox, 1);
+    previewCol->addWidget(afterBox_, 1);
 
     stackListBox_ = new QGroupBox("Stack quality filter inspector (click a stack to preview; tick/untick to override)", this);
     stackListBox_->setObjectName("resharpenStackListBox");
@@ -176,10 +177,27 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     previewCol->addWidget(stackListBox_);
     mainRow->addLayout(previewCol, 3);
 
-    // Right: controls
-    auto* ctrlCol = new QVBoxLayout();
+    // Right: controls (scrollable so everything stays accessible on compact displays)
+    auto* ctrlScroll = new QScrollArea(this);
+    ctrlScroll->setFrameShape(QFrame::NoFrame);
+    ctrlScroll->setWidgetResizable(true);
+    ctrlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ctrlScroll->setMinimumWidth(340);
+    auto* ctrlHost = new QWidget(ctrlScroll);
+    auto* ctrlCol = new QVBoxLayout(ctrlHost);
+    ctrlCol->setContentsMargins(0, 0, 4, 0);
 
-    auto* profileBox = new QGroupBox("Saved profiles", this);
+    auto checkboxRowWithHelp = [](QCheckBox* cb, QWidget* parent) {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(6);
+        row->addWidget(cb);
+        row->addWidget(makeHelpIcon(cb, parent));
+        row->addStretch(1);
+        return row;
+    };
+
+    auto* profileBox = new QGroupBox("Saved profiles", ctrlHost);
     auto* profLay = new QHBoxLayout(profileBox);
     profileCombo_ = new QComboBox(profileBox);
     profileCombo_->setObjectName("resharpenProfileCombo");
@@ -193,7 +211,82 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     profLay->addWidget(deleteProfileBtn_);
     ctrlCol->addWidget(profileBox);
 
-    auto* sharpBox = new QGroupBox("Linear sharpening (FITS + video)", this);
+    auto* realignBox = new QGroupBox("Re-align stacks (optional)", ctrlHost);
+    auto* realignLay = new QVBoxLayout(realignBox);
+    realignLay->setSpacing(6);
+    auto* realignModeForm = new QFormLayout();
+    realignModeForm->setContentsMargins(0, 0, 0, 0);
+    realignMode_ = new QComboBox(realignBox);
+    realignMode_->setObjectName("resharpenRealignMode");
+    realignMode_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    realignMode_->setMinimumContentsLength(22);
+    realignMode_->addItem("Off (keep existing alignment)", static_cast<int>(StackRealignMode::Off));
+    realignMode_->addItem("Feature box (draw on Before)", static_cast<int>(StackRealignMode::FeatureBox));
+    realignMode_->addItem("Auto multi-point (rigid, Moon)", static_cast<int>(StackRealignMode::AutoMultiPoint));
+    realignMode_->setToolTip("Re-aligns every saved stack in stacks/ onto a reference stack before sharpening and "
+        "exporting (original stacks/ are never modified). Feature box locks onto a crater or region you drag on the "
+        "Before preview. Auto multi-point picks crisp surface features across the Moon, rejects moving shadows or "
+        "clouds, and fits a rigid shift + rotation.");
+    realignModeForm->addRow("Mode", realignMode_);
+    realignLay->addLayout(realignModeForm);
+
+    realignBoxRow_ = new QWidget(realignBox);
+    auto* realignBoxRowLay = new QHBoxLayout(realignBoxRow_);
+    realignBoxRowLay->setContentsMargins(0, 0, 0, 0);
+    realignBoxRowLay->setSpacing(6);
+    drawFeatureBoxBtn_ = new QToolButton(realignBoxRow_);
+    drawFeatureBoxBtn_->setObjectName("resharpenDrawFeatureBox");
+    drawFeatureBoxBtn_->setText("Draw feature box");
+    drawFeatureBoxBtn_->setCheckable(true);
+    drawFeatureBoxBtn_->setToolTip("Click, then drag a box around a crisp crater or steady sunlit region on the "
+        "Before preview. The currently displayed stack becomes the reference stack.");
+    clearFeatureBoxBtn_ = new QToolButton(realignBoxRow_);
+    clearFeatureBoxBtn_->setObjectName("resharpenClearFeatureBox");
+    clearFeatureBoxBtn_->setText("Clear");
+    clearFeatureBoxBtn_->setEnabled(false);
+    clearFeatureBoxBtn_->setToolTip("Clear the drawn feature box.");
+    realignBoxRowLay->addWidget(drawFeatureBoxBtn_);
+    realignBoxRowLay->addWidget(clearFeatureBoxBtn_);
+    realignBoxRowLay->addStretch(1);
+    realignLay->addWidget(realignBoxRow_);
+
+    realignRefRow_ = new QWidget(realignBox);
+    auto* realignRefRowLay = new QHBoxLayout(realignRefRow_);
+    realignRefRowLay->setContentsMargins(0, 0, 0, 0);
+    realignRefRowLay->setSpacing(6);
+    setRealignRefBtn_ = new QToolButton(realignRefRow_);
+    setRealignRefBtn_->setObjectName("resharpenSetRealignRef");
+    setRealignRefBtn_->setText("Use current stack as reference");
+    setRealignRefBtn_->setToolTip("Align all stacks to the stack currently selected in Preview stack.");
+    realignRefRowLay->addWidget(setRealignRefBtn_);
+    realignRefRowLay->addStretch(1);
+    realignLay->addWidget(realignRefRow_);
+
+    realignOptsBox_ = new QWidget(realignBox);
+    auto* realignOptsLay = new QVBoxLayout(realignOptsBox_);
+    realignOptsLay->setContentsMargins(0, 0, 0, 0);
+    realignOptsLay->setSpacing(4);
+    correctRotation_ = new QCheckBox("Correct rotation", realignOptsBox_);
+    correctRotation_->setObjectName("resharpenCorrectRotation");
+    correctRotation_->setChecked(true);
+    correctRotation_->setToolTip("Fits both shift and rigid rotation (recommended for Moon field rotation). Uncheck "
+        "for shift-only alignment (for example on planets or an equatorial mount with no field rotation).");
+    saveAlignedStacks_ = new QCheckBox("Save re-aligned FITS stacks", realignOptsBox_);
+    saveAlignedStacks_->setObjectName("resharpenSaveAlignedStacks");
+    saveAlignedStacks_->setChecked(false);
+    saveAlignedStacks_->setToolTip("Also writes the unsharpened re-aligned FITS stacks into the new run folder's "
+        "stacks/ subfolder so you can open it later to tweak sharpening without re-aligning again. Uses extra disk space.");
+    realignStatus_ = new QLabel(realignOptsBox_);
+    realignStatus_->setObjectName("resharpenRealignStatus");
+    realignStatus_->setWordWrap(true);
+    realignStatus_->setStyleSheet("color: #888888;");
+    realignOptsLay->addLayout(checkboxRowWithHelp(correctRotation_, realignOptsBox_));
+    realignOptsLay->addLayout(checkboxRowWithHelp(saveAlignedStacks_, realignOptsBox_));
+    realignOptsLay->addWidget(realignStatus_);
+    realignLay->addWidget(realignOptsBox_);
+    ctrlCol->addWidget(realignBox);
+
+    auto* sharpBox = new QGroupBox("Linear sharpening (FITS + video)", ctrlHost);
     auto* sharpForm = new QFormLayout(sharpBox);
     radius_ = new QDoubleSpinBox(sharpBox);
     radius_->setObjectName("resharpenRadius");
@@ -234,17 +327,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     sharpForm->addRow("Pre-denoise", makeSliderRow(sharpBox, denoise_, denoiseSlider_, "resharpenDenoiseSlider", 0.00, 1.00, 100.0));
     ctrlCol->addWidget(sharpBox);
 
-    auto checkboxRowWithHelp = [](QCheckBox* cb, QWidget* parent) {
-        auto* row = new QHBoxLayout();
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(6);
-        row->addWidget(cb);
-        row->addWidget(makeHelpIcon(cb, parent));
-        row->addStretch(1);
-        return row;
-    };
-
-    auto* videoBox = new QGroupBox("Video tone-mapping && export (MP4/GIF only)", this);
+    auto* videoBox = new QGroupBox("Video tone-mapping && export (MP4/GIF only)", ctrlHost);
     auto* videoForm = new QFormLayout(videoBox);
     autoStretch_ = new QCheckBox("Auto stretch black/white", videoBox);
     autoStretch_->setObjectName("resharpenAutoStretch");
@@ -404,7 +487,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     ctrlCol->addWidget(videoBox);
 
     ctrlCol->addStretch(1);
-    mainRow->addLayout(ctrlCol, 2);
+    ctrlScroll->setWidget(ctrlHost);
+    mainRow->addWidget(ctrlScroll, 2);
     root->addLayout(mainRow, 1);
 
     progressBar_ = new QProgressBar(this);
@@ -448,6 +532,55 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         if (!chosen.isEmpty()) openSession(chosen);
     });
     connect(stackCombo_, &QComboBox::currentIndexChanged, this, [this] { loadSelectedStack(); });
+
+    connect(realignMode_, &QComboBox::currentIndexChanged, this, [this] {
+        if (updating_) return;
+        invalidateRealignCache();
+        if (currentRealignMode() == StackRealignMode::AutoMultiPoint && realignRefIndex_ < 0)
+            realignRefIndex_ = bestStackIndex_;
+        updateRealignControls();
+        updatePreview();
+    });
+    connect(drawFeatureBoxBtn_, &QToolButton::toggled, this, [this](bool on) {
+        beforeView_->setDragMode(on ? PreviewWidget::DragMode::Region : PreviewWidget::DragMode::Pan);
+        if (on) beforeView_->setDragColour(QColor(PreviewWidget::kLockColour));
+    });
+    connect(clearFeatureBoxBtn_, &QToolButton::clicked, this, [this] {
+        realignBox_.reset();
+        invalidateRealignCache();
+        updateRealignControls();
+        updatePreview();
+    });
+    connect(setRealignRefBtn_, &QToolButton::clicked, this, [this] {
+        const int cur = stackCombo_->currentIndex();
+        if (cur >= 0 && cur < static_cast<int>(stackFiles_.size()))
+        {
+            realignRefIndex_ = cur;
+            realignRefRaw_.reset();
+            realignRefRawIdx_ = -1;
+            invalidateRealignCache();
+            updateRealignControls();
+            updatePreview();
+        }
+    });
+    connect(correctRotation_, &QCheckBox::toggled, this, [this] {
+        if (updating_) return;
+        invalidateRealignCache();
+        updatePreview();
+    });
+    connect(beforeView_, &PreviewWidget::regionSelected, this, [this](QRect region) {
+        if (!drawFeatureBoxBtn_->isChecked() || !loadedRaw_) return;
+        const QRect clamped = region.intersected(QRect(0, 0, loadedRaw_->width, loadedRaw_->height));
+        if (clamped.width() < 16 || clamped.height() < 16) return;
+        realignBox_ = clamped;
+        realignRefIndex_ = stackCombo_->currentIndex();
+        realignRefRaw_ = loadedRaw_;
+        realignRefRawIdx_ = realignRefIndex_;
+        invalidateRealignCache();
+        drawFeatureBoxBtn_->setChecked(false);
+        updateRealignControls();
+        updatePreview();
+    });
 
     previewTimer_ = new QTimer(this);
     previewTimer_->setSingleShot(true);
@@ -547,6 +680,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     whiteLevel_->setEnabled(!autoStretch_->isChecked());
     whiteSlider_->setEnabled(!autoStretch_->isChecked());
     updateQualityFilterControls();
+    updateRealignControls();
     installControlHelp(this);
 
     QString startDir = initialSessionDir;
@@ -648,6 +782,20 @@ void ResharpenDialog::openSession(const QString& sessionDir)
     bestSharpened_.reset();
     cachedBestApplied_.reset();
     cachedBestAppliedValid_ = false;
+    realignBox_.reset();
+    realignRefIndex_ = -1;
+    realignRefRaw_.reset();
+    realignRefRawIdx_ = -1;
+    invalidateRealignCache();
+    {
+        const QSignalBlocker br(realignMode_);
+        realignMode_->setCurrentIndex(0);
+    }
+    drawFeatureBoxBtn_->setChecked(false);
+    beforeView_->setAnchorBox(std::nullopt);
+    afterView_->setAnchorBox(std::nullopt);
+    beforeView_->setDragMode(PreviewWidget::DragMode::Pan);
+    saveAlignedStacks_->setChecked(false);
     const QSignalBlocker b(stackCombo_);
     stackCombo_->clear();
     const QDir stacksDir(QDir(sessionDir_).filePath("stacks"));
@@ -701,6 +849,12 @@ void ResharpenDialog::openSession(const QString& sessionDir)
         }
 
         stackCombo_->setCurrentIndex(bestIndex);
+        realignRefIndex_ = bestIndex;
+        {
+            const QSignalBlocker bc(correctRotation_);
+            correctRotation_->setChecked(!bestRaw_ || bestRaw_->meta.targetPreset != "planet");
+        }
+        updateRealignControls();
         loadSelectedStack();
         statusLabel_->setText(QString("Loaded %1 stacks (defaulting preview to sharpest clear stack).").arg(stackFiles_.size()));
     }
@@ -710,6 +864,7 @@ void ResharpenDialog::openSession(const QString& sessionDir)
         loadedSharpened_.reset();
         beforeView_->clear();
         afterView_->clear();
+        updateRealignControls();
         statusLabel_->setText("No stacks/ FITS files found in this folder.");
     }
     applyBtn_->setEnabled(!stackFiles_.empty());
@@ -760,6 +915,7 @@ void ResharpenDialog::loadSelectedStack()
         const QSignalBlocker bt(stackTable_);
         stackTable_->selectRow(idx);
     }
+    updateRealignControls();
     updatePreview();
 }
 
@@ -826,11 +982,16 @@ void ResharpenDialog::updatePreview()
 
     const VideoToneSettings tone = currentTone();
     const SharpeningSettings sharp = currentSharpening();
-    const bool rebuildOnly = rebuildVideoOnly_->isChecked();
+    const StackRealignMode realignMode = currentRealignMode();
+    const bool realignActive = isRealignActive();
+    const bool rebuildOnly = rebuildVideoOnly_->isChecked() && !realignActive;
 
     // Match exportTimelapseFromFits overlap cropping (even dimensions).
+    // When re-aligning, show the full uncropped frame so drawn feature-box
+    // coordinates match full FITS coordinates and the old overlap does not clip.
     QRect crop;
-    if (tone.cropToOverlap && sessionOverlap_ && sessionOverlap_->isValid() && !sessionOverlap_->isEmpty())
+    if (realignMode == StackRealignMode::Off
+        && tone.cropToOverlap && sessionOverlap_ && sessionOverlap_->isValid() && !sessionOverlap_->isEmpty())
     {
         const QRect clipped = sessionOverlap_->intersected(QRect(0, 0, loadedRaw_->width, loadedRaw_->height));
         if (clipped.width() >= 2 && clipped.height() >= 2)
@@ -839,6 +1000,83 @@ void ResharpenDialog::updatePreview()
             crop.setWidth(std::max(2, crop.width() & ~1));
             crop.setHeight(std::max(2, crop.height() & ~1));
         }
+    }
+
+    // Optional live stack re-alignment for After preview (cached per stack/options
+    // so sharpening/tone sliders stay instant).
+    const FitsImage* baseForAfter = &*loadedRaw_;
+    const int curIdx = stackCombo_->currentIndex();
+    const int refIdx = effectiveRealignRefIndex();
+    if (realignActive && refIdx >= 0 && refIdx < static_cast<int>(stackFiles_.size()))
+    {
+        const QString refName = QFileInfo(stackFiles_[static_cast<size_t>(refIdx)]).fileName();
+        if (curIdx == refIdx)
+        {
+            if (realignMode == StackRealignMode::FeatureBox && realignBox_)
+            {
+                realignStatus_->setText(QString("Reference: %1 · Box %2×%3 at (%4,%5). Switch Preview stack to check alignment.")
+                    .arg(refName).arg(realignBox_->width()).arg(realignBox_->height())
+                    .arg(realignBox_->x()).arg(realignBox_->y()));
+            }
+            else
+            {
+                realignStatus_->setText(QString("Reference: %1 (auto multi-point). Switch Preview stack to check alignment.")
+                    .arg(refName));
+            }
+        }
+        else
+        {
+            const bool allowRot = correctRotation_->isChecked();
+            const bool cacheHit = cachedAlignedValid_
+                && cachedAlignedStackIdx_ == curIdx
+                && cachedAlignedRefIdx_ == refIdx
+                && cachedAlignedMode_ == realignMode
+                && cachedAlignedAllowRot_ == allowRot
+                && cachedAlignedBox_ == realignBox_;
+            if (!cacheHit)
+            {
+                if (const FitsImage* refImg = ensureRealignReferenceLoaded(refIdx))
+                {
+                    cachedAlignedResult_ = realignStackToReference(
+                        *loadedRaw_, *refImg, realignMode, allowRot, realignBox_);
+                    cachedAlignedStackIdx_ = curIdx;
+                    cachedAlignedRefIdx_ = refIdx;
+                    cachedAlignedMode_ = realignMode;
+                    cachedAlignedAllowRot_ = allowRot;
+                    cachedAlignedBox_ = realignBox_;
+                    cachedAlignedValid_ = true;
+                }
+            }
+            if (cachedAlignedValid_)
+            {
+                baseForAfter = &cachedAlignedResult_.aligned;
+                QString msg = QString("Aligned to %1: dx %2%3 px, dy %4%5 px")
+                    .arg(refName)
+                    .arg(cachedAlignedResult_.shiftX >= 0 ? "+" : "")
+                    .arg(cachedAlignedResult_.shiftX, 0, 'f', 1)
+                    .arg(cachedAlignedResult_.shiftY >= 0 ? "+" : "")
+                    .arg(cachedAlignedResult_.shiftY, 0, 'f', 1);
+                if (allowRot)
+                {
+                    msg += QString(", rot %1%2°")
+                        .arg(cachedAlignedResult_.rotationDeg >= 0 ? "+" : "")
+                        .arg(cachedAlignedResult_.rotationDeg, 0, 'f', 2);
+                }
+                if (realignMode == StackRealignMode::AutoMultiPoint && cachedAlignedResult_.totalPoints > 0)
+                {
+                    msg += QString(" (%1/%2 pts)")
+                        .arg(cachedAlignedResult_.inliers)
+                        .arg(cachedAlignedResult_.totalPoints);
+                }
+                if (cachedAlignedResult_.usedFallback)
+                    msg += " [fallback]";
+                realignStatus_->setText(msg);
+            }
+        }
+    }
+    else if (realignMode == StackRealignMode::FeatureBox)
+    {
+        realignStatus_->setText("Pick a reference stack above, then click Draw feature box and drag on Before.");
     }
 
     // Build the exact linear After stack (reusing sharpened/ when Rebuild video only is checked).
@@ -850,15 +1088,24 @@ void ResharpenDialog::updatePreview()
     }
     else
     {
-        computedAfter = applyLinearSharpening(*loadedRaw_, sharp);
+        computedAfter = applyLinearSharpening(*baseForAfter, sharp);
         afterFits = &computedAfter;
     }
 
-    // Use the sharpened highest-quality stack as the reference for auto-stretch and
-    // brightness levelling, matching exportTimelapseFromFits.
-    const bool viewingBest = (stackCombo_->currentIndex() == bestStackIndex_) || !bestRaw_;
+    // Use the sharpened highest-quality stack (or re-align reference) for auto-stretch
+    // and brightness levelling, matching exportTimelapseFromFits.
+    const bool viewingBest = (curIdx == bestStackIndex_) || !bestRaw_;
     const FitsImage* refFits = afterFits;
-    if (!viewingBest)
+    FitsImage customRefSharp;
+    if (realignActive && curIdx != refIdx && refIdx != bestStackIndex_)
+    {
+        if (const FitsImage* refRaw = ensureRealignReferenceLoaded(refIdx))
+        {
+            customRefSharp = applyLinearSharpening(*refRaw, sharp);
+            refFits = &customRefSharp;
+        }
+    }
+    else if (!viewingBest)
     {
         if (rebuildOnly)
         {
@@ -1072,6 +1319,89 @@ std::map<QString, bool> ResharpenDialog::currentStackOverrides() const
     return out;
 }
 
+StackRealignMode ResharpenDialog::currentRealignMode() const
+{
+    if (!realignMode_) return StackRealignMode::Off;
+    return static_cast<StackRealignMode>(realignMode_->currentData().toInt());
+}
+
+bool ResharpenDialog::isRealignActive() const
+{
+    const StackRealignMode mode = currentRealignMode();
+    if (mode == StackRealignMode::AutoMultiPoint) return !stackFiles_.empty();
+    if (mode == StackRealignMode::FeatureBox) return !stackFiles_.empty() && realignBox_.has_value();
+    return false;
+}
+
+int ResharpenDialog::effectiveRealignRefIndex() const
+{
+    if (realignRefIndex_ >= 0 && realignRefIndex_ < static_cast<int>(stackFiles_.size()))
+        return realignRefIndex_;
+    return bestStackIndex_;
+}
+
+const FitsImage* ResharpenDialog::ensureRealignReferenceLoaded(int refIdx)
+{
+    if (refIdx < 0 || refIdx >= static_cast<int>(stackFiles_.size())) return nullptr;
+    if (refIdx == bestStackIndex_ && bestRaw_) return &*bestRaw_;
+    if (realignRefRaw_ && realignRefRawIdx_ == refIdx) return &*realignRefRaw_;
+    FitsImage img;
+    QString err;
+    if (!readFitsFloat(stackFiles_[static_cast<size_t>(refIdx)], img, err)) return nullptr;
+    realignRefRaw_ = std::move(img);
+    realignRefRawIdx_ = refIdx;
+    return &*realignRefRaw_;
+}
+
+void ResharpenDialog::invalidateRealignCache()
+{
+    cachedAlignedValid_ = false;
+    cachedAlignedStackIdx_ = -1;
+}
+
+void ResharpenDialog::updateRealignControls()
+{
+    if (!realignMode_) return;
+    const StackRealignMode mode = currentRealignMode();
+    const bool isOff = (mode == StackRealignMode::Off);
+    const bool isBox = (mode == StackRealignMode::FeatureBox);
+    const bool isAuto = (mode == StackRealignMode::AutoMultiPoint);
+    const bool hasStacks = !stackFiles_.empty();
+
+    realignBoxRow_->setVisible(isBox);
+    realignRefRow_->setVisible(isAuto);
+    realignOptsBox_->setVisible(!isOff);
+
+    drawFeatureBoxBtn_->setEnabled(hasStacks);
+    clearFeatureBoxBtn_->setEnabled(realignBox_.has_value());
+    if (!isBox && drawFeatureBoxBtn_->isChecked())
+        drawFeatureBoxBtn_->setChecked(false);
+
+    const int refIdx = effectiveRealignRefIndex();
+    setRealignRefBtn_->setEnabled(hasStacks && stackCombo_->currentIndex() >= 0 && stackCombo_->currentIndex() != refIdx);
+
+    const std::optional<QRect> shownBox = isBox ? realignBox_ : std::nullopt;
+    beforeView_->setAnchorBox(shownBox);
+    afterView_->setAnchorBox(shownBox);
+
+    if (afterBox_)
+    {
+        afterBox_->setTitle(isRealignActive()
+            ? "After (re-aligned + sharpened + tone preview)"
+            : "After (sharpened + tone preview)");
+    }
+
+    if (!isOff)
+    {
+        if (rebuildVideoOnly_->isChecked()) rebuildVideoOnly_->setChecked(false);
+        rebuildVideoOnly_->setEnabled(false);
+    }
+    else
+    {
+        rebuildVideoOnly_->setEnabled(true);
+    }
+}
+
 void ResharpenDialog::setBusy(bool busy)
 {
     applyBtn_->setEnabled(!busy && !stackFiles_.empty());
@@ -1080,12 +1410,25 @@ void ResharpenDialog::setBusy(bool busy)
     profileCombo_->setEnabled(!busy);
     saveProfileBtn_->setEnabled(!busy);
     deleteProfileBtn_->setEnabled(!busy);
+    realignMode_->setEnabled(!busy);
+    drawFeatureBoxBtn_->setEnabled(!busy && !stackFiles_.empty());
+    clearFeatureBoxBtn_->setEnabled(!busy && realignBox_.has_value());
+    setRealignRefBtn_->setEnabled(!busy && !stackFiles_.empty()
+        && stackCombo_->currentIndex() >= 0 && stackCombo_->currentIndex() != effectiveRealignRefIndex());
+    correctRotation_->setEnabled(!busy);
+    saveAlignedStacks_->setEnabled(!busy);
     cancelBtn_->setEnabled(busy);
 }
 
 void ResharpenDialog::onApplyAll()
 {
     if (sessionDir_.isEmpty() || stackFiles_.empty()) return;
+    const StackRealignMode mode = currentRealignMode();
+    if (mode == StackRealignMode::FeatureBox && !realignBox_.has_value())
+    {
+        statusLabel_->setText("Draw a feature box on the Before preview first, or switch Re-align mode to Off / Auto multi-point.");
+        return;
+    }
     if (worker_.joinable()) worker_.join();
 
     cancelFlag_.store(false);
@@ -1096,10 +1439,18 @@ void ResharpenDialog::onApplyAll()
     const QString dir = sessionDir_;
     const SharpeningSettings sharp = currentSharpening();
     const VideoToneSettings tone = currentTone();
-    const bool rebuildOnly = rebuildVideoOnly_->isChecked();
+    const bool rebuildOnly = rebuildVideoOnly_->isChecked() && mode == StackRealignMode::Off;
     const std::map<QString, bool> overrides = currentStackOverrides();
+    RealignOptions realign;
+    realign.mode = mode;
+    realign.allowRotation = correctRotation_->isChecked();
+    realign.featureBox = realignBox_;
+    realign.saveAlignedStacks = saveAlignedStacks_->isChecked();
+    const int refIdx = effectiveRealignRefIndex();
+    if (refIdx >= 0 && refIdx < static_cast<int>(stackFiles_.size()))
+        realign.referenceFileName = QFileInfo(stackFiles_[static_cast<size_t>(refIdx)]).fileName();
 
-    worker_ = std::jthread([this, dir, sharp, tone, rebuildOnly, overrides] {
+    worker_ = std::jthread([this, dir, sharp, tone, rebuildOnly, overrides, realign] {
         QString outDir;
         TimelapseExportResult res;
         // This thread's exception boundary: a failure ends this run with a
@@ -1115,7 +1466,7 @@ void ResharpenDialog::onApplyAll()
                         statusLabel_->setText(QString("%1 (%2/%3)").arg(stage).arg(done).arg(total));
                     }, Qt::QueuedConnection);
                 },
-                &cancelFlag_, overrides);
+                &cancelFlag_, overrides, realign);
         }
         catch (const std::exception& ex)
         {

@@ -16,6 +16,7 @@ class PreviewWidget;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGroupBox;
 class QLabel;
 class QProgressBar;
 class QPushButton;
@@ -56,6 +57,12 @@ private:
     void stepDroppedStack(int direction);
     void onStackTableItemChanged(QTableWidgetItem* item);
     [[nodiscard]] std::map<QString, bool> currentStackOverrides() const;
+    [[nodiscard]] StackRealignMode currentRealignMode() const;
+    [[nodiscard]] bool isRealignActive() const;
+    [[nodiscard]] int effectiveRealignRefIndex() const;
+    [[nodiscard]] const FitsImage* ensureRealignReferenceLoaded(int refIdx);
+    void updateRealignControls();
+    void invalidateRealignCache();
 
     QString timelapsesRoot_;
     QString sessionDir_;
@@ -81,6 +88,18 @@ private:
     double cachedBeforeGamma_{-1.0};
     QRect cachedBeforeCrop_;
 
+    std::optional<QRect> realignBox_;
+    int realignRefIndex_{-1};
+    int realignRefRawIdx_{-1};
+    std::optional<FitsImage> realignRefRaw_;
+    bool cachedAlignedValid_{false};
+    int cachedAlignedStackIdx_{-1};
+    int cachedAlignedRefIdx_{-1};
+    StackRealignMode cachedAlignedMode_{StackRealignMode::Off};
+    bool cachedAlignedAllowRot_{true};
+    std::optional<QRect> cachedAlignedBox_;
+    SessionAlignResult cachedAlignedResult_;
+
     QTimer* previewTimer_{nullptr};
     QLabel* sessionLabel_{nullptr};
     QPushButton* browseBtn_{nullptr};
@@ -88,6 +107,17 @@ private:
     QComboBox* profileCombo_{nullptr};
     QPushButton* saveProfileBtn_{nullptr};
     QPushButton* deleteProfileBtn_{nullptr};
+
+    QComboBox* realignMode_{nullptr};
+    QWidget* realignBoxRow_{nullptr};
+    QToolButton* drawFeatureBoxBtn_{nullptr};
+    QToolButton* clearFeatureBoxBtn_{nullptr};
+    QWidget* realignRefRow_{nullptr};
+    QToolButton* setRealignRefBtn_{nullptr};
+    QWidget* realignOptsBox_{nullptr};
+    QCheckBox* correctRotation_{nullptr};
+    QCheckBox* saveAlignedStacks_{nullptr};
+    QLabel* realignStatus_{nullptr};
 
     QDoubleSpinBox* radius_{nullptr};
     QSlider* radiusSlider_{nullptr};
@@ -131,6 +161,7 @@ private:
     QToolButton* zoom200Btn_{nullptr};
     QToolButton* zoom400Btn_{nullptr};
     QLabel* zoomReadout_{nullptr};
+    QGroupBox* afterBox_{nullptr};
     PreviewWidget* beforeView_{nullptr};
     PreviewWidget* afterView_{nullptr};
     bool syncingView_{false};

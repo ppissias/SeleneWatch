@@ -60,6 +60,13 @@ struct BurstStackResult
     QString error;
 };
 
+enum class StackRealignMode
+{
+    Off,
+    FeatureBox,
+    AutoMultiPoint
+};
+
 struct SessionAlignResult
 {
     FitsImage aligned;
@@ -68,6 +75,8 @@ struct SessionAlignResult
     double rotationDeg{0};
     QRect validOverlap;
     bool usedFallback{false};
+    int inliers{0};
+    int totalPoints{0};
 };
 
 // Fast source-thread capture: copies cropped raw bytes (preserving Bayer phase
@@ -101,6 +110,24 @@ struct SessionAlignResult
     const FitsImage& reference,
     TimelapsePreset preset,
     const std::optional<QRect>& lunarAnchor = {});
+
+// Post-capture stack re-alignment onto a chosen reference stack:
+// - Off: returns stack unchanged.
+// - FeatureBox: aligns using featureBox (rigid shift + rotation via ECC when
+//   allowRotation is true, or sub-pixel shift-only inside featureBox when false).
+// - AutoMultiPoint: automatically selects high-contrast lunar control points across
+//   reference, tracks local sub-pixel patch shifts, rejects moving-shadow or cloud
+//   outliers via deterministic 2D rigid RANSAC, and fits a global rigid transform
+//   (shift + rotation when allowRotation is true, shift-only when false).
+[[nodiscard]] SessionAlignResult realignStackToReference(const FitsImage& stack,
+    const FitsImage& reference,
+    StackRealignMode mode,
+    bool allowRotation,
+    const std::optional<QRect>& featureBox = {});
+
+// Returns the largest inscribed rectangle excluding any border-connected zero-filled
+// warp margins already present in a saved FITS stack.
+[[nodiscard]] QRect fitsValidOverlapRect(const FitsImage& image);
 
 // Applies linear float denoise + thresholded unsharp masking without gamma/stretch.
 [[nodiscard]] FitsImage applyLinearSharpening(const FitsImage& unsharpened,

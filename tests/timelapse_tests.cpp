@@ -267,6 +267,7 @@ private slots:
     void qualityFilterModesAndManualOverrides();
     void serTimelapseExportLinearAndStretchedWithTimestamps();
     void anUnclosedVideoStillPlays();
+    void realignStacksFeatureBoxAndAutoMultiPoint();
 };
 
 namespace {
@@ -2703,6 +2704,196 @@ void TimelapseTests::serTimelapseExportLinearAndStretchedWithTimestamps()
     VideoToneSettings lv;
     QVERIFY(loadProfileJson(profPath, ls, lv, err));
     QVERIFY(lv.writeSer && lv.stretchSer && !lv.writeMp4 && !lv.writeGif);
+}
+
+void TimelapseTests::realignStacksFeatureBoxAndAutoMultiPoint()
+{
+    const int w = 256, h = 256;
+    const auto refField = makeLunarCraterField(w, h);
+    FitsImage ref;
+    ref.width = w;
+    ref.height = h;
+    ref.channels = 1;
+    ref.pixels = refField;
+    ref.meta.targetPreset = "moon";
+
+    // 1. Feature box with rotation enabled recovers shift + rotation despite heavy moving shadow outside box.
+    {
+        auto movField = warpFloatField(refField, w, h, 9.5, -7.25, 4.5);
+        for (int y = 140; y < h; ++y)
+            for (int x = 0; x < 120; ++x)
+                movField[static_cast<size_t>(y) * w + x] *= 0.15f;
+        FitsImage mov = ref;
+        mov.pixels = std::move(movField);
+
+        const QRect box(124, 28, 96, 96);
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::FeatureBox, /*allowRotation=*/true, box);
+        QVERIFY(!res.usedFallback);
+        QVERIFY2(std::abs(res.rotationDeg - (-4.5)) < 0.6,
+            qPrintable(QString("FeatureBox rot=%1 shift=(%2,%3)").arg(res.rotationDeg).arg(res.shiftX).arg(res.shiftY)));
+        QVERIFY(std::abs(res.aligned.meta.rotationDeg - res.rotationDeg) < 1e-6);
+        double sqErr = 0.0;
+        int n = 0;
+        for (int y = box.top() + 8; y < box.bottom() - 8; ++y)
+        {
+            for (int x = box.left() + 8; x < box.right() - 8; ++x)
+            {
+                const double d = res.aligned.pixels[static_cast<size_t>(y) * w + x]
+                               - ref.pixels[static_cast<size_t>(y) * w + x];
+                sqErr += d * d;
+                ++n;
+            }
+        }
+        const double rms = std::sqrt(sqErr / std::max(1, n));
+        QVERIFY2(rms < 0.025, qPrintable(QString("FeatureBox rms=%1").arg(rms)));
+    }
+
+    // 2. Feature box shift-only (allowRotation = false) keeps rotation strictly 0 and recovers sub-pixel shift.
+    {
+        FitsImage mov = ref;
+        mov.pixels = warpFloatField(refField, w, h, 11.25, -6.5, 0.0);
+        const QRect box(116, 40, 96, 96);
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::FeatureBox, /*allowRotation=*/false, box);
+        QVERIFY(!res.usedFallback);
+        QCOMPARE(res.rotationDeg, 0.0);
+        QVERIFY2(std::abs(res.shiftX - (-11.25)) < 0.45 && std::abs(res.shiftY - 6.5) < 0.45,
+            qPrintable(QString("FeatureBox shift-only=(%1,%2)").arg(res.shiftX).arg(res.shiftY)));
+    }
+
+    // 3. Auto multi-point (rigid, rotation ON) recovers shift + rotation accurately even when
+    //    a bright featureless cloud/outlier covers the top-left ~20% of the frame.
+    {
+        auto movField = warpFloatField(refField, w, h, -8.0, 6.5, -5.0);
+        for (int y = 0; y < 110; ++y)
+            for (int x = 0; x < 110; ++x)
+                movField[static_cast<size_t>(y) * w + x] = 0.85f;
+        FitsImage mov = ref;
+        mov.pixels = std::move(movField);
+
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::AutoMultiPoint, /*allowRotation=*/true);
+        QVERIFY2(!res.usedFallback, qPrintable(QString("inliers=%1 total=%2").arg(res.inliers).arg(res.totalPoints)));
+        QVERIFY2(res.inliers >= 6 && res.totalPoints >= res.inliers,
+            qPrintable(QString("inliers=%1 total=%2").arg(res.inliers).arg(res.totalPoints)));
+        QVERIFY2(std::abs(res.rotationDeg - 5.0) < 0.45,
+            qPrintable(QString("AutoMultiPoint rot=%1 shift=(%2,%3)").arg(res.rotationDeg).arg(res.shiftX).arg(res.shiftY)));
+        QVERIFY2(std::abs(res.shiftX - 8.0) < 0.7 && std::abs(res.shiftY - (-6.5)) < 0.7,
+            qPrintable(QString("AutoMultiPoint shift=(%1,%2) rot=%3").arg(res.shiftX).arg(res.shiftY).arg(res.rotationDeg)));
+
+        // Every pixel inside validOverlap must be non-black, and the clear quadrant must match ref closely.
+        const QRect r = res.validOverlap;
+        QVERIFY(r.isValid() && r.width() > 140 && r.height() > 140);
+        double sqErr = 0.0;
+        int n = 0;
+        for (int y = r.top(); y <= r.bottom(); ++y)
+        {
+            for (int x = r.left(); x <= r.right(); ++x)
+            {
+                const float px = res.aligned.pixels[static_cast<size_t>(y) * w + x];
+                QVERIFY2(px > 0.01f, qPrintable(QString("black px %1 at (%2,%3)").arg(px).arg(x).arg(y)));
+                if (x >= 130 && y >= 130)
+                {
+                    const double d = px - ref.pixels[static_cast<size_t>(y) * w + x];
+                    sqErr += d * d;
+                    ++n;
+                }
+            }
+        }
+        const double rms = std::sqrt(sqErr / std::max(1, n));
+        QVERIFY2(rms < 0.025, qPrintable(QString("AutoMultiPoint clear-quadrant rms=%1").arg(rms)));
+    }
+
+    // 4. Auto multi-point shift-only (allowRotation = false).
+    {
+        FitsImage mov = ref;
+        mov.pixels = warpFloatField(refField, w, h, 7.5, -5.25, 0.0);
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::AutoMultiPoint, /*allowRotation=*/false);
+        QVERIFY(!res.usedFallback);
+        QVERIFY(res.inliers >= 6);
+        QCOMPARE(res.rotationDeg, 0.0);
+        QVERIFY2(std::abs(res.shiftX - (-7.5)) < 0.45 && std::abs(res.shiftY - 5.25) < 0.45,
+            qPrintable(QString("AutoMultiPoint shift-only=(%1,%2)").arg(res.shiftX).arg(res.shiftY)));
+    }
+
+    // 5. End-to-end resharpenTimelapseSession with RealignOptions:
+    //    non-destructive, optional saveAlignedStacks, and dropped stack excluded from commonOverlap.
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const QString sessionDir = tmp.filePath("session");
+        const QString stacksDir = QDir(sessionDir).filePath("stacks");
+        QVERIFY(QDir().mkpath(stacksDir));
+
+        auto writeStack = [&](const QString& name, const std::vector<float>& pix, double q) {
+            FitsImage img = ref;
+            img.pixels = pix;
+            img.meta.qualityScore = q;
+            QString err;
+            QVERIFY2(writeFitsFloat(QDir(stacksDir).filePath(name), img, err), qPrintable(err));
+        };
+        writeStack("stack_0001.fits", refField, 1.0);
+        writeStack("stack_0002.fits", warpFloatField(refField, w, h, 6.0, -5.0, 4.0), 0.95);
+        // Dropped low-quality stack shifted far away: must NOT shrink commonOverlap!
+        writeStack("stack_0003.fits", warpFloatField(refField, w, h, 42.0, 42.0, 12.0), 0.10);
+
+        const QString origStack2 = QDir(stacksDir).filePath("stack_0002.fits");
+        const QDateTime origMtime = QFileInfo(origStack2).lastModified();
+
+        SharpeningSettings sharp = sharpeningForPreset(SharpeningPreset::Mild);
+        sharp.profileName = "RealignTest";
+        VideoToneSettings tone;
+        tone.writeMp4 = false;
+        tone.writeGif = false;
+        tone.writeSer = true;
+        tone.cropToOverlap = true;
+        tone.qualityFilterMode = QualityFilterMode::KeepBestPct;
+        tone.keepBestPercent = 66.0; // Keeps 2 of 3 (drops stack_0003.fits).
+
+        RealignOptions opts;
+        opts.mode = StackRealignMode::AutoMultiPoint;
+        opts.allowRotation = true;
+        opts.referenceFileName = "stack_0001.fits";
+        opts.saveAlignedStacks = false;
+
+        QString outDir1;
+        const TimelapseExportResult r1 = resharpenTimelapseSession(
+            sessionDir, {}, sharp, tone, /*rebuildVideoOnly=*/false, outDir1, {}, nullptr, {}, opts);
+        QVERIFY2(r1.ok, qPrintable(r1.error));
+        QCOMPARE(r1.stacksUsed, 2);
+        QCOMPARE(r1.stacksDropped, 1);
+        QVERIFY(QFileInfo(outDir1).fileName().startsWith("realigned_"));
+        QVERIFY(QDir(QDir(outDir1).filePath("sharpened")).exists());
+        QVERIFY(!QDir(QDir(outDir1).filePath("stacks")).exists());
+        QCOMPARE(QFileInfo(origStack2).lastModified(), origMtime);
+
+        // Verify persisted overlap excludes the dropped stack's huge 42 px shift.
+        SharpeningSettings ls;
+        VideoToneSettings lv;
+        std::optional<QRect> savedOv;
+        QString pErr;
+        QVERIFY2(loadProfileJson(QDir(outDir1).filePath("sharpening_profile.json"), ls, lv, pErr, &savedOv),
+            qPrintable(pErr));
+        QVERIFY(savedOv.has_value() && savedOv->isValid());
+        QVERIFY2(savedOv->width() >= 200 && savedOv->height() >= 200,
+            qPrintable(QString("overlap unexpectedly shrunk to %1x%2").arg(savedOv->width()).arg(savedOv->height())));
+
+        // Run again with saveAlignedStacks = true and verify unsharpened aligned FITS are saved with updated headers.
+        opts.saveAlignedStacks = true;
+        QString outDir2;
+        const TimelapseExportResult r2 = resharpenTimelapseSession(
+            sessionDir, {}, sharp, tone, /*rebuildVideoOnly=*/false, outDir2, {}, nullptr, {}, opts);
+        QVERIFY2(r2.ok, qPrintable(r2.error));
+        const QDir savedStacksDir(QDir(outDir2).filePath("stacks"));
+        QCOMPARE(savedStacksDir.entryList({"*.fits"}, QDir::Files).size(), 3);
+        FitsImage aligned2;
+        QString rErr;
+        QVERIFY2(readFitsFloat(savedStacksDir.filePath("stack_0002.fits"), aligned2, rErr), qPrintable(rErr));
+        QVERIFY2(std::abs(aligned2.meta.rotationDeg - (-4.0)) < 0.5,
+            qPrintable(QString("saved stack_0002 ALIGNROT=%1").arg(aligned2.meta.rotationDeg)));
+    }
 }
 
 QTEST_MAIN(TimelapseTests)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "timelapse/fits_io.h"
+#include "timelapse/stack_processor.h"
 #include "timelapse/timelapse_settings.h"
 
 #include <QtCore/QRect>
@@ -53,11 +54,21 @@ struct TimelapseExportResult
     std::atomic<bool>* cancel = nullptr,
     const std::map<QString, bool>& stackOverrides = {});
 
-// Re-sharpens every stack in <sessionDir>/stacks/ into a non-destructive
-// <sessionDir>/sharpened_<profile>_<UTC>/ folder and builds its MP4/GIF.
-// When rebuildVideoOnly is true, reads sourceFitsDir (default <sessionDir>/sharpened)
-// directly without re-running FITS sharpening and writes the rebuilt video into
-// a non-destructive video_<UTC>/ folder so earlier videos are never overwritten.
+struct RealignOptions
+{
+    StackRealignMode mode{StackRealignMode::Off};
+    bool allowRotation{true};
+    std::optional<QRect> featureBox;
+    QString referenceFileName;
+    bool saveAlignedStacks{false};
+};
+
+// Re-sharpens (and optionally re-aligns) every stack in <sessionDir>/stacks/ into
+// a non-destructive <sessionDir>/sharpened_<profile>_<UTC>/ (or realigned_<profile>_<UTC>/)
+// folder and builds its MP4/GIF/SER. Original stacks/ are never modified.
+// When rebuildVideoOnly is true (and realign.mode == Off), reads sourceFitsDir
+// (default <sessionDir>/sharpened) directly without re-running FITS sharpening and
+// writes the rebuilt video into a non-destructive video_<UTC>/ folder.
 [[nodiscard]] TimelapseExportResult resharpenTimelapseSession(const QString& sessionDir,
     const QString& sourceFitsDir,
     const SharpeningSettings& sharpening,
@@ -66,4 +77,5 @@ struct TimelapseExportResult
     QString& outTargetDir,
     std::function<void(int done, int total, const QString& stage)> progress = {},
     std::atomic<bool>* cancel = nullptr,
-    const std::map<QString, bool>& stackOverrides = {});
+    const std::map<QString, bool>& stackOverrides = {},
+    const RealignOptions& realign = {});
