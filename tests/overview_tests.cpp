@@ -111,6 +111,7 @@ private slots:
     void aFlashIsMarkedAndShownInPlace();
     void aMovingPointLeavesItsWholePath();
     void aDarkSilhouetteShowsAsAFall();
+    void darkeningOverviewIgnoresBrightRiseAndHonorsPeakPoint();
     void aSaveWithNothingInItSaysSo();
     void aSlowDriftMarksAlmostNothing();
     void twoTriggersAreBothMarked();
@@ -210,6 +211,38 @@ void OverviewTest::aDarkSilhouetteShowsAsAFall()
     QVERIFY(overview.mainFrameIndex >= 40 && overview.mainFrameIndex < 60);
     const QRgb pixel = overview.image.pixel(48 * 5, 48 * 5);
     QVERIFY2(qBlue(pixel) > qRed(pixel) + 60, qPrintable(QString::number(pixel, 16)));
+}
+
+void OverviewTest::darkeningOverviewIgnoresBrightRiseAndHonorsPeakPoint()
+{
+    std::mt19937 random(131);
+    std::vector<FramePtr> frames;
+    // Frame 38 has a huge bright limb shift (+1200 ADU) at (15, 15).
+    // Frame 42 has both a tiny, deeper fall (-1100 ADU) at (110, 80) and the
+    // real dark shadow (-700 ADU, 9x9) centred at (60, 48).
+    for (uint64_t i = 0; i < 65; ++i)
+        frames.push_back(frame(i, [i](int x, int y) {
+            if (i == 38 && x >= 12 && x < 18 && y >= 12 && y < 18) return 3800.0;
+            if (i == 42 && x >= 109 && x < 111 && y >= 79 && y < 81) return 1500.0;
+            if (i == 42 && x >= 56 && x < 65 && y >= 44 && y < 53) return 1900.0;
+            return 2600.0;
+        }, 15, random));
+    OverviewRequest request;
+    request.onsetFrameIndex = 38;
+    request.peakFrameIndex = 42;
+    request.peakPoint = QPoint(60, 48);
+    request.darkening = true;
+    const ClipOverview overview = makeClipOverview(frames, request);
+
+    QCOMPARE(overview.mainFrameIndex, uint64_t{42});
+    QVERIFY2(overview.activity.contains("fall") && !overview.activity.contains("rise"), qPrintable(overview.activity));
+    QVERIFY(!overview.stripCentres.empty());
+    for (const QPoint& centre : overview.stripCentres)
+        QVERIFY2(std::abs(centre.x() - 60) <= 4 && std::abs(centre.y() - 48) <= 4,
+            qPrintable(QString("centre=(%1,%2)").arg(centre.x()).arg(centre.y())));
+    // The bright rise at (15, 15) must not be painted orange in darkening mode.
+    const QRgb riseSpot = overview.image.pixel(15 * 5 + 2, 15 * 5 + 2);
+    QVERIFY2(qRed(riseSpot) - qBlue(riseSpot) < 30, qPrintable(QString::number(riseSpot, 16)));
 }
 
 void OverviewTest::aSaveWithNothingInItSaysSo()

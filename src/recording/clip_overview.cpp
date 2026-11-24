@@ -212,7 +212,9 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
             if (!record.learning && !isMasked(i))
             {
                 const float noiseVariance = std::max(variance[i], floorVariance);
-                if (delta * delta >= k * k * noiseVariance)
+                const bool directionMatches = !request.darkening
+                    || (*request.darkening ? delta < 0.0f : delta > 0.0f);
+                if (directionMatches && delta * delta >= k * k * noiseVariance)
                 {
                     // A changed pixel is held from learning, as the detector
                     // holds a firing patch: a slow light would otherwise raise
@@ -239,14 +241,28 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
         if (learned < 1'000'000) ++learned;
 
         record.changed = static_cast<int>(changedAt.size());
+        const bool anchored = request.peakFrameIndex && request.peakPoint
+            && frame.frameIndex == *request.peakFrameIndex;
+        const int anchorX = anchored ? std::clamp(request.peakPoint->x(), 0, first.width - 1) : record.peakX;
+        const int anchorY = anchored ? std::clamp(request.peakPoint->y(), 0, first.height - 1) : record.peakY;
         double weight = 0, sumX = 0, sumY = 0, sumXX = 0, sumYY = 0;
+        float localStrongest = 0;
         for (size_t c = 0; c < changedAt.size(); ++c)
         {
-            const double x = static_cast<double>(changedAt[c] % static_cast<size_t>(first.width));
-            const double y = static_cast<double>(changedAt[c] / static_cast<size_t>(first.width));
-            if (std::abs(x - record.peakX) > kWindowRadius || std::abs(y - record.peakY) > kWindowRadius) continue;
+            const int ix = static_cast<int>(changedAt[c] % static_cast<size_t>(first.width));
+            const int iy = static_cast<int>(changedAt[c] / static_cast<size_t>(first.width));
+            const double x = static_cast<double>(ix);
+            const double y = static_cast<double>(iy);
+            if (std::abs(x - anchorX) > kWindowRadius || std::abs(y - anchorY) > kWindowRadius) continue;
             const double w = std::abs(changedSigma[c]);
             weight += w; sumX += w * x; sumY += w * y; sumXX += w * x * x; sumYY += w * y * y;
+            if (anchored && std::abs(changedSigma[c]) > localStrongest)
+            {
+                localStrongest = std::abs(changedSigma[c]);
+                record.peak = changedSigma[c];
+                record.peakX = ix;
+                record.peakY = iy;
+            }
         }
         if (weight > 0)
         {
@@ -255,6 +271,14 @@ Activity measure(const std::vector<FramePtr>& frames, const OverviewRequest& req
             const double varianceX = std::max(0.0, sumXX / weight - record.centreX * record.centreX);
             const double varianceY = std::max(0.0, sumYY / weight - record.centreY * record.centreY);
             record.spread = std::sqrt((varianceX + varianceY) / 2);
+        }
+        else if (anchored)
+        {
+            record.centreX = anchorX;
+            record.centreY = anchorY;
+            record.peakX = anchorX;
+            record.peakY = anchorY;
+            record.spread = 0;
         }
         activity.frames.push_back(record);
     }

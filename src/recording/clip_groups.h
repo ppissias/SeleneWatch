@@ -14,9 +14,11 @@
 //
 //  - Moving: three or more triggers, on three or more frames, advance
 //    steadily along a straight line (fitted against time, leaving out at most
-//    a fifth of them as strays). With fewer triggers, the activity the
-//    overview followed around the peak moved. Usually an aircraft or a
-//    satellite; on the Moon a bird, an aircraft or a satellite crossing.
+//    a fifth of them as strays, or a dominant straight track carrying at least
+//    two-thirds of the detected pixels and signal when smaller strays are
+//    present). With fewer triggers, the activity the overview followed around
+//    the peak moved. Usually an aircraft or a satellite; on the Moon a bird,
+//    an aircraft or a satellite crossing.
 //  - Brief: every trigger within 0.2 s, and no activity around the peak
 //    lasting longer. A meteor, a glint, a cosmic-ray hit, one blink of a
 //    strobe, a flash.

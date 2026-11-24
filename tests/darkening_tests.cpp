@@ -71,6 +71,7 @@ private slots:
     void tooManyDarkPixelsStopTheSearchAndSaySo();
     void theIssSilhouetteBlocksTheLightUnderItsOutline();
     void theIssAtRealSpeedNeedsAOneFrameTrigger();
+    void darkeningOverviewIgnoresBrightLimbRiseAndLocksOnShadow();
 };
 
 // Done-when 1: a 5 x 5 patch darkened for two frames.
@@ -132,11 +133,20 @@ void DarkeningTest::aDarkDiskCrossingIsOneClipShownInBlue()
     QCOMPARE(candidates, 1);
     QCOMPARE(clips.size(), size_t{1});
     for (const ClipTrigger& trigger : clips[0].triggers) QCOMPARE(trigger.change, ChangeKind::Fall);
-    // The clip's peak preview is for rises; a darkening leaves it empty.
-    QVERIFY(!clips[0].peak.ready);
+    // A darkening crossing records its deepest passing patch and difference.
+    QVERIFY(clips[0].peak.ready);
+    QCOMPARE(clips[0].peak.change, ChangeKind::Fall);
+    QVERIFY(clips[0].peak.peakSigma > 10);
+    QVERIFY(clips[0].peak.peakAdu < -30);
+    QVERIFY(!clips[0].peakDifference.empty());
+    const int peakX = clips[0].peak.peakX;
+    const int peakY = clips[0].peak.peakY;
 
     OverviewRequest request;
     request.onsetFrameIndex = clips[0].triggers.front().onsetFrameIndex;
+    request.peakFrameIndex = clips[0].peak.frameIndex;
+    request.peakPoint = QPoint(peakX, peakY);
+    request.darkening = true;
     const ClipOverview overview = makeClipOverview(clips[0].frames, request);
     QVERIFY2(overview.activity.contains("fall") && overview.activity.contains("moved"), qPrintable(overview.activity));
     QVERIFY(overview.changedBounds.left() <= 2 && overview.changedBounds.right() >= 175);
@@ -153,7 +163,12 @@ void DarkeningTest::aDarkDiskCrossingIsOneClipShownInBlue()
     const QString text = contents(QDir(results[0].folder).filePath("event.txt"));
     QVERIFY(text.contains(" kind=darkening fall_adu="));
     QVERIFY(text.contains(" darkening=yes max_dark_pixels=20000 max_dark_box_ratio=10"));
+    QVERIFY(text.contains("peak_preview_role: selected automatic passing patch"));
+    QVERIFY(text.contains("negative native-ADU difference (fall magnitude)"));
     QVERIFY(text.contains("preview_gif: 04_event_preview.gif "));
+    const QImage diffImage(QDir(results[0].folder).filePath("03_diff_annotated.png"));
+    QVERIFY(!diffImage.isNull());
+    QVERIFY(qGray(diffImage.pixel(peakX, peakY)) > 180);
     const QString gifPath = QDir(results[0].folder).filePath("04_event_preview.gif");
     QVERIFY(QFile::exists(gifPath));
     QImageReader gif(gifPath);
@@ -336,6 +351,58 @@ void DarkeningTest::theIssAtRealSpeedNeedsAOneFrameTrigger()
         QCOMPARE(static_cast<int>(triggers.size()), framesShown);
         QCOMPARE(describeClip(triggers).group, ClipGroup::Moving);
     }
+}
+
+// Regression test: in darkening-only mode, a large opposite-sign brightening
+// (such as a lunar limb shift) and a small stray speck must not steal the
+// clip's peak frame, overview crop, or Moving classification from a prominent
+// crossing shadow.
+void DarkeningTest::darkeningOverviewIgnoresBrightLimbRiseAndLocksOnShadow()
+{
+    std::mt19937 random(49);
+    DetectionSettings settings = withDarkening();
+    settings.oneFrame = true;
+    settings.sigma = 6.0;
+    std::vector<EventClip> clips;
+    EventCapture capture(CaptureSettings{}, {}, [&](EventClip clip) { clips.push_back(std::move(clip)); }, settings);
+    for (uint64_t i = 0; i < 190; ++i)
+    {
+        capture.onFrame(scene(220, 140, i, random, [i](int x, int y) {
+            // Frame 58: bright lunar limb shift (+120 ADU) before the transit.
+            if (i == 58 && x >= 8 && x < 24 && y >= 8 && y < 24) return 120.0;
+            // Frame 60: small stray dark speck near the top-right (scanned first).
+            if (i == 60 && x >= 190 && x < 194 && y >= 10 && y < 14) return -30.0;
+            // Frames 60..64: prominent dark object crossing in a straight line,
+            // deepest at frame 62 centred at (100, 80).
+            if (i >= 60 && i <= 64)
+            {
+                const double cx = 40.0 + 30.0 * static_cast<double>(i - 60);
+                if (std::hypot(x - cx, y - 80.0) <= 10.0)
+                    return i == 62 ? -170.0 : -110.0;
+            }
+            return 0.0;
+        }, 180.0, 2.0));
+    }
+    capture.finishPartial();
+    QCOMPARE(clips.size(), size_t{1});
+    QVERIFY(clips[0].peak.ready);
+    QCOMPARE(clips[0].peak.change, ChangeKind::Fall);
+    QCOMPARE(clips[0].peak.frameIndex, uint64_t{62});
+    QVERIFY2(std::abs(clips[0].peak.peakX - 100) <= 12 && std::abs(clips[0].peak.peakY - 80) <= 12,
+        qPrintable(QString("peak=(%1,%2)").arg(clips[0].peak.peakX).arg(clips[0].peak.peakY)));
+
+    QTemporaryDir directory;
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    {
+        EventWriter writer(&context, directory.path(), 256 * 1024 * 1024, [&](const auto& result) { results.push_back(result); });
+        writer.submit(std::move(clips[0]));
+        QTRY_COMPARE_WITH_TIMEOUT(results.size(), size_t{1}, 10000);
+    }
+    QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
+    const QString text = contents(QDir(results[0].folder).filePath("event.txt"));
+    QVERIFY2(text.contains("overview: 00_overview.png main_frame_index=62 "), qPrintable(text));
+    QVERIFY2(text.contains("group: moving ("), qPrintable(text));
 }
 
 int main(int argc, char** argv)

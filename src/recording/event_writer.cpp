@@ -174,37 +174,59 @@ QString captionTime(std::chrono::system_clock::time_point time)
 }
 
 // The overview's lines about the clip: when and how it was triggered, the
-// first trigger's measurement, the clip's extent, and its flags.
+// strongest trigger's measurement, the clip's extent, and its flags.
 QStringList overviewCaption(const EventClip& clip, bool duringCorrection)
 {
     const ClipTrigger& first = clip.triggers.front();
+    const auto isLarge = [](const ClipTrigger& t) {
+        return t.kind != TriggerKind::Manual && (t.change == ChangeKind::LargeRise || t.change == ChangeKind::LargeFall);
+    };
+    const ClipTrigger* featured = &first;
+    for (const ClipTrigger& trigger : clip.triggers)
+    {
+        if (trigger.kind == TriggerKind::Manual) continue;
+        if (featured->kind == TriggerKind::Manual) { featured = &trigger; continue; }
+        if (isLarge(trigger))
+        {
+            if (!isLarge(*featured) || trigger.share > featured->share) featured = &trigger;
+            continue;
+        }
+        if (isLarge(*featured)) continue;
+        if (trigger.peakSigma > featured->peakSigma
+            || (trigger.peakSigma == featured->peakSigma && trigger.brightPixelCount > featured->brightPixelCount))
+            featured = &trigger;
+    }
+
     QStringList lines;
-    const bool manual = first.kind == TriggerKind::Manual;
-    const bool large = !manual && (first.change == ChangeKind::LargeRise || first.change == ChangeKind::LargeFall);
+    const bool manual = featured->kind == TriggerKind::Manual;
+    const bool large = isLarge(*featured);
     const QString kind = manual ? "Save now"
-        : first.change == ChangeKind::LargeRise ? "large brightening"
-        : first.change == ChangeKind::LargeFall ? "large darkening"
-        : first.change == ChangeKind::Fall ? "darkening" : "automatic trigger";
+        : featured->change == ChangeKind::LargeRise ? "large brightening"
+        : featured->change == ChangeKind::LargeFall ? "large darkening"
+        : featured->change == ChangeKind::Fall ? "darkening" : "automatic trigger";
     QString heading = QString("%1 · frame %2 · %3 · %4 mode").arg(captionTime(first.triggerTime)).arg(first.triggerFrameIndex)
         .arg(kind).arg(clip.captureSettings.target == Target::Sky ? "Sky" : "Moon");
     if (clip.triggers.size() > 1) heading += QString(" · %1 triggers").arg(clip.triggers.size());
     if (first.continuesPreviousClip) heading += " · continues the previous clip";
     lines << heading;
+    const QString frameSuffix = clip.triggers.size() > 1 && featured->triggerFrameIndex != first.triggerFrameIndex
+        ? QString(" (frame %1)").arg(featured->triggerFrameIndex) : QString();
     if (manual)
-        lines << QString("Requested at %1 · K %2").arg(captionTime(first.requestedAt)).arg(first.settings.sigma, 0, 'g', 4);
+        lines << QString("Requested at %1 · K %2").arg(captionTime(featured->requestedAt)).arg(featured->settings.sigma, 0, 'g', 4);
     else if (large)
-        lines << QString("%1% of the frame at K at once, median difference %2 ADU · K %3")
-            .arg(100 * first.share, 0, 'f', 1).arg(first.medianDifferenceAdu, 0, 'f', 1).arg(first.settings.sigma, 0, 'g', 4);
-    else if (first.change == ChangeKind::Fall)
-        lines << QString("Deepest fall %1 σ (%2 ADU) · %3 px in a %4 × %5 box at (%6, %7) · K %8, dark patch %9 to %10 px")
-            .arg(first.peakSigma, 0, 'f', 1).arg(-first.peakAdu, 0, 'f', 1).arg(first.brightPixelCount)
-            .arg(first.boxWidth).arg(first.boxHeight).arg(first.peakX).arg(first.peakY)
-            .arg(first.settings.sigma, 0, 'g', 4).arg(first.settings.minPixels).arg(first.settings.maxDarkPixels);
+        lines << QString("%1% of the frame at K at once, median difference %2 ADU%3 · K %4")
+            .arg(100 * featured->share, 0, 'f', 1).arg(featured->medianDifferenceAdu, 0, 'f', 1).arg(frameSuffix)
+            .arg(featured->settings.sigma, 0, 'g', 4);
+    else if (featured->change == ChangeKind::Fall)
+        lines << QString("Deepest fall %1 σ (%2 ADU) · %3 px in a %4 × %5 box at (%6, %7)%8 · K %9, dark patch %10 to %11 px")
+            .arg(featured->peakSigma, 0, 'f', 1).arg(-featured->peakAdu, 0, 'f', 1).arg(featured->brightPixelCount)
+            .arg(featured->boxWidth).arg(featured->boxHeight).arg(featured->peakX).arg(featured->peakY).arg(frameSuffix)
+            .arg(featured->settings.sigma, 0, 'g', 4).arg(featured->settings.minPixels).arg(featured->settings.maxDarkPixels);
     else
-        lines << QString("Peak %1 σ · %2 px in a %3 × %4 box at (%5, %6) · K %7, patch %8 to %9 px")
-            .arg(first.peakSigma, 0, 'f', 1).arg(first.brightPixelCount).arg(first.boxWidth).arg(first.boxHeight)
-            .arg(first.peakX).arg(first.peakY).arg(first.settings.sigma, 0, 'g', 4)
-            .arg(first.settings.minPixels).arg(first.settings.maxPixels);
+        lines << QString("Peak %1 σ · %2 px in a %3 × %4 box at (%5, %6)%7 · K %8, patch %9 to %10 px")
+            .arg(featured->peakSigma, 0, 'f', 1).arg(featured->brightPixelCount).arg(featured->boxWidth).arg(featured->boxHeight)
+            .arg(featured->peakX).arg(featured->peakY).arg(frameSuffix).arg(featured->settings.sigma, 0, 'g', 4)
+            .arg(featured->settings.minPixels).arg(featured->settings.maxPixels);
 
     const auto start = clip.frames.front()->timestamp;
     uint64_t dropped = 0;
@@ -302,6 +324,22 @@ std::vector<QImage> preparePreviewGifFrames(const EventClip& clip, const ClipOve
             }
         }
         firstPos = lastPos = peakPos;
+    }
+    // Include all automatic triggers in the preview span so fast-moving
+    // transits (where frames jump further than the overview's link radius)
+    // still show the full crossing in the animated preview.
+    for (const ClipTrigger& trigger : clip.triggers)
+    {
+        if (trigger.kind != TriggerKind::Automatic) continue;
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            if (frames[i]->frameIndex == trigger.triggerFrameIndex)
+            {
+                firstPos = std::min(firstPos, i);
+                lastPos = std::max(lastPos, i);
+                break;
+            }
+        }
     }
 
     const std::vector<size_t> positions = selectEventGifFramePositions(
@@ -1015,13 +1053,16 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& group, 
     difference.fill(Qt::black);
     if (clip.peakDifference.size() == static_cast<size_t>(peak->width) * peak->height)
     {
-        const float maximum = std::max(0.001f, *std::max_element(clip.peakDifference.begin(), clip.peakDifference.end()));
+        const bool peakFall = clip.peak.change == ChangeKind::Fall;
+        float maximum = 0.001f;
+        for (float v : clip.peakDifference) maximum = std::max(maximum, peakFall ? -v : v);
         for (int y = 0; y < peak->height; ++y)
         {
             auto* row = reinterpret_cast<QRgb*>(difference.scanLine(y));
             for (int x = 0; x < peak->width; ++x)
             {
-                const int value = static_cast<int>(std::clamp(clip.peakDifference[static_cast<size_t>(y) * peak->width + x]
+                const float signedDelta = clip.peakDifference[static_cast<size_t>(y) * peak->width + x];
+                const int value = static_cast<int>(std::clamp((peakFall ? -signedDelta : signedDelta)
                     * 255.0f / maximum, 0.0f, 255.0f));
                 row[x] = qRgb(value, value, value);
             }
@@ -1029,7 +1070,9 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& group, 
         QPainter painter(&difference);
         painter.setPen(QPen(Qt::red, 1));
         painter.drawRect(QRect(clip.peak.boxX, clip.peak.boxY, clip.peak.boxWidth, clip.peak.boxHeight));
-        painter.drawText(8, 18, QString("Pre-update reference difference; peak %1 sigma; display scaled")
+        painter.drawText(8, 18, QString(peakFall
+            ? "Pre-update reference fall; peak %1 sigma; display scaled"
+            : "Pre-update reference difference; peak %1 sigma; display scaled")
             .arg(clip.peak.peakSigma, 0, 'f', 1));
     }
     else
@@ -1088,7 +1131,10 @@ QString EventWriter::writeClip(EventClip& clip, QString& error, QString& group, 
                 << " min_pixels=" << clip.peak.settings.minPixels << " max_pixels=" << clip.peak.settings.maxPixels
                 << " one_frame=" << (clip.peak.settings.oneFrame ? "yes" : "no")
                 << detectorModelFields(clip.peak.settings) << "\n";
-            out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit" : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
+            out << "difference_preview: " << (clip.previewLimited ? "unavailable: RAM limit"
+                : clip.peak.change == ChangeKind::Fall
+                    ? "negative native-ADU difference (fall magnitude) scaled to its maximum; annotations are display only"
+                    : "positive native-ADU difference scaled to its maximum; annotations are display only") << "\n";
         }
         out << "overview: " << overviewNote << "\n";
         out << "preview_gif: " << previewGifNote << "\n";
@@ -1130,7 +1176,12 @@ QString EventWriter::writeOverview(const EventClip& clip, const QString& folder,
     request.minNoiseAdu = first.settings.minNoiseAdu;
     request.minPixels = first.settings.minPixels;
     request.onsetFrameIndex = first.onsetFrameIndex;
-    if (clip.peak.ready) request.peakFrameIndex = clip.peak.frameIndex;
+    if (first.kind == TriggerKind::Automatic) request.darkening = first.settings.darkening;
+    if (clip.peak.ready)
+    {
+        request.peakFrameIndex = clip.peak.frameIndex;
+        request.peakPoint = QPoint(clip.peak.peakX, clip.peak.peakY);
+    }
     request.referenceTime = first.triggerTime;
     request.arcsecPerPixel = clip.site.arcsecPerPixel();
     bool duringCorrection = false;

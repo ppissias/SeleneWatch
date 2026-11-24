@@ -28,8 +28,8 @@
 // Feature-45 a detector looks for one direction only: with darkening (the
 // shadows' watch) it tests falls and nothing that rises, and every
 // measurement it reports, the history and the sigma map are of falls. The
-// clip's peak preview stays the strongest rising patch, so a darkening
-// leaves it empty.
+// clip's peak preview is the strongest passing patch in the watched
+// direction (rise or fall).
 class FlashDetector
 {
 public:

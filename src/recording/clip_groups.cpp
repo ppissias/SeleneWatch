@@ -22,6 +22,10 @@ constexpr double kTrackJitter = 3;
 constexpr double kTrackTolerance = 0.05;
 // At most this share of the triggers may be strays off a track.
 constexpr double kStrayShare = 0.2;
+// A dominant track may still be found amidst smaller noise triggers when the
+// triggers along the line carry at least this share of total pixels and signal.
+constexpr double kDominantShare = 0.65;
+constexpr size_t kMaxTrackSeeds = 24;
 // Positions closer than this are one place.
 constexpr double kOnePlacePixels = 10;
 // A clip that was cut is continued by one that starts this soon after it.
@@ -109,94 +113,171 @@ struct Track
     double speed() const { return duration > 0 ? (along(to) - along(from)) / duration : 0; }
 };
 
+// Checks whether time-sorted patch trigger indices lie along one straight line
+// and advance monotonically along it. On failure, sets worst to the index
+// inside points with the largest residual or backtrack.
+std::optional<Track> fitStraightLine(const std::vector<TriggerPoint>& triggers,
+    const std::vector<size_t>& points, size_t of, size_t& worst)
+{
+    Track track;
+    const double n = static_cast<double>(points.size());
+    double xm = 0, ym = 0, tm = 0;
+    const auto origin = triggers[points.front()].time;
+    for (size_t i : points)
+    {
+        const QPointF c = centreOf(triggers[i]);
+        xm += c.x();
+        ym += c.y();
+        tm += secondsOf(triggers[i].time - origin);
+    }
+    track.centre = QPointF(xm / n, ym / n);
+    tm /= n;
+    double sxx = 0, syy = 0, sxy = 0;
+    for (size_t i : points)
+    {
+        const QPointF v = centreOf(triggers[i]) - track.centre;
+        sxx += v.x() * v.x();
+        syy += v.y() * v.y();
+        sxy += v.x() * v.y();
+    }
+    const double angle = 0.5 * std::atan2(2 * sxy, sxx - syy);
+    track.direction = QPointF(std::cos(angle), std::sin(angle));
+    // Point the line the way the triggers went.
+    double progress = 0;
+    for (size_t i : points) progress += track.along(centreOf(triggers[i])) * (secondsOf(triggers[i].time - origin) - tm);
+    if (progress < 0) track.direction = -track.direction;
+
+    double low = std::numeric_limits<double>::max(), high = -low, squares = 0;
+    for (size_t i : points)
+    {
+        const QPointF c = centreOf(triggers[i]);
+        low = std::min(low, track.along(c));
+        high = std::max(high, track.along(c));
+        squares += track.offset(c) * track.offset(c);
+    }
+    const double length = high - low;
+    track.tolerance = std::max(kTrackJitter, kTrackTolerance * length);
+    // How far each trigger is off the line, or back from the furthest
+    // point reached before it.
+    double furthest = -std::numeric_limits<double>::max(), worstScore = -1, back = 0;
+    worst = 0;
+    for (size_t k = 0; k < points.size(); ++k)
+    {
+        const QPointF c = centreOf(triggers[points[k]]);
+        const double behind = std::max(0.0, furthest - track.along(c));
+        back = std::max(back, behind);
+        const double score = std::max(track.offset(c), behind);
+        if (score > worstScore) { worstScore = score; worst = k; }
+        furthest = std::max(furthest, track.along(c));
+    }
+    if (length >= kMinTrackPixels && std::sqrt(squares / n) <= track.tolerance && back <= 2 * track.tolerance)
+    {
+        const QPointF first = centreOf(triggers[points.front()]), last = centreOf(triggers[points.back()]);
+        track.from = first;
+        track.to = last;
+        track.duration = secondsOf(triggers[points.back()].time - origin);
+        track.kept.assign(triggers.size(), false);
+        for (size_t i : points) track.kept[i] = true;
+        track.used = points.size();
+        track.of = of;
+        return track;
+    }
+    return std::nullopt;
+}
+
 // Fits a line through the patch triggers, leaving out the worst one at a
 // time, up to kStrayShare of them, until the rest lie along it: on average
 // within the tolerance, and never going back by more than twice it. Needs
-// three frames.
+// three frames. If small stray triggers exceed kStrayShare by count, also
+// checks for a dominant straight track carrying at least kDominantShare of
+// total detected pixels and pixel*sigma signal.
 std::optional<Track> straightTrack(const std::vector<TriggerPoint>& triggers)
 {
-    std::vector<size_t> points;
+    std::vector<size_t> allPoints;
     for (size_t i = 0; i < triggers.size(); ++i)
-        if (isPatch(triggers[i])) points.push_back(i);
-    const size_t of = points.size();
-    size_t strays = static_cast<size_t>(std::floor(kStrayShare * static_cast<double>(of)));
+        if (isPatch(triggers[i])) allPoints.push_back(i);
+    const size_t of = allPoints.size();
     // In time order, so going back along the line can be seen.
-    std::stable_sort(points.begin(), points.end(), [&](size_t a, size_t b) { return triggers[a].time < triggers[b].time; });
+    std::stable_sort(allPoints.begin(), allPoints.end(), [&](size_t a, size_t b) { return triggers[a].time < triggers[b].time; });
     const auto framesIn = [&](const std::vector<size_t>& chosen) {
         std::set<Clock::rep> times;
         for (size_t i : chosen) times.insert(triggers[i].time.time_since_epoch().count());
         return times.size();
     };
+
+    std::vector<size_t> points = allPoints;
+    size_t strays = static_cast<size_t>(std::floor(kStrayShare * static_cast<double>(of)));
     while (framesIn(points) >= 3)
     {
-        Track track;
-        const double n = static_cast<double>(points.size());
-        double xm = 0, ym = 0, tm = 0;
-        const auto origin = triggers[points.front()].time;
-        for (size_t i : points)
-        {
-            const QPointF c = centreOf(triggers[i]);
-            xm += c.x();
-            ym += c.y();
-            tm += secondsOf(triggers[i].time - origin);
-        }
-        track.centre = QPointF(xm / n, ym / n);
-        tm /= n;
-        double sxx = 0, syy = 0, sxy = 0;
-        for (size_t i : points)
-        {
-            const QPointF v = centreOf(triggers[i]) - track.centre;
-            sxx += v.x() * v.x();
-            syy += v.y() * v.y();
-            sxy += v.x() * v.y();
-        }
-        const double angle = 0.5 * std::atan2(2 * sxy, sxx - syy);
-        track.direction = QPointF(std::cos(angle), std::sin(angle));
-        // Point the line the way the triggers went.
-        double progress = 0;
-        for (size_t i : points) progress += track.along(centreOf(triggers[i])) * (secondsOf(triggers[i].time - origin) - tm);
-        if (progress < 0) track.direction = -track.direction;
-
-        double low = std::numeric_limits<double>::max(), high = -low, squares = 0;
-        for (size_t i : points)
-        {
-            const QPointF c = centreOf(triggers[i]);
-            low = std::min(low, track.along(c));
-            high = std::max(high, track.along(c));
-            squares += track.offset(c) * track.offset(c);
-        }
-        const double length = high - low;
-        track.tolerance = std::max(kTrackJitter, kTrackTolerance * length);
-        // How far each trigger is off the line, or back from the furthest
-        // point reached before it.
-        double furthest = -std::numeric_limits<double>::max(), worstScore = -1, back = 0;
         size_t worst = 0;
-        for (size_t k = 0; k < points.size(); ++k)
-        {
-            const QPointF c = centreOf(triggers[points[k]]);
-            const double behind = std::max(0.0, furthest - track.along(c));
-            back = std::max(back, behind);
-            const double score = std::max(track.offset(c), behind);
-            if (score > worstScore) { worstScore = score; worst = k; }
-            furthest = std::max(furthest, track.along(c));
-        }
-        if (length >= kMinTrackPixels && std::sqrt(squares / n) <= track.tolerance && back <= 2 * track.tolerance)
-        {
-            const QPointF first = centreOf(triggers[points.front()]), last = centreOf(triggers[points.back()]);
-            track.from = first;
-            track.to = last;
-            track.duration = secondsOf(triggers[points.back()].time - origin);
-            track.kept.assign(triggers.size(), false);
-            for (size_t i : points) track.kept[i] = true;
-            track.used = points.size();
-            track.of = of;
-            return track;
-        }
-        if (strays == 0) return std::nullopt;
+        if (auto track = fitStraightLine(triggers, points, of, worst)) return track;
+        if (strays == 0) break;
         points.erase(points.begin() + static_cast<std::ptrdiff_t>(worst));
         --strays;
     }
-    return std::nullopt;
+
+    // Dominant-track fallback: a prominent moving object (such as the ISS)
+    // accompanied by many small limb/seeing specks. Requires recorded pixel
+    // areas so uniform synthetic/unmeasured triggers keep the count rule.
+    if (framesIn(allPoints) < 3) return std::nullopt;
+    const auto signalOf = [&](size_t i) {
+        return static_cast<double>(std::max(0, triggers[i].pixels)) * std::max(1.0, triggers[i].sigma);
+    };
+    double totalPixels = 0, totalSignal = 0;
+    for (size_t i : allPoints)
+    {
+        totalPixels += static_cast<double>(std::max(0, triggers[i].pixels));
+        totalSignal += signalOf(i);
+    }
+    if (totalPixels <= 0 || totalSignal <= 0) return std::nullopt;
+
+    std::vector<size_t> seeds = allPoints;
+    std::stable_sort(seeds.begin(), seeds.end(), [&](size_t a, size_t b) { return signalOf(a) > signalOf(b); });
+    if (seeds.size() > kMaxTrackSeeds) seeds.resize(kMaxTrackSeeds);
+
+    std::optional<Track> bestTrack;
+    double bestSignal = 0;
+    for (size_t a = 0; a < seeds.size(); ++a)
+    {
+        for (size_t b = a + 1; b < seeds.size(); ++b)
+        {
+            const size_t ia = seeds[a], ib = seeds[b];
+            if (triggers[ia].time == triggers[ib].time) continue;
+            const QPointF pa = centreOf(triggers[ia]), pb = centreOf(triggers[ib]);
+            const double span = distance(pa, pb);
+            if (span < kMinTrackPixels) continue;
+            const QPointF u((pb.x() - pa.x()) / span, (pb.y() - pa.y()) / span);
+            const double band = std::max(2 * kTrackJitter, 2 * kTrackTolerance * span);
+            std::vector<size_t> inliers;
+            for (size_t idx : allPoints)
+            {
+                const QPointF v = centreOf(triggers[idx]) - pa;
+                if (std::abs(v.x() * u.y() - v.y() * u.x()) <= band) inliers.push_back(idx);
+            }
+            while (framesIn(inliers) >= 3)
+            {
+                size_t worst = 0;
+                if (auto track = fitStraightLine(triggers, inliers, of, worst))
+                {
+                    double keptPixels = 0, keptSignal = 0;
+                    for (size_t idx : inliers)
+                    {
+                        keptPixels += static_cast<double>(std::max(0, triggers[idx].pixels));
+                        keptSignal += signalOf(idx);
+                    }
+                    if (keptPixels >= kDominantShare * totalPixels && keptSignal >= kDominantShare * totalSignal
+                        && (!bestTrack || keptSignal > bestSignal || (keptSignal == bestSignal && track->used > bestTrack->used)))
+                    {
+                        bestTrack = std::move(track);
+                        bestSignal = keptSignal;
+                    }
+                    break;
+                }
+                inliers.erase(inliers.begin() + static_cast<std::ptrdiff_t>(worst));
+            }
+        }
+    }
+    return bestTrack;
 }
 
 // "53 triggers on 53 frames over 19.6 s", or "1 trigger".

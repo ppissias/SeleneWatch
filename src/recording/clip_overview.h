@@ -45,6 +45,13 @@ struct OverviewRequest
     // The detector's strongest frame. Without it the main view is the frame
     // with the strongest change, or the onset frame when nothing changed.
     std::optional<uint64_t> peakFrameIndex;
+    // The detector's strongest patch peak pixel on peakFrameIndex, when known.
+    // Anchors the peak frame's crop so a stray pixel elsewhere cannot pull it.
+    std::optional<QPoint> peakPoint;
+    // When set, only changes in the watched direction (falls when true, rises
+    // when false) count toward the overview's activity and peak. Empty measures
+    // both directions (for example, a manual Save now).
+    std::optional<bool> darkening;
     // The strip's times count from here, normally the first trigger.
     std::optional<std::chrono::system_clock::time_point> referenceTime;
     // The clip's triggers, for its group (Feature-46). The boxes of the

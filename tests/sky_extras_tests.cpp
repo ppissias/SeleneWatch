@@ -409,6 +409,35 @@ void SkyExtrasTest::clipGroupsComeFromWhatWasMeasured()
     QCOMPARE(d.group, ClipGroup::Moving);
     QVERIFY2(d.facts.startsWith("6 darkening triggers on 6 frames over 0.500 s"), qPrintable(d.facts));
 
+    // A dominant straight transit (e.g. ISS) accompanied by many smaller limb
+    // specks (> 20% by count) still classifies as Moving when the line carries
+    // the clear majority of detected pixels and signal.
+    std::vector<TriggerPoint> issWithSpecks;
+    const int issPixels[5] = {370, 763, 874, 789, 714};
+    const double issSigma[5] = {15.0, 69.4, 131.9, 72.3, 63.0};
+    for (int i = 0; i < 5; ++i)
+    {
+        TriggerPoint p = at(0.1 * i, 1226 - 110 * i, 1841 - 270 * i, TriggerPoint::Change::Fall);
+        p.pixels = issPixels[i];
+        p.sigma = issSigma[i];
+        issWithSpecks.push_back(p);
+    }
+    for (int i = 0; i < 11; ++i)
+    {
+        TriggerPoint speck = at(0.05 * i, 1800 + (i % 4) * 30, 600 + (i % 5) * 40, TriggerPoint::Change::Fall);
+        speck.pixels = 25;
+        speck.sigma = 7.0;
+        issWithSpecks.push_back(speck);
+    }
+    d = describeClip(issWithSpecks);
+    QCOMPARE(d.group, ClipGroup::Moving);
+    QVERIFY2(d.facts.contains("(5 of the 16 triggers)"), qPrintable(d.facts));
+
+    // Equal-sized scattered triggers with recorded pixel counts must still stay Other.
+    std::vector<TriggerPoint> scatteredMeasured = scattered;
+    for (TriggerPoint& p : scatteredMeasured) { p.pixels = 25; p.sigma = 10.0; }
+    QCOMPARE(describeClip(scatteredMeasured).group, ClipGroup::Other);
+
     // Two patches on one frame are brief, however far apart.
     d = describeClip({at(0, 681, 153), at(0, 652, 178)});
     QCOMPARE(d.group, ClipGroup::Brief);

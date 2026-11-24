@@ -288,8 +288,8 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display)
                     patch.measured.triggered = !patch.measured.firing && (settings_.oneFrame || patch.consecutive>=2);
                     patch.measured.firing = patch.measured.firing || patch.measured.triggered;
                     measured = patch.measured;
-                    // The clip's peak preview is a positive difference: rises only.
-                    if (change == ChangeKind::Rise && (!strongest_.passed || measured.peakSigma>strongest_.peakSigma)) strongest_=measured;
+                    // Strongest passing patch on this frame (rise or fall, matching the watch).
+                    if (!strongest_.passed || measured.peakSigma > strongest_.peakSigma) strongest_ = measured;
                     if (measured.triggered) candidates_.push_back(measured);
                     // Feature-11: past the release limit a patch is learned
                     // like the background. A star drifting past a fixed camera
