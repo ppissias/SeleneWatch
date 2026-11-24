@@ -25,6 +25,16 @@ void EventCapture::reset(bool releaseDetectorBuffers)
     manualTail_.reset();
 }
 
+void EventCapture::resetDetector(bool releaseBuffers)
+{
+    detector_.reset(releaseBuffers);
+}
+
+void EventCapture::recenterDetector(int stepX, int stepY, const Frame& frame, FrameShift newShift)
+{
+    detector_.recenterReference(stepX, stepY, frame, newShift);
+}
+
 // Disarming hands off the available clip. Arming reconfirms ongoing patches in Monitoring.
 void EventCapture::setMonitoring(bool monitoring)
 {
@@ -48,10 +58,10 @@ void EventCapture::rememberPeak(const Frame& frame)
     }
 }
 
-void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest display)
+void EventCapture::onFrame(const FramePtr& frame, DetectionDisplayRequest display, FrameShift shift)
 {
     ring_.push(frame);
-    detector_.analyze(*frame, display);
+    detector_.analyze(*frame, display, shift);
     if (!monitoring_)
     {
         detector_.updateReference(*frame);
@@ -179,6 +189,10 @@ ClipTrigger EventCapture::currentTrigger(const DetectionSummary& measured, bool 
     trigger.learningFrames=measured.learningFrames; trigger.longestActiveSeconds=measured.longestActiveSeconds;
     trigger.change=measured.change; trigger.share=measured.share; trigger.medianDifferenceAdu=measured.medianDifferenceAdu;
     trigger.peakAdu=measured.peakAdu;
+    trigger.stabilizationState=measured.stabilizationState;
+    trigger.stabilizationMethod=measured.stabilizationMethod;
+    trigger.stabilizationDx=measured.stabilizationDx;
+    trigger.stabilizationDy=measured.stabilizationDy;
     return trigger;
 }
 

@@ -74,6 +74,8 @@ QVariantMap detectionFields(const DetectionSettings& settings, Watch watch)
         {"darkeningShare", settings.darkeningShare},
         {"ignoreAboveShare", settings.ignoreAboveShare},
     };
+    if (watchTarget(watch) != Target::Sky)
+        fields.insert("stabilizeDetection", settings.stabilizeDetection);
     if (watchTarget(watch) == Target::Sky)
     {
         fields.insert("brighteningShare", settings.brighteningShare);
@@ -103,6 +105,8 @@ DetectionSettings detectionFromFields(const QVariantMap& fields, Watch watch)
     real("maxDarkBoxRatio", settings.maxDarkBoxRatio);
     real("darkeningShare", settings.darkeningShare);
     real("ignoreAboveShare", settings.ignoreAboveShare);
+    if (watchTarget(watch) != Target::Sky)
+        flag("stabilizeDetection", settings.stabilizeDetection);
     if (watchTarget(watch) == Target::Sky)
     {
         real("brighteningShare", settings.brighteningShare);

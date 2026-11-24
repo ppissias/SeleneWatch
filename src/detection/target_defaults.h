@@ -75,6 +75,11 @@
     settings.darkening = shadows;
     if (!shadows) settings.darkeningShare = 0;
     if (watch != Watch::MoonFlashes) settings.ignoreAboveShare = 0;
+    if (watchTarget(watch) == Target::Sky)
+    {
+        // Fixed-camera Sky watches have fixed horizon masks and intentionally drifting stars.
+        settings.stabilizeDetection = false;
+    }
     if (watchTarget(watch) != Target::Sky)
     {
         settings.brighteningShare = 0;

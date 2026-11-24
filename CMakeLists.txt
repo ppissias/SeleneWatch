@@ -73,6 +73,7 @@ add_library(selenewatch_core STATIC
     src/timelapse/video_exporter.cpp src/timelapse/timelapse_session.cpp src/timelapse/sky_timelapse.cpp
     src/settings/detection_profiles.cpp src/settings/watch_settings.cpp
     src/session/session.cpp src/session/blip_injector.cpp src/session/clock_check.cpp src/session/session_end.cpp
+    src/session/frame_stabilizer.cpp
 )
 target_include_directories(selenewatch_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(selenewatch_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

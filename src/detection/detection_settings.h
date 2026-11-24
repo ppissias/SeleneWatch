@@ -43,6 +43,11 @@ struct DetectionSettings
     // and seeing on sunlit terrain only makes false triggers. Zero is off.
     double ignoreAboveShare{0};
 
+    // Feature-50: opt-in sub-pixel shift stabilization inside the detector
+    // (off by default; always off on fixed-camera Sky watches). Raw saved
+    // frames remain untouched.
+    bool stabilizeDetection{false};
+
     // Feature-45: the patch limits of the change the detector looks for, the
     // dark ones with darkening.
     [[nodiscard]] int patchMaxPixels() const { return darkening ? maxDarkPixels : maxPixels; }

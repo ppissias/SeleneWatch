@@ -40,6 +40,10 @@ public:
 
     // Drops the ring, the detector state, and any clip still being collected.
     void reset(bool releaseDetectorBuffers = true);
+    // Feature-50: resets or recenters only the detector reference, keeping the
+    // pre-event ring buffer and any clip currently being collected intact.
+    void resetDetector(bool releaseBuffers = false);
+    void recenterDetector(int stepX, int stepY, const Frame& frame, FrameShift newShift);
 
     // Source thread. Preview keeps history and runs the identical detector,
     // but creates no clips or candidate notifications. Arming retains the
@@ -47,7 +51,7 @@ public:
     void setMonitoring(bool monitoring);
 
     // Source thread. May call the candidate and clip callbacks before returning.
-    void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {});
+    void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {}, FrameShift shift = {});
     void setDetectionSettings(const DetectionSettings& settings);
     [[nodiscard]] const DetectionSummary& detectionSummary() const;
     [[nodiscard]] const std::vector<DetectionSummary>& detectionCandidates() const;

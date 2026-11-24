@@ -338,6 +338,11 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
     summary_.frameIndex = frame.frameIndex;
     summary_.time = frame.timestamp;
     summary_.probeX = display.probeX; summary_.probeY = display.probeY;
+    summary_.stabilizationState = shift.state;
+    summary_.stabilizationMethod = shift.method;
+    summary_.stabilizationDx = shift.dx;
+    summary_.stabilizationDy = shift.dy;
+    summary_.stabilizationMs = shift.estimatorMs;
     map_.reset();
     candidates_.clear();
     protected_.assign(pixels, 0);
@@ -637,6 +642,11 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
         candidate.newCandidates = summary_.newCandidates; candidate.activePatches = summary_.activePatches;
         candidate.protectedPixels = summary_.protectedPixels; candidate.learningFrames = summary_.learningFrames;
         candidate.longestActiveSeconds = summary_.longestActiveSeconds;
+        candidate.stabilizationState = summary_.stabilizationState;
+        candidate.stabilizationMethod = summary_.stabilizationMethod;
+        candidate.stabilizationDx = summary_.stabilizationDx;
+        candidate.stabilizationDy = summary_.stabilizationDy;
+        candidate.stabilizationMs = summary_.stabilizationMs;
     };
     for (auto& candidate : candidates_) copyContext(candidate);
     copyContext(strongest_);

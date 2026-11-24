@@ -205,6 +205,7 @@ private slots:
     void cameraRoiDrawingPresetsAndAutoRounding();
     void guiLayoutThemesFocusViewAndPersistence();
     void moonAndSkyEndToEndInjectionsRecordOnDisk();
+    void stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -4107,6 +4108,51 @@ void UiTest::guiLayoutThemesFocusViewAndPersistence()
         reopened.findChild<QAction*>("themeDarkAction")->trigger();
         QCOMPARE(currentUiTheme(), UiTheme::Dark);
     }
+}
+
+// Feature-50: stabilization checkbox is opt-in (off by default), visible on
+// Moon/Sun watches, hidden & forced off on Sky watches, and shows live status.
+void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
+{
+    DetectionPanel panel;
+    auto* box = panel.findChild<QCheckBox*>("stabilizeDetection");
+    auto* status = panel.findChild<QLabel*>("stabilizeStatus");
+    QVERIFY(box && status);
+
+    panel.setWatch(Watch::MoonFlashes);
+    QVERIFY(!box->isHidden());
+    QVERIFY(!box->isChecked());
+    QVERIFY(status->isHidden());
+    QVERIFY(!panel.settings().stabilizeDetection);
+
+    box->setChecked(true);
+    QVERIFY(panel.settings().stabilizeDetection);
+    QVERIFY(!status->isHidden());
+
+    DetectionView view;
+    view.summary.ready = true;
+    view.summary.settings = panel.settings();
+    view.summary.stabilizationState = StabilizationState::Locked;
+    view.summary.stabilizationMethod = StabilizationMethod::DiskCentroid;
+    view.summary.stabilizationDx = 1.4;
+    view.summary.stabilizationDy = -0.6;
+    panel.setView(view);
+    QVERIFY2(status->text().contains("locked (Disk centroid"), qPrintable(status->text()));
+
+    view.summary.stabilizationState = StabilizationState::LostFallback;
+    panel.setView(view);
+    QVERIFY2(status->text().contains("lost — running unstabilized"), qPrintable(status->text()));
+
+    // Shadows watch keeps stabilization visible; Sky watches hide and force it off.
+    panel.setWatch(Watch::MoonShadows);
+    QVERIFY(!box->isHidden());
+    panel.setWatch(Watch::Sky);
+    QVERIFY(box->isHidden());
+    QVERIFY(!box->isChecked());
+    QVERIFY(!panel.settings().stabilizeDetection);
+    panel.setWatch(Watch::SkySlow);
+    QVERIFY(box->isHidden());
+    QVERIFY(!panel.settings().stabilizeDetection);
 }
 
 int main(int argc, char** argv)

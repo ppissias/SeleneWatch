@@ -462,6 +462,7 @@ bool Session::start(QString& error, Mode mode)
     sourceFinished_.store(false);
     { std::lock_guard lock(requestMutex_); manualRequest_.reset(); monitoringRequest_.reset(); cameraTuned_ = false; }
     capture_.reset();
+    resetStabilizer();
     captureResetRequested_.store(false);
     capture_.setMonitoring(mode == Mode::Monitoring);
     mode_.store(mode);
@@ -587,6 +588,7 @@ bool Session::applyPreviewWatch()
         if (!previewWatchRequest_) return true;
         const auto& next = *previewWatchRequest_;
         capture_.reset();
+        resetStabilizer();
         (void)previewSlot_.take();
         // An older evidence job may still own buffers. Leave the change queued
         // until those readers drain if the observer chose a lower ceiling.
@@ -813,7 +815,7 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
     if (gStatus.lock.state == LockState::Locked)
         cfg.lockRegion = gStatus.lock.region;
     cfg.freeSpace = std::move(freeSpace);
-    if (settings.watchTransits) cfg.beforeBurst = [this] { capture_.reset(); };
+    if (settings.watchTransits) cfg.beforeBurst = [this] { capture_.reset(); resetStabilizer(); };
     cfg.statusChanged = [this](TimelapseStatus status) {
         status.transitWatch = transitState_.load();
         if (notifications_.timeLapseChanged) notifications_.timeLapseChanged(status);
@@ -926,6 +928,7 @@ void Session::openTransitWatch(const QString& parent)
     if (!transitDetection_ || !transitFolder_.isEmpty()) return;
     transitFolder_ = QDir(parent).filePath("transits");
     capture_.reset();
+    resetStabilizer();
     capture_.setDetectionSettings(*transitDetection_);
     capture_.setMonitoring(true);
     writer_.setOutputRoot(transitFolder_, true);
@@ -959,7 +962,13 @@ void Session::updateTransitWatch(const FramePtr& frame, TimelapseWork work)
             frame->timestamp);
         return;
     }
-    capture_.onFrame(frame);
+    bool stabilizeTransit = false;
+    {
+        std::lock_guard lock(timelapseMutex_);
+        stabilizeTransit = transitDetection_ && transitDetection_->stabilizeDetection;
+    }
+    const FrameShift shift = stepStabilizer(*frame, stabilizeTransit, transitFolder_);
+    capture_.onFrame(frame, {}, shift);
     setTransitState(capture_.collectingClip() || transitWrites_.load() ? TransitWatchState::Saving : TransitWatchState::Watching,
         frame->timestamp);
 }
@@ -976,6 +985,7 @@ void Session::closeTransitWatch(const std::string& reason)
         capture_.finishPartial(reason);
         capture_.setMonitoring(false);
         capture_.reset();
+        resetStabilizer();
         setTransitState(TransitWatchState::Finished, transitFrameUtc_);
         transitFolder_.clear();
         writer_.setOutputRoot(eventsRoot());
@@ -991,6 +1001,45 @@ void Session::closeTransitWatch(const std::string& reason)
             if (pending) finishTimeLapse(pending->first, std::move(pending->second));
         }, Qt::QueuedConnection);
     });
+}
+
+void Session::resetStabilizer()
+{
+    stabilizer_.reset();
+    prevStabilizeEnabled_ = false;
+    lastStabilizerTime_ = {};
+}
+
+FrameShift Session::stepStabilizer(const Frame& frame, bool enabled, const QString& logFolder)
+{
+    if (enabled != prevStabilizeEnabled_)
+    {
+        stabilizer_.reset();
+        lastStabilizerTime_ = {};
+        capture_.resetDetector(false);
+        prevStabilizeEnabled_ = enabled;
+    }
+    if (!enabled) return {};
+
+    double dt = lastStabilizerTime_.time_since_epoch().count() != 0
+        ? std::chrono::duration<double>(frame.timestamp - lastStabilizerTime_).count()
+        : (1.0 / 30.0);
+    lastStabilizerTime_ = frame.timestamp;
+
+    std::optional<LockRegion> preferred;
+    const GuiderStatus gStatus = guider_.status();
+    if (gStatus.lock.state == LockState::Locked) preferred = gStatus.lock.region;
+
+    const FrameStabilizer::StepResult res = stabilizer_.step(frame, dt, preferred);
+    if (res.resetDetector)
+        capture_.resetDetector(false);
+    else if (res.recenterStepX != 0 || res.recenterStepY != 0)
+        capture_.recenterDetector(res.recenterStepX, res.recenterStepY, frame, res.shift);
+
+    if (!res.logEvent.empty() && !logFolder.isEmpty())
+        writer_.logRecord(utcText(frame.timestamp) + " " + QString::fromStdString(res.logEvent) + "\n", logFolder, "session.txt");
+
+    return res.shift;
 }
 
 void Session::prepareCaptureBudget(const Frame& frame)
@@ -1065,7 +1114,10 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     }
 
     if (captureResetRequested_.exchange(false))
+    {
         capture_.reset();
+        resetStabilizer();
+    }
 
     // Feature-26: a flash check's test flash never goes into a recording,
     // even one that starts with this frame.
@@ -1095,11 +1147,14 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     const bool settling = now < settlingUntil_;
     // Analyse every delivered tuning frame, but do not let a delayed SDK
     // brightness step hold a patch reference through the settling interval.
-    if (settling) capture_.reset(false);
+    if (settling) { capture_.reset(false); resetStabilizer(); }
     const bool previewDue = now - lastPreviewTime_ >= std::chrono::milliseconds{50};
     display.makeMap = previewDue;
     capture_.setDetectionSettings(settings);
-    capture_.onFrame(published, display);
+    const bool stabilizeNow = !settling && settings.stabilizeDetection && captureSettings_.target != Target::Sky;
+    const FrameShift shift = stepStabilizer(*published, stabilizeNow,
+        mode_.load() == Mode::Monitoring ? watchFolder_ : QString());
+    capture_.onFrame(published, display, shift);
     // Feature-26: auto-tune measures after the live detector learned from the frame.
     if (tuneWatch_.busy())
     {
@@ -1135,6 +1190,7 @@ void Session::onDiscontinuity()
     applyManualSave();
     capture_.finishPartial("playback loop boundary");
     capture_.reset();
+    resetStabilizer();
     guider_.discontinuity();
     // Feature-26: a repeated clip is not a longer observation.
     if (tuneWatch_.busy())

@@ -117,6 +117,8 @@ private:
     QDoubleSpinBox* referenceTime_;
     QDoubleSpinBox* minimumNoise_;
     QCheckBox* oneFrame_;
+    QCheckBox* stabilize_;
+    QLabel* stabilizeStatus_;
     QComboBox* overlay_;
     QComboBox* target_;
     QComboBox* profileCombo_;

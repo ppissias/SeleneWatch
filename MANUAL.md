@@ -412,6 +412,7 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 | **Minimum / Maximum patch** | The size of a shadow, in darkened pixels | 20 to 20 000 |
 | **Maximum box / patch** | How long and thin a shadow may be | 10 times |
 | **Allow a one-frame trigger** | On: one frame is enough, as the ISS and satellites need. Off: the same shadow must be seen on two frames in a row, which only aircraft and slower objects do | On |
+| **Stabilize detection against drift/shake** | Aligns each frame to sub-pixel precision inside the detector before checking for shadows (raw saved SER frames stay untouched). Uses your active Feature Lock box if set, otherwise tracks the disk centroid or an automatic crater patch. Holds briefly through passing shadows and falls back cleanly to unstabilized detection if lock is lost. Adds ~1.5–2 ms/frame at 1280×960 (~7 ms/frame at 2128×2128) | Off |
 | **Large darkening** | The share of the frame that, darkening at once, triggers | Off |
 
 ---
@@ -462,6 +463,7 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 | **Minimum / Maximum patch** | The size of a flash, in pixels | 8 to 400 |
 | **Maximum box / patch** | How long and thin a patch may be | 4 times |
 | **Allow a one-frame trigger** | A flash on a single frame triggers | On |
+| **Stabilize detection against drift/shake** | Aligns each frame to sub-pixel precision inside the detector before checking for flashes (raw saved SER frames stay untouched). Uses your active Feature Lock box if set, otherwise tracks the disk centroid or an automatic crater patch. Falls back cleanly to unstabilized detection if lock is lost | Off |
 | **Reference time**, **Minimum noise** | How quickly the background is learned, and the smallest noise assumed | 2 s, 0.5 |
 | **Preview overlay** | Shows on screen the pixels above K, or each pixel's noise | None |
 | **Profile** | Saves and loads named detection settings | — |

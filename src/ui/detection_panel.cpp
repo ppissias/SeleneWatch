@@ -500,20 +500,32 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(sizeReading_, 9, 0, 1, 2);
     oneFrame_ = new QCheckBox("Allow a one-frame trigger", this); oneFrame_->setObjectName("oneFrameTrigger");
     layout->addWidget(oneFrame_, 10, 0, 1, 2);
+    stabilize_ = new QCheckBox("Stabilize detection against drift/shake", this);
+    stabilize_->setObjectName("stabilizeDetection");
+    stabilize_->setToolTip("Aligns each frame to sub-pixel precision inside the detector before checking for flashes or "
+        "shadows (raw saved SER frames stay untouched). Uses your active Feature Lock box if set, otherwise tracks the "
+        "disk centroid or an automatic crater patch. Falls back cleanly to unstabilized detection if lock is lost. "
+        "Adds ~1.5–2 ms/frame at 1280×960 (~7 ms/frame at 2128×2128).");
+    layout->addWidget(stabilize_, 11, 0, 1, 2);
+    stabilizeStatus_ = new QLabel(this);
+    stabilizeStatus_->setObjectName("stabilizeStatus");
+    stabilizeStatus_->setWordWrap(true);
+    stabilizeStatus_->hide();
+    layout->addWidget(stabilizeStatus_, 12, 0, 1, 2);
     history_ = new PeakHistory(this); history_->setObjectName("peakHistory");
-    layout->addWidget(history_, 11, 0, 1, 2);
+    layout->addWidget(history_, 13, 0, 1, 2);
     state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)),
         stateText(widestFall, decisionText(widestFall, false)), kSettlingState}, this);
     state_->setObjectName("detectionState");
     state_->setText("Start a source to measure its noise.");
-    layout->addWidget(state_, 12, 0, 1, 2);
+    layout->addWidget(state_, 14, 0, 1, 2);
     overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
     overlay_->addItems({"None", "Sigma map", "Noise map"});
-    layout->addWidget(named("Preview overlay", overlay_), 13, 0);
-    layout->addWidget(overlay_, 13, 1);
+    layout->addWidget(named("Preview overlay", overlay_), 15, 0);
+    layout->addWidget(overlay_, 15, 1);
     mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, this);
     mapScale_->setText("Overlays affect the display only.");
-    layout->addWidget(mapScale_, 14, 0, 1, 2);
+    layout->addWidget(mapScale_, 16, 0, 1, 2);
 
     auto* showBackground = new QToolButton(content);
     showBackground->setObjectName("backgroundSettings");
@@ -522,7 +534,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     showBackground->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     showBackground->setArrowType(Qt::RightArrow);
     showBackground->setCheckable(true);
-    layout->addWidget(showBackground, 15, 0, 1, 2);
+    layout->addWidget(showBackground, 17, 0, 1, 2);
     auto* background = new QWidget(content);
     auto* model = new QFormLayout(background);
     model->setContentsMargins(0, 0, 0, 0);
@@ -548,7 +560,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     model->addRow(referenceSlider_);
     model->addRow("Minimum noise", minimumNoise_);
     model->addRow(noiseSlider_);
-    layout->addWidget(background, 16, 0, 1, 2);
+    layout->addWidget(background, 18, 0, 1, 2);
 
     // Feature-31: the flashes' ceiling. The sunlit side cannot show a flash.
     flashControls_ = new QWidget(content);
@@ -562,7 +574,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
         "glare by the terminator, where no flash can be seen and seeing only makes false triggers. It follows the "
         "Moon's drift. Off tests every pixel.");
     flashForm->addRow("Ignore brighter than", ignoreAbove_);
-    layout->addWidget(flashControls_, 17, 0, 1, 2);
+    layout->addWidget(flashControls_, 19, 0, 1, 2);
     // Feature-31: the shadows' large darkening. Their patch limits are the
     // Maximum patch and Maximum box / patch above (Feature-45).
     auto* dark = new QWidget(content);
@@ -576,8 +588,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     darkShare_->setToolTip("A frame fires when this share of the unmasked pixels falls by K at once: a plane or bird "
         "filling the field. A cloud edge does the same.");
     darkForm->addRow("Large darkening", darkShare_);
-    layout->addWidget(dark, 18, 0, 1, 2);
-    layout->setRowStretch(19, 1);
+    layout->addWidget(dark, 20, 0, 1, 2);
+    layout->setRowStretch(21, 1);
     background->hide();
     connect(showBackground, &QToolButton::toggled, this, [showBackground, background](bool shown) {
         showBackground->setArrowType(shown ? Qt::DownArrow : Qt::RightArrow);
@@ -590,6 +602,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     for (auto* spin : {compactness_, referenceTime_, minimumNoise_})
         connect(spin, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(oneFrame_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
+    connect(stabilize_, &QCheckBox::toggled, this, [this] { controlsChanged(); });
     connect(sigmaSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) sigma_->setValue(sigmaSlider_->number(p)); });
     connect(minSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimum_->setValue(static_cast<int>(std::round(minSlider_->number(p)))); });
     connect(maxSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) maximum_->setValue(static_cast<int>(std::round(maxSlider_->number(p)))); });
@@ -664,6 +677,7 @@ DetectionSettings DetectionPanel::settings() const
     values.sigma = sigma_->value();
     values.minPixels = minimum_->value();
     values.oneFrame = oneFrame_->isChecked();
+    values.stabilizeDetection = stabilize_->isChecked();
     values.referenceTimeConstantSeconds = referenceTime_->value();
     values.minNoiseAdu = minimumNoise_->value();
     // Feature-45: Maximum patch and Maximum box / patch are the limits of
@@ -711,11 +725,18 @@ void DetectionPanel::setWatch(Watch watch)
     updating_ = true;
     target_->setCurrentIndex(std::max(0, target_->findData(static_cast<int>(watch))));
     updating_ = updating;
-    sky_->setVisible(watchTarget(watch) == Target::Sky);
+    const bool isSky = watchTarget(watch) == Target::Sky;
+    sky_->setVisible(isSky);
     timelapseRow_->setVisible(watch == Watch::SkySlow);
     flashControls_->setVisible(watch == Watch::MoonFlashes);
     darkControls_->setVisible(watch == Watch::MoonShadows);
-    if (watchTarget(watch) != Target::Sky) drawMask_->setChecked(false);
+    stabilize_->setVisible(!isSky);
+    if (isSky)
+    {
+        stabilize_->setChecked(false);
+        stabilizeStatus_->hide();
+    }
+    if (!isSky) drawMask_->setChecked(false);
     // Feature-45: until the window sets the watch's own settings, the
     // controls show these ones' limits for the change this watch looks for.
     showWatchedChange();
@@ -822,6 +843,11 @@ void DetectionPanel::setSettings(const DetectionSettings& given)
     // Feature-45: the maximum patch and box are those of the change looked for.
     sigma_->setValue(settings.sigma); minimum_->setValue(settings.minPixels); maximum_->setValue(settings.patchMaxPixels());
     oneFrame_->setChecked(settings.oneFrame);
+    stabilize_->setChecked(settings.stabilizeDetection);
+    const bool showStab = watchTarget(watch_) != Target::Sky && settings.stabilizeDetection;
+    stabilizeStatus_->setVisible(showStab);
+    if (showStab && stabilizeStatus_->text().isEmpty())
+        stabilizeStatus_->setText("Stabilization: waiting for frames");
     compactness_->setValue(settings.patchMaxBoxRatio());
     referenceTime_->setValue(settings.referenceTimeConstantSeconds);
     minimumNoise_->setValue(settings.minNoiseAdu);
@@ -1033,6 +1059,32 @@ void DetectionPanel::setView(const DetectionView& view)
         sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(shown.minPixels).arg(shown.patchMaxPixels()));
     }
     updateDecision();
+    const bool showStab = watchTarget(watch_) != Target::Sky && stabilize_->isChecked();
+    stabilizeStatus_->setVisible(showStab);
+    if (showStab)
+    {
+        const QString methodLabel = summary.stabilizationMethod == StabilizationMethod::DiskCentroid
+            ? "Disk centroid" : summary.stabilizationMethod == StabilizationMethod::FeatureLock
+            ? "Feature Lock" : "auto";
+        switch (summary.stabilizationState)
+        {
+        case StabilizationState::Locked:
+            stabilizeStatus_->setText(QString("Stabilization: locked (%1, shift %2, %3 px)")
+                .arg(methodLabel)
+                .arg(summary.stabilizationDx >= 0 ? QString("+%1").arg(summary.stabilizationDx, 0, 'f', 1) : QString::number(summary.stabilizationDx, 'f', 1))
+                .arg(summary.stabilizationDy >= 0 ? QString("+%1").arg(summary.stabilizationDy, 0, 'f', 1) : QString::number(summary.stabilizationDy, 'f', 1)));
+            break;
+        case StabilizationState::GraceHold:
+            stabilizeStatus_->setText("Stabilization: holding last shift (brief dip)");
+            break;
+        case StabilizationState::LostFallback:
+            stabilizeStatus_->setText("Stabilization: lost — running unstabilized");
+            break;
+        case StabilizationState::Off:
+            stabilizeStatus_->setText("Stabilization: waiting for frames");
+            break;
+        }
+    }
     history_->setView(view);
     overlayImage_ = {};
     if (!view.map || overlay() == DetectionOverlay::None)

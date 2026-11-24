@@ -2,9 +2,11 @@
 #include "session/blip_injector.h"
 #include "capture/event_capture.h"
 #include "detection/flash_detector.h"
+#include "detection/target_defaults.h"
 #include "recording/event_writer.h"
 #include "recording/ser_reader.h"
 #include "recording/ser_writer.h"
+#include "session/frame_stabilizer.h"
 #include "session/session.h"
 #include "sources/recording_source.h"
 
@@ -84,6 +86,9 @@ private slots:
     void aNewWeakerCandidateDoesNotReplaceTheStrongestPeak();
     void aFullyProtectedFieldDoesNotAdvanceLearning();
     void theSunlitSideIsLeftOutForFlashes();
+    void stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer();
+    void frameStabilizerHandlesOcclusionCloudsAndRecenter();
+    void stabilizedSessionPreservesRawSerAndLogsMetadata();
 };
 
 // Feature-31: for flashes on the earthlit side, pixels whose learned
@@ -604,6 +609,268 @@ void DetectionTest::aLoopFlushesTheClipAtItsBoundary()
         }
         QVERIFY(haveFirst);
         QCOMPARE(first / 10, last / 10);
+    }
+}
+
+namespace {
+
+// Renders a textured bright lunar disk shifted by exact continuous (dx, dy)
+// with optional Bayer RGGB per-channel gains so cross-channel bleeding would show.
+Frame shiftedLunarDisk(uint64_t idx, int w, int h, double dx, double dy,
+    BayerPattern bayer = BayerPattern::None, double brightness = 1.0)
+{
+    Frame frame;
+    frame.width = w; frame.height = h;
+    frame.format = PixelFormat::Mono8;
+    frame.significantBits = 8;
+    frame.bayer = bayer;
+    frame.frameIndex = idx;
+    frame.timestamp = std::chrono::system_clock::time_point{} + std::chrono::milliseconds{static_cast<int64_t>(idx) * 33};
+    frame.testSource = true;
+    frame.data.resize(static_cast<size_t>(w) * h);
+
+    const double cx0 = w * 0.5, cy0 = h * 0.5;
+    const double limbR = 0.36 * std::min(w, h);
+    const double bayerGain[2][2] = {{1.00, 0.80}, {0.80, 0.62}};
+    struct Crater { double x, y, r, d; };
+    static const Crater craters[] = {{-28, -20, 12, 42}, {22, -16, 10, 38}, {-10, 22, 14, 46}, {32, 20, 11, 36}};
+
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const double sx = x - cx0 - dx;
+            const double sy = y - cy0 - dy;
+            const double limb = 1.0 / (1.0 + std::exp((std::hypot(sx, sy) - limbR) / 1.4));
+            double surf = 120.0 + 16.0 * std::sin(sx * 0.09) * std::cos(sy * 0.08);
+            for (const auto& c : craters)
+            {
+                const double d = std::hypot(sx - c.x, sy - c.y);
+                surf += c.d * (0.85 * std::exp(-((d - c.r) * (d - c.r)) / 7.0) - (d < c.r ? 0.5 * (1.0 - (d / c.r) * (d / c.r)) : 0.0));
+            }
+            double v = (8.0 + limb * std::max(0.0, surf)) * brightness;
+            if (bayer != BayerPattern::None) v *= bayerGain[y & 1][x & 1];
+            // Small deterministic noise so variance_ learns cleanly without random flakiness.
+            v += (((x * 17 + y * 31 + static_cast<int>(idx) * 13) % 5) - 2) * 0.4;
+            frame.data[static_cast<size_t>(y) * w + x] = static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+        }
+    }
+    return frame;
+}
+
+} // namespace
+
+// Feature-50: known fractional (dx, dy) shifts suppress limb false triggers,
+// recover both rising flashes and falling shadows in native frame coordinates,
+// and keep raw Bayer RGGB colour sub-planes uncorrupted.
+void DetectionTest::stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer()
+{
+    for (const BayerPattern bayer : {BayerPattern::None, BayerPattern::RGGB})
+    {
+        for (const bool darkening : {false, true})
+        {
+            DetectionSettings s;
+            s.sigma = 8.0;
+            s.minPixels = 4;
+            s.maxPixels = 400;
+            s.darkening = darkening;
+            s.oneFrame = true;
+            s.stabilizeDetection = true;
+            FlashDetector det(s);
+
+            const int W = 160, H = 120;
+            // Learn reference across fractional sub-pixel jitter with zero false triggers.
+            for (uint64_t f = 0; f < 30; ++f)
+            {
+                const double dx = f == 0 ? 0.0 : 0.35 * std::sin(f * 0.7) + 0.08 * static_cast<double>(f);
+                const double dy = f == 0 ? 0.0 : -0.45 * std::cos(f * 0.5) - 0.05 * static_cast<double>(f);
+                const Frame frame = shiftedLunarDisk(f, W, H, dx, dy, bayer);
+                const bool trig = det.analyze(frame, {}, {ShiftMode::Subpixel, dx, dy,
+                    StabilizationState::Locked, StabilizationMethod::DiskCentroid, 0.1});
+                det.updateReference(frame);
+                if (f >= 10) QVERIFY2(!trig, "stabilized quiet shifted frame should not false-trigger");
+            }
+
+            // Inject a flash or shadow on frame 30 at a known shifted native coordinate.
+            const double dx = 3.4, dy = -2.3;
+            Frame eventFrame = shiftedLunarDisk(30, W, H, dx, dy, bayer);
+            const int targetNatX = static_cast<int>(std::lround(80.0 + 12.0 + dx));
+            const int targetNatY = static_cast<int>(std::lround(60.0 - 8.0 + dy));
+            for (int y = targetNatY - 2; y <= targetNatY + 2; ++y)
+                for (int x = targetNatX - 2; x <= targetNatX + 2; ++x)
+                {
+                    const size_t i = static_cast<size_t>(y) * W + x;
+                    const int delta = darkening ? -70 : 75;
+                    eventFrame.data[i] = static_cast<uint8_t>(std::clamp(static_cast<int>(eventFrame.data[i]) + delta, 0, 255));
+                }
+
+            const bool triggered = det.analyze(eventFrame, {}, {ShiftMode::Subpixel, dx, dy,
+                StabilizationState::Locked, StabilizationMethod::DiskCentroid, 0.1});
+            QVERIFY(triggered);
+            QCOMPARE(det.candidates().size(), size_t{1});
+            const auto& c = det.candidates().front();
+            QCOMPARE(c.change, darkening ? ChangeKind::Fall : ChangeKind::Rise);
+            QVERIFY2(std::abs(c.peakX - targetNatX) <= 3 && std::abs(c.peakY - targetNatY) <= 3,
+                qPrintable(QString("peak=(%1,%2) expected near (%3,%4)").arg(c.peakX).arg(c.peakY).arg(targetNatX).arg(targetNatY)));
+            QCOMPARE(c.stabilizationState, StabilizationState::Locked);
+            QCOMPARE(c.stabilizationMethod, StabilizationMethod::DiskCentroid);
+            det.updateReference(eventFrame);
+        }
+    }
+}
+
+// Feature-50: FrameStabilizer handles auto-selection, preferred lock region,
+// transient grace-hold, sustained cloud fallback + re-lock, and large-drift recentering.
+void DetectionTest::frameStabilizerHandlesOcclusionCloudsAndRecenter()
+{
+    // 1. Isolated disk auto-selects DiskCentroid; large 48 px drift recenters cleanly with 0 false triggers.
+    {
+        FrameStabilizer stab;
+        DetectionSettings s;
+        s.sigma = 8.0; s.minPixels = 4; s.oneFrame = true; s.stabilizeDetection = true;
+        FlashDetector det(s);
+        int recenters = 0;
+        for (uint64_t f = 0; f < 100; ++f)
+        {
+            const double dx = -24.0 + 0.50 * static_cast<double>(f);
+            const Frame frame = shiftedLunarDisk(f, 240, 160, dx, 0.0);
+            const auto step = stab.step(frame, 1.0 / 30.0);
+            if (f == 0) QCOMPARE(stab.method(), StabilizationMethod::DiskCentroid);
+            QCOMPARE(step.shift.state, StabilizationState::Locked);
+            if (step.recenterStepX != 0 || step.recenterStepY != 0)
+            {
+                ++recenters;
+                det.recenterReference(step.recenterStepX, step.recenterStepY, frame, step.shift);
+            }
+            const bool trig = det.analyze(frame, {}, step.shift);
+            det.updateReference(frame);
+            if (f >= 20) QVERIFY2(!trig, qPrintable(QString("unexpected trigger after recenter at frame %1").arg(f)));
+        }
+        QVERIFY(recenters >= 1);
+    }
+
+    // 2. Transient occlusion -> GraceHold; sustained opaque clouds -> LostFallback + clean re-lock.
+    {
+        FrameStabilizer stab;
+        DetectionSettings s;
+        s.sigma = 8.0; s.minPixels = 4; s.oneFrame = false; s.stabilizeDetection = true;
+        FlashDetector det(s);
+
+        // Provide an explicit preferred lock region (as when guiding).
+        const LockRegion preferred{64, 48, 96, 96};
+        int graceCount = 0, lostCount = 0;
+        bool sawLostEvent = false, sawRelockedEvent = false;
+        for (uint64_t f = 0; f < 130; ++f)
+        {
+            const bool briefOcclusion = (f >= 30 && f < 35);
+            const bool clouds = (f >= 50 && f < 85);
+            Frame frame = shiftedLunarDisk(f, 240, 180, 0.05 * static_cast<double>(f), 0.0,
+                BayerPattern::None, clouds ? 0.0 : 1.0);
+            if (briefOcclusion)
+            {
+                for (int y = preferred.y - 8; y < preferred.y + preferred.height + 8; ++y)
+                    for (int x = preferred.x - 8; x < preferred.x + preferred.width + 8; ++x)
+                        frame.data[static_cast<size_t>(y) * 240 + x] = 5;
+            }
+            const auto step = stab.step(frame, 1.0 / 30.0, preferred);
+            if (f == 0) QCOMPARE(stab.method(), StabilizationMethod::FeatureLock);
+            if (step.shift.state == StabilizationState::GraceHold) ++graceCount;
+            if (step.shift.state == StabilizationState::LostFallback) ++lostCount;
+            if (step.logEvent.find("registration_lost") != std::string::npos) sawLostEvent = true;
+            if (f >= 85 && step.logEvent.find("registration_locked") != std::string::npos) sawRelockedEvent = true;
+            if (step.resetDetector) det.reset(false);
+            const bool trig = det.analyze(frame, {}, step.shift);
+            det.updateReference(frame);
+            if (f >= 50) QVERIFY2(!trig, "no false-trigger burst during cloud fallback or re-lock");
+        }
+        QVERIFY(graceCount >= 5);
+        QVERIFY(lostCount >= 10);
+        QVERIFY(sawLostEvent);
+        QVERIFY(sawRelockedEvent);
+        QCOMPARE(stab.state(), StabilizationState::Locked);
+    }
+}
+
+// Feature-50: end-to-end Session with stabilizeDetection=true records metadata in
+// event.txt and leaves raw event.ser frames byte-for-byte identical to input frames.
+void DetectionTest::stabilizedSessionPreservesRawSerAndLogsMetadata()
+{
+    QTemporaryDir dir;
+    const QString input = QDir(dir.path()).filePath("drifting.ser");
+    std::vector<std::vector<uint8_t>> rawBytes;
+    {
+        QFile file(input);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        SerWriter ser(file);
+        QString error;
+        for (uint64_t i = 0; i < 45; ++i)
+        {
+            const double dx = 0.15 * static_cast<double>(i);
+            Frame frame = shiftedLunarDisk(i, 160, 120, dx, -0.08 * static_cast<double>(i));
+            if (i == 30)
+            {
+                const int fx = static_cast<int>(std::lround(80.0 + dx));
+                const int fy = static_cast<int>(std::lround(60.0 - 0.08 * 30.0));
+                patch(frame, fx - 1, fy - 1, 3, 90);
+            }
+            rawBytes.push_back(std::vector<uint8_t>(frame.data.begin(), frame.data.end()));
+            if (i == 0) QVERIFY2(ser.start(frame, "TEST: stabilized session", error), qPrintable(error));
+            QVERIFY2(ser.append(frame, error), qPrintable(error));
+        }
+        QVERIFY2(ser.finish(error), qPrintable(error));
+    }
+
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    bool ended = false;
+    Session::Notifications notices;
+    notices.clipWritten = [&](const auto& r) { results.push_back(r); };
+    notices.ended = [&] { ended = true; };
+
+    Session session(&context, dir.path(), std::move(notices));
+    DetectionSettings settings = defaultDetectionSettings(Watch::MoonFlashes);
+    settings.ignoreAboveShare = 0.0;
+    settings.sigma = 8.0;
+    settings.minPixels = 4;
+    settings.oneFrame = true;
+    settings.stabilizeDetection = true;
+    session.setWatch(Watch::MoonFlashes);
+    session.setDetectionSettings(settings);
+    CaptureSettings capture = defaultCaptureSettings(Watch::MoonFlashes);
+    capture.postSeconds = 0.2;
+    session.setCaptureSettings(capture);
+
+    auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
+    source->setSpeed(RecordingSource::Speed::Fast);
+    session.setSource(std::move(source));
+    QString error;
+    QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(ended, 5000);
+    session.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!results.empty(), 5000);
+
+    const ClipWriteResult& clip = results.front();
+    QVERIFY2(clip.notSaved.isEmpty(), qPrintable(clip.notSaved));
+    const QString eventTxt = contents(QDir(clip.folder).filePath("event.txt"));
+    QVERIFY2(eventTxt.contains("stabilize_detection=yes"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("stabilization_state=locked"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("stabilization_method=disk_centroid"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("shift=("), qPrintable(eventTxt));
+
+    // Verify raw event.ser frames are byte-for-byte untouched evidence.
+    std::string serErr;
+    SerReader reader;
+    QVERIFY2(reader.open(std::filesystem::path(QDir(clip.folder).filePath("event.ser").toStdWString()), 30.0, serErr), serErr.c_str());
+    QVERIFY(reader.frameCount() > 0);
+    Frame saved;
+    saved.data.resize(reader.frameBytes());
+    for (int i = 0; i < reader.frameCount(); ++i)
+    {
+        QVERIFY(reader.readFrame(i, saved, serErr));
+        const uint64_t origIdx = reader.frameNumber(i);
+        QVERIFY(origIdx < rawBytes.size());
+        QCOMPARE(saved.data.size(), rawBytes[origIdx].size());
+        QVERIFY(std::equal(saved.data.begin(), saved.data.end(), rawBytes[origIdx].begin()));
     }
 }
 

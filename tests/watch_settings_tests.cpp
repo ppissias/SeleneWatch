@@ -50,6 +50,10 @@ DetectionSettings distinctDetection(Watch watch, double sigma)
         settings.releaseSeconds = sigma * 3;
         settings.mask = DetectionMask::fromText("10,10,40,30");
     }
+    else
+    {
+        settings.stabilizeDetection = true;
+    }
     return settings;
 }
 
@@ -241,6 +245,13 @@ void WatchSettingsTest::invalidValuesReadAsTheWatchsDefaults()
     QSettings().setValue("detection/darkening", true);
     QVERIFY(!savedDetectionSettings(Watch::MoonFlashes).darkening);
     QVERIFY(savedDetectionSettings(Watch::MoonShadows).darkening);
+    // Feature-50: stabilization is off by default and always off on fixed-camera Sky watches.
+    QVERIFY(!defaultDetectionSettings(Watch::MoonFlashes).stabilizeDetection);
+    QVERIFY(!defaultDetectionSettings(Watch::MoonShadows).stabilizeDetection);
+    QSettings().setValue("sky/detection/stabilizeDetection", true);
+    QSettings().setValue("skySlow/detection/stabilizeDetection", true);
+    QVERIFY(!savedDetectionSettings(Watch::Sky).stabilizeDetection);
+    QVERIFY(!savedDetectionSettings(Watch::SkySlow).stabilizeDetection);
 }
 
 int main(int argc, char** argv)

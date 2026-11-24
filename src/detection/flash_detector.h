@@ -20,6 +20,9 @@ struct FrameShift
     // coordinates (rx + dx, ry + dy).
     double dx{0};
     double dy{0};
+    StabilizationState state{StabilizationState::Off};
+    StabilizationMethod method{StabilizationMethod::None};
+    double estimatorMs{0};
 };
 
 // Feature-9: per-pixel running reference and variance, in native sample

@@ -24,6 +24,33 @@ struct DetectionDisplayRequest
 // or a large share of the frame that rose (Feature-11) or fell at once.
 enum class ChangeKind { Rise, LargeRise, Fall, LargeFall };
 
+// Feature-50: runtime shift stabilization state and active estimator.
+enum class StabilizationState { Off, Locked, GraceHold, LostFallback };
+enum class StabilizationMethod { None, FeatureLock, DiskCentroid };
+
+[[nodiscard]] inline const char* stabilizationStateName(StabilizationState state)
+{
+    switch (state)
+    {
+    case StabilizationState::Off: return "off";
+    case StabilizationState::Locked: return "locked";
+    case StabilizationState::GraceHold: return "grace_hold";
+    case StabilizationState::LostFallback: return "lost_fallback";
+    }
+    return "off";
+}
+
+[[nodiscard]] inline const char* stabilizationMethodName(StabilizationMethod method)
+{
+    switch (method)
+    {
+    case StabilizationMethod::None: return "none";
+    case StabilizationMethod::FeatureLock: return "feature_lock";
+    case StabilizationMethod::DiskCentroid: return "disk_centroid";
+    }
+    return "none";
+}
+
 // Measurements of one frame in native ADU and per-pixel noise units.
 struct DetectionSummary
 {
@@ -62,6 +89,12 @@ struct DetectionSummary
     uint64_t onsetFrameIndex{0};
     size_t newCandidates{0}, activePatches{0}, protectedPixels{0}, learningFrames{0};
     double longestActiveSeconds{0};
+    // Feature-50: stabilization telemetry for this frame.
+    StabilizationState stabilizationState{StabilizationState::Off};
+    StabilizationMethod stabilizationMethod{StabilizationMethod::None};
+    double stabilizationDx{0};
+    double stabilizationDy{0};
+    double stabilizationMs{0};
 };
 
 // A compact reading for the live history plot, timestamped by the source.

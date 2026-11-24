@@ -44,6 +44,12 @@ struct ClipTrigger
     double share{0};
     double medianDifferenceAdu{0};
     double peakAdu{0};
+
+    // Feature-50: stabilization state and measured shift on this trigger frame.
+    StabilizationState stabilizationState{StabilizationState::Off};
+    StabilizationMethod stabilizationMethod{StabilizationMethod::None};
+    double stabilizationDx{0};
+    double stabilizationDy{0};
 };
 
 // A patch or large change in the clip that reached the release limit and

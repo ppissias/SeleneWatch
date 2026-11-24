@@ -2,6 +2,7 @@
 
 #include "autotune/auto_tune_watch.h"
 #include "session/blip_injector.h"
+#include "session/frame_stabilizer.h"
 #include "capture/event_capture.h"
 #include "guiding/guider.h"
 #include "core/observing_site.h"
@@ -255,6 +256,9 @@ private:
     void beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames = 0);
     void endRecording(const std::string& reason);
     void startClockCheck();
+    // Source thread: computes optional sub-pixel shift and handles reset/recenter/logging.
+    FrameShift stepStabilizer(const Frame& frame, bool enabled, const QString& logFolder);
+    void resetStabilizer();
 
     QObject* context_;
     Notifications notifications_;
@@ -273,6 +277,10 @@ private:
 
     EventWriter writer_;
     EventCapture capture_;
+    // Source thread only (Feature-50): shift estimator for stabilized detection.
+    FrameStabilizer stabilizer_;
+    bool prevStabilizeEnabled_{false};
+    std::chrono::system_clock::time_point lastStabilizerTime_{};
     LatestFrameSlot previewSlot_;
     BlipInjector blip_;
     mutable std::mutex requestMutex_;

@@ -117,6 +117,8 @@ QString detectorModelFields(const DetectionSettings& settings)
     if (settings.darkeningShare > 0) text += QString(" darkening_share=%1").arg(settings.darkeningShare, 0, 'g', 17);
     // Feature-31: flashes on the earthlit side leave out the sunlit side.
     if (settings.ignoreAboveShare > 0) text += QString(" ignore_above_share=%1").arg(settings.ignoreAboveShare, 0, 'g', 17);
+    // Feature-50: optional runtime sub-pixel shift stabilization.
+    if (settings.stabilizeDetection) text += " stabilize_detection=yes";
     return text;
 }
 
@@ -154,6 +156,10 @@ QString triggerFields(const ClipTrigger& trigger)
         }
         text += QString(" active_patches=%1 protected_pixels=%2 learning_frames=%3 longest_active_seconds=%4")
             .arg(trigger.activePatches).arg(trigger.protectedPixels).arg(trigger.learningFrames).arg(trigger.longestActiveSeconds,0,'g',17);
+        if (trigger.settings.stabilizeDetection || trigger.stabilizationState != StabilizationState::Off)
+            text += QString(" stabilization_state=%1 stabilization_method=%2 shift=(%3,%4)")
+                .arg(stabilizationStateName(trigger.stabilizationState), stabilizationMethodName(trigger.stabilizationMethod))
+                .arg(trigger.stabilizationDx, 0, 'f', 3).arg(trigger.stabilizationDy, 0, 'f', 3);
     }
     text += detectorModelFields(trigger.settings);
     if (trigger.continuesPreviousClip)

@@ -54,6 +54,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-47 — Checking on SeleneWatch from a phone](#feature-47--checking-on-selenewatch-from-a-phone)
 - [Feature-48 — An ISS silhouette test signal, and documentation that shows each feature](#feature-48--an-iss-silhouette-test-signal-and-documentation-that-shows-each-feature)
 - [Feature-49 — The shadows watch and the ISS](#feature-49--the-shadows-watch-and-the-iss)
+- [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3614,3 +3615,65 @@ Feature-13's darkening measurements, on five recordings of the sunlit Moon with 
 - `watch_settings`, in `theKeysEarlierVersionsWroteAreRead`: shadows settings saved with `oneFrame` false by an earlier version read as one frame, while the flashes' saved value stays. Shadows settings unticked and saved since read as unticked, and the default is one frame.
 - `ui`, `eachTargetKeepsItsOwnSettings`: the shadows watch starts with one frame.
 - `darkening`, `theIssAtRealSpeedNeedsAOneFrameTrigger` (Feature-48): still checks both settings explicitly.
+
+---
+
+## Feature-50 — Optional runtime sub-pixel registration for stabilized detection
+
+*Proposed, benchmarked, and implemented on 24 November 2026.*
+
+### Goal
+
+Add an **opt-in checkbox** (off by default) that stabilizes frames against frame-to-frame translation `(dx, dy)` inside the detector's working comparison before evaluating `FlashDetector` — working identically for **both flashes (rises) and shadows (falls)** on the **Moon, Sun, and planetary targets (e.g., Jupiter/Saturn)**.
+
+Unlike the historical 14 November 2026 integer-only prototype ([registration experiment](docs/registration-experiment.md)), which ran on the older whole-frame-hold detector and left ±0.5 px edge residuals, this feature targets the current per-pixel hold-out, single-direction detector (Features 9, 11, 13, 45), supports **sub-pixel** alignment, reuses existing `FeatureLock` measurements where available, and **benchmarks both detection benefit and CPU cost first** before shipping in the UI.
+
+### Scope and design
+
+1. **Opt-in user control (`DetectionSettings::stabilizeDetection`):**
+   - A checkbox (**Stabilize detection against drift/shake**) in the **Detection** panel, saved per watch in `watch_settings` (`false` by default).
+   - Available on Moon/Sun watches (flashes and shadows) and future planetary watches; hidden and forced off on fixed-camera Sky watches (where horizon masks are fixed and stars drift intentionally).
+
+2. **Two shift estimators (reusing existing code, one implementation per behaviour):**
+   - **When Feature Lock is active (Moon / Sun surface):** Reuse the observer's active Feature Lock box, running `FeatureLock::find` on the source thread at full frame rate (~0.65 ms/frame) so fast seeing shake and guide-pulse jitter are removed even though the guider runs asynchronously at 5 Hz.
+   - **When no Feature Lock is set (or for isolated planetary / full-disk targets):** A lightweight automatic estimator:
+     - *Isolated bright disk (planets, full Moon, full Sun):* clipped-limb thresholded **Center of Gravity (CoG)** centroid (< 0.3 ms at ≤1280×960, ~0.01–0.05 px precision, inherently rotation-invariant and insensitive to interior flashes or small dark transits).
+     - *Partial lunar surface without a lock box:* auto-picked high-contrast anchor patch via `FeatureLock`'s own quality gates (saturation, contrast, 2D structure), with periodic anchor-preserving template refresh (~60 s or gentle score dip) for multi-hour slow field rotation and lunar lighting changes. *(Stage 1 also benchmarked downsampled 2D phase correlation and dropped it from production after it performed worse than both `DiskCoG` and `FeatureLock`.)*
+
+3. **Zero-copy shifted sampling inside `FlashDetector` (evidence rules preserved):**
+   - Raw `Frame` objects in `FrameRingBuffer` and saved `event.ser` clips remain **100% untouched** (native bytes, timestamps, and layout unchanged).
+   - `FlashDetector::analyze(frame, display, shift)` reads shifted coordinates `(x + dx, y + dy)` row-by-row into a reusable L1-cache row buffer without allocating a warped full-frame copy:
+     - **Mono8 / Mono16 / RGB:** bilinear sub-pixel interpolation.
+     - **Raw Bayer mosaics:** never interpolates across colour channels; bilinear interpolation operates strictly on the 2-pixel same-colour sub-plane lattice (`R`, `G1`, `G2`, `B` independently) while keeping raw evidence untouched.
+   - Any detected trigger's `(peakX, peakY)` and bounding `box` are mapped back to **native raw frame coordinates** `(x + round(dx), y + round(dy))`, while internal patch continuity (`active_`) tracks in reference coordinates so stationary flashes stay matched across drift.
+   - Border pixels outside the valid shifted overlap are treated as masked for that frame so exposed edges never false-trigger.
+   - `event.txt` records `stabilize_detection=yes`, `stabilization_state=...`, `stabilization_method=...`, and `shift=(dx,dy)` on triggers when active.
+
+4. **Failure handling — what happens when registration cannot lock or loses lock:**
+   Registration failure is expected in real observing (clouds, slewing, a large shadow covering the lock region, low contrast, or target drifting out of frame). Every failure mode is handled explicitly and without false-trigger storms:
+   - **Transient loss (short dip ≤ grace window, 0.5 s — such as a bird/aircraft crossing the lock region, a sudden seeing blur, or an implausible single-frame jump `> maxStepPx` = 12 px):**
+     - Reject the bad measurement and **hold the last valid `(dx, dy)`** during the grace window so detection stays active through the exact moment a large shadow passes over the lock area.
+   - **Sustained loss (grace window expires — clouds, slew, target left frame, or no lockable texture):**
+     - **Never** compare an unshifted frame against a shifted `mean_` (which would fire across every edge in the frame).
+     - Transition explicitly to **`LostFallback`**: cleanly reset only the detector's reference (`EventCapture::resetDetector(false)`, keeping the pre-event ring buffer and any open clip intact), emit one `registration_lost reason=...` entry in `session.txt` (no log spam), show clear status in the Detection panel (`Stabilization: lost — running unstabilized`), and continue watching with standard unregistered detection so the observer never goes blind.
+     - When registration produces 3 consecutive consistent valid matches again, cleanly re-anchor the reference and log `registration_locked method=...`.
+   - **Large accumulated drift (unguided mount drifting past margin, `|dx|` or `|dy| >= 32 px`):**
+     - **In-place integer recenter** (`FlashDetector::recenterReference`, even steps on Bayer) of `mean_` and `variance_` by `(stepX, stepY)` (initializing only the newly exposed border strip from clamped current-frame samples and subtracting `(stepX, stepY)` from the accumulated offset), keeping the learned background intact across the interior with zero blind gap and zero false triggers.
+
+### Stage 1 — Benchmark outcome (24 November 2026)
+
+Measured in Release x64 with `SeleneWatchProbe stabilize-bench` ([full benchmark report](docs/stabilized-detection-benchmark.md)):
+- **Detection benefit:** On drifting sunlit lunar footage (`Moon_171311.ser`, 1296×964, 500 frames), sub-pixel bilinear improved injected ISS shadow recovery at `K = 12` by +60% (**8/11 vs. 5/11**, 0 false; **11/11 at `K = 8`**, 0 false) while integer-only shifting dropped to 3/11. On real drifting Mars footage (`Mars_222831.avi`, 360×276, 737 frames), `DiskCoG` locked 737/737 frames in 0.09 ms/frame and cut false triggers at `K = 8` from **9 → 0** (`p95 σ`: 12.9 → 6.5). On sample lunar/solar ISS transits and impact flashes, sub-pixel eliminated false triggers at lower K and improved flash SNR (+12% on the 2013 NASA lunar flash).
+- **Computational cost (Release x64 mean ms/frame):** ~1.3 ms total at `480×480` (+0.25 ms detector, 0.17 ms `DiskCoG`), ~8.0 ms total at `1280×960` (+1.5 ms detector, 0.65 ms `FeatureLock` / 0.28 ms `DiskCoG`), ~28 ms total at `2128×2128` (+5.2–7.1 ms detector, 0.65 ms `FeatureLock`).
+- **Estimator & rotation findings:** Dropped 2D phase correlation (`PhaseCorr` lost lock on Mars and partial lunar clips); kept `FeatureLock` + `DiskCoG` only (zero OpenCV in detection/session stabilization). Verified 6° field rotation with periodic template refresh (`minScore = 0.998`, 0 lost, 0 false) and caught/fixed a border-clamping edge case in `recenterReference`.
+
+### Stage 2 — Implementation & verification (24 November 2026)
+
+- **Core & Session:** `DetectionSettings::stabilizeDetection` (`false` by default, forced `false` on Sky in `target_defaults.h`), `StabilizationState` / `StabilizationMethod` on `DetectionSummary` and `ClipTrigger`, `FlashDetector::analyze(..., FrameShift)` + `recenterReference(...)`, `FrameStabilizer` (`src/session/frame_stabilizer.{h,cpp}`), `EventCapture::resetDetector` / `recenterDetector`, `Session` integration (including time-lapse transit gap watching and `session.txt` transition logging), and `event.txt` metadata in `event_writer.cpp`.
+- **Settings & UI:** `watch_settings.cpp` (per-watch & named profiles), **Stabilize detection against drift/shake** checkbox + live status label (`stabilizeStatus`) in `DetectionPanel` (hidden on Sky watches), and `MANUAL.md` controls tables updated.
+- **Tests:**
+  - `watch_settings`: per-watch & named-profile persistence in registry and `.ini`, default `false`, Sky forced `false`.
+  - `detection`: `stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer` (Mono8 + raw Bayer RGGB, rises & falls, native coordinate recovery), `frameStabilizerHandlesOcclusionCloudsAndRecenter` (DiskCentroid, preferred FeatureLock, GraceHold, LostFallback + re-lock, 48 px recenter), and `stabilizedSessionPreservesRawSerAndLogsMetadata` (end-to-end `Session` verifying `event.txt` fields and byte-for-byte untouched `event.ser`).
+  - `ui`: `stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus` plus `everyControlHasHelp` and layout tests.
+  - All **26/26 CTest suites** passed in `Debug-x64` (built with `-j 2` while the observer's live Release session remained undisturbed).
+- **Pending field validation:** live telescope check on earthshine, sunlit Moon, and planetary streams; Release build & desktop GUI E2E test once the live Release observing session finishes.
