@@ -2045,6 +2045,8 @@ void UiTest::theReleaseIsShown()
     QVERIFY(!refsText.contains("Evangelidis") && !refsText.contains("Kuglin"));
     QVERIFY(formatsText.contains("SER Format (v3)") && formatsText.contains("RFC 5905")
         && formatsText.contains("ASCOM") && !formatsText.contains("Pence"));
+    QVERIFY(formatsText.contains("Joel Kowsky") && formatsText.contains("NHQ201903160004")
+        && formatsText.contains("Marshall Space Flight Center") && formatsText.contains("SVS 11806"));
     QVERIFY(AboutDialog::licenseText().contains("BSD 2-Clause"));
 }
 

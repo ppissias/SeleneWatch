@@ -269,7 +269,23 @@ QString AcknowledgementsDialog::formatsStandardsHtml() const
         "      <span class='muted'>Late-bound COM calls in <code>ascom_mount</code> to read mount state and send guide pulses.</span></li>"
         "  <li><b>FireCapture</b> by Torsten Edelmann (<a href='https://www.firecapture.de/'>firecapture.de</a>).<br>"
         "      <span class='muted'>Companion FireCapture <code>.txt</code> capture logs parsed by <code>firecapture_log</code> during SER/AVI replay to recover camera settings and timestamps.</span></li>"
-        "</ul>");
+        "</ul>"
+        "<hr>"
+        "<h3>Sample Astronomical Imagery &amp; Data</h3>"
+        "<p>Public-domain astronomical sequences replayed as sample data to verify and illustrate SeleneWatch's "
+        "detection watches in the documentation and website:</p>"
+        "<ul>"
+        "  <li><b>NASA / Joel Kowsky</b> (NASA Headquarters) &mdash; International Space Station lunar transit "
+        "      sequence (16 March 2019, <code>NHQ201903160004</code>, "
+        "      <a href='https://commons.wikimedia.org/wiki/File:ISS_Lunar_Transit_(NHQ201903160004).webm'>Wikimedia Commons</a>) "
+        "      and solar transit sequence (24 June 2020, <code>NHQ202006240004</code>, "
+        "      <a href='https://commons.wikimedia.org/wiki/File:ISS_Solar_Transit_(NHQ202006240004).webm'>Wikimedia Commons</a>).</li>"
+        "  <li><b>NASA's Marshall Space Flight Center (Meteoroid Environment Office) &amp; "
+        "      NASA's Goddard Space Flight Center (Scientific Visualization Studio)</b> &mdash; "
+        "      17 March 2013 Mare Imbrium lunar impact flash telescope recording "
+        "      (<code>SVS 11806</code>, <a href='https://svs.gsfc.nasa.gov/11806'>svs.gsfc.nasa.gov/11806</a>).</li>"
+        "</ul>"
+        "<p class='muted'>All NASA imagery listed above is in the public domain; its use does not imply endorsement by NASA.</p>");
 }
 
 AboutDialog::AboutDialog(QWidget* parent, const QString& release, const QString& revision,

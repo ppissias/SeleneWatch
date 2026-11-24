@@ -440,6 +440,10 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 
 ### What it looks like
 
+![The 17 March 2013 Mare Imbrium lunar impact flash, detected by SeleneWatch on NASA MSFC's public-domain telescope recording](docs/images/flash-nasa-2013.png)
+
+*Sample data: the 17 March 2013 Mare Imbrium lunar impact flash recorded by NASA's Marshall Space Flight Center (Meteoroid Environment Office) and published by NASA's Goddard Space Flight Center (`SVS 11806`, public domain), replayed through the flashes watch. The crop strip shows the quiet surface before, the flash onset, the peak frame, the cooling tail across 12 frames (0.37 s, strongest rise 81.3 σ), and the change overlay.*
+
 ![A test flash on the Moon's dark side, as SeleneWatch saved it](docs/images/flash-test.png)
 
 *Test data: a marked test flash added to the unlit part of the Moon, beyond the terminator, in a real recording, and the clip SeleneWatch saved, grouped as brief (K 12). No real impact was recorded here.*
@@ -613,7 +617,7 @@ Every frame a test signal touches is marked as test data, and so is every clip t
 | **Watching the sky** | Automated tests with a synthetic sky and test signals, and **all-night use outdoors with a ZWO ASI120MM Mini**: meteors, aircraft, satellites and short flashes caught, a horizon mask, the exposure follower, and the report of the night |
 | **Time-lapses** | Automated tests of stacking, alignment, rotation, planets, FITS files, the video and re-sharpening, recordings of the Moon and planets from 2010 to 2019, and **Moon time-lapses at the telescope** |
 | **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with one frame, the default since then; never with two); public-domain NASA lunar and solar ISS transit sequences replayed at K 12 (both saved as Moving crossings). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
-| **Impact flashes** | Automated tests, and test flashes added to real lunar recordings to measure the faintest caught. **Waiting for a calibrated night on the earthshine** |
+| **Impact flashes** | Automated tests, test flashes added to real lunar recordings to measure the faintest caught, and NASA MSFC's public-domain 17 March 2013 Mare Imbrium lunar impact flash recording replayed through the flashes watch (detected across 12 frames, 81.3 σ). **Waiting for a calibrated night on the earthshine** |
 | **Guiding** | Automated tests with a simulated mount, drift followed on lunar recordings, and the ASCOM simulator. **Waiting for a whole night of guiding under the Moon** |
 | **Cameras** | ZWO ASI120MM Mini on the bench (8 and 16 bit, half-hour runs) and outdoors. QHY, Player One and ToupTek with automated tests and their libraries found on Windows; **waiting for real cameras** |
 | **Auto-tune** | Automated tests on a model camera and the synthetic scenes; **waiting for real nights** |

@@ -80,9 +80,9 @@ Small meteoroids hit the Moon all the time. On the part of the Moon lit only fai
 
 SeleneWatch tests each pixel against its own noise, so a faint flash on the dark side is noticed, while the bright sunlit side and the glare beside it are left out. Auto-tune sets the camera for the faint earthshine and measures the faintest flash that would be caught, by adding a marked test flash to the real frames. Guiding and the automatic end of the session work as for shadows.
 
-![A test flash on the dark side of the Moon, as SeleneWatch saved it](docs/images/flash-test.png)
+![The 17 March 2013 Mare Imbrium lunar impact flash, detected by SeleneWatch on NASA MSFC's public-domain telescope recording](docs/images/flash-nasa-2013.png)
 
-*Test data: a marked test flash added to the unlit part of the Moon, beyond the terminator, in a real recording, and the clip SeleneWatch saved, grouped as brief (K 12). No real impact was recorded here.*
+*Sample data: the 17 March 2013 Mare Imbrium lunar impact flash recorded by NASA's Marshall Space Flight Center (Meteoroid Environment Office) and published by NASA's Goddard Space Flight Center (`SVS 11806`, public domain), replayed through SeleneWatch's flashes watch. SeleneWatch detected the onset, tracked the flash across 12 frames (0.37 s, strongest rise 81.3 σ) in place, and built the crop strip showing the rise and cooling decay. The [user manual](MANUAL.md#5-impact-flashes-on-the-moons-dark-side) also shows a marked test-flash run.*
 
 ---
 
@@ -134,7 +134,7 @@ Install your camera maker's driver first. ZWO's library comes with SeleneWatch; 
 ## How far it has been tested
 
 - **In use:** the sky watch, all night with a ZWO ASI120MM Mini, catching meteors, aircraft and satellites; Moon time-lapses at the telescope.
-- **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, public-domain NASA lunar and solar ISS transit sequences (replayed through the shadows watch at K 12), and test signals added to real lunar recordings.
+- **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, public-domain NASA sequences (lunar and solar ISS transits at K 12, and NASA MSFC's 17 March 2013 lunar impact flash recording), and test signals added to real lunar recordings.
 - **Waiting for real tests:** QHY, Player One and ToupTek cameras on hardware; a whole night of mount guiding under the Moon; an impact flash or a shadow caught at the telescope; a predicted ISS transit recorded on schedule.
 
 The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested, feature by feature.
@@ -217,9 +217,12 @@ References for established methods, standards and interfaces implemented directl
 - **NTPv4** — Mills et al. (2010), [RFC 5905](https://datatracker.ietf.org/doc/html/rfc5905) (`clock_check`).
 - **ASCOM Telescope interface** ([ascom-standards.org](https://ascom-standards.org/)) (`ascom_mount`) and **FireCapture** `.txt` capture logs by Torsten Edelmann ([firecapture.de](https://www.firecapture.de/)) (`firecapture_log`).
 
-#### Sample Transit Imagery
+#### Sample Astronomical Imagery & Data
 
-- **NASA / Joel Kowsky** — public-domain International Space Station lunar transit sequence (16 March 2019, `NHQ201903160004`) and solar transit sequence (24 June 2020, `NHQ202006240004`), replayed as sample data to verify and illustrate SeleneWatch's shadows watch. Use of NASA imagery does not imply endorsement by NASA.
+- **NASA / Joel Kowsky** (NASA Headquarters) — public-domain International Space Station lunar transit sequence (16 March 2019, `NHQ201903160004`, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:ISS_Lunar_Transit_(NHQ201903160004).webm)) and solar transit sequence (24 June 2020, `NHQ202006240004`, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:ISS_Solar_Transit_(NHQ202006240004).webm)), replayed as sample data to verify and illustrate SeleneWatch's shadows watch.
+- **NASA's Marshall Space Flight Center (Meteoroid Environment Office) & NASA's Goddard Space Flight Center (Scientific Visualization Studio)** — public-domain 17 March 2013 Mare Imbrium lunar impact flash telescope recording (`SVS 11806`, [svs.gsfc.nasa.gov/11806](https://svs.gsfc.nasa.gov/11806)), replayed as sample data to verify and illustrate SeleneWatch's lunar impact flashes watch.
+
+Use of NASA imagery does not imply endorsement by NASA.
 
 ---
 
