@@ -6,6 +6,22 @@
 #include <deque>
 #include <vector>
 
+// Feature-50: how a frame is sampled relative to the detector's reference
+// coordinates when shift stabilization is active. Off keeps the unshifted
+// path; Integer shifts by whole pixels (even steps on raw Bayer mosaics);
+// Subpixel uses bilinear interpolation (per-channel 2-pixel lattice on Bayer).
+enum class ShiftMode { Off, Integer, Subpixel };
+
+struct FrameShift
+{
+    ShiftMode mode{ShiftMode::Off};
+    // Displacement of the scene in this frame relative to the reference frame,
+    // matching FeatureLock's sign: reference pixel (rx, ry) samples frame
+    // coordinates (rx + dx, ry + dy).
+    double dx{0};
+    double dy{0};
+};
+
 // Feature-9: per-pixel running reference and variance, in native sample
 // units. A robust grid estimate supplies a noise floor. At least one compact
 // patch over K must satisfy the size limits. Spatially separate patches have
@@ -43,8 +59,14 @@ public:
 
     // Source thread, in this order for each frame: analyze, inspect/copy derived
     // measurements, updateReference with that same immutable frame.
-    bool analyze(const Frame& frame, DetectionDisplayRequest display = {});
+    // An optional shift (Feature-50) samples frame coordinates (x + dx, y + dy)
+    // while mapping reported peak/box coordinates back to native frame space.
+    bool analyze(const Frame& frame, DetectionDisplayRequest display = {}, FrameShift shift = {});
     void updateReference(const Frame& frame);
+    // Feature-50: in-place integer shift of the learned mean/variance by
+    // (stepX, stepY) when accumulated drift exceeds margin, initializing only
+    // the newly exposed border strip from frame at newShift.
+    void recenterReference(int stepX, int stepY, const Frame& frame, FrameShift newShift);
     [[nodiscard]] const std::vector<DetectionSummary>& candidates() const;
     [[nodiscard]] const DetectionSummary& strongestPatch() const;
 
@@ -95,6 +117,7 @@ private:
     struct Patch
     {
         DetectionSummary measured;
+        int refBoxX{0}, refBoxY{0}, refBoxWidth{0}, refBoxHeight{0};
         int consecutive{0};
         double seconds{0};
     };
@@ -111,4 +134,6 @@ private:
     std::chrono::system_clock::time_point previousTime_{};
     double frameInterval_{0};
     bool awaitingUpdate_{false};
+    FrameShift lastShift_{};
+    std::vector<float> rowBuf_;
 };

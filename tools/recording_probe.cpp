@@ -11,6 +11,7 @@
 #include "tools/pulse_probe.h"
 #include "tools/overview_probe.h"
 #include "tools/darkening_probe.h"
+#include "tools/stabilize_bench.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -47,9 +48,15 @@ int main(int argc, char** argv)
         try { return mode=="rearm"?runRearmingProbe(args):runDetectionProbe(args); }
         catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
     }
-    if (mode == "overview" || mode == "darkening" || mode == "iss")
+    if (mode == "overview" || mode == "darkening" || mode == "iss" || mode == "stabilize-bench")
     {
-        try { return mode == "overview" ? runOverviewProbe(args) : mode == "iss" ? runIssProbe(args) : runDarkeningProbe(args); }
+        try
+        {
+            return mode == "overview" ? runOverviewProbe(args)
+                : mode == "iss" ? runIssProbe(args)
+                : mode == "stabilize-bench" ? runStabilizeBench(args)
+                : runDarkeningProbe(args);
+        }
         catch (const std::exception& ex) { err << ex.what() << '\n'; return 1; }
     }
     if (mode == "lock" || mode == "guide-sim" || mode == "ascom" || mode == "guide-pulses")

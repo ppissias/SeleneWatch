@@ -9,7 +9,7 @@ On 21 November 2026 every feature whose software was complete moved there: Featu
 | Feature | Focus | Status |
 | --- | --- | --- |
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Item 3 (nightly review) implemented; items 1 and 2 proposed |
-| [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection) | Opt-in real-time shift stabilization before detection for Moon/Sun flashes, shadows, and planetary targets, benchmarked first for benefit and CPU cost | Proposed (Stage 1 benchmark next) |
+| [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection) | Opt-in real-time shift stabilization before detection for Moon/Sun flashes, shadows, and planetary targets, benchmarked first for benefit and CPU cost | Stage 1 benchmark complete ([report](docs/stabilized-detection-benchmark.md)); Stage 2 awaiting review |
 | [Ideas not yet proposed](#ideas-not-yet-proposed) | Work set aside in earlier features, waiting for data, hardware or a decision | Not proposed |
 | [Field validation](#field-validation) | Checks of implemented features that need the sky, a mount or a camera | Open |
 
@@ -101,7 +101,9 @@ Add a reproducible CLI benchmark subcommand to `SeleneWatchProbe` (`stabilize-be
 2. **Computational cost (Release x64 build, mean & p95 ms/frame):**
    - Measure shift estimation time (`FeatureLock` NCC, disk CoG, phase correlation) separately from shifted `FlashDetector::analyze` + `updateReference` time.
    - Measure across Mono8, Mono16, and Bayer/RGB at representative sizes: planetary ROI (`480×480`, `640×480`), mid lunar (`1280×960`), and large lunar (`2128×2128`), verifying headroom against real camera frame intervals (30–150 fps).
-   - Record all benchmark results in `docs/stabilized-detection-benchmark.md` and review with the maintainer before starting Stage 2 (UI checkbox + Session integration).
+   - Record all benchmark results in [docs/stabilized-detection-benchmark.md](docs/stabilized-detection-benchmark.md) and review with the maintainer before starting Stage 2 (UI checkbox + Session integration).
+
+**Stage 1 outcome (24 November 2026):** Measured in Release x64 ([benchmark report](docs/stabilized-detection-benchmark.md)). Sub-pixel bilinear stabilization improved shadow recovery on drifting sunlit lunar footage by +60% at `K = 12` (8/11 vs. 5/11; 11/11 at `K = 8`, 0 false) and eliminated false triggers on real drifting Mars footage at `K = 8` (0 vs. 9 false, `DiskCoG` 0.09 ms/frame, 100% lock), at a total cost of ~1.3 ms/frame at `480×480`, ~8.0 ms/frame at `1280×960`, and ~28 ms/frame at `2128×2128`. Integer-only shifting frequently performed worse than unstabilized, and 2D phase correlation performed significantly worse than both `DiskCoG` (planets) and `FeatureLock` (partial lunar views). Stage 2 should therefore ship **sub-pixel bilinear** with **`FeatureLock` + `DiskCoG` only** (zero OpenCV dependency in `src/detection/`), plus periodic anchor-preserving template refresh to handle multi-hour slow field rotation and lunar lighting changes cleanly.
 
 ### Stage 2 — Implementation & acceptance criteria (after benchmark review)
 

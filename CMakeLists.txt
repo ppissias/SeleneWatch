@@ -412,10 +412,12 @@ add_test(NAME touptek COMMAND SeleneWatchToupTekTests -o -,tap)
 
 # Run by hand, with an explicit input and output path; never part of CTest.
 add_executable(SeleneWatchProbe tools/recording_probe.cpp tools/detection_probe.cpp tools/rearming_probe.cpp tools/translation_estimator.cpp
-    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp tools/darkening_probe.cpp)
+    tools/lock_probe.cpp tools/guide_probe.cpp tools/pulse_probe.cpp tools/overview_probe.cpp tools/darkening_probe.cpp
+    tools/stabilize_bench.cpp)
 # The probes include each other as "tools/…", from the repository root.
 target_include_directories(SeleneWatchProbe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core)
+target_include_directories(SeleneWatchProbe SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(SeleneWatchProbe PRIVATE selenewatch_core opencv_world)
 selenewatch_compile_options(SeleneWatchProbe)
 
 add_library(selenewatch_camera_probe STATIC tools/camera_probe.cpp tools/qhy_probe.cpp)
