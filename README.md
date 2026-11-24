@@ -2,6 +2,7 @@
 
 # SeleneWatch
 
+### Watch the sky, Moon and planets. From split-second flashes to all-night time-lapses.
 SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens pointed at the sky, and keeps the moments when something changes. It saves those moments as lossless video, with the frames from just before and after, the exact times, and a picture of what changed. It also makes time-lapses of the Moon and the planets, and can lock directly onto a lunar crater or planetary disk to guide your ASCOM mount through the main camera—no guide scope or guide star required.
 
 It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
@@ -69,9 +70,9 @@ Aircraft, the International Space Station and satellites pass in front of the su
 
 The feature lock and mount guiding keep the Moon in place. **Auto-tune** measures the sunlit Moon and suggests the exposure, the gain and the sensitivity. The session can end by itself: at a time, after a duration, or when the Moon sinks too low.
 
-![A test ISS silhouette crossing the Moon, as SeleneWatch saved it](docs/images/transit-iss-test.png)
+![An ISS silhouette crossing the Moon, detected by SeleneWatch on a public-domain NASA sequence](docs/images/transit-iss-nasa-moon.png)
 
-*Test data: an ISS silhouette at its real size and speed for a 9.25-inch telescope (0.33″ per pixel), added to a real lunar recording and saved by SeleneWatch as a crossing. No real transit was recorded here.*
+*Sample data: a public-domain NASA lunar ISS transit sequence (16 March 2019, credit: NASA / Joel Kowsky, `NHQ201903160004`), replayed through the shadows watch at its default K 12 with a one-frame trigger. SeleneWatch detected all five crossing frames in a straight line (grouped as **Moving**, 220 σ deepest fall) and centred the crop strip on the ISS silhouette. The [user manual](MANUAL.md#4-shadows-crossing-the-moon) also shows a public-domain NASA solar ISS transit and a test-signal run.*
 
 ### 4. Impact flashes on the Moon's dark side
 
@@ -133,7 +134,7 @@ Install your camera maker's driver first. ZWO's library comes with SeleneWatch; 
 ## How far it has been tested
 
 - **In use:** the sky watch, all night with a ZWO ASI120MM Mini, catching meteors, aircraft and satellites; Moon time-lapses at the telescope.
-- **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, and test signals added to real lunar recordings.
+- **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, public-domain NASA lunar and solar ISS transit sequences (replayed through the shadows watch at K 12), and test signals added to real lunar recordings.
 - **Waiting for real tests:** QHY, Player One and ToupTek cameras on hardware; a whole night of mount guiding under the Moon; an impact flash or a shadow caught at the telescope; a predicted ISS transit recorded on schedule.
 
 The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested, feature by feature.
@@ -215,6 +216,10 @@ References for established methods, standards and interfaces implemented directl
 - **SER v3** — Heiko Wilkens & Grischa Hahn ([specification](https://www.grischa-hahn.homepage.t-online.de/astro/ser/SER%20Doc%20V3b.pdf)) (`SerReader` / `SerWriter`).
 - **NTPv4** — Mills et al. (2010), [RFC 5905](https://datatracker.ietf.org/doc/html/rfc5905) (`clock_check`).
 - **ASCOM Telescope interface** ([ascom-standards.org](https://ascom-standards.org/)) (`ascom_mount`) and **FireCapture** `.txt` capture logs by Torsten Edelmann ([firecapture.de](https://www.firecapture.de/)) (`firecapture_log`).
+
+#### Sample Transit Imagery
+
+- **NASA / Joel Kowsky** — public-domain International Space Station lunar transit sequence (16 March 2019, `NHQ201903160004`) and solar transit sequence (24 June 2020, `NHQ202006240004`), replayed as sample data to verify and illustrate SeleneWatch's shadows watch. Use of NASA imagery does not imply endorsement by NASA.
 
 ---
 

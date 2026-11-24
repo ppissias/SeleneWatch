@@ -391,6 +391,14 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 
 ### What it looks like
 
+![An ISS silhouette crossing the Moon, detected by SeleneWatch on a public-domain NASA sequence](docs/images/transit-iss-nasa-moon.png)
+
+*Sample data: a public-domain NASA lunar ISS transit sequence (16 March 2019, credit: NASA / Joel Kowsky, `NHQ201903160004`), replayed through the shadows watch at K 12 with a one-frame trigger. SeleneWatch detected all five crossing frames in a straight line (grouped as **Moving**, 220 σ deepest fall) and centred the crop strip on the ISS silhouette.*
+
+![An ISS silhouette crossing the Sun, detected by SeleneWatch on a public-domain NASA sequence](docs/images/transit-iss-nasa-sun.png)
+
+*Sample data: a public-domain NASA solar ISS transit sequence (24 June 2020, credit: NASA / Joel Kowsky, `NHQ202006240004`), replayed through the same shadows watch at K 12. All six crossing frames are marked in blue along a straight line (grouped as **Moving**, 184 σ deepest fall), with the ISS silhouette centred in the peak crop.*
+
 ![A test ISS silhouette crossing the Moon, as SeleneWatch saved it](docs/images/transit-iss-test.png)
 
 *Test data: an ISS silhouette at its real size and speed for a 9.25-inch telescope (0.33″ per pixel, the ISS about 45° up), added to a real recording of the sunlit Moon, and saved by the shadows watch. It shows on three frames, far apart. No real transit was recorded here.*
@@ -604,7 +612,7 @@ Every frame a test signal touches is marked as test data, and so is every clip t
 | --- | --- |
 | **Watching the sky** | Automated tests with a synthetic sky and test signals, and **all-night use outdoors with a ZWO ASI120MM Mini**: meteors, aircraft, satellites and short flashes caught, a horizon mask, the exposure follower, and the report of the night |
 | **Time-lapses** | Automated tests of stacking, alignment, rotation, planets, FITS files, the video and re-sharpening, recordings of the Moon and planets from 2010 to 2019, and **Moon time-lapses at the telescope** |
-| **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with one frame, the default since then; never with two). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
+| **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with one frame, the default since then; never with two); public-domain NASA lunar and solar ISS transit sequences replayed at K 12 (both saved as Moving crossings). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
 | **Impact flashes** | Automated tests, and test flashes added to real lunar recordings to measure the faintest caught. **Waiting for a calibrated night on the earthshine** |
 | **Guiding** | Automated tests with a simulated mount, drift followed on lunar recordings, and the ASCOM simulator. **Waiting for a whole night of guiding under the Moon** |
 | **Cameras** | ZWO ASI120MM Mini on the bench (8 and 16 bit, half-hour runs) and outdoors. QHY, Player One and ToupTek with automated tests and their libraries found on Windows; **waiting for real cameras** |
