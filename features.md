@@ -9,6 +9,7 @@ On 21 November 2026 every feature whose software was complete moved there: Featu
 | Feature | Focus | Status |
 | --- | --- | --- |
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Item 3 (nightly review) implemented; items 1 and 2 proposed |
+| [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection) | Opt-in real-time shift stabilization before detection for Moon/Sun flashes, shadows, and planetary targets, benchmarked first for benefit and CPU cost | Proposed (Stage 1 benchmark next) |
 | [Ideas not yet proposed](#ideas-not-yet-proposed) | Work set aside in earlier features, waiting for data, hardware or a decision | Not proposed |
 | [Field validation](#field-validation) | Checks of implemented features that need the sky, a mount or a camera | Open |
 
@@ -45,6 +46,74 @@ Let the observer step through candidates using the existing overviews and animat
 
 ---
 
+## Feature-50 — Optional runtime sub-pixel registration for stabilized detection
+
+*Proposed on 24 November 2026.*
+
+### Goal
+
+Add an **opt-in checkbox** (off by default) that stabilizes frames against frame-to-frame translation `(dx, dy)` inside the detector's working comparison before evaluating `FlashDetector` — working identically for **both flashes (rises) and shadows (falls)** on the **Moon, Sun, and planetary targets (e.g., Jupiter/Saturn)**.
+
+Unlike the historical 14 November 2026 integer-only prototype ([registration experiment](docs/registration-experiment.md)), which ran on the older whole-frame-hold detector and left ±0.5 px edge residuals, this feature targets the current per-pixel hold-out, single-direction detector (Features 9, 11, 13, 45), supports **sub-pixel** alignment, reuses existing `FeatureLock` measurements where available, and **benchmarks both detection benefit and CPU cost first** before shipping in the UI.
+
+### Scope and design
+
+1. **Opt-in user control (`DetectionSettings::stabilizeDetection`):**
+   - A checkbox (**Stabilize detection against drift/shake**) in the **Detection** panel, saved per watch in `watch_settings` (`false` by default).
+   - Available on Moon/Sun watches (flashes and shadows) and future planetary watches; hidden and forced off on fixed-camera Sky watches (where horizon masks are fixed and stars drift intentionally).
+
+2. **Two shift estimators (reusing existing code, one implementation per behaviour):**
+   - **When Feature Lock is active (Moon / Sun surface):** Reuse the live sub-pixel `(dx, dy)` already computed by `FeatureLock` on every frame (~0 ms extra registration cost).
+   - **When no Feature Lock is set (or for isolated planetary / full-disk targets):** A lightweight automatic estimator:
+     - *Isolated bright disk (planets, full Moon, full Sun):* thresholded intensity-weighted **Center of Gravity (CoG)** centroid (< 0.3 ms, ~0.05–0.1 px precision).
+     - *Partial lunar surface without a lock box:* fast downsampled **2D phase correlation** (or auto-picked high-contrast anchor patch via `FeatureLock`) on an interior ROI.
+
+3. **Zero-copy shifted sampling inside `FlashDetector` (evidence rules preserved):**
+   - Raw `Frame` objects in `FrameRingBuffer` and saved `event.ser` clips remain **100% untouched** (native bytes, timestamps, and layout unchanged).
+   - `FlashDetector::analyze(frame, display, shift)` reads shifted coordinates `(x + dx, y + dy)` on the fly without allocating a warped full-frame copy:
+     - **Mono8 / Mono16 / RGB:** bilinear sub-pixel interpolation (benchmarking integer vs bilinear sub-pixel directly in Stage 1).
+     - **Raw Bayer mosaics:** never interpolate across colour channels; either shift each of the 4 Bayer sub-planes (`R`, `G1`, `G2`, `B`) independently or compare on a 2×2-cell luma grid while keeping raw evidence untouched.
+   - Any detected trigger's `(peakX, peakY)` and bounding `box` are mapped back to **native raw frame coordinates** `(x + round(dx), y + round(dy))`.
+   - Border pixels outside the valid shifted overlap are treated as masked for that frame so exposed edges never false-trigger.
+   - `event.txt` records whether stabilization was active, its state, and the measured `(dx, dy)` on each trigger.
+
+4. **Failure handling — what happens when registration cannot lock or loses lock:**
+   Registration failure is expected in real observing (clouds, slewing, a large shadow covering the lock region, low contrast, or target drifting out of frame). Every failure mode is handled explicitly and without false-trigger storms:
+   - **Transient loss (short dip ≤ grace window, e.g., up to 0.5 s / ~15 frames — such as a bird/aircraft crossing the lock region, a sudden seeing blur, or an implausible single-frame jump `> maxStepPx`):**
+     - Reject the bad measurement and **hold the last valid `(dx, dy)`** during the grace window so detection stays active through the exact moment a large shadow passes over the lock area.
+   - **Sustained loss (grace window expires — clouds, slew, target left frame, or no lockable texture):**
+     - **Never** compare an unshifted frame against a shifted `mean_` (which would fire across every edge in the frame).
+     - Transition explicitly to **`Registration lost (unstabilized fallback)`**: cleanly reset the detector's reference at `(0, 0)`, emit one `registration_lost reason=...` entry in `session.txt` / `candidates.txt` (no log spam), show clear status in the Detection panel (`Stabilization: lost — running unstabilized`), and continue watching with standard unregistered detection so the observer never goes blind.
+     - When registration produces consecutive valid matches again (e.g., 3 frames), cleanly re-anchor the reference and log `registration_locked`.
+   - **Large accumulated drift (unguided mount drifting past margin, e.g., `|dx|` or `|dy| >= 32 px`):**
+     - **In-place integer recenter** of `mean_` and `variance_` by `(stepX, stepY)` (initializing only the newly exposed border strip from the current frame and subtracting `(stepX, stepY)` from the accumulated offset), keeping the learned background intact across the interior with zero blind gap and zero false triggers.
+
+### Stage 1 — Benchmark plan (before UI integration)
+
+Add a reproducible CLI benchmark subcommand to `SeleneWatchProbe` (`stabilize-bench`) comparing **unstabilized** vs **integer-shifted** vs **sub-pixel bilinear** detection on the same recordings and detector code:
+
+1. **Detection benefit (quietness & sensitivity):**
+   - *Moon / Sun shadows:* `nasa_iss_lunar_2019_leadin.avi`, `nasa_iss_solar_2020_leadin.avi`, `iss_lunar_transit_1080p.ser`, plus real archive sunlit lunar recordings (`test_data/Moon_*.avi`, `test_data/Moon_*.ser`) — measure false-trigger count vs `K` (`6, 8, 12, 18`), limb/edge noise reduction, and ISS/injected-shadow recovery.
+   - *Moon impact flashes:* `nasa_msfc_lunar_impact_20130317.ser`, `FDS_moon_2.avi`, and injected test flashes on drifting lunar recordings — measure false triggers vs `K` and faintest recovered flash amplitude.
+   - *Planetary:* real archive Mars/Jupiter recordings (`test_data/Mars_*.avi`, etc.) with injected synthetic bolide flashes and dark transits — measure disk-centroid stability, limb false triggers, and recovery.
+   - *Failure injection:* simulate synthetic clouds, sudden 20 px wind jump, and a dark disk crossing the lock region to verify grace-hold and clean fallback with zero false-trigger storms.
+
+2. **Computational cost (Release x64 build, mean & p95 ms/frame):**
+   - Measure shift estimation time (`FeatureLock` NCC, disk CoG, phase correlation) separately from shifted `FlashDetector::analyze` + `updateReference` time.
+   - Measure across Mono8, Mono16, and Bayer/RGB at representative sizes: planetary ROI (`480×480`, `640×480`), mid lunar (`1280×960`), and large lunar (`2128×2128`), verifying headroom against real camera frame intervals (30–150 fps).
+   - Record all benchmark results in `docs/stabilized-detection-benchmark.md` and review with the maintainer before starting Stage 2 (UI checkbox + Session integration).
+
+### Stage 2 — Implementation & acceptance criteria (after benchmark review)
+
+- `DetectionSettings::stabilizeDetection` (default `false`) wired through `watch_settings`, Detection panel checkbox + live status readout, `Session`, `FlashDetector`, and `event.txt`.
+- Automated unit and integration tests covering:
+  - Known fractional `(dx, dy)` shifts on bright flashes and dark shadows recover true native coordinates and suppress limb false triggers.
+  - Raw Bayer mosaic phase is preserved (no cross-channel interpolation artifacts) and raw `event.ser` frames remain byte-for-byte untouched.
+  - Transient lock loss holds `(dx, dy)` through a shadow crossing the lock box; sustained lock loss resets cleanly to unstabilized fallback with zero false-trigger burst; large drift recenters in-place without losing the learned interior model.
+- `MANUAL.md` updated with the checkbox, when to use it, its CPU note, and what happens when lock is lost.
+
+---
+
 ## Ideas not yet proposed
 
 Work that earlier features set aside. None is designed yet; each would become a numbered feature when the observer asks for it or the data shows the need.
@@ -54,7 +123,7 @@ Work that earlier features set aside. None is designed yet; each would become a 
 | Measure the flash width from the blur of the Moon's limb, instead of the typical seeing | Feature-30 | — |
 | Watch the Moon's flashes and shadows at the same time | Feature-31 | The observer's decision ("not yet") |
 | Start a session by itself: at dusk, or when the Moon rises above an altitude | Feature-32 (**Watch from dusk to dawn** removed) | The observer's interest; it would extend **Ends** |
-| Register frames against field shift before detection | Feature-9, Feature-5 | Longer unclipped earthshine and bright-limb comparisons ([registration experiment](docs/registration-experiment.md)) |
+| Register frames against field shift before detection | Feature-9, Feature-5 | Promoted to [Feature-50](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection) (building on [registration experiment](docs/registration-experiment.md)) |
 | Guiding: refresh the lock template over a session; alt-azimuth mounts | Feature-8 (open decisions) | A real session whose lock score decays; an observer with an alt-azimuth mount |
 | Binning above 1 for colour cameras (ZWO, Player One) and for QHY | Feature-10, Feature-16 | Hardware checks of the Bayer cell and the binned data |
 | A GPS time reference | Feature-10, Feature-14 | A camera or receiver with GPS |
