@@ -19,6 +19,7 @@ private slots:
     void selectionNeverChangesTheImage();
     void zoomPanAndCoordinateAccuracy();
     void leftDragPansByDefaultAndDrawsOnlyInRegionMode();
+    void stabilizedDisplayShiftMovesRenderedPixelsAndMapsClicks();
 };
 
 void PreviewWidgetTest::mapsTheWholeImageIncludingItsLastPixel()
@@ -228,6 +229,35 @@ void PreviewWidgetTest::leftDragPansByDefaultAndDrawsOnlyInRegionMode()
         QApplication::sendEvent(&preview, &release);
     }
     QCOMPARE(preview.panOffset(), panBefore + QPointF(-3, -2));
+}
+
+void PreviewWidgetTest::stabilizedDisplayShiftMovesRenderedPixelsAndMapsClicks()
+{
+    // A white 10x10 square sits at raw frame (310, 235) when the target shifted by (+10, -5).
+    QImage image(640, 480, QImage::Format_RGB888);
+    image.fill(Qt::black);
+    for (int y = 235; y < 245; ++y)
+        for (int x = 310; x < 320; ++x)
+            image.setPixelColor(x, y, Qt::white);
+    const QImage original = image.copy();
+
+    PreviewWidget preview;
+    preview.resize(642, 482); // 1:1 inside 1 px border: imageRect = (1, 1, 640, 480)
+    preview.setImage(image);
+    preview.setDisplayShift(QPointF(10.0, -5.0));
+    QCOMPARE(preview.displayShift(), QPointF(10.0, -5.0));
+
+    // Rendered white square moves by (-10, +5) to screen (301..310, 241..250); raw image stays untouched.
+    QImage screen(preview.size(), QImage::Format_RGB32);
+    preview.render(&screen);
+    QCOMPARE(screen.pixelColor(305, 245), QColor(Qt::white));
+    QCOMPARE(screen.pixelColor(315, 237), QColor(Qt::black));
+    QCOMPARE(image, original);
+
+    // Clicking on the stabilized square at screen (305, 245) maps back to raw frame (314, 239).
+    const auto rawPos = preview.framePosition(QPointF(305.0, 245.0));
+    QVERIFY(rawPos.has_value());
+    QCOMPARE(*rawPos, QPoint(314, 239));
 }
 
 QTEST_MAIN(PreviewWidgetTest)

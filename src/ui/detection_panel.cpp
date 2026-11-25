@@ -280,19 +280,21 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     target_->setObjectName("targetChoice");
     target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     target_->setMinimumContentsLength(16);
-    // Feature-31: the Moon's flashes and its shadows are watched apart.
-    target_->addItem("The Moon: flashes on the earthlit side", static_cast<int>(Watch::MoonFlashes));
-    target_->addItem("The Moon (or Sun): shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
+    // Feature-31: the Moon's flashes and sunlit shadows/crossings are watched apart.
+    target_->addItem("Flashes (Moon, earthlit side)", static_cast<int>(Watch::MoonFlashes));
+    target_->addItem("Shadows / crossings (Moon, Sun, planets)", static_cast<int>(Watch::MoonShadows));
     // Feature-35: the sky's fast events and its slow, faint ones are watched apart.
-    target_->addItem("The sky: fast events (meteors, lightning)", static_cast<int>(Watch::Sky));
-    target_->addItem("The sky: slow and faint (long exposures)", static_cast<int>(Watch::SkySlow));
-    target_->setToolTip("What is watched. Each keeps its own detection settings and profiles; both Moon watches share "
-        "the Moon's capture settings, folder and guiding. Flashes: sensitive, on the earthlit side, the sunlit side "
-        "left out. Shadows: planes, the ISS or birds against the sunlit side, insensitive to seeing. Sky, fast events: "
-        "short exposures (40 ms at most by default) for meteors, lightning and flares, their timing and trajectory; a "
-        "moving meteor leaves no more light in a pixel when exposed longer, only more sky. Sky, slow and faint: "
-        "exposures up to 2 s by default for aurora, airglow, slow satellites and long glows, with its own capture "
-        "settings and an optional time-lapse. Both sky watches use the sky's folder. Changes only while stopped.");
+    target_->addItem("Fast sky events (meteors, lightning)", static_cast<int>(Watch::Sky));
+    target_->addItem("Slow & faint sky (long exposures)", static_cast<int>(Watch::SkySlow));
+    target_->setToolTip("What is watched and where it applies. Each watch keeps its own detection settings and profiles; "
+        "Flashes and Shadows / crossings share capture settings, folder and guiding. "
+        "Flashes (Moon, earthlit side): sensitive to brief brightenings on the unlit Moon, leaving out the sunlit side "
+        "(bright planetary disks are not intended for sub-second flash watching). "
+        "Shadows / crossings (Moon, Sun, planets): dark silhouettes such as aircraft, birds or the ISS across a bright "
+        "disk (experimental on planets). "
+        "Fast sky events: short exposures (up to 40 ms by default) for meteors, lightning and flares. "
+        "Slow & faint sky: long exposures (up to 2 s by default) for aurora, airglow and slow glows, with an optional "
+        "overnight time-lapse. Changes only while stopped.");
     targetRow->addWidget(target_, 1);
     column->addLayout(targetRow);
 
@@ -506,6 +508,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     stabilizeStatus_ = new QLabel(this);
     stabilizeStatus_->setObjectName("stabilizeStatus");
     stabilizeStatus_->setWordWrap(true);
+    stabilizeStatus_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     stabilizeStatus_->hide();
     layout->addWidget(stabilizeStatus_, 12, 0, 1, 2);
     history_ = new PeakHistory(this); history_->setObjectName("peakHistory");

@@ -51,6 +51,10 @@ public:
     [[nodiscard]] double zoom() const;
     [[nodiscard]] QPointF panOffset() const { return pan_; }
     void setDetectionOverlay(QImage image, QRect frameBox);
+    // Display-only shift in frame pixels (matching detector stabilization): draws
+    // the image shifted by (-dx, -dy) and maps clicks back to raw frame coordinates.
+    void setDisplayShift(QPointF frameShift);
+    [[nodiscard]] QPointF displayShift() const { return displayShift_; }
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
     // Frame coordinates. Optional lunar constant anchor region (Feature-18).
@@ -92,6 +96,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private:
+    [[nodiscard]] QRectF displayImageRect() const;
     [[nodiscard]] QRectF toWidget(const QRectF& frameRect) const;
     // The frame pixels a drag between two widget points covers, clamped to the image.
     [[nodiscard]] QRect dragRegion(QPointF from, QPointF to) const;
@@ -125,6 +130,7 @@ private:
     bool fitMode_{true};
     double zoom_{1.0};
     QPointF pan_{0.0, 0.0};
+    QPointF displayShift_{0.0, 0.0};
     bool panning_{false};
     QPointF panLastPos_;
 };

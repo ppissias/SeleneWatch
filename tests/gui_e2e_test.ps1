@@ -436,7 +436,7 @@ try {
     # Feature-31: shadows on the sunlit side are their own watch. Switch to it,
     # monitor again and inject a Dark transit -> a darkening clip in a new session.
     $targetCombo = Find-UiaElement -Root $mainWin -IdSuffix "targetChoice"
-    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon (or Sun): shadows on the sunlit side" -ProcessId $proc.Id
+    Select-UiaComboItem -Combo $targetCombo -ItemText "Shadows / crossings (Moon, Sun, planets)" -ProcessId $proc.Id
     Start-Sleep -Milliseconds 300
     $null = Start-StreamUi "Start Moon shadows preview"
     Start-MonitoringUi "Start Moon shadows monitoring"
@@ -473,7 +473,7 @@ try {
     # --- Scenario 2: Synthetic Sky Watch (Meteor streak + Lightning on disk) ---
     Write-Host "`n[2/4] Synthetic Sky Watch: Meteor streak + Lightning recorded on disk..."
     $targetCombo = Find-UiaElement -Root $mainWin -IdSuffix "targetChoice"
-    Select-UiaComboItem -Combo $targetCombo -ItemText "The sky" -ProcessId $proc.Id
+    Select-UiaComboItem -Combo $targetCombo -ItemText "Fast sky events (meteors, lightning)" -ProcessId $proc.Id
     Start-Sleep -Milliseconds 300
 
     $null = Start-StreamUi "Start synthetic Sky preview"
@@ -542,7 +542,7 @@ try {
     Write-Host "  Sky clips verified on disk: $($skyDirs.Count) (meteor + lightning)"
 
     # Switch back to Moon for Time-lapse scenarios.
-    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon" -ProcessId $proc.Id
+    Select-UiaComboItem -Combo $targetCombo -ItemText "Flashes (Moon, earthlit side)" -ProcessId $proc.Id
     Select-UiaComboItem -Combo $blipKindCombo -ItemText "Bright flash" -ProcessId $proc.Id
     Start-Sleep -Milliseconds 300
 

@@ -103,8 +103,9 @@ const std::vector<StartupTip>& allStartupTips()
         },
         {
             "Four independent watches",
-            "The <b>Watching</b> selector at the top of <b>Detection</b> keeps separate settings for <b>The Moon: "
-            "flashes</b>, <b>The Moon: shadows</b>, <b>The sky: fast events</b>, and <b>The sky: slow and faint</b>. "
+            "The <b>Watching</b> selector at the top of <b>Detection</b> keeps separate settings for <b>Flashes "
+            "(Moon, earthlit side)</b>, <b>Shadows / crossings (Moon, Sun, planets)</b>, <b>Fast sky events "
+            "(meteors, lightning)</b>, and <b>Slow &amp; faint sky (long exposures)</b>. "
             "Switching watches in <b>Preview</b> immediately applies that watch's thresholds without disturbing the others.",
             kSectionLunar
         },
@@ -181,8 +182,8 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 3: Transits, continuous recording & guiding ────────────────
         {
             "Catching dark transits across the Moon",
-            "Choose <b>Watching: The Moon (or Sun): shadows on the sunlit side</b> in <b>Detection</b> to catch aircraft, birds, "
-            "or the ISS crossing the sunlit Moon. It looks only for darkening, and its settings start insensitive to "
+            "Choose <b>Watching: Shadows / crossings (Moon, Sun, planets)</b> in <b>Detection</b> to catch aircraft, birds, "
+            "or the ISS crossing the sunlit Moon or Sun (experimental on planets). It looks only for darkening, and its settings start insensitive to "
             "seeing (<code>K 12</code>, 20-pixel shadows, one frame enough for the fast ISS), so silhouettes trigger "
             "clips while bright terrain stays quiet.",
             kSectionTransits
@@ -220,8 +221,8 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 4: Watching the sky ────────────────────────────────────────
         {
             "Fast sky events vs. slow & faint sky",
-            "Use <b>The sky: fast events</b> (exposures up to <code>40 ms</code>) for meteors, lightning, aircraft, "
-            "and satellites. Switch to <b>The sky: slow and faint</b> (exposures up to <code>2 s</code>) for aurora "
+            "Use <b>Fast sky events (meteors, lightning)</b> (exposures up to <code>40 ms</code>) for meteors, lightning, aircraft, "
+            "and satellites. Switch to <b>Slow &amp; faint sky (long exposures)</b> (exposures up to <code>2 s</code>) for aurora "
             "or airglow&mdash;it can also build an overnight sky time-lapse right beside its triggered clips.",
             kSectionSky
         },

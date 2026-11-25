@@ -238,7 +238,7 @@ What both share:
 ### Step by step
 
 1. Enter your site's position under **Session → Site and instrument…** ([1.4](#14-your-site-and-instrument)), and choose your camera under **Source**.
-2. Under **Watching**, choose **The sky: fast events** or **The sky: slow and faint**.
+2. Under **Watching**, choose **Fast sky events (meteors, lightning)** or **Slow & faint sky (long exposures)**.
 3. Start Preview at night and draw a mask over the horizon:
    - **Draw mask**, click the corners of each area and double-click to close it (or drag for a rectangle). Turn **Draw mask** off when done.
    - **Save…** on the **Profile** row keeps these settings under a name; tick **Include horizon mask** to keep the mask with them, for a site of its own.
@@ -369,7 +369,7 @@ Aircraft, the International Space Station and satellites pass in front of the su
 
 ### How the shadows watch works
 
-**The Moon (or Sun): shadows on the sunlit side**, under **Watching**, looks only for pixels that get darker. Nothing that brightens triggers it: the bright surface shimmers with the seeing, and that would otherwise trigger all night. Its starting settings are chosen to stay quiet on the sunlit Moon:
+**Shadows / crossings (Moon, Sun, planets)**, under **Watching**, looks only for pixels that get darker. Nothing that brightens triggers it: the bright surface shimmers with the seeing, and that would otherwise trigger all night (planetary shadow/crossing watching is experimental). Its starting settings are chosen to stay quiet on the sunlit Moon:
 - **K 12**: a pixel must fall twelve times its own noise. On five recordings of the sunlit Moon, nothing triggered at this K.
 - **A shadow of at least 20 pixels**, and up to 20 000 pixels, enough for a close aircraft.
 - **One frame is enough**, so that the ISS and satellites are caught.
@@ -379,7 +379,7 @@ Aircraft, the International Space Station and satellites pass in front of the su
 ### Automatic: catching crossings as they happen
 
 1. In Preview, frame the sunlit Moon, and lock and guide if you have a mount ([chapter 6](#6-feature-lock-and-guiding)).
-2. Under **Watching**, choose **The Moon (or Sun): shadows on the sunlit side**.
+2. Under **Watching**, choose **Shadows / crossings (Moon, Sun, planets)**.
 3. **Auto-tune** ([1.7](#17-auto-tune)) measures the brightest sunlit areas, sets the exposure (up to 10 ms) and the gain, and suggests K. Keep K at 12 or higher on the sunlit Moon.
 4. Set when the session ends ([1.8](#18-ending-a-session-by-itself)), for example when the Moon sinks below 10°.
 5. Press **Start monitoring**. The readouts under K show the deepest fall and the largest shadow, and the graph plots the deepest fall against K. Each crossing is saved as a clip, with its path drawn in blue on its overview.
@@ -408,7 +408,7 @@ For an ISS transit or an occultation you know the time of, record every frame ar
 
 | Control | What it does | Starting value |
 | --- | --- | --- |
-| **Watching** | **The Moon (or Sun): shadows on the sunlit side** | — |
+| **Watching** | **Shadows / crossings (Moon, Sun, planets)** *(experimental on planets)* | — |
 | **Sensitivity K** | How far below its own noise a pixel must fall | 12 |
 | **Minimum / Maximum patch** | The size of a shadow, in darkened pixels | 20 to 20 000 |
 | **Maximum box / patch** | How long and thin a shadow may be | 10 times |
@@ -432,7 +432,7 @@ The sunlit side and its glare are left out (**Ignore brighter than**, 30% of the
 
 1. In Preview, frame the earthshine. Keep most of the bright sunlit crescent outside the frame, so its glare does not spread, and keep enough lunar detail nearby to lock on ([chapter 6](#6-feature-lock-and-guiding)).
 2. Check the brightness: with **Auto-stretch** to see the earthshine, and with the histogram, the earthshine should sit at about 3 to 10% of the camera's range, with no pixels at zero. The [camera settings guide](CAMERA_SETTINGS_GUIDE.md) explains why.
-3. Under **Watching**, choose **The Moon: flashes on the earthlit side**.
+3. Under **Watching**, choose **Flashes (Moon, earthlit side)**.
 4. **Auto-tune** ([1.7](#17-auto-tune)): draw a box on the earthshine, tune the camera, watch K, and measure the minimum patch. Auto-tune adds marked test flashes to work out how faint a flash can be caught.
 5. Lock, and start guiding if you have a mount. Set when the session ends ([1.8](#18-ending-a-session-by-itself)), for example when the Moon sinks below 10°.
 6. Press **Start monitoring**. If you see a flash by eye that was not caught, press **Save now** to keep the frames from just before.
@@ -458,7 +458,7 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 
 | Control | What it does | Starting value |
 | --- | --- | --- |
-| **Watching** | **The Moon: flashes on the earthlit side** | — |
+| **Watching** | **Flashes (Moon, earthlit side)** | — |
 | **Ignore brighter than** | Leaves out the sunlit side and its glare | 30% |
 | **Sensitivity K** | How far above its own noise a pixel must rise | 6 |
 | **Minimum / Maximum patch** | The size of a flash, in pixels | 8 to 400 |
@@ -530,6 +530,7 @@ SeleneWatch aligns images in three places: **Guiding**, **Live detection stabili
 - **Detection panel** (below **Stabilize detection against drift/shake**): shows what stabilization chose and why—`Disk centroid (isolated disk)`, `Feature Lock (using guiding box)`, `Feature Lock (auto crater patch)`, `holding last shift`, or `lost — running unstabilized`—along with the live shift in pixels.
 - **Time-lapse panel** (below **Also watch for transits**): summarizes both the stacking preset (**Moon** shift & rotation or **Planet** disk-centred) and whether between-burst shadow watching is stabilized or unstabilized.
 - **Main window status bar:** shows the active lock method beside `Lock:` (e.g. `Lock: Disk centroid, dx …`) and, whenever detection stabilization is ticked, a compact `Stab: Disk centroid` / `Stab: Feature Lock` / `Stab: lost (unstabilized)` readout so you can check both even when docks are collapsed.
+- **Stabilized view button** (in the **View:** bar above the preview, beside **Histogram**): when **Stabilize detection against drift/shake** is ticked, toggle **Stabilized view** on to shift the live preview (and any **Sigma map** or **Noise map** overlay) in lockstep with detector stabilization. This is display-only—raw recordings and `event.ser` clips are never altered—and mouse clicks or drawn boxes map automatically back to raw frame coordinates.
 
 ---
 
@@ -652,7 +653,7 @@ Every frame a test signal touches is marked as test data, and so is every clip t
 | **Shadows crossing the Moon** | Automated tests; test shadows added to five recordings of the sunlit Moon (no false trigger at K 12); test ISS silhouettes at their real size and speed on two of them (caught 23 times out of 24 with one frame, the default since then; never with two); public-domain NASA lunar and solar ISS transit sequences replayed at K 12 (both saved as Moving crossings). **Waiting for a real crossing at the telescope** and a predicted transit recorded on schedule |
 | **Impact flashes** | Automated tests, test flashes added to real lunar recordings to measure the faintest caught, and NASA MSFC's public-domain 17 March 2013 Mare Imbrium lunar impact flash recording replayed through the flashes watch (detected across 12 frames, 81.3 σ). **Waiting for a calibrated night on the earthshine** |
 | **Guiding** | Automated tests with a simulated mount, drift followed on lunar recordings, and the ASCOM simulator. **Waiting for a whole night of guiding under the Moon** |
-| **Cameras** | ZWO ASI120MM Mini on the bench (8 and 16 bit, half-hour runs) and outdoors. QHY, Player One and ToupTek with automated tests and their libraries found on Windows; **waiting for real cameras** |
+| **Cameras** | ZWO ASI120MM Mini on the bench (8 and 16 bit, half-hour runs) and outdoors; QHYCCD 5L-II colour camera tested on hardware. Player One and ToupTek with automated tests and their libraries found on Windows; **waiting for real cameras** |
 | **Auto-tune** | Automated tests on a model camera and the synthetic scenes; **waiting for real nights** |
 | **Reading recordings** | 352 AVI and SER files from 2010 to 2019 read, with FireCapture's times |
 | **The window** | Automated tests of the window offscreen, and tests on the real Windows desktop |

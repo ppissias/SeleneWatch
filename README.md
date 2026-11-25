@@ -147,9 +147,9 @@ Install your camera maker's driver first. ZWO's library comes with SeleneWatch; 
 
 ## How far it has been tested
 
-- **In use:** the sky watch, all night with a ZWO ASI120MM Mini, catching meteors, aircraft and satellites; Moon time-lapses at the telescope.
+- **In use:** the sky watch, all night with a ZWO ASI120MM Mini, catching meteors, aircraft and satellites; Moon time-lapses at the telescope; tested on hardware with ZWO ASI (ASI120MM Mini) and QHYCCD (QHY5L-II colour).
 - **Tested in software:** every feature, with automated tests, recordings from 2010 to 2019, public-domain NASA sequences (lunar and solar ISS transits at K 12, and NASA MSFC's 17 March 2013 lunar impact flash recording), and test signals added to real lunar recordings.
-- **Waiting for real tests:** QHY, Player One and ToupTek cameras on hardware; a whole night of mount guiding under the Moon; an impact flash or a shadow caught at the telescope; a predicted ISS transit recorded on schedule.
+- **Waiting for real tests:** Player One and ToupTek cameras on hardware; a whole night of mount guiding under the Moon; an impact flash or a shadow caught at the telescope; a predicted ISS transit recorded on schedule.
 
 The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested, feature by feature.
 

@@ -4212,18 +4212,30 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     QVERIFY(box->isHidden());
     QVERIFY(!panel.settings().stabilizeDetection);
 
-    // MainWindow status bar shows stabilizeReadout only when stabilization is ticked.
+    // MainWindow status bar shows stabilizeReadout only when stabilization is ticked,
+    // and previewStabilizedView button enables/disables with stabilization and hides on Sky.
     QTemporaryDir dir;
     MainWindow window(nullptr, dir.path());
     auto* stabBar = window.findChild<QLabel*>("stabilizeReadout");
+    auto* stabViewBtn = window.findChild<QToolButton*>("previewStabilizedView");
     auto* winBox = window.findChild<QCheckBox*>("stabilizeDetection");
-    QVERIFY(stabBar && winBox);
+    QVERIFY(stabBar && stabViewBtn && winBox);
     QVERIFY(stabBar->isHidden());
+    QVERIFY(!stabViewBtn->isHidden());
+    QVERIFY(!stabViewBtn->isEnabled());
+    QVERIFY(!stabViewBtn->isChecked());
     winBox->setChecked(true);
     QVERIFY(!stabBar->isHidden());
     QVERIFY(stabBar->text().startsWith("Stab:"));
+    QVERIFY(stabViewBtn->isEnabled());
+    stabViewBtn->setChecked(true);
+    QVERIFY(stabViewBtn->isChecked());
     winBox->setChecked(false);
     QVERIFY(stabBar->isHidden());
+    QVERIFY(!stabViewBtn->isEnabled());
+    QVERIFY(!stabViewBtn->isChecked());
+    chooseWatch(window, Watch::Sky);
+    QVERIFY(stabViewBtn->isHidden());
 }
 
 int main(int argc, char** argv)

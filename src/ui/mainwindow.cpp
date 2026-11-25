@@ -975,10 +975,10 @@ void MainWindow::onWatchRequested(Watch watch)
     renderPreview();
     updateControls();
     updateStatusLabel();
-    showMessage(watch_ == Watch::Sky ? "Watching the sky for fast events: their settings are loaded. Guiding is for the Moon and is off."
-        : watch_ == Watch::SkySlow ? "Watching the sky for slow and faint light: its settings are loaded. Guiding is for the Moon and is off."
-        : watch_ == Watch::MoonShadows ? "Watching the Moon (or Sun) for shadows on the sunlit side: their settings are loaded."
-        : "Watching the Moon for flashes on the earthlit side: their settings are loaded.", 6000);
+    showMessage(watch_ == Watch::Sky ? "Watching Fast sky events (meteors, lightning): settings loaded. Guiding is off."
+        : watch_ == Watch::SkySlow ? "Watching Slow & faint sky (long exposures): settings loaded. Guiding is off."
+        : watch_ == Watch::MoonShadows ? "Watching Shadows / crossings (Moon, Sun, planets): settings loaded."
+        : "Watching Flashes (Moon, earthlit side): settings loaded.", 6000);
 }
 
 void MainWindow::applyWatchTimelapse()
@@ -2386,6 +2386,14 @@ void MainWindow::setupPreviewZoomBar()
     previewHintLabel_->setStyleSheet("color: #888888;");
     previewHintLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
+    stabilizedViewButton_ = new QToolButton(zoomBar);
+    stabilizedViewButton_->setObjectName("previewStabilizedView");
+    stabilizedViewButton_->setText("Stabilized view");
+    stabilizedViewButton_->setCheckable(true);
+    stabilizedViewButton_->setEnabled(false);
+    stabilizedViewButton_->setToolTip("Enable 'Stabilize detection against drift/shake' in the Detection panel to view "
+        "the stabilized preview (display only; raw recordings and clips are never altered).");
+
     histogramToggleButton_ = new QToolButton(zoomBar);
     histogramToggleButton_->setObjectName("previewHistogramToggle");
     histogramToggleButton_->setText("Histogram");
@@ -2405,6 +2413,7 @@ void MainWindow::setupPreviewZoomBar()
     row->addWidget(zoomReadoutLabel_);
     row->addSpacing(8);
     row->addWidget(previewHintLabel_, 1);
+    row->addWidget(stabilizedViewButton_);
     row->addWidget(histogramToggleButton_);
     row->addWidget(focusViewButton_);
 
@@ -2414,6 +2423,7 @@ void MainWindow::setupPreviewZoomBar()
     connect(zoomFitButton_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setFitToWindow(); });
     connect(zoom100Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(1.0); });
     connect(zoom200Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(2.0); });
+    connect(stabilizedViewButton_, &QToolButton::toggled, this, [this] { updateStabilizeReadout(latestDetection_); });
     connect(ui_->previewWidget, &PreviewWidget::zoomChanged, this, &MainWindow::updateZoomControls);
 }
 
@@ -2676,8 +2686,32 @@ void MainWindow::updateControls()
 
 void MainWindow::updateStabilizeReadout(const DetectionSummary& summary)
 {
+    const bool sky = target() == Target::Sky;
+    const bool enabled = !sky && detectionPanel_ && detectionPanel_->settings().stabilizeDetection;
+    if (stabilizedViewButton_)
+    {
+        stabilizedViewButton_->setVisible(!sky);
+        stabilizedViewButton_->setEnabled(enabled);
+        if (!enabled && stabilizedViewButton_->isChecked())
+        {
+            const QSignalBlocker blocked(stabilizedViewButton_);
+            stabilizedViewButton_->setChecked(false);
+        }
+        stabilizedViewButton_->setToolTip(enabled
+            ? "Shifts the live preview to match detector stabilization so you can see the steady target and noise map. "
+              "Display only — raw recordings and clips are never altered."
+            : "Enable 'Stabilize detection against drift/shake' in the Detection panel to view the stabilized preview "
+              "(display only; raw recordings and clips are never altered).");
+    }
+    if (ui_ && ui_->previewWidget)
+    {
+        const bool shiftActive = enabled && stabilizedViewButton_ && stabilizedViewButton_->isChecked()
+            && (summary.stabilizationState == StabilizationState::Locked
+                || summary.stabilizationState == StabilizationState::GraceHold);
+        ui_->previewWidget->setDisplayShift(shiftActive
+            ? QPointF(summary.stabilizationDx, summary.stabilizationDy) : QPointF(0.0, 0.0));
+    }
     if (!stabilizeLabel_ || !stabilizeSeparator_) return;
-    const bool enabled = target() != Target::Sky && detectionPanel_ && detectionPanel_->settings().stabilizeDetection;
     stabilizeSeparator_->setVisible(enabled);
     stabilizeLabel_->setVisible(enabled);
     if (!enabled) return;
@@ -3380,6 +3414,13 @@ void MainWindow::showLatestFrame()
             guidingPanel_->setFrameShortSide(side);
             sendTolerance();
         }
+        // Update display stabilization shift before painting this frame so
+        // frame N and its measured (dx, dy) render in lockstep (zero 1-frame lag).
+        if (packet.detection)
+        {
+            latestDetection_ = packet.detection->summary;
+            updateStabilizeReadout(latestDetection_);
+        }
         renderPreview();
         updateHistogram();
         // Feature-26: the earthshine area, once a frame arrives after the box was drawn.
@@ -3387,10 +3428,8 @@ void MainWindow::showLatestFrame()
         if (packet.detection)
         {
             const auto& view = *packet.detection;
-            latestDetection_ = view.summary;
             try { detectionPanel_->setView(view); }
             catch (const MemoryLimitError&) { showMessage("Overlay skipped: RAM ceiling reached"); }
-            updateStabilizeReadout(view.summary);
             if (detectionDock_->isVisible())
                 ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
                     {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});

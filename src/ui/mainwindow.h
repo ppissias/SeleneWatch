@@ -529,6 +529,7 @@ private:
     QToolButton* zoomFitButton_{nullptr};
     QToolButton* zoom100Button_{nullptr};
     QToolButton* zoom200Button_{nullptr};
+    QToolButton* stabilizedViewButton_{nullptr};
     QToolButton* histogramToggleButton_{nullptr};
     QToolButton* focusViewButton_{nullptr};
     QLabel* zoomReadoutLabel_{nullptr};

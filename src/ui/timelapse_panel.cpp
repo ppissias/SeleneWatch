@@ -116,7 +116,8 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     anchorLabel_ = new QLabel(body);
     anchorLabel_->setObjectName("timelapseAnchorLabel");
     anchorLabel_->setWordWrap(true);
-    form->addRow(QString(), anchorLabel_);
+    anchorLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    form->addRow(anchorLabel_);
     showAnchor();
 
     stopKind_ = new QComboBox(body);
@@ -179,6 +180,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     form->addRow(watchTransits_);
     transitHelp_ = new QLabel(body);
     transitHelp_->setWordWrap(true);
+    transitHelp_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     form->addRow(transitHelp_);
     configureTransits_ = new QPushButton("Configure transit detection…", body);
     configureTransits_->setObjectName("timelapseConfigureTransits");
@@ -188,6 +190,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     estimateLabel_ = new QLabel(body);
     estimateLabel_->setObjectName("timelapseEstimate");
     estimateLabel_->setWordWrap(true);
+    estimateLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     form->addRow(estimateLabel_);
     root->addLayout(form);
 
@@ -221,21 +224,25 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     timingLabel_ = new QLabel("Idle", liveBox);
     timingLabel_->setObjectName("timelapseTiming");
     timingLabel_->setWordWrap(true);
+    timingLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     liveLayout->addWidget(timingLabel_);
     transitStatus_ = new QLabel(liveBox);
     transitStatus_->setObjectName("timelapseTransitStatus");
     transitStatus_->setWordWrap(true);
+    transitStatus_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     transitStatus_->hide();
     liveLayout->addWidget(transitStatus_);
 
     statsLabel_ = new QLabel(liveBox);
     statsLabel_->setObjectName("timelapseStats");
     statsLabel_->setWordWrap(true);
+    statsLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     liveLayout->addWidget(statsLabel_);
 
     warningLabel_ = new QLabel(liveBox);
     warningLabel_->setObjectName("timelapseWarning");
     warningLabel_->setWordWrap(true);
+    warningLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     warningLabel_->setStyleSheet("color: #b45309; font-weight: bold;");
     warningLabel_->hide();
     liveLayout->addWidget(warningLabel_);

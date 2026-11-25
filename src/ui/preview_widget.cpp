@@ -50,6 +50,7 @@ void PreviewWidget::clear()
     dragging_ = false;
     leftPanning_ = false;
     pan_ = {0.0, 0.0};
+    displayShift_ = {0.0, 0.0};
     panning_ = false;
     updateIdleCursor();
     update();
@@ -185,9 +186,19 @@ void PreviewWidget::mouseDoubleClickEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton && framePosition(event->position())) emit shapeClosed();
 }
 
+QRectF PreviewWidget::displayImageRect() const
+{
+    const QRect base = imageRect();
+    if (base.isEmpty() || image_.isNull() || displayShift_.isNull()) return QRectF(base);
+    const double sx = base.width() / static_cast<double>(image_.width());
+    const double sy = base.height() / static_cast<double>(image_.height());
+    return QRectF(base.x() - displayShift_.x() * sx, base.y() - displayShift_.y() * sy,
+        base.width(), base.height());
+}
+
 QRectF PreviewWidget::toWidget(const QRectF& frameRect) const
 {
-    const QRect image = imageRect();
+    const QRectF image = displayImageRect();
     const double sx = image.width() / static_cast<double>(image_.width());
     const double sy = image.height() / static_cast<double>(image_.height());
     return QRectF(image.x() + frameRect.x() * sx, image.y() + frameRect.y() * sy,
@@ -197,7 +208,7 @@ QRectF PreviewWidget::toWidget(const QRectF& frameRect) const
 QRect PreviewWidget::dragRegion(QPointF from, QPointF to) const
 {
     const QRect area = contentsRect().adjusted(1, 1, -1, -1);
-    const QRectF visible = QRectF(imageRect()).intersected(QRectF(area));
+    const QRectF visible = QRectF(imageRect()).intersected(QRectF(area)).intersected(displayImageRect());
     if (visible.isEmpty()) return {};
     // The visible image's right and bottom edges belong to the next pixel, outside it.
     auto clamp = [&](QPointF point) {
@@ -242,6 +253,15 @@ void PreviewWidget::setDetectionOverlay(QImage image, QRect frameBox)
     update();
 }
 
+void PreviewWidget::setDisplayShift(QPointF frameShift)
+{
+    if (!std::isfinite(frameShift.x()) || !std::isfinite(frameShift.y())) frameShift = {0.0, 0.0};
+    if (std::abs(frameShift.x() - displayShift_.x()) < 1e-6 && std::abs(frameShift.y() - displayShift_.y()) < 1e-6)
+        return;
+    displayShift_ = frameShift;
+    update();
+}
+
 std::optional<QPoint> PreviewWidget::selectedPosition() const
 {
     return selected_;
@@ -271,18 +291,21 @@ QRect PreviewWidget::imageRect() const
 std::optional<QPoint> PreviewWidget::framePosition(QPointF position) const
 {
     const QRect area = contentsRect().adjusted(1, 1, -1, -1);
-    const QRect image = imageRect();
-    if (image.isEmpty()
+    const QRect base = imageRect();
+    const QRectF display = displayImageRect();
+    if (base.isEmpty()
         || position.x() < area.x() || position.x() >= area.x() + area.width()
         || position.y() < area.y() || position.y() >= area.y() + area.height()
-        || position.x() < image.x() || position.x() >= image.x() + image.width()
-        || position.y() < image.y() || position.y() >= image.y() + image.height())
+        || position.x() < base.x() || position.x() >= base.x() + base.width()
+        || position.y() < base.y() || position.y() >= base.y() + base.height()
+        || position.x() < display.x() || position.x() >= display.x() + display.width()
+        || position.y() < display.y() || position.y() >= display.y() + display.height())
     {
         return std::nullopt;
     }
-    const int fx = std::clamp(static_cast<int>((position.x() - image.x()) * image_.width() / image.width()),
+    const int fx = std::clamp(static_cast<int>(std::floor((position.x() - display.x()) * image_.width() / display.width())),
         0, image_.width() - 1);
-    const int fy = std::clamp(static_cast<int>((position.y() - image.y()) * image_.height() / image.height()),
+    const int fy = std::clamp(static_cast<int>(std::floor((position.y() - display.y()) * image_.height() / display.height())),
         0, image_.height() - 1);
     return QPoint(fx, fy);
 }
@@ -306,30 +329,28 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
 
     const QRect viewport = contentsRect().adjusted(1, 1, -1, -1);
     const QRect image = imageRect();
+    const QRectF display = displayImageRect();
     const QRect visibleImage = viewport.intersected(image);
 
     painter.save();
-    painter.setClipRect(viewport);
+    painter.setClipRect(visibleImage);
     const bool downscaled = image.width() < image_.width() || image.height() < image_.height();
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, downscaled);
-    painter.drawImage(image, image_);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, downscaled || !displayShift_.isNull());
+    painter.drawImage(display, image_);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (!overlay_.isNull())
     {
-        painter.drawImage(image, overlay_);
+        painter.drawImage(display, overlay_);
         if (!detectionBox_.isEmpty())
         {
             painter.setPen(QPen(QColor("#ffdd66"), 1));
-            painter.drawRect(QRectF(image.x() + detectionBox_.x() * image.width() / static_cast<double>(image_.width()),
-                image.y() + detectionBox_.y() * image.height() / static_cast<double>(image_.height()),
-                detectionBox_.width() * image.width() / static_cast<double>(image_.width()),
-                detectionBox_.height() * image.height() / static_cast<double>(image_.height())));
+            painter.drawRect(toWidget(detectionBox_));
         }
     }
     // A frame corner (x, y) is the top-left of pixel (x, y) on the screen.
     const auto toScreen = [&](QPoint corner) {
-        return QPointF(image.x() + corner.x() * image.width() / static_cast<double>(image_.width()),
-            image.y() + corner.y() * image.height() / static_cast<double>(image_.height()));
+        return QPointF(display.x() + corner.x() * display.width() / static_cast<double>(image_.width()),
+            display.y() + corner.y() * display.height() / static_cast<double>(image_.height()));
     };
     if (!mask_.empty() || !pending_.empty())
     {
@@ -402,8 +423,8 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
     }
     if (selected_)
     {
-        const QPointF centre(image.x() + (selected_->x() + 0.5) * image.width() / image_.width(),
-            image.y() + (selected_->y() + 0.5) * image.height() / image_.height());
+        const QPointF centre(display.x() + (selected_->x() + 0.5) * display.width() / image_.width(),
+            display.y() + (selected_->y() + 0.5) * display.height() / image_.height());
         painter.save();
         painter.setClipRect(visibleImage);
         // A dark outline keeps the cross visible on bright lunar terrain.
