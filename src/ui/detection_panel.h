@@ -15,6 +15,7 @@ class QLabel;
 class QPushButton;
 class QSpinBox;
 class QToolButton;
+class CollapsibleSection;
 class MeterSlider;
 class PeakHistory;
 
@@ -126,6 +127,9 @@ private:
     QToolButton* deleteProfile_;
     Watch watch_{Watch::MoonFlashes};
     QWidget* sky_;
+    QWidget* skyAdvanced_;
+    CollapsibleSection* advancedSection_;
+    CollapsibleSection* diagnosticsSection_;
     QDoubleSpinBox* brightening_;
     QDoubleSpinBox* release_;
     QLabel* maskLabel_;

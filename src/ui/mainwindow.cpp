@@ -1205,6 +1205,48 @@ void MainWindow::chooseDrawing(Drawing drawing)
     case Drawing::CameraRoi: ui_->previewWidget->setDragColour(QColor(PreviewWidget::kCameraRoiColour)); break;
     }
     updatePreviewHint(drawing);
+    auto syncDrawBtn = [](QToolButton* btn, bool checked) {
+        if (!btn) return;
+        const QSignalBlocker blocked(btn);
+        btn->setChecked(checked);
+    };
+    syncDrawBtn(previewDrawLockButton_, drawing == Drawing::LockBox);
+    syncDrawBtn(previewDrawAnchorButton_, drawing == Drawing::Anchor);
+    syncDrawBtn(previewDrawMaskButton_, drawing == Drawing::Mask);
+    syncDrawBtn(previewDrawRoiButton_, drawing == Drawing::CameraRoi);
+}
+
+void MainWindow::updateViewportDrawButtons()
+{
+    const bool sky = target() == Target::Sky;
+    const bool running = session_->isRunning();
+    const bool previewing = running && session_->mode() == Session::Mode::Preview;
+    CameraFamilyPanel* selected = selectedCamera();
+    const bool hasCameraRoi = selected && selected->controls() != nullptr;
+    const bool roiReady = hasCameraRoi && previewing && activeCamera() == selected;
+
+    if (previewDrawLockButton_)
+    {
+        previewDrawLockButton_->setVisible(!sky);
+        previewDrawLockButton_->setEnabled(!sky && running);
+    }
+    if (previewDrawAnchorButton_)
+    {
+        const bool showAnchor = !sky && workspace_ == Workspace::TimeLapse
+            && timelapsePanel_ && timelapsePanel_->settings().preset == TimelapsePreset::Moon;
+        previewDrawAnchorButton_->setVisible(showAnchor);
+        previewDrawAnchorButton_->setEnabled(showAnchor && previewing);
+    }
+    if (previewDrawMaskButton_)
+    {
+        previewDrawMaskButton_->setVisible(sky);
+        previewDrawMaskButton_->setEnabled(sky);
+    }
+    if (previewDrawRoiButton_)
+    {
+        previewDrawRoiButton_->setVisible(hasCameraRoi);
+        previewDrawRoiButton_->setEnabled(roiReady);
+    }
 }
 
 void MainWindow::updatePreviewHint(Drawing drawing)
@@ -2527,6 +2569,28 @@ void MainWindow::setupPreviewZoomBar()
     zoomReadoutLabel_ = new QLabel("Fit", zoomBar);
     zoomReadoutLabel_->setObjectName("previewZoomLabel");
 
+    // Feature-51 Phase 2: context-sensitive quick drawing tools right on the
+    // preview bar, synced with the panel tools via chooseDrawing().
+    auto makeDrawBtn = [&](const QString& text, const QString& objName, const QString& tip) {
+        auto* btn = new QToolButton(zoomBar);
+        btn->setObjectName(objName);
+        btn->setText(text);
+        btn->setCheckable(true);
+        btn->setToolTip(tip);
+        return btn;
+    };
+    previewDrawLockButton_ = makeDrawBtn("Lock box", "previewDrawLock",
+        "Draw a guiding / stabilization lock box directly on the preview (drag around a crater or planet).");
+    previewDrawAnchorButton_ = makeDrawBtn("Anchor", "previewDrawAnchor",
+        "Draw a sunlit lunar anchor box on the preview for Time-lapse shift & rotation alignment.");
+    previewDrawMaskButton_ = makeDrawBtn("Mask", "previewDrawMask",
+        "Draw a horizon mask on the preview to exclude roofs, trees, or streetlights from sky detection.");
+    previewDrawRoiButton_ = makeDrawBtn("ROI", "previewDrawRoi",
+        "Drag a hardware camera ROI directly on the live preview (Preview mode only).");
+    previewDrawAnchorButton_->hide();
+    previewDrawMaskButton_->hide();
+    previewDrawRoiButton_->hide();
+
     previewHintLabel_ = new ElidedLabel("Mouse wheel: zoom · Drag: pan", Qt::ElideRight, zoomBar);
     previewHintLabel_->setObjectName("previewHintLabel");
     previewHintLabel_->setStyleSheet("color: #888888;");
@@ -2557,7 +2621,12 @@ void MainWindow::setupPreviewZoomBar()
     row->addWidget(zoom200Button_);
     row->addSpacing(6);
     row->addWidget(zoomReadoutLabel_);
-    row->addSpacing(8);
+    row->addSpacing(6);
+    row->addWidget(previewDrawLockButton_);
+    row->addWidget(previewDrawAnchorButton_);
+    row->addWidget(previewDrawMaskButton_);
+    row->addWidget(previewDrawRoiButton_);
+    row->addSpacing(6);
     row->addWidget(previewHintLabel_, 1);
     row->addWidget(stabilizedViewButton_);
     row->addWidget(histogramToggleButton_);
@@ -2569,6 +2638,27 @@ void MainWindow::setupPreviewZoomBar()
     connect(zoomFitButton_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setFitToWindow(); });
     connect(zoom100Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(1.0); });
     connect(zoom200Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(2.0); });
+    connect(previewDrawLockButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (guidingPanel_) guidingPanel_->setDrawingLock(on);
+        chooseDrawing(on ? Drawing::LockBox : Drawing::None);
+        if (on) showMessage("Drag a rectangle on the preview around a crater or planet to lock on it.", 5000);
+    });
+    connect(previewDrawAnchorButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (timelapsePanel_) timelapsePanel_->setSelectingAnchor(on);
+        chooseDrawing(on ? Drawing::Anchor : Drawing::None);
+        if (on) showMessage("Drag a steady sunlit lunar region on the preview to set the time-lapse anchor.", 6000);
+    });
+    connect(previewDrawMaskButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (detectionPanel_) detectionPanel_->setDrawingMask(on);
+        chooseDrawing(on ? Drawing::Mask : Drawing::None);
+        if (on) showMessage("Drag a rectangle or click corners and double-click to close a horizon mask shape.", 5000);
+    });
+    connect(previewDrawRoiButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (CameraFamilyPanel* camera = selectedCamera(); camera && camera->controls())
+            camera->controls()->setDrawingRoi(on);
+        chooseDrawing(on ? Drawing::CameraRoi : Drawing::None);
+        if (on) showMessage("Drag a rectangle on the preview to set the camera's hardware ROI.", 5000);
+    });
     connect(stabilizedViewButton_, &QToolButton::toggled, this, [this] { updateStabilizeReadout(latestDetection_); });
     connect(ui_->previewWidget, &PreviewWidget::zoomChanged, this, &MainWindow::updateZoomControls);
 }
@@ -2857,6 +2947,7 @@ void MainWindow::updateControls()
             hasSavedDetectionSettings(Watch::MoonShadows), watchEditable, transitStabilized);
     }
     updateStabilizeReadout(latestDetection_);
+    updateViewportDrawButtons();
 }
 
 void MainWindow::updateStabilizeReadout(const DetectionSummary& summary)

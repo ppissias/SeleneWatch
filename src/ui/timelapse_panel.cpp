@@ -568,6 +568,12 @@ bool TimelapsePanel::selectingAnchor() const
     return selectAnchor_->isChecked();
 }
 
+void TimelapsePanel::setSelectingAnchor(bool active)
+{
+    const QSignalBlocker b(selectAnchor_);
+    selectAnchor_->setChecked(active);
+}
+
 void TimelapsePanel::cancelAnchorSelection()
 {
     const QSignalBlocker b(selectAnchor_);

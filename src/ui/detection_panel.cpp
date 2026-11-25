@@ -1,4 +1,5 @@
 #include "ui/detection_panel.h"
+#include "ui/widgets/collapsible_section.h"
 #include "ui/widgets/control_help.h"
 #include "ui/widgets/theme.h"
 #include "settings/detection_profiles.h"
@@ -324,18 +325,6 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     sky_->setObjectName("skySettings");
     auto* skyForm = new QFormLayout(sky_);
     skyForm->setContentsMargins(0, 0, 0, 0);
-    brightening_ = new QDoubleSpinBox(sky_);
-    brightening_->setObjectName("brighteningShare");
-    brightening_->setRange(0, 100); brightening_->setDecimals(1); brightening_->setSingleStep(0.5);
-    brightening_->setSuffix(" % of frame"); brightening_->setSpecialValueText("Off");
-    brightening_->setToolTip("A frame fires when this share of the unmasked pixels rises by K at once: lightning, a fireball's flare.");
-    release_ = new QDoubleSpinBox(sky_);
-    release_->setObjectName("releaseSeconds");
-    release_->setRange(0, 3600); release_->setDecimals(0); release_->setSuffix(" s"); release_->setSpecialValueText("Never");
-    release_->setToolTip("A patch that keeps firing this long is learned into the background, so a star drifting past "
-        "a fixed camera stops firing. Aircraft and satellites move on faster and keep firing.");
-    skyForm->addRow("Large brightening", brightening_);
-    skyForm->addRow("Learn a patch after", release_);
     auto* maskRow = new QHBoxLayout;
     maskLabel_ = new QLabel(sky_);
     maskLabel_->setObjectName("maskSummary");
@@ -437,106 +426,150 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     column->addWidget(sky_);
     sky_->hide();
 
-    auto* grid = new QWidget(content);
-    auto* layout = new QGridLayout(grid);
+    // Feature-51 Phase 2: Essential controls visible immediately, with the live
+    // sensitivity trace directly beneath Sensitivity K; secondary geometry,
+    // background model, and diagnostics live in persistent collapsible sections.
+    auto* essentialGrid = new QWidget(content);
+    auto* layout = new QGridLayout(essentialGrid);
     layout->setContentsMargins(0, 0, 0, 0);
-    column->addWidget(grid);
-    column->addStretch(1);
     layout->setColumnStretch(0, 1);
+    column->addWidget(essentialGrid);
+
     // Feature-45: the help of the controls for the change looked for is set
     // with the watch, in showWatchedChange().
-    sigma_ = new QDoubleSpinBox(this);
+    sigma_ = new QDoubleSpinBox(essentialGrid);
     sigma_->setObjectName("detectionSigma");
     sigma_->setRange(0.1, 1000); sigma_->setDecimals(1); sigma_->setSingleStep(0.1); sigma_->setSuffix(" sigma");
-    minimum_ = new QSpinBox(this); minimum_->setObjectName("detectionMinPixels");
-    maximum_ = new QSpinBox(this); maximum_->setObjectName("detectionMaxPixels");
+    minimum_ = new QSpinBox(essentialGrid); minimum_->setObjectName("detectionMinPixels");
+    maximum_ = new QSpinBox(content); maximum_->setObjectName("detectionMaxPixels");
     for (auto* spin : {minimum_, maximum_}) { spin->setRange(1, 1'000'000); spin->setSuffix(" px"); }
-    sigmaSlider_ = new MeterSlider(0.1, 1000, this); sigmaSlider_->setObjectName("sigmaSlider");
-    minSlider_ = new MeterSlider(1, 1'000'000, this); minSlider_->setObjectName("minimumSlider");
+    sigmaSlider_ = new MeterSlider(0.1, 1000, essentialGrid); sigmaSlider_->setObjectName("sigmaSlider");
+    minSlider_ = new MeterSlider(1, 1'000'000, essentialGrid); minSlider_->setObjectName("minimumSlider");
     minSlider_->setToolTip("Minimum patch. The marks show the current and recent largest patch.");
-    maxSlider_ = new MeterSlider(1, 1'000'000, this); maxSlider_->setObjectName("maximumSlider");
+    maxSlider_ = new MeterSlider(1, 1'000'000, content); maxSlider_->setObjectName("maximumSlider");
     maxSlider_->setToolTip("Maximum patch. The marks show the current and recent largest patch.");
-    compactness_ = new QDoubleSpinBox(this);
+    compactness_ = new QDoubleSpinBox(content);
     compactness_->setObjectName("detectionMaxBoxRatio");
     compactness_->setRange(1.0, 1000.0);
     compactness_->setDecimals(2);
     compactness_->setSingleStep(0.1);
     compactness_->setSuffix(" ×");
-    compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), this);
+    compactnessSlider_ = new MeterSlider(compactness_->minimum(), compactness_->maximum(), content);
     compactnessSlider_->setObjectName("compactnessSlider");
     // The readouts keep room for their longest texts, so the controls below
     // them stay where they are while the texts change.
     const DetectionSummary widest = widestSummary();
     const DetectionSummary widestFall = widestFallSummary();
     sigmaReading_ = new ReadoutLabel({peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, false),
-        peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, true), kSettlingReading}, this);
+        peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, true), kSettlingReading}, essentialGrid);
     sigmaReading_->setObjectName("sigmaReading");
     sigmaReading_->setText("Waiting for measurements");
     // A measured patch is at most a few thousand pixels (a shadow some tens
     // of thousands); the recent high counts pixels at K across the frame,
     // which can be most of it.
     sizeReading_ = new ReadoutLabel({patchText(widest.settings.maxPixels, 9'999'999, 99.99, widest.settings),
-        patchText(widestFall.settings.maxDarkPixels, 9'999'999, 99.99, widestFall.settings)}, this);
+        patchText(widestFall.settings.maxDarkPixels, 9'999'999, 99.99, widestFall.settings)}, content);
     sizeReading_->setObjectName("patchReading");
     sizeReading_->setText("Patch: --");
     // A label naming its control, so the control's help shows on it (Feature-24).
-    const auto named = [this](const QString& text, QWidget* control) {
-        auto* label = new QLabel(text, this);
+    const auto named = [](const QString& text, QWidget* control, QWidget* parent) {
+        auto* label = new QLabel(text, parent);
         label->setBuddy(control);
         return label;
     };
-    layout->addWidget(named("Sensitivity K", sigma_), 0, 0); layout->addWidget(sigma_, 0, 1);
+    history_ = new PeakHistory(essentialGrid); history_->setObjectName("peakHistory");
+    layout->addWidget(named("Sensitivity K", sigma_, essentialGrid), 0, 0); layout->addWidget(sigma_, 0, 1);
     layout->addWidget(sigmaSlider_, 1, 0, 1, 2);
     layout->addWidget(sigmaReading_, 2, 0, 1, 2);
-    layout->addWidget(named("Minimum patch", minimum_), 3, 0); layout->addWidget(minimum_, 3, 1);
-    layout->addWidget(minSlider_, 4, 0, 1, 2);
-    layout->addWidget(named("Maximum patch", maximum_), 5, 0); layout->addWidget(maximum_, 5, 1);
-    layout->addWidget(maxSlider_, 6, 0, 1, 2);
-    layout->addWidget(named("Maximum box / patch", compactness_), 7, 0);
-    layout->addWidget(compactness_, 7, 1);
-    layout->addWidget(compactnessSlider_, 8, 0, 1, 2);
-    layout->addWidget(sizeReading_, 9, 0, 1, 2);
-    oneFrame_ = new QCheckBox("Allow a one-frame trigger", this); oneFrame_->setObjectName("oneFrameTrigger");
-    layout->addWidget(oneFrame_, 10, 0, 1, 2);
-    stabilize_ = new QCheckBox("Stabilize detection against drift/shake", this);
+    layout->addWidget(history_, 3, 0, 1, 2);
+    layout->addWidget(named("Minimum patch", minimum_, essentialGrid), 4, 0); layout->addWidget(minimum_, 4, 1);
+    layout->addWidget(minSlider_, 5, 0, 1, 2);
+    oneFrame_ = new QCheckBox("Allow a one-frame trigger", essentialGrid); oneFrame_->setObjectName("oneFrameTrigger");
+    layout->addWidget(oneFrame_, 6, 0, 1, 2);
+    stabilize_ = new QCheckBox("Stabilize detection against drift/shake", essentialGrid);
     stabilize_->setObjectName("stabilizeDetection");
     stabilize_->setToolTip("Aligns each frame to sub-pixel precision inside the detector before checking for flashes or "
         "shadows (raw saved SER frames stay untouched). Uses your active Feature Lock box if set, otherwise tracks the "
         "disk centroid or an automatic crater patch. Falls back cleanly to unstabilized detection if lock is lost. "
         "Adds ~1.5–2 ms/frame at 1280×960 (~7 ms/frame at 2128×2128).");
-    layout->addWidget(stabilize_, 11, 0, 1, 2);
-    stabilizeStatus_ = new QLabel(this);
+    layout->addWidget(stabilize_, 7, 0, 1, 2);
+    stabilizeStatus_ = new QLabel(essentialGrid);
     stabilizeStatus_->setObjectName("stabilizeStatus");
     stabilizeStatus_->setWordWrap(true);
     stabilizeStatus_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     stabilizeStatus_->hide();
-    layout->addWidget(stabilizeStatus_, 12, 0, 1, 2);
-    history_ = new PeakHistory(this); history_->setObjectName("peakHistory");
-    layout->addWidget(history_, 13, 0, 1, 2);
-    state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)),
-        stateText(widestFall, decisionText(widestFall, false)), kSettlingState}, this);
-    state_->setObjectName("detectionState");
-    state_->setText("Start a source to measure its noise.");
-    layout->addWidget(state_, 14, 0, 1, 2);
-    overlay_ = new QComboBox(this); overlay_->setObjectName("detectionOverlay");
-    overlay_->addItems({"None", "Sigma map", "Noise map"});
-    layout->addWidget(named("Preview overlay", overlay_), 15, 0);
-    layout->addWidget(overlay_, 15, 1);
-    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, this);
-    mapScale_->setText("Overlays affect the display only.");
-    layout->addWidget(mapScale_, 16, 0, 1, 2);
+    layout->addWidget(stabilizeStatus_, 8, 0, 1, 2);
 
-    auto* showBackground = new QToolButton(content);
-    showBackground->setObjectName("backgroundSettings");
-    showBackground->setToolTip("Shows the settings for how the background and its noise are learned.");
-    showBackground->setText("Background and noise");
-    showBackground->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    showBackground->setArrowType(Qt::RightArrow);
-    showBackground->setCheckable(true);
-    layout->addWidget(showBackground, 17, 0, 1, 2);
-    auto* background = new QWidget(content);
+    // Collapsible Advanced detection section (persists open/closed state).
+    advancedSection_ = new CollapsibleSection("Advanced detection", "ui/sections/detectionAdvanced", false, content);
+    advancedSection_->setObjectName("advancedDetectionSection");
+    advancedSection_->toggleButton()->setObjectName("advancedDetectionToggle");
+    advancedSection_->toggleButton()->setToolTip("Shows patch geometry limits, watch-specific thresholds, and background/noise learning settings.");
+    auto* advHost = advancedSection_->content();
+    auto* advGrid = new QGridLayout;
+    advGrid->setContentsMargins(0, 0, 0, 0);
+    advGrid->setColumnStretch(0, 1);
+    maximum_->setParent(advHost);
+    maxSlider_->setParent(advHost);
+    compactness_->setParent(advHost);
+    compactnessSlider_->setParent(advHost);
+    sizeReading_->setParent(advHost);
+    advGrid->addWidget(named("Maximum patch", maximum_, advHost), 0, 0); advGrid->addWidget(maximum_, 0, 1);
+    advGrid->addWidget(maxSlider_, 1, 0, 1, 2);
+    advGrid->addWidget(named("Maximum box / patch", compactness_, advHost), 2, 0); advGrid->addWidget(compactness_, 2, 1);
+    advGrid->addWidget(compactnessSlider_, 3, 0, 1, 2);
+    advGrid->addWidget(sizeReading_, 4, 0, 1, 2);
+    advancedSection_->contentLayout()->addLayout(advGrid);
+
+    // Watch-specific limits inside Advanced detection.
+    skyAdvanced_ = new QWidget(advHost);
+    auto* skyAdvForm = new QFormLayout(skyAdvanced_);
+    skyAdvForm->setContentsMargins(0, 0, 0, 0);
+    brightening_ = new QDoubleSpinBox(skyAdvanced_);
+    brightening_->setObjectName("brighteningShare");
+    brightening_->setRange(0, 100); brightening_->setDecimals(1); brightening_->setSingleStep(0.5);
+    brightening_->setSuffix(" % of frame"); brightening_->setSpecialValueText("Off");
+    brightening_->setToolTip("A frame fires when this share of the unmasked pixels rises by K at once: lightning, a fireball's flare.");
+    release_ = new QDoubleSpinBox(skyAdvanced_);
+    release_->setObjectName("releaseSeconds");
+    release_->setRange(0, 3600); release_->setDecimals(0); release_->setSuffix(" s"); release_->setSpecialValueText("Never");
+    release_->setToolTip("A patch that keeps firing this long is learned into the background, so a star drifting past "
+        "a fixed camera stops firing. Aircraft and satellites move on faster and keep firing.");
+    skyAdvForm->addRow("Large brightening", brightening_);
+    skyAdvForm->addRow("Learn a patch after", release_);
+    advancedSection_->contentLayout()->addWidget(skyAdvanced_);
+    skyAdvanced_->hide();
+
+    // Feature-31: the flashes' ceiling. The sunlit side cannot show a flash.
+    flashControls_ = new QWidget(advHost);
+    auto* flashForm = new QFormLayout(flashControls_);
+    flashForm->setContentsMargins(0, 0, 0, 0);
+    ignoreAbove_ = new QDoubleSpinBox(flashControls_);
+    ignoreAbove_->setObjectName("detectionIgnoreAbove");
+    ignoreAbove_->setRange(0, 100); ignoreAbove_->setDecimals(0); ignoreAbove_->setSingleStep(5);
+    ignoreAbove_->setSuffix(" % of full scale"); ignoreAbove_->setSpecialValueText("Off");
+    ignoreAbove_->setToolTip("Pixels whose learned brightness is above this are not tested: the sunlit side and the "
+        "glare by the terminator, where no flash can be seen and seeing only makes false triggers. It follows the "
+        "Moon's drift. Off tests every pixel.");
+    flashForm->addRow("Ignore brighter than", ignoreAbove_);
+    advancedSection_->contentLayout()->addWidget(flashControls_);
+
+    // Feature-31: the shadows' large darkening.
+    darkControls_ = new QWidget(advHost);
+    auto* darkForm = new QFormLayout(darkControls_);
+    darkForm->setContentsMargins(0, 0, 0, 0);
+    darkShare_ = new QDoubleSpinBox(darkControls_);
+    darkShare_->setObjectName("darkeningShare");
+    darkShare_->setRange(0, 100); darkShare_->setDecimals(1); darkShare_->setSingleStep(0.5);
+    darkShare_->setSuffix(" % of frame"); darkShare_->setSpecialValueText("Off");
+    darkShare_->setToolTip("A frame fires when this share of the unmasked pixels falls by K at once: a plane or bird "
+        "filling the field. A cloud edge does the same.");
+    darkForm->addRow("Large darkening", darkShare_);
+    advancedSection_->contentLayout()->addWidget(darkControls_);
+
+    auto* background = new QWidget(advHost);
     auto* model = new QFormLayout(background);
-    model->setContentsMargins(0, 0, 0, 0);
+    model->setContentsMargins(0, 4, 0, 0);
     referenceTime_ = new QDoubleSpinBox(background);
     referenceTime_->setObjectName("detectionReferenceTime");
     referenceTime_->setRange(0.05, 300.0);
@@ -559,41 +592,31 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     model->addRow(referenceSlider_);
     model->addRow("Minimum noise", minimumNoise_);
     model->addRow(noiseSlider_);
-    layout->addWidget(background, 18, 0, 1, 2);
+    advancedSection_->contentLayout()->addWidget(background);
+    column->addWidget(advancedSection_);
 
-    // Feature-31: the flashes' ceiling. The sunlit side cannot show a flash.
-    flashControls_ = new QWidget(content);
-    auto* flashForm = new QFormLayout(flashControls_);
-    flashForm->setContentsMargins(0, 0, 0, 0);
-    ignoreAbove_ = new QDoubleSpinBox(flashControls_);
-    ignoreAbove_->setObjectName("detectionIgnoreAbove");
-    ignoreAbove_->setRange(0, 100); ignoreAbove_->setDecimals(0); ignoreAbove_->setSingleStep(5);
-    ignoreAbove_->setSuffix(" % of full scale"); ignoreAbove_->setSpecialValueText("Off");
-    ignoreAbove_->setToolTip("Pixels whose learned brightness is above this are not tested: the sunlit side and the "
-        "glare by the terminator, where no flash can be seen and seeing only makes false triggers. It follows the "
-        "Moon's drift. Off tests every pixel.");
-    flashForm->addRow("Ignore brighter than", ignoreAbove_);
-    layout->addWidget(flashControls_, 19, 0, 1, 2);
-    // Feature-31: the shadows' large darkening. Their patch limits are the
-    // Maximum patch and Maximum box / patch above (Feature-45).
-    auto* dark = new QWidget(content);
-    darkControls_ = dark;
-    auto* darkForm = new QFormLayout(dark);
-    darkForm->setContentsMargins(0, 0, 0, 0);
-    darkShare_ = new QDoubleSpinBox(dark);
-    darkShare_->setObjectName("darkeningShare");
-    darkShare_->setRange(0, 100); darkShare_->setDecimals(1); darkShare_->setSingleStep(0.5);
-    darkShare_->setSuffix(" % of frame"); darkShare_->setSpecialValueText("Off");
-    darkShare_->setToolTip("A frame fires when this share of the unmasked pixels falls by K at once: a plane or bird "
-        "filling the field. A cloud edge does the same.");
-    darkForm->addRow("Large darkening", darkShare_);
-    layout->addWidget(dark, 20, 0, 1, 2);
-    layout->setRowStretch(21, 1);
-    background->hide();
-    connect(showBackground, &QToolButton::toggled, this, [showBackground, background](bool shown) {
-        showBackground->setArrowType(shown ? Qt::DownArrow : Qt::RightArrow);
-        background->setVisible(shown);
-    });
+    // Collapsible Diagnostics & overlays section (persists open/closed state).
+    diagnosticsSection_ = new CollapsibleSection("Diagnostics && overlays", "ui/sections/detectionDiagnostics", false, content);
+    diagnosticsSection_->setObjectName("diagnosticsDetectionSection");
+    diagnosticsSection_->toggleButton()->setObjectName("diagnosticsDetectionToggle");
+    diagnosticsSection_->toggleButton()->setToolTip("Shows display-only Sigma/Noise preview overlays and live detector diagnostics.");
+    auto* diagHost = diagnosticsSection_->content();
+    auto* diagForm = new QFormLayout;
+    diagForm->setContentsMargins(0, 0, 0, 0);
+    overlay_ = new QComboBox(diagHost); overlay_->setObjectName("detectionOverlay");
+    overlay_->addItems({"None", "Sigma map", "Noise map"});
+    diagForm->addRow("Preview overlay", overlay_);
+    diagnosticsSection_->contentLayout()->addLayout(diagForm);
+    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, diagHost);
+    mapScale_->setText("Overlays affect the display only.");
+    diagnosticsSection_->contentLayout()->addWidget(mapScale_);
+    state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)),
+        stateText(widestFall, decisionText(widestFall, false)), kSettlingState}, diagHost);
+    state_->setObjectName("detectionState");
+    state_->setText("Start a source to measure its noise.");
+    diagnosticsSection_->contentLayout()->addWidget(state_);
+    column->addWidget(diagnosticsSection_);
+    column->addStretch(1);
 
     connect(sigma_, &QDoubleSpinBox::valueChanged, this, [this] { controlsChanged(); });
     connect(minimum_, &QSpinBox::valueChanged, this, [this] { controlsChanged(); });
@@ -726,6 +749,7 @@ void DetectionPanel::setWatch(Watch watch)
     updating_ = updating;
     const bool isSky = watchTarget(watch) == Target::Sky;
     sky_->setVisible(isSky);
+    skyAdvanced_->setVisible(isSky);
     timelapseRow_->setVisible(watch == Watch::SkySlow);
     flashControls_->setVisible(watch == Watch::MoonFlashes);
     darkControls_->setVisible(watch == Watch::MoonShadows);

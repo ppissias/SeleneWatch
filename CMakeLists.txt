@@ -226,6 +226,7 @@ add_library(selenewatch_ui STATIC
     src/ui/remote_status_dialog.h src/ui/remote_status_dialog.cpp src/ui/mainwindow_remote.cpp
     src/ui/acknowledgements_dialog.h src/ui/acknowledgements_dialog.cpp
     src/ui/widgets/elided_label.h src/ui/widgets/elided_label.cpp src/ui/widgets/flow_layout.h src/ui/widgets/flow_layout.cpp
+    src/ui/widgets/collapsible_section.h src/ui/widgets/collapsible_section.cpp
     src/ui/widgets/control_help.h src/ui/widgets/control_help.cpp src/ui/widgets/readout_label.h src/ui/widgets/readout_label.cpp
     src/ui/widgets/theme.h src/ui/widgets/theme.cpp
     src/ui/widgets/wheel_guard.h

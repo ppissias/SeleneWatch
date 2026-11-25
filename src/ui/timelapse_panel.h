@@ -40,6 +40,7 @@ public:
 
     void setLunarAnchor(const std::optional<QRect>& rect);
     [[nodiscard]] bool selectingAnchor() const;
+    void setSelectingAnchor(bool active);
     void cancelAnchorSelection();
 
     void updateStatus(const TimelapseStatus& status);

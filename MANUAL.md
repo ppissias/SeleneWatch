@@ -84,7 +84,7 @@ SeleneWatch is always in one of these modes:
 | **Monitoring** (green) | Every change that passes the detection settings is saved as a clip, with the frames before and after it. | Fixed, so each clip's settings are known | Clips, the session's journal and report |
 | **Time-lapse** (purple) | Bursts of frames at a fixed interval, stacked and turned into a video ([chapter 3](#3-time-lapses-of-the-moon-and-the-planets)). | Fixed | The stacks and the video |
 
-**The image.** The bar above it switches between **Fit**, **100%** and **200%**; the mouse wheel zooms around the pixel under the pointer (25% to 800%), and dragging moves the zoomed image. A short click chooses a pixel, for its noise reading, a test signal, or a lock. Dragging draws a box only after you choose a drawing tool (such as **Draw ROI**, **Draw lock box** or **Draw mask**). **Focus view** (`F11`) hides the panels.
+**The image.** The bar above it switches between **Fit**, **100%** and **200%**; the mouse wheel zooms around the pixel under the pointer (25% to 800%), and dragging moves the zoomed image. Context-sensitive quick drawing buttons (**Lock box**, **Anchor**, **Mask**, **ROI**) sit right on the same bar alongside **Stabilized view**, **Histogram**, and **Focus view** (`F11`). A short click chooses a pixel, for its noise reading, a test signal, or a lock. Dragging draws a box only while a drawing tool is active.
 
 **The panels** sit on the right: the camera, **Detection**, **Display and capture**, **Guiding**, **Time-lapse**, and the histogram. The **View** menu shows and hides them, chooses the theme (**Dark**, **Red night vision** or **System**), and resets the layout. SeleneWatch remembers the window's layout, size and theme.
 

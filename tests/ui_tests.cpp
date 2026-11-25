@@ -932,7 +932,7 @@ void UiTest::controlsPreserveValidSizeLimits()
     QVERIFY(panel.settings().sigma > 6);
     panel.findChild<QSlider*>("compactnessSlider")->setValue(600);
     QVERIFY(panel.settings().maxPatchBoxRatio > 4);
-    panel.findChild<QToolButton*>("backgroundSettings")->click();
+    panel.findChild<QToolButton*>("advancedDetectionToggle")->click();
     panel.findChild<QSlider*>("referenceTimeSlider")->setValue(600);
     panel.findChild<QSlider*>("minimumNoiseSlider")->setValue(600);
     QVERIFY(panel.settings().referenceTimeConstantSeconds > 2);
@@ -1265,9 +1265,12 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
 void UiTest::darkeningIsForTheMoonOnly()
 {
     DetectionPanel panel;
+    auto* advToggle = panel.findChild<QToolButton*>("advancedDetectionToggle");
     auto* share = panel.findChild<QDoubleSpinBox*>("darkeningShare");
     auto* ceiling = panel.findChild<QDoubleSpinBox*>("detectionIgnoreAbove");
+    QVERIFY(advToggle && share && ceiling);
     QVERIFY(!panel.findChild<QCheckBox*>("darkeningTrigger")); // No longer a choice of its own.
+    if (!advToggle->isChecked()) advToggle->click();
 
     panel.setWatch(Watch::MoonShadows);
     panel.setSettings(defaultDetectionSettings(Watch::MoonShadows));
@@ -2213,11 +2216,13 @@ void UiTest::readoutsKeepTheControlsBelowInPlace()
     for (const int width : {350, 700})
     {
         DetectionPanel detection;
+        detection.findChild<QToolButton*>("advancedDetectionToggle")->setChecked(true);
+        detection.findChild<QToolButton*>("diagnosticsDetectionToggle")->setChecked(true);
         detection.resize(width, 1600);
         detection.show();
         const QList<QWidget*> belowReadouts{detection.findChild<QSpinBox*>("detectionMinPixels"),
             detection.findChild<QCheckBox*>("oneFrameTrigger"), detection.findChild<QComboBox*>("detectionOverlay"),
-            detection.findChild<QToolButton*>("backgroundSettings")};
+            detection.findChild<QToolButton*>("advancedDetectionToggle")};
         const QList<int> start = positions(&detection, belowReadouts);
         DetectionView view;
         view.settling = true;
@@ -4298,6 +4303,39 @@ void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
     QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Start time-lapse" && tlPrimary->isEnabled(), 15000);
     QVERIFY(wsFlashes->isEnabled());
     window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 5000);
+
+    // Feature-51 Phase 2: collapsible Detection sections persist open/closed state,
+    // and viewport quick-draw buttons follow the active workspace and drawing state.
+    auto* advToggle = window.findChild<QToolButton*>("advancedDetectionToggle");
+    auto* diagToggle = window.findChild<QToolButton*>("diagnosticsDetectionToggle");
+    auto* vpLock = window.findChild<QToolButton*>("previewDrawLock");
+    auto* vpAnchor = window.findChild<QToolButton*>("previewDrawAnchor");
+    auto* vpMask = window.findChild<QToolButton*>("previewDrawMask");
+    QVERIFY(advToggle && diagToggle && vpLock && vpAnchor && vpMask);
+    QVERIFY(!advToggle->isChecked());
+    QVERIFY(!diagToggle->isChecked());
+    advToggle->click();
+    QVERIFY(advToggle->isChecked());
+    QVERIFY(QSettings().value("ui/sections/detectionAdvanced").toBool());
+    advToggle->click();
+    QVERIFY(!QSettings().value("ui/sections/detectionAdvanced").toBool());
+
+    wsFlashes->click();
+    QVERIFY(!vpLock->isHidden());
+    QVERIFY(vpAnchor->isHidden());
+    QVERIFY(vpMask->isHidden());
+    wsTimelapse->click();
+    QVERIFY(!vpLock->isHidden());
+    QVERIFY(!vpAnchor->isHidden());
+    wsSky->click();
+    QVERIFY(vpLock->isHidden());
+    QVERIFY(vpAnchor->isHidden());
+    QVERIFY(!vpMask->isHidden());
+    vpMask->click();
+    QVERIFY(window.findChild<DetectionPanel*>()->drawingMask());
+    vpMask->click();
+    QVERIFY(!window.findChild<DetectionPanel*>()->drawingMask());
 }
 
 int main(int argc, char** argv)

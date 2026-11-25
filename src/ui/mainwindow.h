@@ -313,6 +313,7 @@ private:
     enum class Workspace { Flashes, Shadows, Sky, TimeLapse };
     void selectWorkspace(Workspace workspace);
     void syncWorkspaceButtons();
+    void updateViewportDrawButtons();
     void updateControls();
     void updateRecordButton();
     void updateBufferReadout();
@@ -533,6 +534,10 @@ private:
     QToolButton* zoomFitButton_{nullptr};
     QToolButton* zoom100Button_{nullptr};
     QToolButton* zoom200Button_{nullptr};
+    QToolButton* previewDrawLockButton_{nullptr};
+    QToolButton* previewDrawAnchorButton_{nullptr};
+    QToolButton* previewDrawMaskButton_{nullptr};
+    QToolButton* previewDrawRoiButton_{nullptr};
     QToolButton* stabilizedViewButton_{nullptr};
     QToolButton* histogramToggleButton_{nullptr};
     QToolButton* focusViewButton_{nullptr};
