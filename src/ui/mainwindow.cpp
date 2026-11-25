@@ -52,6 +52,7 @@
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
 #include <QtGui/QScreen>
+#include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QDateTimeEdit>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDockWidget>
@@ -257,8 +258,15 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     setupViewMenuExtras();
     setupSourceChoice();
     arrangeTopControls();
+    workspace_ = watch_ == Watch::MoonShadows ? Workspace::Shadows
+        : (watch_ == Watch::Sky || watch_ == Watch::SkySlow) ? Workspace::Sky
+        : Workspace::Flashes;
+    if (watch_ == Watch::Sky || watch_ == Watch::SkySlow) lastSkyWatch_ = watch_;
+    else lastLunarWatch_ = watch_;
+    syncWorkspaceButtons();
     applyDefaultDockLayout();
     restoreWindowLayout();
+    applyTarget();
     loadSessionEnd();
 
     connect(ui_->startButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
@@ -396,13 +404,20 @@ void MainWindow::arrangeTopControls()
     delete ui_->controlsLayout;
     ui_->controlsLayout = nullptr;
 
+    // Feature-51 Phase 1: top observation-workspace bar above the command bar.
+    workspaceToolBar_ = new QToolBar("Workspaces", this);
+    workspaceToolBar_->setObjectName("workspaceToolBar");
+    workspaceToolBar_->setMovable(false);
+    workspaceToolBar_->setFloatable(false);
+    workspaceToolBar_->toggleViewAction()->setVisible(false);
+
     commandToolBar_ = new QToolBar("Controls", this);
     commandToolBar_->setObjectName("commandToolBar");
     commandToolBar_->setMovable(false);
     commandToolBar_->setFloatable(false);
     commandToolBar_->toggleViewAction()->setVisible(false);
-    // Keep the full-width command bar expanded inside QToolBar without ever
-    // collapsing the whole bar into QToolBar's ">>" overflow popup.
+    // Keep full-width bars expanded inside QToolBar without ever collapsing
+    // them into QToolBar's ">>" overflow popup.
     class CommandBarWidget final : public QWidget
     {
     public:
@@ -410,6 +425,46 @@ void MainWindow::arrangeTopControls()
         [[nodiscard]] QSize sizeHint() const override { return {1, QWidget::sizeHint().height()}; }
         [[nodiscard]] QSize minimumSizeHint() const override { return {1, QWidget::minimumSizeHint().height()}; }
     };
+
+    auto* wsBar = new CommandBarWidget(workspaceToolBar_);
+    wsBar->setObjectName("workspaceBar");
+    wsBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* wsRow = new QHBoxLayout(wsBar);
+    wsRow->setContentsMargins(6, 2, 6, 2);
+    wsRow->setSpacing(6);
+    auto* wsLabel = new QLabel("Workspace:", wsBar);
+    wsRow->addWidget(wsLabel);
+    workspaceButtons_ = new QButtonGroup(this);
+    workspaceButtons_->setExclusive(true);
+    auto makeWorkspaceBtn = [&](const QString& text, const QString& objName, const QString& tip, Workspace ws) {
+        auto* btn = new QToolButton(wsBar);
+        btn->setObjectName(objName);
+        btn->setText(text);
+        btn->setCheckable(true);
+        btn->setToolTip(tip);
+        workspaceButtons_->addButton(btn, static_cast<int>(ws));
+        wsRow->addWidget(btn);
+        connect(btn, &QToolButton::clicked, this, [this, ws] { selectWorkspace(ws); });
+        return btn;
+    };
+    workspaceFlashesButton_ = makeWorkspaceBtn("Flashes", "workspaceFlashesButton",
+        "Flashes (Moon, earthlit side): watch the unlit Moon for brief lunar impact flashes.",
+        Workspace::Flashes);
+    workspaceShadowsButton_ = makeWorkspaceBtn("Shadows / crossings", "workspaceShadowsButton",
+        "Shadows / crossings (Moon, Sun, planets): watch a bright disk for dark silhouettes such as aircraft, birds or the ISS (experimental on planets).",
+        Workspace::Shadows);
+    workspaceSkyButton_ = makeWorkspaceBtn("Sky", "workspaceSkyButton",
+        "Sky monitoring: watch the night sky for fast events (meteors, lightning) or slow, faint light (aurora, airglow).",
+        Workspace::Sky);
+    workspaceTimelapseButton_ = makeWorkspaceBtn("Time-lapse", "workspaceTimelapseButton",
+        "Lunar & planetary time-lapses: capture periodic bursts, stack the sharpest frames, and build a video.",
+        Workspace::TimeLapse);
+    wsRow->addStretch(1);
+    workspaceToolBar_->addWidget(wsBar);
+    wsBar->show();
+    addToolBar(Qt::TopToolBarArea, workspaceToolBar_);
+    addToolBarBreak(Qt::TopToolBarArea);
+
     auto* bar = new CommandBarWidget(commandToolBar_);
     bar->setObjectName("commandBar");
     bar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -430,9 +485,18 @@ void MainWindow::arrangeTopControls()
     barRow->addWidget(sep1);
 
     ui_->stopButton->setText("Stop");
+    toolbarTimelapseButton_ = new QPushButton("Start time-lapse", bar);
+    toolbarTimelapseButton_->setObjectName("toolbarTimelapseButton");
+    toolbarTimelapseButton_->setToolTip("Starts a lunar or planetary time-lapse (starting Preview automatically if stopped), or stops it and builds the video.");
+    toolbarTimelapseButton_->hide();
+    connect(toolbarTimelapseButton_, &QPushButton::clicked, this, [this] {
+        if (session_->mode() == Session::Mode::TimeLapse) onStopTimeLapse();
+        else onStartTimeLapse();
+    });
     barRow->addWidget(ui_->startButton);
     barRow->addWidget(ui_->stopButton);
     barRow->addWidget(ui_->monitoringButton);
+    barRow->addWidget(toolbarTimelapseButton_);
     barRow->addWidget(ui_->saveNowButton);
     barRow->addWidget(recordButton_);
     barRow->addWidget(recordFramesSpinBox_);
@@ -594,7 +658,7 @@ void MainWindow::saveWindowLayout()
     if (wasFocus) setFocusView(false);
     QSettings saved;
     saved.setValue("ui/windowGeometry", saveGeometry());
-    saved.setValue("ui/windowState", saveState(2));
+    saved.setValue("ui/windowState", saveState(3));
     saved.sync();
     if (wasFocus) setFocusView(true);
 }
@@ -633,7 +697,9 @@ void MainWindow::restoreWindowLayout()
         resize(w, h);
     }
     if (!state.isEmpty())
-        restoreState(state, 2);
+        restoreState(state, 3);
+    if (workspaceToolBar_) workspaceToolBar_->show();
+    if (commandToolBar_) commandToolBar_->show();
 
     CameraFamilyPanel* selected = selectedCamera();
     for (const auto& family : cameraFamilies_)
@@ -657,9 +723,13 @@ void MainWindow::resetWindowLayout()
     saved.remove("ui/windowState");
     saved.sync();
     applyDefaultDockLayout();
-    for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_})
+    const bool sky = target() == Target::Sky;
+    for (QDockWidget* dock : {detectionDock_, displayDock_})
         if (dock) dock->show();
-    if (detectionDock_) detectionDock_->raise();
+    for (QDockWidget* dock : {guidingDock_, timelapseDock_})
+        if (dock) dock->setVisible(!sky);
+    if (workspace_ == Workspace::TimeLapse && timelapseDock_ && !sky) timelapseDock_->raise();
+    else if (detectionDock_) detectionDock_->raise();
     if (histogramDock_) histogramDock_->hide();
     CameraFamilyPanel* selected = selectedCamera();
     for (const auto& family : cameraFamilies_)
@@ -707,6 +777,7 @@ void MainWindow::setFocusView(bool on)
                     break;
                 }
             }
+            if (target() == Target::Sky && (dock == guidingDock_ || dock == timelapseDock_)) continue;
             if (!isCameraDock || isSelectedCameraDock) dock->show();
         }
         focusSavedDocks_.clear();
@@ -723,6 +794,12 @@ void MainWindow::applyTheme(UiTheme theme, bool persist)
 
     ui_->startButton->setStyleSheet(primaryActionStyle(theme));
     ui_->stopButton->setStyleSheet(stopActionStyle(theme));
+    if (toolbarTimelapseButton_)
+    {
+        if (session_->timeLapseFinalizing()) toolbarTimelapseButton_->setStyleSheet({});
+        else if (session_->mode() == Session::Mode::TimeLapse) toolbarTimelapseButton_->setStyleSheet(stopActionStyle(theme));
+        else toolbarTimelapseButton_->setStyleSheet(primaryActionStyle(theme));
+    }
     if (testingBadge_)
     {
         testingBadge_->setStyleSheet(theme == UiTheme::NightRed
@@ -942,6 +1019,15 @@ void MainWindow::onWatchRequested(Watch watch)
         return;
     }
     watch_ = watch;
+    if (watch_ == Watch::Sky || watch_ == Watch::SkySlow) lastSkyWatch_ = watch_;
+    else lastLunarWatch_ = watch_;
+    if (!switchingWorkspace_)
+    {
+        workspace_ = watch_ == Watch::MoonShadows ? Workspace::Shadows
+            : (watch_ == Watch::Sky || watch_ == Watch::SkySlow) ? Workspace::Sky
+            : Workspace::Flashes;
+        syncWorkspaceButtons();
+    }
     saveWatch(watch_);
     detectionPanel_->setWatch(watch_);
     detectionPanel_->setSettings(detection);
@@ -1147,6 +1233,52 @@ void MainWindow::updatePreviewHint(Drawing drawing)
     }
 }
 
+void MainWindow::syncWorkspaceButtons()
+{
+    if (!workspaceButtons_) return;
+    const QSignalBlocker blocked(workspaceButtons_);
+    if (auto* btn = workspaceButtons_->button(static_cast<int>(workspace_)))
+        btn->setChecked(true);
+}
+
+void MainWindow::selectWorkspace(Workspace workspace)
+{
+    const bool busy = session_->isRunning() || session_->timeLapseFinalizing();
+    const bool watchEditable = !busy || (!session_->timeLapseFinalizing() && session_->canChangePreviewWatch());
+    if (!watchEditable)
+    {
+        syncWorkspaceButtons();
+        return;
+    }
+
+    switchingWorkspace_ = true;
+    workspace_ = workspace;
+    switch (workspace)
+    {
+    case Workspace::Flashes:
+        lastLunarWatch_ = Watch::MoonFlashes;
+        if (watch_ != Watch::MoonFlashes) onWatchRequested(Watch::MoonFlashes);
+        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
+        break;
+    case Workspace::Shadows:
+        lastLunarWatch_ = Watch::MoonShadows;
+        if (watch_ != Watch::MoonShadows) onWatchRequested(Watch::MoonShadows);
+        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
+        break;
+    case Workspace::Sky:
+        if (target() != Target::Sky) onWatchRequested(lastSkyWatch_);
+        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
+        break;
+    case Workspace::TimeLapse:
+        if (target() == Target::Sky) onWatchRequested(lastLunarWatch_);
+        if (!focusView_ && timelapseDock_) { timelapseDock_->show(); timelapseDock_->raise(); }
+        break;
+    }
+    switchingWorkspace_ = false;
+    syncWorkspaceButtons();
+    updateControls();
+}
+
 void MainWindow::applyTarget()
 {
     const bool sky = target() == Target::Sky;
@@ -1156,6 +1288,18 @@ void MainWindow::applyTarget()
         if (sky) session_->guider().requestUnlock();
         guidingPanel_->setEnabled(!sky);
         guidingDock_->setWindowTitle(sky ? "Guiding (Moon only)" : "Guiding");
+    }
+    if (guidingDock_)
+    {
+        guidingDock_->toggleViewAction()->setVisible(!sky);
+        if (sky) guidingDock_->hide();
+        else if (!focusView_) guidingDock_->show();
+    }
+    if (timelapseDock_)
+    {
+        timelapseDock_->toggleViewAction()->setVisible(!sky);
+        if (sky) timelapseDock_->hide();
+        else if (!focusView_) timelapseDock_->show();
     }
     if (timelapsePanel_)
     {
@@ -1388,6 +1532,8 @@ void MainWindow::onStartTimeLapse()
         return;
     }
     beginSessionRun(true);
+    workspace_ = Workspace::TimeLapse;
+    syncWorkspaceButtons();
     timelapseDock_->raise();
     QString started = tlSettings.watchTransits ? "Time-lapse started with transit watching between stacks." : "Time-lapse started.";
     // Without an anchor a Moon time-lapse fits rotation over the whole frame,
@@ -2614,9 +2760,33 @@ void MainWindow::updateControls()
     if (testingAction_) testingAction_->setEnabled(!busy);
     ui_->stopButton->setEnabled(running);
     ui_->stopButton->setVisible(running);
-    ui_->monitoringButton->setEnabled(running && !timeLapsing && !timeLapseFinalizing && !session_->sourceFinished() && !pending);
-    ui_->monitoringButton->setVisible(running && !timeLapsing && !timeLapseFinalizing);
+    const bool showTlPrimary = (workspace_ == Workspace::TimeLapse) || timeLapsing || timeLapseFinalizing;
+    ui_->monitoringButton->setEnabled(running && !showTlPrimary && !session_->sourceFinished() && !pending);
+    ui_->monitoringButton->setVisible(running && !showTlPrimary);
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
+    if (toolbarTimelapseButton_)
+    {
+        toolbarTimelapseButton_->setVisible(showTlPrimary);
+        if (timeLapseFinalizing)
+        {
+            toolbarTimelapseButton_->setText("Finalizing…");
+            toolbarTimelapseButton_->setEnabled(false);
+            toolbarTimelapseButton_->setStyleSheet({});
+        }
+        else if (timeLapsing)
+        {
+            toolbarTimelapseButton_->setText("Stop time-lapse");
+            toolbarTimelapseButton_->setEnabled(true);
+            toolbarTimelapseButton_->setStyleSheet(stopActionStyle(currentUiTheme()));
+        }
+        else
+        {
+            toolbarTimelapseButton_->setText("Start time-lapse");
+            toolbarTimelapseButton_->setEnabled(!monitoring && !pending && !session_->recordingStatus().active
+                && chosen && (!selected || selected->hasCamera()));
+            toolbarTimelapseButton_->setStyleSheet(primaryActionStyle(currentUiTheme()));
+        }
+    }
     ui_->saveNowButton->setEnabled(running && monitoring && !pending && !session_->sourceFinished() && !session_->manualSavePending());
     ui_->saveNowButton->setVisible(running && monitoring);
     if (recordButton_)
@@ -2632,6 +2802,11 @@ void MainWindow::updateControls()
 
     ui_->sourceComboBox->setEnabled(!busy);
     const bool watchEditable = !busy || (!timeLapseFinalizing && session_->canChangePreviewWatch());
+    if (workspaceButtons_)
+    {
+        for (QAbstractButton* btn : workspaceButtons_->buttons())
+            btn->setEnabled(watchEditable);
+    }
     if (detectionPanel_)
     {
         detectionPanel_->setTargetEditable(watchEditable);

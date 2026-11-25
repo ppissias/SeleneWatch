@@ -25,6 +25,7 @@
 
 class QAction;
 class QActionGroup;
+class QButtonGroup;
 class QCheckBox;
 class QDialog;
 class QCloseEvent;
@@ -309,6 +310,9 @@ private:
     // end by itself (Feature-32); the reason goes into the session's record.
     void finishStream(const std::string& reason = "stopped");
 
+    enum class Workspace { Flashes, Shadows, Sky, TimeLapse };
+    void selectWorkspace(Workspace workspace);
+    void syncWorkspaceButtons();
     void updateControls();
     void updateRecordButton();
     void updateBufferReadout();
@@ -534,6 +538,17 @@ private:
     QToolButton* focusViewButton_{nullptr};
     QLabel* zoomReadoutLabel_{nullptr};
     ElidedLabel* previewHintLabel_{nullptr};
+    QToolBar* workspaceToolBar_{nullptr};
+    QButtonGroup* workspaceButtons_{nullptr};
+    QToolButton* workspaceFlashesButton_{nullptr};
+    QToolButton* workspaceShadowsButton_{nullptr};
+    QToolButton* workspaceSkyButton_{nullptr};
+    QToolButton* workspaceTimelapseButton_{nullptr};
+    QPushButton* toolbarTimelapseButton_{nullptr};
+    Workspace workspace_{Workspace::Flashes};
+    Watch lastLunarWatch_{Watch::MoonShadows};
+    Watch lastSkyWatch_{Watch::Sky};
+    bool switchingWorkspace_{false};
     QToolBar* commandToolBar_{nullptr};
     QWidget* recordingFileGroup_{nullptr};
     QWidget* playbackBar_{nullptr};

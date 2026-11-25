@@ -68,9 +68,11 @@ To guide a mount (for the Moon and the planets), install the [ASCOM Platform](ht
 
 *The main window while monitoring the Moon: the command bar at the top, the live image filling the window, the Detection panel on the right and the histogram below it.*
 
-**The command bar** at the top holds what you use most:
+**The workspace bar** at the very top switches between the four observation workspaces — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, bringing the right panel forward (and hiding Moon-only panels while watching the sky), and updating the primary start action without resetting settings.
+
+**The command bar** below it holds what you use most:
 - **Source**: a camera, a recording, or the synthetic test scenes (with testing tools on). **Connect at startup** opens the same camera next time.
-- **Start preview** and then **Stop**; **Start monitoring** and **Stop monitoring**; **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)).
+- **Start preview** and then **Stop**; **Start monitoring** / **Stop monitoring** (or **Start time-lapse** / **Stop time-lapse** in the **Time-lapse** workspace); **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)).
 - **Ends** and **Change…**: when the session ends by itself ([1.8](#18-ending-a-session-by-itself)).
 - **The mode badge** on the right: **STOPPED**, **PREVIEW**, **MONITORING** or **TIME-LAPSE**.
 

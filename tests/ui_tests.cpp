@@ -207,6 +207,7 @@ private slots:
     void guiLayoutThemesFocusViewAndPersistence();
     void moonAndSkyEndToEndInjectionsRecordOnDisk();
     void stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus();
+    void observationWorkspacesSyncWatchDocksAndPrimaryAction();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -4236,6 +4237,67 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     QVERIFY(!stabViewBtn->isChecked());
     chooseWatch(window, Watch::Sky);
     QVERIFY(stabViewBtn->isHidden());
+}
+
+void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    useSynthetic(window);
+
+    auto* wsFlashes = window.findChild<QToolButton*>("workspaceFlashesButton");
+    auto* wsShadows = window.findChild<QToolButton*>("workspaceShadowsButton");
+    auto* wsSky = window.findChild<QToolButton*>("workspaceSkyButton");
+    auto* wsTimelapse = window.findChild<QToolButton*>("workspaceTimelapseButton");
+    auto* tlPrimary = window.findChild<QPushButton*>("toolbarTimelapseButton");
+    auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    auto* guidingDock = window.findChild<QDockWidget*>("guidingDock");
+    auto* timelapseDock = window.findChild<QDockWidget*>("timelapseDock");
+    auto* watchCombo = window.findChild<QComboBox*>("targetChoice");
+    QVERIFY(wsFlashes && wsShadows && wsSky && wsTimelapse && tlPrimary && monitoring && guidingDock && timelapseDock && watchCombo);
+
+    // Starts on Flashes: Moon-only docks visible, toolbar Time-lapse primary hidden.
+    QVERIFY(wsFlashes->isChecked());
+    QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonFlashes));
+    QVERIFY(!guidingDock->isHidden());
+    QVERIFY(!timelapseDock->isHidden());
+    QVERIFY(tlPrimary->isHidden());
+
+    // Shadows / crossings workspace switches watch cleanly.
+    wsShadows->click();
+    QVERIFY(wsShadows->isChecked());
+    QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonShadows));
+    QVERIFY(tlPrimary->isHidden());
+
+    // Sky workspace hides Moon-only docks (Guiding & lunar/planetary Time-lapse).
+    wsSky->click();
+    QVERIFY(wsSky->isChecked());
+    QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::Sky));
+    QVERIFY(guidingDock->isHidden());
+    QVERIFY(timelapseDock->isHidden());
+
+    // Time-lapse workspace restores Moon-only docks, switches back from Sky, and
+    // promotes Start time-lapse onto the main command toolbar.
+    wsTimelapse->click();
+    QVERIFY(wsTimelapse->isChecked());
+    QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonShadows));
+    QVERIFY(!guidingDock->isHidden());
+    QVERIFY(!timelapseDock->isHidden());
+    QVERIFY(!tlPrimary->isHidden());
+    QVERIFY(tlPrimary->isEnabled());
+    QCOMPARE(tlPrimary->text(), QString("Start time-lapse"));
+    QVERIFY(monitoring->isHidden());
+
+    // Starting and stopping time-lapse via the unified toolbar button works directly from Stopped.
+    tlPrimary->click();
+    QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Stop time-lapse", 5000);
+    QVERIFY(!wsFlashes->isEnabled());
+    tlPrimary->click();
+    QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Start time-lapse" && tlPrimary->isEnabled(), 15000);
+    QVERIFY(wsFlashes->isEnabled());
+    window.findChild<QPushButton*>("stopButton")->click();
 }
 
 int main(int argc, char** argv)

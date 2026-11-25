@@ -665,7 +665,10 @@ try {
         } "Recording index loaded" -TimeoutMs 15000
         Write-Host "  Loaded recording: $($fileLabel.Current.Name)"
 
-        # First run Monitoring on the real lunar AVI with an injected bright flash and verify it records on disk.
+        # First switch back to the Flashes workspace to monitor the real lunar AVI with an injected bright flash.
+        $wsFlashes = Find-UiaElement -Root $mainWin -IdSuffix "workspaceFlashesButton" -TimeoutMs 5000
+        Invoke-UiaClick $wsFlashes "Switch to Flashes workspace"
+        Start-Sleep -Milliseconds 250
         $speedCombo = Find-UiaElement -Root $mainWin -IdSuffix "speedComboBox"
         Select-UiaComboItem -Combo $speedCombo -ItemText "Real time" -ProcessId $proc.Id
         $null = Start-StreamUi "Start real lunar AVI preview"
@@ -686,9 +689,13 @@ try {
 
         Select-UiaComboItem -Combo $speedCombo -ItemText "Fast" -ProcessId $proc.Id
 
-        # Start Time-lapse directly from Stopped (verifies auto-start from frame 0 on real Moon AVI!).
-        Wait-Until { $tlStartBtn.Current.IsEnabled } "Start time-lapse enabled for recording" -TimeoutMs 5000
-        Invoke-UiaClick $tlStartBtn "Start real lunar time-lapse"
+        # Switch to Time-lapse workspace and start directly from Stopped via the unified toolbar Start time-lapse button!
+        $wsTimelapse = Find-UiaElement -Root $mainWin -IdSuffix "workspaceTimelapseButton" -TimeoutMs 5000
+        Invoke-UiaClick $wsTimelapse "Switch to Time-lapse workspace"
+        Start-Sleep -Milliseconds 250
+        $toolbarTlBtn = Find-UiaElement -Root $mainWin -IdSuffix "toolbarTimelapseButton" -TimeoutMs 5000
+        Wait-Until { $toolbarTlBtn.Current.IsEnabled } "Toolbar Start time-lapse enabled for recording" -TimeoutMs 5000
+        Invoke-UiaClick $toolbarTlBtn "Start real lunar time-lapse from toolbar"
         Wait-Until {
             @(Get-ChildItem -Path $tlRoot -Directory).Count -ge 2
         } "Second (real lunar) session directory created" -TimeoutMs 15000
