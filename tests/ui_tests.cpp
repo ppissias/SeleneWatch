@@ -210,6 +210,9 @@ private slots:
     void moonAndSkyEndToEndInjectionsRecordOnDisk();
     void stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus();
     void observationWorkspacesSyncWatchDocksAndPrimaryAction();
+    void detectorLearningPeriodSuppressesFeedbackAndKeepsControlsEditable();
+    void guidingInstrumentHeaderBullseyePlotAndAdvancedSection();
+    void cameraToolToggleResetLayoutAndRecordingPreviewFirst();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -1224,6 +1227,9 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
                 problems << where + QString("the window cannot be smaller than %1x%2").arg(window.width()).arg(window.height());
             for (const QString& problem : squeezedControls(window))
                 problems << where + problem;
+            if (auto* badge = window.findChild<QLabel*>("captureModeLabel"))
+                if (badge->width() < 112)
+                    problems << where + QString("captureModeLabel too narrow for MONITORING (%1 px)").arg(badge->width());
         }
     }
     window.findChild<QToolButton*>("workspaceFlashesButton")->click();
@@ -4442,6 +4448,237 @@ void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
     QVERIFY(window.findChild<DetectionPanel*>()->drawingMask());
     vpMask->click();
     QVERIFY(!window.findChild<DetectionPanel*>()->drawingMask());
+}
+
+// Feature-52: Detector learning period suppresses startup spikes and pauses
+// Auto-tune measurements while keeping sliders, profiles, watch selector, and
+// Draw earthshine box editable; Start monitoring preserves adapted state; a
+// watch switch during Preview cleanly restarts the countdown.
+void UiTest::detectorLearningPeriodSuppressesFeedbackAndKeepsControlsEditable()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    useSynthetic(window);
+
+    // Use a brisk 0.8 s reference time so the test reliably observes both the
+    // adapting phase and the post-warmup transition without slowing CI.
+    auto* refSpin = window.findChild<QDoubleSpinBox*>("detectionReferenceTime");
+    auto* sigLbl = window.findChild<QLabel*>("sigmaReading");
+    auto* peakHist = window.findChild<QWidget*>("peakHistory");
+    auto* sigmaSpin = window.findChild<QDoubleSpinBox*>("detectionSigma");
+    auto* minSpin = window.findChild<QSpinBox*>("detectionMinPixels");
+    auto* profCombo = window.findChild<QComboBox*>("detectionProfileCombo");
+    auto* watchCombo = window.findChild<QComboBox*>("targetChoice");
+    auto* autoTuneBtn = window.findChild<QPushButton*>("autoTuneButton");
+    QVERIFY(refSpin && sigLbl && peakHist && sigmaSpin && minSpin && profCombo && watchCombo && autoTuneBtn);
+    refSpin->setValue(0.8);
+
+    autoTuneBtn->click();
+    auto* atWatch = window.findChild<QPushButton*>("autoTuneWatch");
+    auto* atDrawBox = window.findChild<QToolButton*>("autoTuneDrawBox");
+    QVERIFY(atWatch && atDrawBox);
+
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(sigLbl->text().contains("Adapting detector"), 3000);
+    QVERIFY(peakHist->property("warmingUp").toBool());
+    QCOMPARE(peakHist->property("pointCount").toInt(), 0);
+    // Detector sliders/profile/watch and Draw earthshine box remain usable while
+    // Auto-tune's measurement buttons pause until the detector finishes adapting.
+    QVERIFY(!atWatch->isEnabled());
+    QVERIFY(atDrawBox->isEnabled());
+    QVERIFY(sigmaSpin->isEnabled());
+    QVERIFY(minSpin->isEnabled());
+    QVERIFY(profCombo->isEnabled());
+    QVERIFY(watchCombo->isEnabled());
+
+    // Draw an earthshine box *during* warmup: box selection works right away,
+    // while Watch stays paused until the detector finishes adapting.
+    atDrawBox->click();
+    auto* preview = window.findChild<PreviewWidget*>();
+    QVERIFY(preview);
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 3000);
+    emit preview->regionSelected(QRect(120, 120, 60, 60));
+    QApplication::processEvents();
+    if (peakHist->property("warmingUp").toBool())
+        QVERIFY(!atWatch->isEnabled());
+
+    // Once adapted, live peak feedback and Auto-tune Watch unlock automatically.
+    QTRY_VERIFY_WITH_TIMEOUT(!peakHist->property("warmingUp").toBool()
+        && peakHist->property("pointCount").toInt() > 0
+        && sigLbl->text().contains("Peak "), 6000);
+    QTRY_VERIFY_WITH_TIMEOUT(atWatch->isEnabled(), 2000);
+
+    // Entering Monitoring preserves the adapted detector (no second learning period).
+    auto* monBtn = window.findChild<QPushButton*>("monitoringButton");
+    monBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monBtn->text().contains("Stop monitoring"), 3000);
+    QTest::qWait(120);
+    QVERIFY(!peakHist->property("warmingUp").toBool());
+    QVERIFY(!sigLbl->text().contains("Adapting detector"));
+
+    // Return to Preview and switch Watching -> warmup restarts cleanly for the new watch.
+    monBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(monBtn->text().contains("Start monitoring"), 3000);
+    window.findChild<QToolButton*>("workspaceShadowsButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(sigLbl->text().contains("Adapting detector"), 4000);
+    QTRY_VERIFY_WITH_TIMEOUT(!peakHist->property("warmingUp").toBool()
+        && sigLbl->text().contains("Deepest fall"), 8000);
+
+    window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 5000);
+}
+
+// Feature-51 Phase 3: Guiding floating instrument header (Match score, Drift
+// speed, Mount), 2D bullseye DriftTargetWidget trail/tolerance updates, and
+// persistent collapsible Advanced guiding section.
+void UiTest::guidingInstrumentHeaderBullseyePlotAndAdvancedSection()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    useSynthetic(window);
+
+    auto* toolGuiding = window.findChild<QToolButton*>("toolGuidingButton");
+    auto* guidingDock = window.findChild<QDockWidget*>("guidingDock");
+    auto* advToggle = window.findChild<QToolButton*>("advancedGuidingToggle");
+    auto* metricScore = window.findChild<QLabel*>("guideMetricScore");
+    auto* metricSpeed = window.findChild<QLabel*>("guideMetricSpeed");
+    auto* metricMount = window.findChild<QLabel*>("guideMetricMount");
+    auto* driftPlot = window.findChild<QWidget*>("driftTargetPlot");
+    auto* lockState = window.findChild<QLabel*>("lockStateLabel");
+    auto* lockAtSel = window.findChild<QPushButton*>("lockAtSelectionButton");
+    auto* unlockBtn = window.findChild<QPushButton*>("unlockButton");
+    auto* preview = window.findChild<PreviewWidget*>();
+    QVERIFY(toolGuiding && guidingDock && advToggle && metricScore && metricSpeed
+        && metricMount && driftPlot && lockState && lockAtSel && unlockBtn && preview);
+
+    toolGuiding->click();
+    QVERIFY(!guidingDock->isHidden() && guidingDock->isFloating());
+    // Advanced guiding starts collapsed and persists toggle state in QSettings.
+    QVERIFY(!advToggle->isChecked());
+    advToggle->click();
+    QVERIFY(advToggle->isChecked());
+    QVERIFY(QSettings().value("ui/sections/guidingAdvanced").toBool());
+    advToggle->click();
+    QVERIFY(!advToggle->isChecked());
+    QVERIFY(!QSettings().value("ui/sections/guidingAdvanced").toBool());
+    QCOMPARE(metricScore->text(), QString("—"));
+    QCOMPARE(driftPlot->property("trailCount").toInt(), 0);
+
+    // Start Preview, select the synthetic Moon disk, lock on it, and verify
+    // live telemetry header and 2D bullseye drift plot populate.
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 4000);
+    QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
+    QTRY_VERIFY_WITH_TIMEOUT(lockAtSel->isEnabled(), 2000);
+    lockAtSel->click();
+
+    QTRY_VERIFY_WITH_TIMEOUT(lockState->text().contains("Locked")
+        && metricScore->text() != "—"
+        && driftPlot->property("trailCount").toInt() > 0, 6000);
+    QCOMPARE(metricMount->text(), QString("Off"));
+    QVERIFY(driftPlot->property("tolerancePx").toDouble() > 0.0);
+
+    // Unlocking clears the bullseye plot trail and resets the telemetry header.
+    unlockBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(driftPlot->property("trailCount").toInt() == 0
+        && metricScore->text() == "—", 3000);
+
+    window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 5000);
+}
+
+// Feature-51 Phase 4 + Feature-52: Tools -> Camera toggle syncs with the
+// floating Camera dock only when a camera is selected, View -> Reset layout
+// restores the clean default, and loaded Recording files still require Preview
+// before Start time-lapse can run.
+void UiTest::cameraToolToggleResetLayoutAndRecordingPreviewFirst()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path(), std::make_shared<FakeZwoApi>());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    useSynthetic(window);
+
+    auto* toolCamera = window.findChild<QToolButton*>("toolCameraButton");
+    auto* toolGuiding = window.findChild<QToolButton*>("toolGuidingButton");
+    auto* toolDisplay = window.findChild<QToolButton*>("toolDisplayButton");
+    auto* histToggle = window.findChild<QToolButton*>("previewHistogramToggle");
+    auto* cameraDock = window.findChild<QDockWidget*>("cameraDock");
+    auto* detectionDock = window.findChild<QDockWidget*>("detectionDock");
+    auto* displayDock = window.findChild<QDockWidget*>("displayDock");
+    auto* guidingDock = window.findChild<QDockWidget*>("guidingDock");
+    auto* timelapseDock = window.findChild<QDockWidget*>("timelapseDock");
+    auto* histogramDock = window.findChild<QDockWidget*>("histogramDock");
+    auto* resetLayout = window.findChild<QAction*>("resetLayoutAction");
+    QVERIFY(toolCamera && toolGuiding && toolDisplay && histToggle && cameraDock
+        && detectionDock && displayDock && guidingDock && timelapseDock && histogramDock && resetLayout);
+
+    // Non-camera source hides Tools -> Camera.
+    QVERIFY(toolCamera->isHidden());
+
+    // Selecting a camera reveals Tools -> Camera and syncs with the floating Camera dock.
+    chooseSource(window, "zwo");
+    QVERIFY(!toolCamera->isHidden() && toolCamera->isEnabled());
+    QVERIFY(cameraDock->isFloating() && cameraDock->isHidden());
+    toolCamera->click();
+    QVERIFY(!cameraDock->isHidden() && cameraDock->isFloating() && toolCamera->isChecked());
+    cameraDock->hide();
+    QVERIFY(!toolCamera->isChecked());
+
+    // Open all floating tools + Histogram, then trigger View -> Reset window layout.
+    toolCamera->click();
+    toolDisplay->click();
+    toolGuiding->click();
+    histToggle->click();
+    QVERIFY(!cameraDock->isHidden() && !displayDock->isHidden() && !guidingDock->isHidden() && !histogramDock->isHidden());
+    resetLayout->trigger();
+    QApplication::processEvents();
+    QVERIFY(!detectionDock->isHidden());
+    QVERIFY(timelapseDock->isHidden());
+    QVERIFY(cameraDock->isFloating() && cameraDock->isHidden());
+    QVERIFY(displayDock->isFloating() && displayDock->isHidden());
+    QVERIFY(guidingDock->isFloating() && guidingDock->isHidden());
+    QVERIFY(histogramDock->isHidden());
+    QVERIFY(!toolCamera->isChecked() && !toolDisplay->isChecked() && !toolGuiding->isChecked());
+
+    // Feature-52: even with a loaded Recording file, Time-lapse requires Preview first.
+    const QString serPath = dir.path() + "/preview_first.ser";
+    QFile file(serPath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    Frame f;
+    f.width = 64; f.height = 64; f.format = PixelFormat::Mono8; f.data.assign(64 * 64, 90);
+    f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1700000000};
+    SerWriter writer(file);
+    QString err;
+    QVERIFY(writer.start(f, "TEST: preview-first recording", err));
+    for (int i = 0; i < 24; ++i)
+    {
+        f.frameIndex = i;
+        f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1700000000} + std::chrono::milliseconds{i * 50};
+        QVERIFY(writer.append(f, err));
+    }
+    QVERIFY(writer.finish(err));
+    file.close();
+
+    window.selectRecording(serPath);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("fileLabel")->text().contains("24 frames, "), 4000);
+    window.findChild<QToolButton*>("workspaceTimelapseButton")->click();
+    auto* tlPrimary = window.findChild<QPushButton*>("toolbarTimelapseButton");
+    auto* tlSidebar = window.findChild<QPushButton*>("timelapseStartButton");
+    QVERIFY(tlPrimary && tlSidebar);
+    QVERIFY(tlPrimary->isHidden());
+    QVERIFY(!tlSidebar->isEnabled());
+
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!tlPrimary->isHidden() && tlPrimary->isEnabled() && tlSidebar->isEnabled(), 4000);
+    window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 4000);
+    QVERIFY(tlPrimary->isHidden());
+    QVERIFY(!tlSidebar->isEnabled());
 }
 
 int main(int argc, char** argv)

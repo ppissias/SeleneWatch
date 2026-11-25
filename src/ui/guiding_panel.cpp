@@ -267,6 +267,8 @@ public:
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         setToolTip("Live 2D drift plot relative to the lock origin. The inner circle is the guiding Tolerance; "
                    "the trail shows recent valid measurements (+X right, +Y down).");
+        setProperty("trailCount", 0);
+        setProperty("tolerancePx", tolerancePx_);
     }
 
     void setSample(LockState state, bool hasOffset, double dx, double dy, double tolerancePx)
@@ -277,6 +279,8 @@ public:
         {
             trail_.clear();
             hasCurrent_ = false;
+            setProperty("trailCount", 0);
+            setProperty("tolerancePx", tolerancePx_);
             update();
             return;
         }
@@ -291,12 +295,15 @@ public:
             current_ = pt;
             hasCurrent_ = true;
         }
+        setProperty("trailCount", trailCount());
+        setProperty("tolerancePx", tolerancePx_);
         update();
     }
 
     void setTolerance(double tolerancePx)
     {
         tolerancePx_ = tolerancePx > 0.5 ? tolerancePx : 15.0;
+        setProperty("tolerancePx", tolerancePx_);
         update();
     }
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Real Windows GUI end-to-end automated test for SeleneWatch using Windows UI Automation.
 .DESCRIPTION
@@ -403,6 +403,30 @@ try {
     $moonBeforeMon = if (Test-Path $moonEventsDir) { @(Get-ChildItem -Path $moonEventsDir -Directory).Count } else { 0 }
     Assert-True ($moonBeforeMon -eq 0) "Preview must not write clips, found $moonBeforeMon"
 
+    # Feature-51 Phase 3 & 4: verify floating Tools -> Guiding (live Feature Lock + bullseye header)
+    # and Tools -> Display open and close cleanly on the real Windows desktop.
+    $toolGuidingBtn = Find-UiaElement -Root $mainWin -IdSuffix "toolGuidingButton" -TimeoutMs 5000
+    Invoke-UiaClick $toolGuidingBtn "Open floating Guiding tool"
+    $guidingWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Guiding" -OwnerWindow $mainWin -TimeoutMs 8000
+    $lockAtSelBtn = Find-UiaElement -Root $guidingWin -IdSuffix "lockAtSelectionButton" -TimeoutMs 5000
+    Wait-Until { $lockAtSelBtn.Current.IsEnabled } "Lock at selection enabled in floating Guiding window" -TimeoutMs 5000
+    Invoke-UiaClick $lockAtSelBtn "Lock on synthetic Moon crater"
+    $lockStateLbl = Find-UiaElement -Root $guidingWin -IdSuffix "lockStateLabel" -TimeoutMs 5000
+    $scoreMetricLbl = Find-UiaElement -Root $guidingWin -IdSuffix "guideMetricScore" -TimeoutMs 5000
+    Wait-Until { ($lockStateLbl.Current.Name -like "*Locked*") -and ($scoreMetricLbl.Current.Name -ne "—") } "Floating Guiding locked with live score" -TimeoutMs 10000
+    Write-Host "  Floating Guiding verified: $($lockStateLbl.Current.Name), score=$($scoreMetricLbl.Current.Name)"
+    $unlockBtn = Find-UiaElement -Root $guidingWin -IdSuffix "unlockButton" -TimeoutMs 5000
+    Invoke-UiaClick $unlockBtn "Unlock synthetic Moon feature"
+    Invoke-UiaClick $toolGuidingBtn "Close floating Guiding tool"
+    Start-Sleep -Milliseconds 250
+
+    $toolDisplayBtn = Find-UiaElement -Root $mainWin -IdSuffix "toolDisplayButton" -TimeoutMs 5000
+    Invoke-UiaClick $toolDisplayBtn "Open floating Display tool"
+    $displayWin = Find-TopWindow -ProcessId $proc.Id -TitleContains "Display" -OwnerWindow $mainWin -TimeoutMs 8000
+    Assert-True ($null -ne (Find-UiaElement -Root $displayWin -IdSuffix "displayMode" -TimeoutMs 5000)) "Floating Display tool missing displayMode combo"
+    Invoke-UiaClick $toolDisplayBtn "Close floating Display tool"
+    Start-Sleep -Milliseconds 250
+
     # Save a named Moon detection profile via the Save... dialog (async PostMessage click so modal exec doesn't block UIA Invoke).
     $saveProfBtn = Find-UiaElement -Root $mainWin -IdSuffix "detectionSaveProfile"
     Click-ElementAtFraction $saveProfBtn 0.5 0.5
@@ -578,6 +602,13 @@ try {
     Invoke-UiaClick $tlLatestBtn "Switch Time-lapse viewport to Latest stack"
     Start-Sleep -Milliseconds 300
     Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "03_timelapse_running.png")
+    $tlHintLbl = Find-UiaElement -Root $mainWin -IdSuffix "previewHintLabel" -TimeoutMs 5000
+    $tlLoopBtn = Find-UiaElement -Root $mainWin -IdSuffix "tlViewLoopButton" -TimeoutMs 5000
+    Invoke-UiaClick $tlLoopBtn "Switch Time-lapse viewport to Sequence loop"
+    Wait-Until { $tlHintLbl.Current.Name -like "*Sequence loop:*" } "Time-lapse viewport shows Sequence loop" -TimeoutMs 5000
+    $tlCard1 = Find-UiaElement -Root $mainWin -IdSuffix "timelapseStackCard_1" -TimeoutMs 5000
+    Invoke-UiaClick $tlCard1 "Inspect stack #1 from Latest stacks strip"
+    Wait-Until { $tlHintLbl.Current.Name -like "*Inspecting stack #1*" } "Time-lapse viewport inspecting stack #1" -TimeoutMs 5000
     $tlLiveBtn = Find-UiaElement -Root $mainWin -IdSuffix "tlViewLiveButton" -TimeoutMs 5000
     Invoke-UiaClick $tlLiveBtn "Return Time-lapse viewport to Live camera"
 

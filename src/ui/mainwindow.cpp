@@ -389,6 +389,7 @@ void MainWindow::arrangeTopControls()
     // A long recording name is shortened with "…" rather than widening the bar.
     auto* file = new ElidedLabel(ui_->fileLabel->text(), Qt::ElideMiddle, this);
     file->setObjectName("fileLabel");
+    file->setMinimumWidth(0);
     file->setMaximumWidth(220);
     file->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     delete ui_->fileLabel;
@@ -2736,7 +2737,11 @@ void MainWindow::setupStatusBar()
 {
     modeLabel_ = new ElidedLabel("STOPPED", Qt::ElideRight, this);
     modeLabel_->setObjectName("captureModeLabel");
-    modeLabel_->setMinimumWidth(84);
+    QFont badgeFont = modeLabel_->font();
+    badgeFont.setBold(true);
+    const int minBadgeWidth = std::max(112, QFontMetrics(badgeFont).horizontalAdvance("MONITORING") + 28);
+    modeLabel_->setMinimumWidth(minBadgeWidth);
+    modeLabel_->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     modeLabel_->setAlignment(Qt::AlignCenter);
     // Messages carry folder paths and error reasons, so they get the whole
     // width; a path that still does not fit keeps both of its ends.

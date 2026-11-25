@@ -197,7 +197,13 @@ private:
 class PeakHistory : public QWidget
 {
 public:
-    explicit PeakHistory(QWidget* parent) : QWidget(parent) { setMinimumHeight(105); }
+    explicit PeakHistory(QWidget* parent) : QWidget(parent)
+    {
+        setObjectName("peakHistory");
+        setMinimumHeight(105);
+        setProperty("warmingUp", false);
+        setProperty("pointCount", 0);
+    }
     void setView(const DetectionView& view)
     {
         points_ = view.history;
@@ -206,6 +212,8 @@ public:
         warmingUp_ = view.summary.warmingUp && !view.settling;
         warmupTotal_ = view.summary.warmupTotalSeconds;
         warmupRemaining_ = view.summary.warmupRemainingSeconds;
+        setProperty("warmingUp", warmingUp_);
+        setProperty("pointCount", static_cast<int>(points_.size()));
         update();
     }
 protected:
