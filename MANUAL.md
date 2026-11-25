@@ -66,7 +66,7 @@ To guide a mount (for the Moon and the planets), install the [ASCOM Platform](ht
 
 ![SeleneWatch's main window while monitoring the Moon](docs/images/readme-main-window.png)
 
-*The main window while monitoring the Moon: the command bar at the top, the live image filling the window, the Detection panel on the right and the histogram below it.*
+*The main window while monitoring the Moon: the Mode and Tools bar at the top, the command bar and preview toolbar below it, the live image filling the window, and the Detection panel with the live peak-sigma graph and histogram on the right.*
 
 **The mode bar** at the very top switches between the four observing modes — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, swapping the right sidebar to the active mode's controls (**Detection** or **Time-lapse**), and updating the primary start action without resetting settings. On the right side of the same bar, **Tools** toggle buttons (**Camera**, **Guiding**, **Display**) open or hide floating instrument windows (which can also be docked by dragging) without crowding the sidebar.
 
@@ -145,7 +145,7 @@ What you set in the **Display** window (**Tools → Display** or **View → Disp
 
 ![Display stretch and the histogram](docs/images/manual-display-histogram.png)
 
-*Black and white levels stretch a faint image on screen; the histogram shows the camera's real values.*
+*The floating Display tool (**Tools → Display**) stretching a faint image on screen with Black / white levels while the histogram shows the camera's real values.*
 
 - **Display:** **Linear** shows the full range; **Black / white levels** stretches between two values you set; **Auto-stretch** chooses them from the image. **Invert brightness** and **Show Bayer colour** are for viewing only.
 - **The histogram** (**Histogram** on the preview bar, or **View → Histogram**) shows the camera's values before any stretch, with the share of pixels at zero and at the top of the range, where detail is lost.
@@ -338,9 +338,9 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
 
 *One sharpened stack of a Moon time-lapse, from 57 stacks a minute apart.*
 
-![The time-lapse panel during a session](docs/images/manual-timelapse.png)
+![Time-lapse mode during a lunar session](docs/images/manual-timelapse.png)
 
-*The time-lapse panel during a session: the lunar anchor box on the image, the latest stack and the loop of stacks.*
+*Time-lapse mode during a lunar session: the **Time-lapse view** bar (**Live camera**, **Latest stack**, **Sequence loop**) above the preview, the pink lunar anchor box on the Moon, the collapsible **Latest stacks** strip below, and the Time-lapse controls on the right.*
 
 ![Re-sharpening a time-lapse](docs/images/manual-resharpen.png)
 
@@ -481,9 +481,9 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 
 For the Moon and the planets. Even with the mount tracking, the Moon drifts slowly across the sensor, and a mount's small errors add up over hours. The **feature lock** follows a crater or a planet's disk on the image, with or without a mount. **Guiding** sends the mount small corrections to keep it in place. Neither is used for the sky.
 
-![The feature lock on a lunar crater](docs/images/manual-guiding.png)
+![The feature lock and floating Guiding window on a lunar crater](docs/images/manual-guiding.png)
 
-*The lock on a crater: the dashed box is where it was locked, the green box where it is now; the drift shows in the status bar.*
+*Feature lock on a lunar crater with the floating **Guiding** tool (**Tools → Guiding**): the dashed cyan box marks where it was locked, the solid green box tracks the crater, and the instrument panel shows match score, drift speed, and the live 2D drift bullseye plot inside the tolerance circle.*
 
 ### Step by step
 

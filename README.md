@@ -56,9 +56,9 @@ In the morning, a report lists the night's events. It groups them by what was me
 
 Shadows lengthen across lunar craters, Jupiter turns, its moons move. A time-lapse shows changes too slow to see at the eyepiece.
 
-At a fixed interval, for example every minute, SeleneWatch captures a short burst of frames, keeps the sharpest, aligns and stacks them, and sharpens the result. At the end of the session it builds the video. A **feature lock** follows a crater or the planet's disk, and can guide your mount to keep it in the field for hours. A Moon time-lapse is aligned on a steady area you choose (the lunar anchor) rather than on the whole frame, where a passing cloud could turn the image; a planet is kept centred on its disk.
+Switch to **Mode: Time-lapse**, preview and frame your target, and start a session. At a fixed interval, for example every minute, SeleneWatch captures a short burst of frames, keeps the sharpest, aligns and stacks them, and builds the video when the session ends. Above the preview you can switch live between **Live camera**, **Latest stack**, and **Sequence loop**, and inspect completed frames from the collapsible **Latest stacks** strip below. A **feature lock** follows a crater or the planet's disk, and can guide your mount to keep it in the field for hours. A Moon time-lapse is aligned on a steady area you choose (the lunar anchor) rather than on the whole frame, where a passing cloud could turn the image; a planet is kept centred on its disk.
 
-Every stack is kept as a 32-bit FITS file. Afterwards you can sharpen it again, drop blurred or cloudy stacks (by their sharpness, compared with the stacks around them), check every dropped stack, and rebuild the video, without capturing again.
+Every stack is kept as a 32-bit FITS file. Afterwards you can re-align (by feature box or automatic multi-point alignment), sharpen again, level brightness across thin clouds, drop blurred or cloudy stacks (by their sharpness, compared with the stacks around them), check every dropped stack, and rebuild MP4, GIF, or lossless SER without capturing again.
 
 ![A stack from a Moon time-lapse](docs/images/timelapse-moon-stack.jpg)
 
@@ -104,11 +104,11 @@ SeleneWatch tests each pixel against its own noise, so a faint flash on the dark
 
 Keeping a lunar region or a planet centred for hours usually fails with standard star guiders—there are no guide stars on the Moon, and the Moon moves at its own rate against the stars. SeleneWatch guides directly on the main camera's live stream instead.
 
-Draw a box around a crisp lunar crater, terminator detail, or a planet's disk, and SeleneWatch tracks its drift to sub-pixel precision in real time. Once calibrated against your [ASCOM](https://ascom-standards.org/) mount, it sends **guide pulses only** (never slews, parks, or unexpected tracking changes) to hold the feature steady through time-lapses, shadow-transit watches, impact-flash runs, or long continuous recordings. If clouds break the lock, guiding pauses and waits through a grace period before ending safely; you can also watch live drift speed along RA and Dec to refine polar alignment.
+Draw a box around a crisp lunar crater, terminator detail, or a planet's disk (SeleneWatch automatically uses **Feature Lock** for lunar surface detail and **Disk centroid** for full disks), and it tracks drift to sub-pixel precision in real time. Open **Tools → Guiding** to monitor **Match score**, **Drift speed**, and a live 2D **drift bullseye plot** inside your tolerance ring. Once calibrated against your [ASCOM](https://ascom-standards.org/) mount, it sends **guide pulses only** (never slews, parks, or unexpected tracking changes) to hold the feature steady through time-lapses, shadow-transit watches, impact-flash runs, or long continuous recordings. If clouds break the lock, guiding pauses and waits through a grace period before ending safely; you can also watch live drift speed along RA and Dec to refine polar alignment.
 
 ![Feature lock tracking a lunar crater in SeleneWatch](docs/images/readme-guiding.png)
 
-*Feature lock tracking a sunlit lunar crater on a real recording: the dashed cyan box marks the reference position, the solid green box follows the crater as the field drifts, and the Guiding panel reports sub-pixel drift, drift speed, match quality, and ASCOM pulse-guiding controls.*
+*Feature lock tracking a sunlit lunar crater on a real recording: the dashed cyan box marks the reference position, the solid green box follows the crater as the field drifts, and the floating Guiding window shows live match score, drift speed, a 2D drift bullseye plot inside the tolerance circle, and ASCOM pulse-guiding controls.*
 
 ---
 
@@ -129,7 +129,8 @@ From your phone's browser you can check what SeleneWatch is doing (Monitoring, P
 ## Also in SeleneWatch
 
 - **Cameras:** ZWO ASI, QHYCCD, Player One, and ToupTek (with the brands whose cameras it makes, such as Altair). Recordings in SER and uncompressed AVI, with FireCapture's log files. A synthetic Moon and sky for practice without hardware.
-- **Preview before you capture:** see the camera's real pixels at any zoom, set the stretch and the histogram, and see what would trigger, without saving anything.
+- **Focused workspace:** switch between **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** in the top **Mode** bar; open **Camera**, **Guiding**, and **Display** as floating tool windows from the **Tools** bar; adjust clip timing and safety limits under **Session → Capture & storage…**; switch between Dark, Red night vision, and System themes, or press `F11` for Focus view.
+- **Preview first, then capture:** Preview always comes first across live cameras and recordings. See the camera's real pixels at any zoom, optionally stabilize the preview or detection against mount shake, stretch the display, read the histogram, let the detector adapt cleanly to the scene, and see what would trigger, without saving anything.
 - **Auto-tune:** measures the scene and suggests the exposure, gain and sensitivity for what you are watching.
 - **Unattended nights:** the session ends by itself at a time, after a duration, at dawn or when the Moon sets, and also when the camera, the guiding or the disk fails. You choose whether the mount then keeps tracking.
 - **Continuous and scheduled recording:** record every frame on demand, or over a time set in advance for a predicted event.

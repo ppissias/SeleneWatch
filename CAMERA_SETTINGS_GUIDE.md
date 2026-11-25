@@ -48,7 +48,7 @@ Unlike deep-sky or planetary imaging of a steady target, a **lunar impact flash 
      - Medium and bright flashes clip at `255` / `65535`, preventing accurate peak brightness and impactor energy photometry.
      - The saturated glare zone spilling from the sunlit crescent expands much farther across the dark earthshine limb, blinding a larger fraction of the Moon.
 
-> **Use Display Stretch for your eyes, not camera gain:** Keep raw earthshine at **3–10 %** on the histogram, and switch **Display and capture → Display** to **Auto-stretch** (or set **Black / white levels** around the earthshine ADU range). You get a bright, high-contrast live view on screen while the detector and saved `event.ser` keep 90 %+ linear headroom.
+> **Use Display Stretch for your eyes, not camera gain:** Keep raw earthshine at **3–10 %** on the histogram, and open **Tools → Display** to switch to **Auto-stretch** (or set **Black / white levels** around the earthshine ADU range). You get a bright, high-contrast live view on screen while the detector and saved `event.ser` keep 90 %+ linear headroom.
 
 ---
 
@@ -75,7 +75,7 @@ The sunlit lunar surface is roughly **10,000× brighter** than earthshine. **Let
 2. **Avoid wasting sensor area on flat saturated white (`255` / `65535`):**
    - Saturated pixels have zero variance—they cannot detect flashes and cannot be used for guiding.
    - Because SeleneWatch estimates noise **per pixel**, the bright scattered-light gradient near the burned crescent automatically receives a higher local noise estimate `σ(x, y)` (preventing false triggers), while darker earthshine farther from the terminator keeps a low `σ(x, y)` and full sensitivity.
-3. **Where to place the Feature Lock box (`View → Guiding`):**
+3. **Where to place the Feature Lock box (`Tools → Guiding` or `Lock box` above the preview):**
    - **Option A — Lock directly on earthshine:** If the sunlit side is completely outside the frame, drag a slightly larger lock box (`80 × 80` to `128 × 128 px`) around a prominent high-contrast earthshine feature (*Aristarchus*, *Copernicus*, *Grimaldi*, *Mare Crisium*, or a curved earthshine limb corner). SeleneWatch's normalized cross-correlation runs on native ADU and tracks earthshine features reliably even at 5 % histogram levels.
    - **Option B — Lock on an unsaturated terminator cusp:** If a corner of the terminator is in view, lock onto an **unsaturated** crater rim near the high-latitude cusp where shadow contrast is crisp in both X and Y—never onto a flat saturated white plateau.
 
@@ -83,7 +83,7 @@ The sunlit lunar surface is roughly **10,000× brighter** than earthshine. **Let
 
 ### 1.5 30-Second Pre-Monitoring Checklist in SeleneWatch
 
-**Auto-tune does most of this for you.** In Preview, press **Auto-tune…** at the top of the Detection dock and draw a box on the earthshine. **Tune camera** sets the gain live, round by round (keeping the exposure at 10–40 ms), until the earthshine is in the 3–10 % aim. It then compares the gain it reached with one near the top of the aim by their measured noise, and keeps the one with the faintest threshold in photons. **Watch** then compares several K values on the same frames and suggests the lowest quiet one ([MANUAL.md, section 2.6](MANUAL.md#17-auto-tune)). The aims it uses are the ones in this guide: earthshine 3–10 %, sunlit rims 60–80 % for transits, and the sky 8–30 %. Run it again once the sky around the Moon is dark, and for the sky, run it in full darkness. The checks below are what it measures, if you prefer to do them by hand.
+**Auto-tune does most of this for you.** In Preview, press **Tune camera & detection…** at the top of the Detection panel and draw a box on the earthshine. **Tune camera** sets the gain live, round by round (keeping the exposure at 10–40 ms), until the earthshine is in the 3–10 % aim. It then compares the gain it reached with one near the top of the aim by their measured noise, and keeps the one with the faintest threshold in photons. **Watch** then compares several K values on the same frames and suggests the lowest quiet one ([MANUAL.md, section 1.7](MANUAL.md#17-auto-tune)). The aims it uses are the ones in this guide: earthshine 3–10 %, sunlit rims 60–80 % for transits, and the sky 8–30 %. Run it again once the sky around the Moon is dark, and for the sky, run it in full darkness. The checks below are what it measures, if you prefer to do them by hand.
 
 Before pressing **Start monitoring**:
 
@@ -104,14 +104,14 @@ Before pressing **Start monitoring**:
 
 ## 2. Settings for the Other Observing Workflows
 
-### 2.1 Lunar Transits & Shadows (`Watching: The Moon: shadows on the sunlit side`)
+### 2.1 Lunar Transits & Shadows (`Mode: Shadows / crossings`)
 
 - **Goal:** Keep the entire **sunlit lunar disk** unsaturated so aircraft, birds, satellites, or the ISS produce crisp, high-SNR negative contrast dips rather than dipping inside a clipped plateau.
 - **Histogram target:** Peak sunlit crater rims around **60 % – 80 %** of full scale (`~150–205 ADU` in `RAW8`, `~40000–52000 ADU` in `RAW16`), with **`At max code` reading `0.00%`** (especially important if recording continuously via **Record** or **Session → Schedule a recording…** for occultations or ISS transits).
 - **Exposure & Gain:** Use **low gain** and fast shutter speeds (**`1 – 10 ms`**, `60 – 200+ fps`) so fast transits (`0.5 s` ISS pass) remain sharp across many frames.
-- **Detection:** Set **Watching** to **The Moon: shadows on the sunlit side**. Darkening is always on there, and its own settings start at **`K 12`** (raise to `16` if seeing still triggers), `20 px` shadows, and one frame is enough, so the ISS and satellites, which never show twice in the same place, are caught too.
+- **Detection:** Switch to **Mode: Shadows / crossings** (or **Watching: Shadows / crossings (Moon, Sun, planets)**). Darkening is always on there, and its own settings start at **`K 12`** (raise to `16` if seeing still triggers), `20 px` shadows, and one frame is enough, so the ISS and satellites, which never show twice in the same place, are caught too.
 
-### 2.2 Lunar & Planetary Time-Lapses
+### 2.2 Lunar & Planetary Time-Lapses (`Mode: Time-lapse`)
 
 - **Goal:** Freeze atmospheric seeing per frame (`1 – 15 ms`) with high dynamic range so stacks of the sharpest frames (`stacks/*.fits`) align cleanly and tolerate aggressive **Re-sharpen time-lapse…** deconvolution/USM without noise explosion or blown highlights.
 - **Histogram target:** **65 % – 85 %** on the brightest sunlit lunar highland/crater rim or Jupiter/Saturn cloud band, keeping **`At max code`** at **`0.00%`** (`0` clipped white pixels—clipped pixels cannot be recovered by sharpening).
@@ -121,11 +121,11 @@ Before pressing **Start monitoring**:
 
 ### 2.3 Wide-Field Sky Watch (Meteors, Fireballs, Lightning, Aircraft)
 
-- **Goal:** Maximize sky coverage and detection sensitivity across the night while leaving headroom for bright meteor flares and lightning, and ignoring horizon clutter via **Draw mask**.
+- **Goal:** Maximize sky coverage and detection sensitivity across the night while leaving headroom for bright meteor flares and lightning, and ignoring horizon clutter via **Mask** (**Draw mask**).
 - **Histogram target:** Keep the **unmasked sky median** between **8 % and 30 %** of full scale (`~5000–20000 ADU` in `RAW16`, `20–75 ADU` in `RAW8`), with **`At 0` = `0.00%`**.
-  - When **Follow the sky's brightness** is enabled under **Watching: The sky**, SeleneWatch automatically adjusts camera exposure (up to `2×` per step within your `ms` bounds) and then gain (within your cap) whenever the unmasked sky median drifts outside **8 % – 30 %**.
-- **Exposure & Gain (Watching: The sky: fast events):** about **`20 – 40 ms`** (`25 – 50 fps`) with moderate-to-high gain; auto-tune stops at 40 ms by default. A meteor crosses a pixel in a few milliseconds, so a longer exposure leaves no more of its light in each pixel. It only adds sky background, and the noise each pixel is tested against. Short exposures also give the timing and trajectory frame by frame.
-- **Slow and faint light (Watching: The sky: slow and faint):** aurora, airglow waves, slow satellites and long glows, and a time-lapse of the night. Light that stays in place keeps adding up, so use **`0.25 – 2 s`** (auto-tune's default longest is 2 s), keeping the sky median in the same 8–30 % band. Its detection settings learn the background over about five frames, and **Time-lapse while monitoring** keeps a frame every 30 or 60 s.
+  - When **Follow the sky's brightness** is enabled under **Mode: Sky**, SeleneWatch automatically adjusts camera exposure (up to `2×` per step within your `ms` bounds) and then gain (within your cap) whenever the unmasked sky median drifts outside **8 % – 30 %**.
+- **Exposure & Gain (`Watching: Fast sky events (meteors, lightning)`):** about **`20 – 40 ms`** (`25 – 50 fps`) with moderate-to-high gain; auto-tune stops at 40 ms by default. A meteor crosses a pixel in a few milliseconds, so a longer exposure leaves no more of its light in each pixel. It only adds sky background, and the noise each pixel is tested against. Short exposures also give the timing and trajectory frame by frame.
+- **Slow and faint light (`Watching: Slow & faint sky (long exposures)`):** aurora, airglow waves, slow satellites and long glows, and a time-lapse of the night. Light that stays in place keeps adding up, so use **`0.25 – 2 s`** (auto-tune's default longest is 2 s), keeping the sky median in the same 8–30 % band. Its detection settings learn the background over about five frames, and **Time-lapse while monitoring** keeps a frame every 30 or 60 s.
 - **Sensor Color Note:** Both **mono** and **raw Bayer colour** sensors work identically in **Detection** (per-pixel statistics run on the raw mosaic; **Show Bayer colour** only affects screen display, never evidence).
 
 ---
@@ -134,7 +134,7 @@ Before pressing **Start monitoring**:
 
 | Workflow | Target Histogram Level | Typical Exposure & Rate | Gain & Format | Key Detection / Panel Settings |
 | --- | --- | --- | --- | --- |
-| **1. Lunar Impact Flashes** *(Earthshine)* | **3 % – 10 %** on earthshine (`At 0` = `0.00%`; sunlit side allowed to saturate) | **`16 – 33 ms`** (`30 – 60 fps`) | HCG / unity gain; **`RAW16`** preferred (or `RAW8` at 5–10 %) | **Watching:** `The Moon` · **K:** `6.0 – 10.0 σ` · **Patch:** `8 – 400 px` · **1-frame trigger:** `On` · **Display:** `Auto-stretch` |
-| **2. Lunar Transits & Shadows** *(Sunlit Moon)* | **60 % – 80 %** on brightest sunlit crater rims (`At max code` = `0.00%`) | **`1 – 10 ms`** (`60 – 200+ fps`) | Low gain (maximize dynamic range); `RAW8` or `RAW16` | **Watching:** `The Moon: shadows on the sunlit side` · **K:** **`12.0 – 16.0 σ`** · **Maximum patch:** `20000 px` (or **Record** / **Schedule…**) |
-| **3. Lunar & Planetary Time-Lapses** | **65 % – 85 %** on brightest sunlit terrain or cloud belts (`At max code` = `0.00%`) | **`2 – 15 ms`** (`60 – 150+ fps`) | Low-to-moderate gain; `RAW8` or `RAW16` (mono or Bayer colour) | **Time-lapse:** `Moon` (`25 %` best, `150` cap) or `Planet` (`15 %` best, `200` cap, window `≤ 60–90 s`) |
-| **4. Wide-Field Sky Watch** *(Fixed Camera)* | **8 % – 30 %** unmasked sky median (`At 0` = `0.00%`) | Fast events: **`20 – 40 ms`** (`25 – 50 fps`); slow and faint: **`0.25 – 2 s`** | Moderate-to-high gain; **Follow the sky's brightness** optional | **Watching:** `The sky` · **K:** `6.0 – 14.0 σ` · **Max patch:** `3000 px` · **Box/patch:** `30 ×` · **Large brightening:** `2 %` · **Learn after:** `20 s` · **Draw mask** on horizon |
+| **1. Lunar Impact Flashes** *(Earthshine)* | **3 % – 10 %** on earthshine (`At 0` = `0.00%`; sunlit side allowed to saturate) | **`16 – 33 ms`** (`30 – 60 fps`) | HCG / unity gain; **`RAW16`** preferred (or `RAW8` at 5–10 %) | **Mode:** `Flashes` · **K:** `6.0 – 10.0 σ` · **Patch:** `8 – 400 px` · **1-frame trigger:** `On` · **Tools → Display:** `Auto-stretch` |
+| **2. Lunar Transits & Shadows** *(Sunlit Moon)* | **60 % – 80 %** on brightest sunlit crater rims (`At max code` = `0.00%`) | **`1 – 10 ms`** (`60 – 200+ fps`) | Low gain (maximize dynamic range); `RAW8` or `RAW16` | **Mode:** `Shadows / crossings` · **K:** **`12.0 – 16.0 σ`** · **Maximum patch:** `20000 px` (or **Record** / **Schedule…**) |
+| **3. Lunar & Planetary Time-Lapses** | **65 % – 85 %** on brightest sunlit terrain or cloud belts (`At max code` = `0.00%`) | **`2 – 15 ms`** (`60 – 150+ fps`) | Low-to-moderate gain; `RAW8` or `RAW16` (mono or Bayer colour) | **Mode:** `Time-lapse` · `Moon` (`25 %` best, `150` cap) or `Planet` (`15 %` best, `200` cap, window `≤ 60–90 s`) |
+| **4. Wide-Field Sky Watch** *(Fixed Camera)* | **8 % – 30 %** unmasked sky median (`At 0` = `0.00%`) | Fast events: **`20 – 40 ms`** (`25 – 50 fps`); slow and faint: **`0.25 – 2 s`** | Moderate-to-high gain; **Follow the sky's brightness** optional | **Mode:** `Sky` · **K:** `6.0 – 14.0 σ` · **Max patch:** `3000 px` · **Box/patch:** `30 ×` · **Large brightening:** `2 %` · **Learn after:** `20 s` · **Mask** on horizon |

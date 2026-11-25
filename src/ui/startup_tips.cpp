@@ -66,7 +66,7 @@ const std::vector<StartupTip>& allStartupTips()
         {
             "Display controls never alter saved pixels",
             "Switching to <b>Auto-stretch</b>, moving <b>Black / white levels</b>, ticking <b>Invert brightness</b>, "
-            "or toggling <b>Show Bayer colour</b> in <b>Display</b> only changes what appears on screen. "
+            "or toggling <b>Show Bayer colour</b> in <b>Tools &rarr; Display</b> only changes what appears on screen. "
             "Saved <code>.ser</code> videos and the detector always read unmodified linear camera pixels.",
             kSectionDisplay
         },
@@ -121,7 +121,7 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 2: Camera depth, ROI, timing, review & rehearsal ───────────
         {
             "Keep full sensor depth with RAW16",
-            "Choosing <b>RAW16</b> in your <b>Camera</b> dock preserves every ADC bit delivered by your sensor "
+            "Choosing <b>RAW16</b> in <b>Tools &rarr; Camera</b> preserves every ADC bit delivered by your sensor "
             "instead of scaling to 8 bits. Use <b>View &rarr; Histogram</b> in <b>Preview</b> to verify that sunlit "
             "lunar terrain or planetary bands stay unclipped for transits and time-lapses.",
             kSectionSource
@@ -129,8 +129,8 @@ const std::vector<StartupTip>& allStartupTips()
         {
             "Draw a hardware camera ROI on the preview",
             "Need faster frame rates or smaller files when imaging a planet or a single lunar crater? Click "
-            "<b>Draw ROI</b> in your <b>Camera</b> dock and drag a box directly on the live preview to crop the "
-            "sensor readout, or reset to full frame whenever you need the whole field back.",
+            "<b>ROI</b> above the preview (or <b>Draw ROI</b> in <b>Tools &rarr; Camera</b>) and drag a box directly "
+            "on the live image to crop the sensor readout, or reset to full frame whenever you need the whole field back.",
             kSectionSource
         },
         {
@@ -172,10 +172,10 @@ const std::vector<StartupTip>& allStartupTips()
         },
         {
             "Disk reserve safety",
-            "Set <b>Disk reserve</b> in <b>Display</b> to keep a safety margin of free space on your "
-            "output drive&mdash;especially when recording long SER runs or ticking <b>Also save raw SER bursts</b> in "
-            "<b>Time-lapse</b>. If free space drops below the reserve, SeleneWatch stops writing safely instead of "
-            "filling your disk.",
+            "Set <b>Disk reserve</b> under <b>Session &rarr; Capture &amp; storage&hellip;</b> to keep a safety margin "
+            "of free space on your output drive&mdash;especially when recording long SER runs or ticking <b>Also save "
+            "raw SER bursts</b> in <b>Time-lapse</b>. If free space drops below the reserve, SeleneWatch stops writing "
+            "safely instead of filling your disk.",
             kSectionOutputs
         },
 
@@ -204,10 +204,10 @@ const std::vector<StartupTip>& allStartupTips()
         },
         {
             "Surface-feature & planetary guiding",
-            "Hold a lunar crater or planetary disk steady without a guide scope: open <b>Guiding</b> in "
-            "<b>Preview</b>, click <b>Draw lock box</b> and drag around a sharp feature, connect your <b>ASCOM "
-            "telescope</b>, run <b>Calibrate</b>, and press <b>Start guiding</b>. Keeping <b>Tolerance</b> around "
-            "<code>3.0%</code> avoids chasing atmospheric seeing.",
+            "Hold a lunar crater or planetary disk steady without a guide scope: open <b>Tools &rarr; Guiding</b> in "
+            "<b>Preview</b>, click <b>Draw lock box</b> (or <b>Lock box</b> above the preview) and drag around a sharp "
+            "feature, connect your <b>ASCOM telescope</b>, run <b>Calibrate</b>, and press <b>Start guiding</b>. "
+            "Keeping <b>Tolerance</b> around <code>3.0%</code> avoids chasing atmospheric seeing.",
             kSectionGuides
         },
         {
@@ -266,9 +266,10 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 5: Time-lapses & testing safety reminder ───────────────────
         {
             "Lunar and planetary time-lapses",
-            "Watch planets turn and lunar shadows unfold. Open <b>Time-lapse</b> to capture regular bursts, stack "
-            "the sharpest frames, and export any mix of <b>MP4</b>, <b>GIF</b>, and lossless <b>SER</b> alongside "
-            "32-bit FITS stacks. End automatically via <b>Ends</b> above the preview or after a set stack count.",
+            "Watch planets turn and lunar shadows unfold. Switch to <b>Mode: Time-lapse</b> to capture regular bursts, "
+            "stack the sharpest frames, inspect them in the live <b>Latest stacks</b> strip, and export any mix of "
+            "<b>MP4</b>, <b>GIF</b>, and lossless <b>SER</b> alongside 32-bit FITS stacks. End automatically via "
+            "<b>Ends</b> above the preview or after a set stack count.",
             kSectionTimelapse
         },
         {
