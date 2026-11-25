@@ -54,7 +54,7 @@ Both include everything SeleneWatch needs, except camera drivers. Install your c
 | Cameras | What you need | Tested |
 | --- | --- | --- |
 | **ZWO ASI** | ZWO's Windows driver. ZWO's library comes with SeleneWatch. | Yes, with an ASI120MM Mini, on the bench and outdoors all night |
-| **QHYCCD** | QHY's Windows driver and SDK package (the *All-In-One* installer). SeleneWatch finds the library. | In software; waiting for a camera |
+| **QHYCCD** | QHY's Windows driver and SDK package (the *All-In-One* installer). SeleneWatch finds the library. | Yes, with a QHYCCD 5L-II colour camera on hardware |
 | **Player One** | Player One's driver and its 64-bit library. SeleneWatch finds it where N.I.N.A. or SharpCap installed it, or beside SeleneWatch, or you choose it. | In software; waiting for a camera |
 | **ToupTek**, and the brands whose cameras it makes (such as Altair) | The camera's driver and ToupTek's 64-bit library, found the same way. | In software; waiting for a camera |
 
@@ -68,11 +68,11 @@ To guide a mount (for the Moon and the planets), install the [ASCOM Platform](ht
 
 *The main window while monitoring the Moon: the command bar at the top, the live image filling the window, the Detection panel on the right and the histogram below it.*
 
-**The workspace bar** at the very top switches between the four observation workspaces — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, bringing the right panel forward (and hiding Moon-only panels while watching the sky), and updating the primary start action without resetting settings.
+**The mode bar** at the very top switches between the four observing modes — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, swapping the right sidebar to the active mode's controls (**Detection** or **Time-lapse**), and updating the primary start action without resetting settings. On the right side of the same bar, **Tools** toggle buttons (**Camera**, **Guiding**, **Display**) open or hide floating instrument windows (which can also be docked by dragging) without crowding the sidebar.
 
 **The command bar** below it holds what you use most:
 - **Source**: a camera, a recording, or the synthetic test scenes (with testing tools on). **Connect at startup** opens the same camera next time.
-- **Start preview** and then **Stop**; **Start monitoring** / **Stop monitoring** (or **Start time-lapse** / **Stop time-lapse** in the **Time-lapse** workspace); **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)).
+- **Start preview** and then **Stop**; **Start monitoring** / **Stop monitoring** (or **Start time-lapse** / **Stop time-lapse** in **Time-lapse** mode); **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)).
 - **Ends** and **Change…**: when the session ends by itself ([1.8](#18-ending-a-session-by-itself)).
 - **The mode badge** on the right: **STOPPED**, **PREVIEW**, **MONITORING** or **TIME-LAPSE**.
 
@@ -86,7 +86,7 @@ SeleneWatch is always in one of these modes:
 
 **The image.** The bar above it switches between **Fit**, **100%** and **200%**; the mouse wheel zooms around the pixel under the pointer (25% to 800%), and dragging moves the zoomed image. Context-sensitive quick drawing buttons (**Lock box**, **Anchor**, **Mask**, **ROI**) sit right on the same bar alongside **Stabilized view**, **Histogram**, and **Focus view** (`F11`). A short click chooses a pixel, for its noise reading, a test signal, or a lock. Dragging draws a box only while a drawing tool is active.
 
-**The panels** sit on the right: the camera, **Detection**, **Display and capture**, **Guiding**, **Time-lapse**, and the histogram. The **View** menu shows and hides them, chooses the theme (**Dark**, **Red night vision** or **System**), and resets the layout. SeleneWatch remembers the window's layout, size and theme.
+**The panels.** The right sidebar holds the active mode's panel (**Detection** or **Time-lapse**) plus the optional **Histogram** below it. **Camera**, **Guiding**, and **Display** open as floating tool windows from the top **Tools** buttons (or the **View** menu) and can be dragged to dock if you prefer. Clip timing (**Pre-event history**, **Quiet tail**, **Maximum after trigger**), **RAM ceiling**, and **Disk reserve** live under **Session → Capture & storage…**. The **View** menu also chooses the theme (**Dark**, **Red night vision** or **System**) and resets the layout. SeleneWatch remembers the window's layout, size and theme.
 
 **Help on every control.** Point at a control for its explanation, or click the small **ⓘ** beside it. **Help → User Manual** (`F1`) opens this manual.
 
@@ -140,14 +140,15 @@ Spin boxes, sliders and closed lists ignore the mouse wheel, so scrolling a pane
 
 ### 1.6 Seeing the image: stretch and histogram
 
-What you set under **Display and capture** and in the histogram changes **only what you see**. The detector and the saved clips always use the camera's samples as they arrived.
+What you set in the **Display** window (**Tools → Display** or **View → Display**) and in the histogram changes **only what you see**. The detector and the saved clips always use the camera's samples as they arrived.
 
 ![Display stretch and the histogram](docs/images/manual-display-histogram.png)
 
 *Black and white levels stretch a faint image on screen; the histogram shows the camera's real values.*
 
 - **Display:** **Linear** shows the full range; **Black / white levels** stretches between two values you set; **Auto-stretch** chooses them from the image. **Invert brightness** and **Show Bayer colour** are for viewing only.
-- **The histogram** (**View → Histogram**) shows the camera's values before any stretch, with the share of pixels at zero and at the top of the range, where detail is lost.
+- **The histogram** (**Histogram** on the preview bar, or **View → Histogram**) shows the camera's values before any stretch, with the share of pixels at zero and at the top of the range, where detail is lost.
+- **Capture & storage** (**Session → Capture & storage…**) sets clip timing (**Pre-event history**, **Quiet tail**, **Maximum after trigger**), **RAM ceiling**, and **Disk reserve**, which take effect at the next Start.
 
 The [camera settings guide](CAMERA_SETTINGS_GUIDE.md) suggests exposure, gain and histogram levels for each kind of observing.
 
@@ -286,7 +287,7 @@ What both share:
 | **Mask** | Areas left out | None |
 | **Follow the sky's brightness** | Keeps the sky between 8 and 30%, within your limits | Off |
 | **Time-lapse while monitoring** | Slow watch: a frame every interval, and a video | Off, 30 s |
-| **Pre-event history / Quiet tail / Maximum after trigger** (Display and capture) | How much of the clip is kept before and after | 3 s, 5 s, 20 s |
+| **Pre-event history / Quiet tail / Maximum after trigger** (Session → Capture & storage…) | How much of the clip is kept before and after | 3 s, 5 s, 20 s |
 
 ---
 
@@ -315,7 +316,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
    - **Sharpening**, **Stops** (when the session ends, or after a number of stacks; [1.8](#18-ending-a-session-by-itself)), and **Output**: MP4, GIF, SER (plus **Stretch SER (match MP4)** when SER is ticked), and frames per second.
    - **Also save raw SER bursts** keeps every stacked frame. It can fill a drive in one night, so it asks first and is off again the next time SeleneWatch starts.
    - **Also watch for transits** (Moon or Planet): watches for shadows between the bursts, with the shadows watch's settings ([chapter 4](#4-shadows-crossing-the-moon)).
-4. Press **Start time-lapse**. The panel shows the latest stack, a short loop of the last stacks, and each stack's sharpness, shift and rotation, with any warnings.
+4. Press **Start time-lapse** (on the command bar or in the right sidebar). Above the main preview, **Time-lapse view** switches between **Live camera**, **Latest stack**, and **Sequence loop** so you can inspect stacks or watch the sequence play back at full zoom and pan while capture continues. Below the preview, the collapsible **Latest stacks** thumbnail strip shows each completed stack—click any thumbnail to inspect it full-size in the main viewport. The sidebar shows each stack's progress, sharpness, shift, rotation, and any warnings.
 5. When it ends, the panel shows the video being built. If you close SeleneWatch during a time-lapse, it asks first and finishes the video; **Close without video** leaves the stacks, and the video can be made later.
 
 ### Improving it afterwards
@@ -470,8 +471,8 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 | **Reference time**, **Minimum noise** | How quickly the background is learned, and the smallest noise assumed | 2 s, 0.5 |
 | **Preview overlay** | Shows on screen the pixels above K, or each pixel's noise | None |
 | **Profile** | Saves and loads named detection settings | — |
-| **Pre-event history / Quiet tail / Maximum after trigger** (Display and capture) | How much of the clip is kept before and after | 5 s, 3 s, 10 s |
-| **RAM ceiling / Disk reserve** (Display and capture) | Memory for frames, and free disk space always left | 2048 MiB, 10 GiB |
+| **Pre-event history / Quiet tail / Maximum after trigger** (Session → Capture & storage…) | How much of the clip is kept before and after | 5 s, 3 s, 10 s |
+| **RAM ceiling / Disk reserve** (Session → Capture & storage…) | Memory for frames, and free disk space always left | 2048 MiB, 10 GiB |
 
 ---
 

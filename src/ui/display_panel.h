@@ -1,36 +1,26 @@
 #pragma once
 
-#include "core/capture_settings.h"
 #include "display/display_settings.h"
-#include "capture/frame_ring_buffer.h"
-#include "recording/event_writer.h"
 
 #include <QtWidgets/QWidget>
 
 class QComboBox;
 class QDoubleSpinBox;
-class QSpinBox;
 class QSlider;
 class QCheckBox;
 class QLabel;
 
-// GUI-owned display settings and stopped-session capture settings. The
-// preview reads the former; Session copies the latter only at Start. The
-// capture settings shown belong to one target (Feature-11), which they keep.
+// Live screen-only display stretch controls (Black/White levels, Auto-stretch,
+// Invert, Bayer colour). Raw SER evidence and detection are never altered.
 class DisplayPanel : public QWidget
 {
     Q_OBJECT
 public:
     explicit DisplayPanel(QWidget* parent = nullptr);
     [[nodiscard]] DisplaySettings displaySettings() const;
-    [[nodiscard]] CaptureSettings captureSettings() const;
-    [[nodiscard]] int syntheticFormat() const;
     void setDisplaySettings(DisplaySettings settings);
-    void setCaptureSettings(CaptureSettings settings);
     void setNativeMaximum(int maximum);
-    void setRunning(bool running, bool recording);
     void showLevels(DisplayLevels levels);
-    void showUsage(MemoryUsage memory, RingUsage history, WriterUsage writer);
 signals:
     void displayChanged();
 private:
@@ -38,20 +28,12 @@ private:
     int maximum_{255};
     bool updating_{false};
     DisplaySettings display_;
-    QComboBox* mode_;
-    QComboBox* format_;
-    QDoubleSpinBox* black_;
-    QDoubleSpinBox* white_;
-    QSlider* blackSlider_;
-    QSlider* whiteSlider_;
-    QCheckBox* invert_;
-    QCheckBox* debayer_;
-    QDoubleSpinBox* history_;
-    QDoubleSpinBox* post_;
-    QDoubleSpinBox* maxPost_;
-    QSpinBox* memory_;
-    QDoubleSpinBox* reserve_;
-    Target target_{Target::Moon};
-    QLabel* levels_;
-    QLabel* usage_;
+    QComboBox* mode_{nullptr};
+    QDoubleSpinBox* black_{nullptr};
+    QDoubleSpinBox* white_{nullptr};
+    QSlider* blackSlider_{nullptr};
+    QSlider* whiteSlider_{nullptr};
+    QCheckBox* invert_{nullptr};
+    QCheckBox* debayer_{nullptr};
+    QLabel* levels_{nullptr};
 };

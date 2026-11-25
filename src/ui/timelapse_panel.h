@@ -54,6 +54,8 @@ signals:
     void configureTransitsRequested();
     void anchorSelectionChanged(bool active);
     void anchorChanged(const std::optional<QRect>& rect);
+    void stackCompleted(int stackNumber, const QImage& image, const QString& summary);
+    void runVisualsCleared();
 
 private:
     void applyPresetDefaults(TimelapsePreset preset);
@@ -64,7 +66,6 @@ private:
     [[nodiscard]] double rawSerGiBPerHour() const;
     // Asks the observer to confirm turning raw SER bursts on; true when confirmed.
     bool confirmRawSer();
-    void updateFilmstripFrame();
     void loadFromQSettings();
     void saveToQSettings() const;
 
@@ -120,17 +121,7 @@ private:
     QLabel* transitStatus_{nullptr};
     QLabel* statsLabel_{nullptr};
     QLabel* warningLabel_{nullptr};
-    QLabel* latestThumb_{nullptr};
-    QLabel* filmstripThumb_{nullptr};
-    QLabel* filmstripInfo_{nullptr};
-    QCheckBox* loopFilmstrip_{nullptr};
 
-    static constexpr size_t kMaxFilmstripFrames = 200;
-    static constexpr int kFilmstripThumbMaxEdge = 256;
-
-    std::deque<QImage> filmstripFrames_;
-    size_t filmstripIndex_{0};
-    QTimer* filmstripTimer_{nullptr};
     QString lastSessionDir_;
     QString lastTransitFolder_;
     int lastSeenStacks_{0};

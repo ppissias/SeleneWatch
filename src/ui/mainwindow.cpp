@@ -1,11 +1,13 @@
 #include "ui/mainwindow.h"
 #include "ui_mainwindow.h"
 #include "ui/auto_tune_panel.h"
+#include "ui/capture_storage_dialog.h"
 #include "ui/detection_panel.h"
 #include "ui/display_panel.h"
 #include "ui/widgets/elided_label.h"
 #include "ui/widgets/flow_layout.h"
 #include "ui/widgets/control_help.h"
+#include "ui/widgets/timelapse_stack_strip.h"
 #include "ui/histogram_panel.h"
 #include "ui/guiding_panel.h"
 #include "ui/timelapse_panel.h"
@@ -432,7 +434,7 @@ void MainWindow::arrangeTopControls()
     auto* wsRow = new QHBoxLayout(wsBar);
     wsRow->setContentsMargins(6, 2, 6, 2);
     wsRow->setSpacing(6);
-    auto* wsLabel = new QLabel("Workspace:", wsBar);
+    auto* wsLabel = new QLabel("Mode:", wsBar);
     wsRow->addWidget(wsLabel);
     workspaceButtons_ = new QButtonGroup(this);
     workspaceButtons_->setExclusive(true);
@@ -460,6 +462,40 @@ void MainWindow::arrangeTopControls()
         "Lunar & planetary time-lapses: capture periodic bursts, stack the sharpest frames, and build a video.",
         Workspace::TimeLapse);
     wsRow->addStretch(1);
+
+    // Floating instrument tool windows toggled from the right side of the Mode bar.
+    auto* toolsLabel = new QLabel("Tools:", wsBar);
+    wsRow->addWidget(toolsLabel);
+    auto makeToolBtn = [&](const QString& text, const QString& objName, const QString& tip) {
+        auto* btn = new QToolButton(wsBar);
+        btn->setObjectName(objName);
+        btn->setText(text);
+        btn->setCheckable(true);
+        btn->setToolTip(tip);
+        wsRow->addWidget(btn);
+        return btn;
+    };
+    toolCameraButton_ = makeToolBtn("Camera", "toolCameraButton",
+        "Open or hide the floating Camera controls window for the selected camera (can also be docked by dragging).");
+    toolGuidingButton_ = makeToolBtn("Guiding", "toolGuidingButton",
+        "Open or hide the floating Feature lock & Guiding instrument window (Moon & planets; can also be docked by dragging).");
+    toolDisplayButton_ = makeToolBtn("Display", "toolDisplayButton",
+        "Open or hide the floating live Display stretch window (screen only; raw recordings and detection are unchanged).");
+    toolCameraButton_->hide();
+    connect(toolCameraButton_, &QToolButton::toggled, this, [this](bool on) {
+        CameraFamilyPanel* selected = selectedCamera();
+        for (const auto& family : cameraFamilies_)
+            if (family.panel == selected) toggleFloatingToolDock(family.dock, on, QSize(390, 520));
+    });
+    connect(toolGuidingButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (guidingDock_ && target() != Target::Sky)
+            toggleFloatingToolDock(guidingDock_, on, QSize(400, 620));
+    });
+    connect(toolDisplayButton_, &QToolButton::toggled, this, [this](bool on) {
+        if (displayDock_)
+            toggleFloatingToolDock(displayDock_, on, QSize(340, 260));
+    });
+
     workspaceToolBar_->addWidget(wsBar);
     wsBar->show();
     addToolBar(Qt::TopToolBarArea, workspaceToolBar_);
@@ -614,41 +650,42 @@ void MainWindow::applyDefaultDockLayout()
         removeDockWidget(dock);
     }
 
-    // Three distinct vertical slots in the single right-hand sidebar:
-    //   1. Active Camera dock (top; hidden when non-camera source selected)
-    //   2. Tabbed Detection | Display | Guiding | Time-lapse (middle)
-    //   3. Compact Histogram dock (bottom; toggleable via View bar / View menu)
-    QDockWidget* firstCameraDock = nullptr;
+    // Right sidebar holds ONLY the active mode's panel (Detection OR Time-lapse)
+    // plus the optional compact Histogram below it. Camera, Guiding, and Display
+    // are floating tool windows toggled from the top Tools bar (still dockable if dragged).
     for (const auto& family : cameraFamilies_)
     {
         addDockWidget(Qt::RightDockWidgetArea, family.dock);
-        if (!firstCameraDock) firstCameraDock = family.dock;
-        else tabifyDockWidget(firstCameraDock, family.dock);
+        family.dock->setFloating(true);
+        family.dock->setProperty("placed", false);
+        family.dock->hide();
+    }
+    for (QDockWidget* toolDock : {displayDock_, guidingDock_})
+    {
+        if (!toolDock) continue;
+        addDockWidget(Qt::RightDockWidgetArea, toolDock);
+        toolDock->setFloating(true);
+        toolDock->setProperty("placed", false);
+        toolDock->hide();
     }
 
     if (detectionDock_) addDockWidget(Qt::RightDockWidgetArea, detectionDock_);
-    if (displayDock_) addDockWidget(Qt::RightDockWidgetArea, displayDock_);
-    if (guidingDock_) addDockWidget(Qt::RightDockWidgetArea, guidingDock_);
     if (timelapseDock_) addDockWidget(Qt::RightDockWidgetArea, timelapseDock_);
-    if (detectionDock_ && displayDock_) tabifyDockWidget(detectionDock_, displayDock_);
-    if (displayDock_ && guidingDock_) tabifyDockWidget(displayDock_, guidingDock_);
-    if (guidingDock_ && timelapseDock_) tabifyDockWidget(guidingDock_, timelapseDock_);
-
+    if (detectionDock_ && timelapseDock_) tabifyDockWidget(detectionDock_, timelapseDock_);
     if (histogramDock_) addDockWidget(Qt::RightDockWidgetArea, histogramDock_);
 
-    CameraFamilyPanel* selected = selectedCamera();
-    for (const auto& family : cameraFamilies_)
-        family.dock->setVisible(family.panel == selected);
-    for (QDockWidget* dock : {detectionDock_, displayDock_, guidingDock_, timelapseDock_})
-        if (dock) dock->show();
-    if (detectionDock_) detectionDock_->raise();
+    const bool tlActive = workspace_ == Workspace::TimeLapse && target() != Target::Sky;
+    if (detectionDock_) detectionDock_->setVisible(!tlActive);
+    if (timelapseDock_) timelapseDock_->setVisible(tlActive);
+    if (tlActive && timelapseDock_) timelapseDock_->raise();
+    else if (detectionDock_) detectionDock_->raise();
     if (histogramDock_) histogramDock_->setVisible(histWasVisible);
 
-    if (detectionDock_) resizeDocks({detectionDock_}, {350}, Qt::Horizontal);
-    if (firstCameraDock && detectionDock_ && histogramDock_)
-        resizeDocks({firstCameraDock, detectionDock_, histogramDock_}, {280, 340, 140}, Qt::Vertical);
-    else if (detectionDock_ && histogramDock_)
-        resizeDocks({detectionDock_, histogramDock_}, {520, 140}, Qt::Vertical);
+    QDockWidget* activeModeDock = tlActive ? timelapseDock_ : detectionDock_;
+    if (activeModeDock) resizeDocks({activeModeDock}, {360}, Qt::Horizontal);
+    if (activeModeDock && histogramDock_)
+        resizeDocks({activeModeDock, histogramDock_}, {520, 140}, Qt::Vertical);
+    syncToolButtons();
 }
 
 void MainWindow::saveWindowLayout()
@@ -658,7 +695,7 @@ void MainWindow::saveWindowLayout()
     if (wasFocus) setFocusView(false);
     QSettings saved;
     saved.setValue("ui/windowGeometry", saveGeometry());
-    saved.setValue("ui/windowState", saveState(3));
+    saved.setValue("ui/windowState", saveState(4));
     saved.sync();
     if (wasFocus) setFocusView(true);
 }
@@ -697,7 +734,15 @@ void MainWindow::restoreWindowLayout()
         resize(w, h);
     }
     if (!state.isEmpty())
-        restoreState(state, 3);
+    {
+        if (restoreState(state, 4))
+        {
+            for (const auto& family : cameraFamilies_)
+                if (family.dock->isFloating()) family.dock->setProperty("placed", true);
+            for (QDockWidget* toolDock : {displayDock_, guidingDock_})
+                if (toolDock && toolDock->isFloating()) toolDock->setProperty("placed", true);
+        }
+    }
     if (workspaceToolBar_) workspaceToolBar_->show();
     if (commandToolBar_) commandToolBar_->show();
 
@@ -705,7 +750,7 @@ void MainWindow::restoreWindowLayout()
     for (const auto& family : cameraFamilies_)
     {
         const bool isSelected = family.panel == selected;
-        family.dock->setVisible(isSelected);
+        if (!isSelected) family.dock->hide();
         family.dock->toggleViewAction()->setVisible(isSelected);
     }
     if (histogramToggleButton_ && histogramDock_)
@@ -713,6 +758,7 @@ void MainWindow::restoreWindowLayout()
         const QSignalBlocker blocked(histogramToggleButton_);
         histogramToggleButton_->setChecked(!histogramDock_->isHidden());
     }
+    syncToolButtons();
 }
 
 void MainWindow::resetWindowLayout()
@@ -723,21 +769,15 @@ void MainWindow::resetWindowLayout()
     saved.remove("ui/windowState");
     saved.sync();
     applyDefaultDockLayout();
-    const bool sky = target() == Target::Sky;
-    for (QDockWidget* dock : {detectionDock_, displayDock_})
-        if (dock) dock->show();
-    for (QDockWidget* dock : {guidingDock_, timelapseDock_})
-        if (dock) dock->setVisible(!sky);
-    if (workspace_ == Workspace::TimeLapse && timelapseDock_ && !sky) timelapseDock_->raise();
-    else if (detectionDock_) detectionDock_->raise();
     if (histogramDock_) histogramDock_->hide();
     CameraFamilyPanel* selected = selectedCamera();
     for (const auto& family : cameraFamilies_)
     {
         const bool isSelected = family.panel == selected;
-        family.dock->setVisible(isSelected);
+        family.dock->hide();
         family.dock->toggleViewAction()->setVisible(isSelected);
     }
+    syncToolButtons();
     showMessage("Window layout reset to default.", 4000);
 }
 
@@ -782,6 +822,8 @@ void MainWindow::setFocusView(bool on)
         }
         focusSavedDocks_.clear();
     }
+    updateTimelapseWorkspaceUi();
+    syncToolButtons();
 }
 
 void MainWindow::applyTheme(UiTheme theme, bool persist)
@@ -875,6 +917,7 @@ void MainWindow::applyTestingTools(bool on)
     ui_->blipGroupBox->setVisible(on);
     ui_->injectFlashButton->setVisible(on);
     testingBadge_->setVisible(on);
+    if (captureStorageDialog_) captureStorageDialog_->setTestingTools(on);
     session_->setTestingTools(on);
     rebuildSourceList();
     updateControls();
@@ -917,6 +960,7 @@ MainWindow::~MainWindow()
     if (timelapseDock_) disconnect(timelapseDock_, nullptr, this, nullptr);
     if (timelapsePanel_) disconnect(timelapsePanel_, nullptr, this, nullptr);
     if (guidingTimer_) guidingTimer_->stop();
+    if (timelapseLoopTimer_) timelapseLoopTimer_->stop();
     if (prepareTimer_) prepareTimer_->stop();
     // A recording being read is let finish; its result is dropped.
     if (preparing_.valid()) preparing_.wait();
@@ -994,7 +1038,7 @@ void MainWindow::saveDetectionPanel()
 
 void MainWindow::saveCapturePanel()
 {
-    if (displayPanel_) saveCaptureSettings(watch_, displayPanel_->captureSettings());
+    if (captureStorageDialog_) saveCaptureSettings(watch_, captureStorageDialog_->captureSettings());
 }
 
 void MainWindow::onWatchRequested(Watch watch)
@@ -1012,7 +1056,7 @@ void MainWindow::onWatchRequested(Watch watch)
     if (captureChanges) saveCapturePanel();
     saveSkyExtrasPanel();
     const auto detection = savedDetectionSettings(watch);
-    const auto capture = captureChanges ? savedCaptureSettings(watch) : displayPanel_->captureSettings();
+    const auto capture = captureChanges ? savedCaptureSettings(watch) : captureStorageDialog_->captureSettings();
     if (running && !session_->requestPreviewWatch(watch, detection, capture))
     {
         detectionPanel_->setWatch(watch_);
@@ -1031,10 +1075,10 @@ void MainWindow::onWatchRequested(Watch watch)
     saveWatch(watch_);
     detectionPanel_->setWatch(watch_);
     detectionPanel_->setSettings(detection);
-    if (captureChanges) displayPanel_->setCaptureSettings(capture);
+    if (captureChanges) captureStorageDialog_->setCaptureSettings(capture);
     if (!running)
     {
-        if (captureChanges) session_->setCaptureSettings(displayPanel_->captureSettings());
+        if (captureChanges) session_->setCaptureSettings(captureStorageDialog_->captureSettings());
         session_->setWatch(watch_);
         session_->setDetectionSettings(detectionPanel_->settings());
     }
@@ -1300,25 +1344,89 @@ void MainWindow::selectWorkspace(Workspace workspace)
     case Workspace::Flashes:
         lastLunarWatch_ = Watch::MoonFlashes;
         if (watch_ != Watch::MoonFlashes) onWatchRequested(Watch::MoonFlashes);
-        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
         break;
     case Workspace::Shadows:
         lastLunarWatch_ = Watch::MoonShadows;
         if (watch_ != Watch::MoonShadows) onWatchRequested(Watch::MoonShadows);
-        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
         break;
     case Workspace::Sky:
         if (target() != Target::Sky) onWatchRequested(lastSkyWatch_);
-        if (!focusView_ && detectionDock_) { detectionDock_->show(); detectionDock_->raise(); }
         break;
     case Workspace::TimeLapse:
         if (target() == Target::Sky) onWatchRequested(lastLunarWatch_);
-        if (!focusView_ && timelapseDock_) { timelapseDock_->show(); timelapseDock_->raise(); }
         break;
     }
     switchingWorkspace_ = false;
+    const bool tlActive = workspace_ == Workspace::TimeLapse && target() != Target::Sky;
+    if (!focusView_)
+    {
+        if (detectionDock_) detectionDock_->setVisible(!tlActive);
+        if (timelapseDock_) timelapseDock_->setVisible(tlActive);
+        if (tlActive && timelapseDock_) timelapseDock_->raise();
+        else if (detectionDock_) detectionDock_->raise();
+    }
+    if (!tlActive && tlViewMode_ != TimelapseViewMode::Live)
+        setTimelapseViewMode(TimelapseViewMode::Live);
+    updateTimelapseWorkspaceUi();
     syncWorkspaceButtons();
+    syncToolButtons();
     updateControls();
+}
+
+void MainWindow::toggleFloatingToolDock(QDockWidget* dock, bool on, QSize defaultSize)
+{
+    if (!dock) return;
+    if (!on)
+    {
+        dock->hide();
+        syncToolButtons();
+        return;
+    }
+    if (dock->isFloating() && !dock->property("placed").toBool())
+    {
+        dock->resize(defaultSize);
+        QRect avail(0, 0, 1280, 720);
+        if (QScreen* s = screen() ? screen() : QGuiApplication::primaryScreen())
+            avail = s->availableGeometry();
+        const QRect win = frameGeometry();
+        const int x = std::clamp(win.right() - defaultSize.width() - 380, avail.left() + 16,
+            std::max(avail.left() + 16, avail.right() - defaultSize.width() - 16));
+        const int y = std::clamp(win.top() + 110, avail.top() + 16,
+            std::max(avail.top() + 16, avail.bottom() - defaultSize.height() - 16));
+        dock->move(x, y);
+        dock->setProperty("placed", true);
+    }
+    dock->show();
+    dock->raise();
+    syncToolButtons();
+}
+
+void MainWindow::syncToolButtons()
+{
+    if (toolCameraButton_)
+    {
+        CameraFamilyPanel* selected = selectedCamera();
+        QDockWidget* selectedDock = nullptr;
+        for (const auto& family : cameraFamilies_)
+            if (family.panel == selected) { selectedDock = family.dock; break; }
+        toolCameraButton_->setVisible(selected != nullptr);
+        toolCameraButton_->setEnabled(selected != nullptr);
+        const QSignalBlocker blocked(toolCameraButton_);
+        toolCameraButton_->setChecked(selectedDock && !selectedDock->isHidden());
+    }
+    if (toolGuidingButton_)
+    {
+        const bool moon = target() != Target::Sky;
+        toolGuidingButton_->setVisible(moon);
+        toolGuidingButton_->setEnabled(moon);
+        const QSignalBlocker blocked(toolGuidingButton_);
+        toolGuidingButton_->setChecked(moon && guidingDock_ && !guidingDock_->isHidden());
+    }
+    if (toolDisplayButton_)
+    {
+        const QSignalBlocker blocked(toolDisplayButton_);
+        toolDisplayButton_->setChecked(displayDock_ && !displayDock_->isHidden());
+    }
 }
 
 void MainWindow::applyTarget()
@@ -1335,13 +1443,11 @@ void MainWindow::applyTarget()
     {
         guidingDock_->toggleViewAction()->setVisible(!sky);
         if (sky) guidingDock_->hide();
-        else if (!focusView_) guidingDock_->show();
     }
     if (timelapseDock_)
     {
         timelapseDock_->toggleViewAction()->setVisible(!sky);
         if (sky) timelapseDock_->hide();
-        else if (!focusView_) timelapseDock_->show();
     }
     if (timelapsePanel_)
     {
@@ -1355,6 +1461,19 @@ void MainWindow::applyTarget()
             ui_->previewWidget->setAnchorBox(timelapsePanel_->settings().lunarAnchor);
         }
     }
+    if (sky && workspace_ == Workspace::TimeLapse)
+    {
+        workspace_ = Workspace::Sky;
+        syncWorkspaceButtons();
+    }
+    if (!focusView_)
+    {
+        const bool tlActive = workspace_ == Workspace::TimeLapse && !sky;
+        if (detectionDock_) detectionDock_->setVisible(!tlActive);
+        if (timelapseDock_) timelapseDock_->setVisible(tlActive);
+    }
+    updateTimelapseWorkspaceUi();
+    syncToolButtons();
     // Feature-26: each target has its own aim; the earthshine outline is the Moon's.
     updateEarthshineArea();
     updateAutoTune();
@@ -1370,10 +1489,18 @@ void MainWindow::setupDisplayPanel()
 {
     displayPanel_ = new DisplayPanel(this);
     displayDock_ = new QDockWidget("Display", this);
-    displayDock_->setObjectName("displayDock"); displayDock_->setWidget(displayPanel_);
+    displayDock_->setObjectName("displayDock");
+    displayDock_->setWidget(displayPanel_);
     addDockWidget(Qt::RightDockWidgetArea, displayDock_);
-    tabifyDockWidget(detectionDock_, displayDock_);
     viewMenu_->addAction(displayDock_->toggleViewAction());
+    connect(displayDock_, &QDockWidget::visibilityChanged, this, [this](bool) { syncToolButtons(); });
+
+    captureStorageDialog_ = new CaptureStorageDialog(this);
+    connect(captureStorageDialog_, &CaptureStorageDialog::settingsChanged, this, [this] {
+        saveCapturePanel();
+        if (!session_->isRunning()) session_->setCaptureSettings(captureStorageDialog_->captureSettings());
+    });
+
     QSettings saved;
     DisplaySettings display;
     const int mode = saved.value("display/mode", 0).toInt();
@@ -1381,12 +1508,20 @@ void MainWindow::setupDisplayPanel()
     display.black = saved.value("display/black", 0).toDouble(); display.white = saved.value("display/white", 1).toDouble();
     display.invert = saved.value("display/invert", false).toBool(); display.debayer = saved.value("display/debayer", true).toBool();
     displayPanel_->setDisplaySettings(display.valid() ? display : DisplaySettings{});
-    displayPanel_->setCaptureSettings(savedCaptureSettings(watch_));
-    session_->setCaptureSettings(displayPanel_->captureSettings());
+    captureStorageDialog_->setCaptureSettings(savedCaptureSettings(watch_));
+    session_->setCaptureSettings(captureStorageDialog_->captureSettings());
     session_->setWatch(watch_);
     connect(displayPanel_, &DisplayPanel::displayChanged, this, &MainWindow::renderPreview);
-    displayDock_->raise();
     updateBufferReadout();
+}
+
+void MainWindow::onCaptureStorage()
+{
+    if (!captureStorageDialog_) return;
+    updateBufferReadout();
+    captureStorageDialog_->show();
+    captureStorageDialog_->raise();
+    captureStorageDialog_->activateWindow();
 }
 
 void MainWindow::saveDisplaySettings()
@@ -1453,9 +1588,8 @@ void MainWindow::setupGuidingPanel()
     guidingDock_->setObjectName("guidingDock");
     guidingDock_->setWidget(guidingPanel_);
     addDockWidget(Qt::RightDockWidgetArea, guidingDock_);
-    tabifyDockWidget(displayDock_, guidingDock_);
-    displayDock_->raise();
     viewMenu_->addAction(guidingDock_->toggleViewAction());
+    connect(guidingDock_, &QDockWidget::visibilityChanged, this, [this](bool) { syncToolButtons(); });
 
     simulatedPointing_ = std::make_shared<SimulatedPointing>(SimulatedPointing::Settings{});
     const QSettings saved;
@@ -1513,15 +1647,13 @@ void MainWindow::setupTimelapsePanel()
     timelapseDock_->setObjectName("timelapseDock");
     timelapseDock_->setWidget(timelapsePanel_);
     addDockWidget(Qt::RightDockWidgetArea, timelapseDock_);
-    tabifyDockWidget(guidingDock_, timelapseDock_);
+    tabifyDockWidget(detectionDock_, timelapseDock_);
     viewMenu_->addAction(timelapseDock_->toggleViewAction());
     connect(timelapsePanel_, &TimelapsePanel::startRequested, this, &MainWindow::onStartTimeLapse);
     connect(timelapsePanel_, &TimelapsePanel::stopRequested, this, &MainWindow::onStopTimeLapse);
     connect(timelapsePanel_, &TimelapsePanel::resharpenRequested, this, &MainWindow::onOpenResharpen);
     connect(timelapsePanel_, &TimelapsePanel::configureTransitsRequested, this, [this] {
-        if (watch_ != Watch::MoonShadows) onWatchRequested(Watch::MoonShadows);
-        detectionDock_->show();
-        detectionDock_->raise();
+        selectWorkspace(Workspace::Shadows);
     });
     connect(timelapsePanel_, &TimelapsePanel::anchorSelectionChanged, this, [this](bool active) {
         chooseDrawing(active ? Drawing::Anchor : Drawing::None);
@@ -1530,6 +1662,135 @@ void MainWindow::setupTimelapsePanel()
     connect(timelapsePanel_, &TimelapsePanel::anchorChanged, this, [this](const std::optional<QRect>& rect) {
         ui_->previewWidget->setAnchorBox(rect);
     });
+    connect(timelapsePanel_, &TimelapsePanel::stackCompleted, this,
+        [this](int stackNumber, const QImage& image, const QString& summary) {
+            if (!timelapseStackStrip_) return;
+            timelapseStackStrip_->addStack(stackNumber, image, summary);
+            if (tlViewMode_ == TimelapseViewMode::LatestStack)
+            {
+                renderTimelapseViewport();
+            }
+            else if (tlViewMode_ == TimelapseViewMode::SequenceLoop)
+            {
+                if (timelapseStackStrip_->stackCount() == 1) renderTimelapseViewport();
+                else if (timelapseLoopTimer_ && !timelapseLoopTimer_->isActive()) timelapseLoopTimer_->start();
+            }
+        });
+    connect(timelapsePanel_, &TimelapsePanel::runVisualsCleared, this, [this] {
+        if (timelapseLoopTimer_) timelapseLoopTimer_->stop();
+        if (timelapseStackStrip_) timelapseStackStrip_->clear();
+        inspectedStackNumber_ = -1;
+        timelapseLoopIndex_ = 0;
+        if (tlViewMode_ != TimelapseViewMode::Live) setTimelapseViewMode(TimelapseViewMode::Live);
+    });
+
+    timelapseLoopTimer_ = new QTimer(this);
+    timelapseLoopTimer_->setInterval(250);
+    connect(timelapseLoopTimer_, &QTimer::timeout, this, [this] {
+        if (tlViewMode_ != TimelapseViewMode::SequenceLoop || !timelapseStackStrip_ || timelapseStackStrip_->stackCount() == 0)
+            return;
+        timelapseLoopIndex_ %= timelapseStackStrip_->stackCount();
+        renderTimelapseViewport();
+        ++timelapseLoopIndex_;
+    });
+}
+
+void MainWindow::setTimelapseViewMode(TimelapseViewMode mode)
+{
+    tlViewMode_ = mode;
+    if (timelapseLoopTimer_) timelapseLoopTimer_->stop();
+    if (tlViewLiveButton_ && tlViewLatestButton_ && tlViewLoopButton_)
+    {
+        const QSignalBlocker b1(tlViewLiveButton_), b2(tlViewLatestButton_), b3(tlViewLoopButton_);
+        tlViewLiveButton_->setChecked(mode == TimelapseViewMode::Live);
+        tlViewLatestButton_->setChecked(mode == TimelapseViewMode::LatestStack);
+        tlViewLoopButton_->setChecked(mode == TimelapseViewMode::SequenceLoop);
+    }
+    if (mode == TimelapseViewMode::Live)
+    {
+        inspectedStackNumber_ = -1;
+        if (timelapseStackStrip_) timelapseStackStrip_->setHighlightedStack(-1);
+        ui_->previewWidget->setEmptyText("Choose a source and press Start");
+        updatePreviewHint(Drawing::None);
+        updateStabilizeReadout(latestDetection_);
+        if (latestFrame_) renderPreview();
+        else ui_->previewWidget->clear();
+        onLockChanged();
+        if (timelapsePanel_) ui_->previewWidget->setAnchorBox(timelapsePanel_->settings().lunarAnchor);
+        return;
+    }
+    if (mode == TimelapseViewMode::SequenceLoop)
+    {
+        timelapseLoopIndex_ = 0;
+        if (timelapseStackStrip_ && timelapseStackStrip_->stackCount() > 1 && timelapseLoopTimer_)
+            timelapseLoopTimer_->start();
+    }
+    renderTimelapseViewport();
+}
+
+void MainWindow::inspectTimelapseStack(int stackNumber)
+{
+    if (!timelapseStackStrip_ || timelapseStackStrip_->stackImage(stackNumber).isNull()) return;
+    inspectedStackNumber_ = stackNumber;
+    setTimelapseViewMode(TimelapseViewMode::InspectStack);
+}
+
+void MainWindow::renderTimelapseViewport()
+{
+    if (tlViewMode_ == TimelapseViewMode::Live || !ui_ || !ui_->previewWidget) return;
+    // Clear live-stream overlays while displaying a completed stack so the image is unobstructed.
+    ui_->previewWidget->setDisplayShift(QPointF(0.0, 0.0));
+    ui_->previewWidget->setDetectionOverlay({}, {});
+    ui_->previewWidget->setLockBoxes({}, {}, false);
+    ui_->previewWidget->setAnchorBox(std::nullopt);
+
+    if (!timelapseStackStrip_ || timelapseStackStrip_->stackCount() == 0)
+    {
+        ui_->previewWidget->clear();
+        ui_->previewWidget->setEmptyText("No stack completed yet — start a time-lapse to inspect stacks here.");
+        if (previewHintLabel_) previewHintLabel_->setText("Waiting for the first completed stack…");
+        if (timelapseStackStrip_) timelapseStackStrip_->setHighlightedStack(-1);
+        return;
+    }
+
+    int shownNum = 0;
+    QImage img;
+    if (tlViewMode_ == TimelapseViewMode::LatestStack)
+    {
+        shownNum = timelapseStackStrip_->latestStackNumber();
+        img = timelapseStackStrip_->stackImage(shownNum);
+        if (previewHintLabel_)
+            previewHintLabel_->setText(QString("Latest stack #%1 (%2 total) · Mouse wheel: zoom · Drag: pan")
+                .arg(shownNum).arg(timelapseStackStrip_->stackCount()));
+    }
+    else if (tlViewMode_ == TimelapseViewMode::SequenceLoop)
+    {
+        const int count = timelapseStackStrip_->stackCount();
+        const int idx = timelapseLoopIndex_ % count;
+        shownNum = timelapseStackStrip_->stackNumberAtIndex(idx);
+        img = timelapseStackStrip_->stackImageAtIndex(idx);
+        if (previewHintLabel_)
+            previewHintLabel_->setText(QString("Sequence loop: stack #%1 (%2 / %3) · Click Live camera to return")
+                .arg(shownNum).arg(idx + 1).arg(count));
+    }
+    else if (tlViewMode_ == TimelapseViewMode::InspectStack)
+    {
+        shownNum = inspectedStackNumber_;
+        img = timelapseStackStrip_->stackImage(shownNum);
+        if (previewHintLabel_)
+            previewHintLabel_->setText(QString("Inspecting stack #%1 (%2 total) · Click Live camera to return")
+                .arg(shownNum).arg(timelapseStackStrip_->stackCount()));
+    }
+
+    timelapseStackStrip_->setHighlightedStack(shownNum);
+    if (!img.isNull()) ui_->previewWidget->setImage(std::move(img));
+}
+
+void MainWindow::updateTimelapseWorkspaceUi()
+{
+    const bool tl = workspace_ == Workspace::TimeLapse && target() != Target::Sky;
+    if (tlViewGroup_) tlViewGroup_->setVisible(tl);
+    if (timelapseStackStrip_) timelapseStackStrip_->setVisible(tl && !focusView_);
 }
 
 void MainWindow::onStartTimeLapse()
@@ -1575,8 +1836,13 @@ void MainWindow::onStartTimeLapse()
     }
     beginSessionRun(true);
     workspace_ = Workspace::TimeLapse;
+    if (!focusView_)
+    {
+        if (detectionDock_) detectionDock_->hide();
+        if (timelapseDock_) { timelapseDock_->show(); timelapseDock_->raise(); }
+    }
+    updateTimelapseWorkspaceUi();
     syncWorkspaceButtons();
-    timelapseDock_->raise();
     QString started = tlSettings.watchTransits ? "Time-lapse started with transit watching between stacks." : "Time-lapse started.";
     // Without an anchor a Moon time-lapse fits rotation over the whole frame,
     // where a passing cloud can rotate a stack wrongly.
@@ -1778,6 +2044,10 @@ void MainWindow::setupSessionMenu()
 
     // Setup
     menu->addSeparator();
+    auto* captureStorage = menu->addAction("Capture && storage…");
+    captureStorage->setObjectName("captureStorageAction");
+    captureStorage->setToolTip("Configure pre-event clip timing, RAM ceiling, and disk reserve (applied at the next Start).");
+    connect(captureStorage, &QAction::triggered, this, &MainWindow::onCaptureStorage);
     auto* folder = menu->addAction("Output folder…");
     folder->setObjectName("outputFolderAction");
     connect(folder, &QAction::triggered, this, &MainWindow::onOutputFolder);
@@ -2173,7 +2443,7 @@ bool MainWindow::applyOutputFolder(const QString& folder, QString& error)
 
 bool MainWindow::recreateOutputFolder(QString& error)
 {
-    const uint64_t reserve = displayPanel_ ? displayPanel_->captureSettings().diskReserveBytes : 0;
+    const uint64_t reserve = captureStorageDialog_ ? captureStorageDialog_->captureSettings().diskReserveBytes : 0;
     const QString root = session_->outputRoot();
     const OutputFolderCheck recreated = checkOutputFolder(root, reserve, true);
     if (!recreated.ok)
@@ -2198,7 +2468,7 @@ bool MainWindow::recreateOutputFolder(QString& error)
 
 bool MainWindow::ensureOutputFolderReady(const QString& actionName)
 {
-    const uint64_t reserve = displayPanel_ ? displayPanel_->captureSettings().diskReserveBytes : 0;
+    const uint64_t reserve = captureStorageDialog_ ? captureStorageDialog_->captureSettings().diskReserveBytes : 0;
     const OutputFolderCheck check = checkOutputFolder(session_->outputRoot(), reserve, false);
     if (check.ok)
     {
@@ -2434,7 +2704,8 @@ void MainWindow::onLockChanged()
     std::optional<QRectF> found;
     if (status.lastMatch) found = QRectF(locked).translated(status.foundDx, status.foundDy);
     const bool valid = status.lastMatch && status.lastMatch->valid && status.state == LockState::Locked;
-    ui_->previewWidget->setLockBoxes(locked, found, valid);
+    if (tlViewMode_ == TimelapseViewMode::Live)
+        ui_->previewWidget->setLockBoxes(locked, found, valid);
     const QString methodTag = status.method == LockMethod::DiskCentroid ? "Disk centroid" : "Feature Lock";
     if (status.state != LockState::Locked)
         lockLabel_->setText(QString("Lock: %1").arg(lockStateName(status.state)) + guiding);
@@ -2446,7 +2717,7 @@ void MainWindow::onLockChanged()
 
 void MainWindow::renderPreview()
 {
-    if (!latestFrame_) return;
+    if (!latestFrame_ || tlViewMode_ != TimelapseViewMode::Live) return;
     try
     {
         DisplayLevels levels;
@@ -2591,6 +2862,33 @@ void MainWindow::setupPreviewZoomBar()
     previewDrawMaskButton_->hide();
     previewDrawRoiButton_->hide();
 
+    // Feature-51 Phase 4: dedicated Time-lapse viewport mode switcher bar (visible only in Time-lapse mode).
+    tlViewGroup_ = new QWidget(ui_->centralWidget);
+    tlViewGroup_->setObjectName("timelapseViewSwitcher");
+    auto* tlRow = new QHBoxLayout(tlViewGroup_);
+    tlRow->setContentsMargins(0, 0, 0, 0);
+    tlRow->setSpacing(4);
+    tlRow->addWidget(new QLabel("Time-lapse view:", tlViewGroup_));
+    auto makeTlBtn = [&](const QString& text, const QString& objName, const QString& tip, TimelapseViewMode mode) {
+        auto* btn = new QToolButton(tlViewGroup_);
+        btn->setObjectName(objName);
+        btn->setText(text);
+        btn->setCheckable(true);
+        btn->setToolTip(tip);
+        tlRow->addWidget(btn);
+        connect(btn, &QToolButton::clicked, this, [this, mode] { setTimelapseViewMode(mode); });
+        return btn;
+    };
+    tlViewLiveButton_ = makeTlBtn("Live camera", "tlViewLiveButton",
+        "Show the live camera or recording stream in the main preview.", TimelapseViewMode::Live);
+    tlViewLiveButton_->setChecked(true);
+    tlViewLatestButton_ = makeTlBtn("Latest stack", "tlViewLatestButton",
+        "Show the most recently completed sharpened stack in the main preview at full zoom and pan.", TimelapseViewMode::LatestStack);
+    tlViewLoopButton_ = makeTlBtn("Sequence loop", "tlViewLoopButton",
+        "Play all completed stacks so far as an animated loop right inside the main preview.", TimelapseViewMode::SequenceLoop);
+    tlRow->addStretch(1);
+    tlViewGroup_->hide();
+
     previewHintLabel_ = new ElidedLabel("Mouse wheel: zoom · Drag: pan", Qt::ElideRight, zoomBar);
     previewHintLabel_->setObjectName("previewHintLabel");
     previewHintLabel_->setStyleSheet("color: #888888;");
@@ -2634,6 +2932,13 @@ void MainWindow::setupPreviewZoomBar()
 
     const int previewIndex = ui_->verticalLayout->indexOf(ui_->previewWidget);
     ui_->verticalLayout->insertWidget(std::max(0, previewIndex), zoomBar);
+    ui_->verticalLayout->insertWidget(std::max(0, previewIndex) + 1, tlViewGroup_);
+
+    // Feature-51 Phase 4: collapsible bottom Latest stacks horizontal strip (Time-lapse mode only).
+    timelapseStackStrip_ = new TimelapseStackStrip(ui_->centralWidget);
+    timelapseStackStrip_->hide();
+    ui_->verticalLayout->addWidget(timelapseStackStrip_);
+    connect(timelapseStackStrip_, &TimelapseStackStrip::stackSelected, this, &MainWindow::inspectTimelapseStack);
 
     connect(zoomFitButton_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setFitToWindow(); });
     connect(zoom100Button_, &QToolButton::clicked, this, [this] { ui_->previewWidget->setZoom(1.0); });
@@ -2779,10 +3084,12 @@ void MainWindow::addCameraFamily(CameraFamilyPanel* panel,const QString& dockTit
     scroll->setWidget(panel);
     dock->setWidget(scroll);
     addDockWidget(Qt::RightDockWidgetArea,dock);
+    dock->setFloating(true);
     dock->hide();
     QAction* toggle=dock->toggleViewAction();
     toggle->setVisible(false);
     viewMenu_->addAction(toggle);
+    connect(dock, &QDockWidget::visibilityChanged, this, [this](bool) { syncToolButtons(); });
     connect(panel,&CameraFamilyPanel::applyRequested,this,&MainWindow::onApplyCamera);
     connect(panel,&CameraFamilyPanel::liveControlsRequested,this,&MainWindow::onApplyLiveCamera);
     connect(panel,&CameraFamilyPanel::availabilityChanged,this,&MainWindow::updateControls);
@@ -2927,13 +3234,14 @@ void MainWindow::updateControls()
     if (fpsGroup_) fpsGroup_->setVisible(!selected && chosen);
     if (recordingPlaybackGroup_) recordingPlaybackGroup_->setVisible(recording);
     if (playbackBar_) playbackBar_->setVisible(!selected && chosen);
-    if (displayPanel_) displayPanel_->setRunning(running, recording || selected);
+    if (captureStorageDialog_) captureStorageDialog_->setRunning(running, recording || selected);
     for (const auto& family : cameraFamilies_)
     {
         const bool thisFamily = family.panel == selected;
         family.dock->setEnabled(thisFamily);
         family.panel->setRunning(running && thisFamily, running && (monitoring || timeLapsing || pending));
     }
+    syncToolButtons();
     if (guidingPanel_) guidingPanel_->setAvailable(running, ui_->previewWidget->selectedPosition().has_value());
     if (timelapsePanel_)
     {
@@ -2971,7 +3279,8 @@ void MainWindow::updateStabilizeReadout(const DetectionSummary& summary)
     }
     if (ui_ && ui_->previewWidget)
     {
-        const bool shiftActive = enabled && stabilizedViewButton_ && stabilizedViewButton_->isChecked()
+        const bool shiftActive = tlViewMode_ == TimelapseViewMode::Live && enabled
+            && stabilizedViewButton_ && stabilizedViewButton_->isChecked()
             && (summary.stabilizationState == StabilizationState::Locked
                 || summary.stabilizationState == StabilizationState::GraceHold);
         ui_->previewWidget->setDisplayShift(shiftActive
@@ -3014,7 +3323,7 @@ void MainWindow::updateBufferReadout()
     bufferLabel_->setText(QString("History %1 s / %2 frames; RAM %3 / %4 MiB")
         .arg(history.seconds, 0, 'f', 1).arg(history.frames)
         .arg(memory.used / 1048576.0, 0, 'f', 1).arg(memory.limit / 1048576.0, 0, 'f', 0));
-    if (displayPanel_) displayPanel_->showUsage(memory, history, writer);
+    if (captureStorageDialog_) captureStorageDialog_->showUsage(memory, history, writer);
     if (guidingPanel_) guidingPanel_->setLogFailed(writer.guidingWriteFailures > 0);
 }
 
@@ -3246,7 +3555,7 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
             const auto offset = pointing->imageOffset(SimulatedPointing::Clock::now());
             return std::pair{offset.x, offset.y};
         });
-        const int layout = displayPanel_->syntheticFormat();
+        const int layout = captureStorageDialog_->syntheticFormat();
         if (layout) source->setPixelLayout(PixelFormat::Mono16, layout == 3 ? 16 : 12,
             layout == 2 || layout == 4 ? BitAlignment::High : BitAlignment::Low,
             layout == 4 ? BayerPattern::RGGB : BayerPattern::None);
@@ -3308,7 +3617,7 @@ void MainWindow::startStream(Session::Mode mode)
     histogramPanel_->clear();
     lastHistogramTime_ = {};
     detectionPanel_->setView({});
-    session_->setCaptureSettings(displayPanel_->captureSettings());
+    session_->setCaptureSettings(captureStorageDialog_->captureSettings());
     session_->setWatch(watch_);
     session_->setDetectionSettings(detectionPanel_->settings());
     latestDetection_ = {};
@@ -3492,17 +3801,23 @@ void MainWindow::onSourceKindChanged()
 {
     if (session_->isRunning()) return;
     CameraFamilyPanel* selected = selectedCamera();
-    if (focusView_ && selected) setFocusView(false);
+    bool hadOpenCameraDock = false;
+    for (const auto& family : cameraFamilies_)
+        if (!family.dock->isHidden()) hadOpenCameraDock = true;
     for (const auto& family : cameraFamilies_)
     {
         const bool isSelected = family.panel == selected;
-        family.dock->setVisible(isSelected && !focusView_);
         family.dock->toggleViewAction()->setVisible(isSelected);
-        if (!isSelected) continue;
-        family.dock->raise();
-        detectionDock_->raise();
+        if (!isSelected)
+        {
+            family.dock->hide();
+            continue;
+        }
         family.panel->refresh();
+        if (hadOpenCameraDock && !focusView_)
+            toggleFloatingToolDock(family.dock, true, QSize(390, 520));
     }
+    syncToolButtons();
     if (recordingSelected())
     {
         ui_->fileLabel->setText(recordingPath_.isEmpty()?"No recording chosen":QFileInfo(recordingPath_).fileName());
@@ -3696,7 +4011,7 @@ void MainWindow::showLatestFrame()
             const auto& view = *packet.detection;
             try { detectionPanel_->setView(view); }
             catch (const MemoryLimitError&) { showMessage("Overlay skipped: RAM ceiling reached"); }
-            if (detectionDock_->isVisible())
+            if (detectionDock_->isVisible() && tlViewMode_ == TimelapseViewMode::Live)
                 ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
                     {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});
         }
@@ -3747,7 +4062,7 @@ void MainWindow::onClipWritten(const ClipWriteResult& result)
         updateCandidateReadout();
         const QString free = QString("%1 GiB free on the output drive, below the disk reserve of %2 GiB")
             .arg(static_cast<double>(result.freeBytes) / kGiB, 0, 'f', 1)
-            .arg(static_cast<double>(displayPanel_->captureSettings().diskReserveBytes) / kGiB, 0, 'f', 0);
+            .arg(static_cast<double>(captureStorageDialog_->captureSettings().diskReserveBytes) / kGiB, 0, 'f', 0);
         showMessage("Saving stopped: " + free + ". Candidates are still logged.");
         // Feature-32: Monitoring cannot save evidence any more, so it ends.
         if (sessionRun_ && !sessionRun_->timeLapse) endSession("the disk reserve: " + free);

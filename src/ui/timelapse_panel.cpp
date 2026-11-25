@@ -213,7 +213,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         if (!lastTransitFolder_.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(lastTransitFolder_));
     });
 
-    auto* liveBox = new QGroupBox("Session progress && preview", body);
+    auto* liveBox = new QGroupBox("Session progress", body);
     auto* liveLayout = new QVBoxLayout(liveBox);
     progressBar_ = new QProgressBar(liveBox);
     progressBar_->setObjectName("timelapseProgress");
@@ -247,55 +247,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     warningLabel_->hide();
     liveLayout->addWidget(warningLabel_);
 
-    auto* thumbs = new QHBoxLayout();
-    auto* latestCol = new QVBoxLayout();
-    latestCol->addWidget(new QLabel("Latest stack", liveBox));
-    latestThumb_ = new QLabel(liveBox);
-    latestThumb_->setObjectName("timelapseLatestThumb");
-    latestThumb_->setMinimumSize(130, 96);
-    latestThumb_->setAlignment(Qt::AlignCenter);
-    latestThumb_->setStyleSheet("background:#111; color:#888; border:1px solid #333;");
-    latestThumb_->setText("--");
-    latestCol->addWidget(latestThumb_);
-    auto* latestNote = new QLabel("Most recent", liveBox);
-    latestNote->setAlignment(Qt::AlignCenter);
-    latestCol->addWidget(latestNote);
-
-    auto* filmCol = new QVBoxLayout();
-    auto* filmHead = new QHBoxLayout();
-    filmHead->addWidget(new QLabel("Filmstrip loop", liveBox));
-    loopFilmstrip_ = new QCheckBox("Loop", liveBox);
-    loopFilmstrip_->setToolTip("Plays the stacks so far as a loop in the filmstrip, a preview of the video.");
-    loopFilmstrip_->setChecked(true);
-    filmHead->addWidget(loopFilmstrip_);
-    filmCol->addLayout(filmHead);
-    filmstripThumb_ = new QLabel(liveBox);
-    filmstripThumb_->setObjectName("timelapseFilmstripThumb");
-    filmstripThumb_->setMinimumSize(130, 96);
-    filmstripThumb_->setAlignment(Qt::AlignCenter);
-    filmstripThumb_->setStyleSheet("background:#111; color:#888; border:1px solid #333;");
-    filmstripThumb_->setText("--");
-    filmCol->addWidget(filmstripThumb_);
-    filmstripInfo_ = new QLabel("0 stacks", liveBox);
-    filmstripInfo_->setAlignment(Qt::AlignCenter);
-    filmCol->addWidget(filmstripInfo_);
-
-    thumbs->addLayout(latestCol, 1);
-    thumbs->addLayout(filmCol, 1);
-    liveLayout->addLayout(thumbs);
     root->addWidget(liveBox);
     root->addStretch(1);
 
     scroll->setWidget(body);
     outer->addWidget(scroll);
-
-    filmstripTimer_ = new QTimer(this);
-    filmstripTimer_->setInterval(250);
-    connect(filmstripTimer_, &QTimer::timeout, this, &TimelapsePanel::updateFilmstripFrame);
-    connect(loopFilmstrip_, &QCheckBox::toggled, this, [this](bool on) {
-        if (on && filmstripFrames_.size() > 1) filmstripTimer_->start();
-        else filmstripTimer_->stop();
-    });
 
     refreshProfiles();
     loadFromQSettings();
@@ -715,37 +671,16 @@ void TimelapsePanel::updateStatus(const TimelapseStatus& s)
     if (s.stacksCompleted > lastSeenStacks_ && !s.latestThumbnail.isNull())
     {
         lastSeenStacks_ = s.stacksCompleted;
-        const QPixmap pm = QPixmap::fromImage(s.latestThumbnail)
-            .scaled(latestThumb_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        latestThumb_->setPixmap(pm);
-
-        QImage compactThumb = s.latestThumbnail;
-        if (std::max(compactThumb.width(), compactThumb.height()) > kFilmstripThumbMaxEdge)
-        {
-            compactThumb = compactThumb.scaled(kFilmstripThumbMaxEdge, kFilmstripThumbMaxEdge,
-                Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
-        if (filmstripFrames_.size() >= kMaxFilmstripFrames)
-        {
-            filmstripFrames_.pop_front();
-            if (filmstripIndex_ > 0) --filmstripIndex_;
-        }
-        filmstripFrames_.push_back(std::move(compactThumb));
-        if (filmstripFrames_.size() == 1)
-        {
-            filmstripThumb_->setPixmap(pm);
-        }
-        else if (loopFilmstrip_->isChecked() && !filmstripTimer_->isActive())
-        {
-            filmstripTimer_->start();
-        }
-        filmstripInfo_->setText(QString("%1 stacks").arg(s.stacksCompleted));
+        const QString summary = QString("Stack #%1 · %2/%3 frames · Q=%4 · Shift (%5, %6) px, %7°")
+            .arg(s.stacksCompleted).arg(s.lastKeptFrames).arg(s.lastCapturedFrames)
+            .arg(s.lastQuality, 0, 'g', 3).arg(s.lastShiftX, 0, 'f', 1).arg(s.lastShiftY, 0, 'f', 1)
+            .arg(s.lastRotationDeg, 0, 'f', 2);
+        emit stackCompleted(s.stacksCompleted, s.latestThumbnail, summary);
     }
 }
 
 void TimelapsePanel::onSessionFinished(const TimelapseFinishResult& result)
 {
-    filmstripTimer_->stop();
     if (!result.sessionDir.isEmpty()) lastSessionDir_ = result.sessionDir;
     lastTransitFolder_ = result.transitFolder;
     openTransitsButton_->setVisible(!lastTransitFolder_.isEmpty());
@@ -763,15 +698,7 @@ void TimelapsePanel::onSessionFinished(const TimelapseFinishResult& result)
 
 void TimelapsePanel::clearRunVisuals()
 {
-    filmstripTimer_->stop();
-    filmstripFrames_.clear();
-    filmstripIndex_ = 0;
     lastSeenStacks_ = 0;
-    latestThumb_->setPixmap({});
-    latestThumb_->setText("--");
-    filmstripThumb_->setPixmap({});
-    filmstripThumb_->setText("--");
-    filmstripInfo_->setText("0 stacks");
     warningLabel_->hide();
     transitStatus_->hide();
     lastTransitFolder_.clear();
@@ -780,17 +707,7 @@ void TimelapsePanel::clearRunVisuals()
     timingLabel_->setText("Running…");
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
-}
-
-void TimelapsePanel::updateFilmstripFrame()
-{
-    if (filmstripFrames_.empty()) return;
-    filmstripIndex_ %= filmstripFrames_.size();
-    const QPixmap pm = QPixmap::fromImage(filmstripFrames_[filmstripIndex_])
-        .scaled(filmstripThumb_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    filmstripThumb_->setPixmap(pm);
-    filmstripInfo_->setText(QString("%1 / %2").arg(filmstripIndex_ + 1).arg(filmstripFrames_.size()));
-    ++filmstripIndex_;
+    emit runVisualsCleared();
 }
 
 void TimelapsePanel::loadFromQSettings()

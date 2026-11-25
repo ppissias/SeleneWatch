@@ -55,6 +55,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-48 — An ISS silhouette test signal, and documentation that shows each feature](#feature-48--an-iss-silhouette-test-signal-and-documentation-that-shows-each-feature)
 - [Feature-49 — The shadows watch and the ISS](#feature-49--the-shadows-watch-and-the-iss)
 - [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection)
+- [Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)](#feature-51--observation-workspaces--instrument-ui-redesign-phases-14)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3693,3 +3694,44 @@ Measured in Release x64 with `SeleneWatchProbe stabilize-bench` ([full benchmark
   - Main window status bar shows the active lock method (`Lock: Feature Lock, dx …` / `Lock: Disk centroid, dx …`) and a compact `Stab: …` readout (hidden when stabilization is off).
 - **Documentation:** Added dedicated section **6.1 How SeleneWatch tracks the Moon, Sun and planets** in `MANUAL.md` alongside updated panel/status-bar descriptions.
 - **Tests:** Added `diskCentroidTracksRotatingPlanetAndRejectsClippedEdgeAndClouds` and `lockTrackerRefreshesTemplateOnGentleDecay` in `tests/guiding_tests.cpp`, updated status-bar readout assertion in `tests/ui_tests.cpp`, and verified `dependency_rules`, `watch_settings`, `detection`, `ui`, `session_record`, `guiding`, and `timelapse` test suites in `Debug-x64`.
+
+
+---
+
+## Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)
+
+*Proposed, approved, and implemented on 25 November 2026 following the UI & workflow evaluation (`SeleneWatch-UI-Evaluation`) and maintainer design reviews.*
+
+Organize SeleneWatch around the observer's goal ("simple to operate, powerful to configure") while preserving every scientific capability, numeric control, evidence rule, and existing Qt Widgets architecture. Deliberately scoped to **Phases 1–4** (skipping a separate desktop Monitor dashboard since **Status on your phone** already serves browser monitoring on laptops too, skipping a Review workspace for now, and keeping the existing **Night Red** UI theme as-is).
+
+### Phase 1 — Top Mode Bar & Unified Start Controls (commit `c77f8ac`)
+- Promoted the four primary observation workflows to a top-level mode bar (`Mode:` **Flashes** | **Shadows / crossings** | **Sky** | **Time-lapse**) using a `QToolBar` + exclusive `QButtonGroup`.
+- Switching modes activates the corresponding watch (syncing cleanly with Detection's **Watching** selector, while keeping Fast/Slow Sky selectable in Sky mode), swaps the right sidebar to the active mode's controls, hides Moon-only tools on Sky, and never resets settings or interrupts a running session.
+- Unified the primary session action on the main toolbar: **Start monitoring** on detection modes, and **Start time-lapse / Stop time-lapse** in **Time-lapse** mode (synced with the Time-lapse panel button).
+
+### Phase 2 — Essential / Advanced Detection Grouping & Preview Viewport Tools (commit `34e947f`)
+- Added one small reusable `CollapsibleSection` widget in `src/ui/widgets/collapsible_section.{h,cpp}` (persisting open/closed state in `QSettings`).
+- Moved the live sensitivity trace (`PeakHistory`) directly beneath **Sensitivity K**.
+- Kept essential controls immediately visible (`Tune camera & detection…`, `Profile`, `Sensitivity K` + trace, `Minimum patch`, `Allow a one-frame trigger`, `Stabilize detection against drift/shake`, plus Sky's Fast/Slow, horizon mask, and exposure follower) and placed secondary geometry/background/overlay diagnostics in collapsible **Advanced detection** and **Diagnostics & overlays** sections.
+- Placed context-sensitive quick drawing buttons (**Lock box**, **Anchor**, **Mask**, **ROI**) on the preview `View:` bar alongside **Stabilized view** so observers do not have to switch tabs to draw regions.
+
+### Phase 3 — Guiding Live Instrument Panel (commit `4f5a24b`)
+- Added prominent live telemetry header readouts (**Match score**, **Drift speed**, **Mount**) and a live 2D `(ΔX, ΔY)` **Drift bullseye plot** (`DriftTargetWidget`) showing recent drift trail and current offset inside concentric tolerance rings (resizing immediately when `Tolerance` is edited and supporting Dark, System/Light, and Night Red themes).
+- Grouped secondary tuning (`Give up at`, `Aggressiveness`, `Max pulse`, `Lock lost after`) into a collapsible **Advanced guiding** section using `CollapsibleSection`.
+
+### Phase 4 — Dedicated Time-lapse Screen, Floating Tool Windows & Display/Capture Split (25 November 2026)
+- **Mode bar & floating tool windows (`Tools: Camera | Guiding | Display`):**
+  - Renamed top bar label from `Workspace:` to **`Mode:`** per maintainer decision.
+  - Right sidebar now holds **only** the active mode's panel (**Detection** for Flashes/Shadows/Sky, or **Time-lapse** for Time-lapse) plus the optional compact **Histogram** below it—eliminating the redundant 4-tab stack.
+  - **Camera**, **Guiding**, and **Display** pop out as floating `QDockWidget` tool windows toggled from the right side of the top bar (still dockable if dragged, smartly placed on first open inside screen bounds, synced on close, and layout state bumped to `saveState(4)`/`restoreState(4)`).
+- **Display vs. Capture & storage separation:**
+  - Simplified `DisplayPanel` (`src/ui/display_panel.{h,cpp}`) to purely live screen-only controls (`Display` stretch mode, `Black`/`White` spinboxes & sliders, `Invert brightness`, `Show Bayer colour`, live ADU readout).
+  - Created `CaptureStorageDialog` (`src/ui/capture_storage_dialog.{h,cpp}`), opened from **`Session → Capture & storage…`**, holding stopped-session clip timing (`Pre-event history`, `Quiet tail`, `Maximum after trigger`), memory & disk limits (`RAM ceiling`, `Disk reserve`), live memory/writer usage, and `Synthetic pixels` (shown only when Testing tools is enabled).
+- **Dedicated Time-lapse viewport & collapsible bottom stack strip:**
+  - Added a dedicated **`Time-lapse view:`** bar (`Live camera` | `Latest stack` | `Sequence loop`) directly above the central `PreviewWidget` in Time-lapse mode so observers can inspect the latest sharpened stack or watch an animated 4 fps sequence loop full-size at any zoom/pan while capture continues.
+  - Added `TimelapseStackStrip` (`src/ui/widgets/timelapse_stack_strip.{h,cpp}`): a compact, collapsible horizontal thumbnail filmstrip below `PreviewWidget` (visible only in Time-lapse mode, persisted via `QSettings`, holding up to 60 crisp stack previews; clicking any card inspects that stack directly in the central preview).
+  - Removed the duplicate mini `Latest stack` and `Filmstrip loop` thumbnail boxes from the Time-lapse right sidebar.
+
+### Verification & acceptance
+- Preserved all core capture/evidence paths and raw SER guarantees; updated `MANUAL.md`, `tests/ui_tests.cpp`, and `tests/gui_e2e_test.ps1`.
+- Verified across full `Release-x64` build, all 26 CTest suites (including `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, and `observationWorkspacesSyncWatchDocksAndPrimaryAction`), and real Windows GUI E2E (`tests/gui_e2e_test.ps1`) with visual screenshot inspection.

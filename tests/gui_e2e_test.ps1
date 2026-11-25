@@ -550,7 +550,9 @@ try {
     Write-Host "`n[3/4] Synthetic Time-lapse + Re-sharpen + Rebuild..."
     $null = Start-StreamUi "Start synthetic time-lapse preview"
 
-    Select-DockTab $mainWin "Time-lapse"
+    $wsTimelapseBtn = Find-UiaElement -Root $mainWin -IdSuffix "workspaceTimelapseButton" -TimeoutMs 5000
+    Invoke-UiaClick $wsTimelapseBtn "Switch to Time-lapse mode"
+    Start-Sleep -Milliseconds 300
 
     $tlStartBtn = Find-UiaElement -Root $mainWin -IdSuffix "timelapseStartButton"
     Wait-Until { $tlStartBtn.Current.IsEnabled } "Start time-lapse button enabled"
@@ -566,7 +568,12 @@ try {
         throw
     }
     Write-Host "  Live telemetry: $($tlStats.Current.Name)"
+    $tlLatestBtn = Find-UiaElement -Root $mainWin -IdSuffix "tlViewLatestButton" -TimeoutMs 5000
+    Invoke-UiaClick $tlLatestBtn "Switch Time-lapse viewport to Latest stack"
+    Start-Sleep -Milliseconds 300
     Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "03_timelapse_running.png")
+    $tlLiveBtn = Find-UiaElement -Root $mainWin -IdSuffix "tlViewLiveButton" -TimeoutMs 5000
+    Invoke-UiaClick $tlLiveBtn "Return Time-lapse viewport to Live camera"
 
     Invoke-UiaClick $tlStartBtn "Stop time-lapse"
     Wait-Until {

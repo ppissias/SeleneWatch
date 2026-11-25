@@ -216,6 +216,7 @@ selenewatch_compile_options(selenewatch_remote)
 add_library(selenewatch_ui STATIC
     src/ui/mainwindow.ui src/ui/mainwindow.h src/ui/mainwindow.cpp src/ui/mainwindow_autotune.cpp src/ui/mainwindow_session_end.cpp
     src/ui/auto_tune_panel.h src/ui/auto_tune_panel.cpp src/ui/detection_panel.h src/ui/detection_panel.cpp
+    src/ui/capture_storage_dialog.h src/ui/capture_storage_dialog.cpp
     src/ui/display_panel.h src/ui/display_panel.cpp src/ui/guiding_panel.h src/ui/guiding_panel.cpp
     src/ui/histogram_panel.h src/ui/histogram_panel.cpp src/ui/timelapse_panel.h src/ui/timelapse_panel.cpp
     src/ui/preview_widget.h src/ui/preview_widget.cpp
@@ -227,6 +228,7 @@ add_library(selenewatch_ui STATIC
     src/ui/acknowledgements_dialog.h src/ui/acknowledgements_dialog.cpp
     src/ui/widgets/elided_label.h src/ui/widgets/elided_label.cpp src/ui/widgets/flow_layout.h src/ui/widgets/flow_layout.cpp
     src/ui/widgets/collapsible_section.h src/ui/widgets/collapsible_section.cpp
+    src/ui/widgets/timelapse_stack_strip.h src/ui/widgets/timelapse_stack_strip.cpp
     src/ui/widgets/control_help.h src/ui/widgets/control_help.cpp src/ui/widgets/readout_label.h src/ui/widgets/readout_label.cpp
     src/ui/widgets/theme.h src/ui/widgets/theme.cpp
     src/ui/widgets/wheel_guard.h

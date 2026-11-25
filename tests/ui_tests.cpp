@@ -1,6 +1,8 @@
 #include "watch_folders.h"
 #include "ui/detection_panel.h"
+#include "ui/capture_storage_dialog.h"
 #include "ui/display_panel.h"
+#include "ui/widgets/timelapse_stack_strip.h"
 #include "ui/cameras/camera_panel.h"
 #include "ui/auto_tune_panel.h"
 #include "ui/cameras/camera_settings_editor.h"
@@ -372,6 +374,9 @@ void UiTest::playerOneAndToupTekInTheWindow()
     auto* poa = window.findChild<PlayerOneCameraPanel*>();
     QCOMPARE(playerOne->runtimeOverride, savedRuntime);
     QVERIFY(poa->hasCamera());
+    auto* camTool = window.findChild<QToolButton*>("toolCameraButton");
+    QVERIFY(camTool && !camTool->isHidden());
+    camTool->click();
     QVERIFY(window.findChild<QDockWidget*>("playerOneCameraDock")->isVisible());
     QVERIFY(window.findChild<QLabel*>("playerOneReadback")->text().contains("TEST-POA-0001"));
     QVERIFY(start->isEnabled());
@@ -718,6 +723,7 @@ void UiTest::qhyReadbacksBayerEvidenceAndUnknownDrops()
     save->click();
     QTRY_VERIFY_WITH_TIMEOUT(save->isEnabled(),3000);
     QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
+    window.findChild<QToolButton*>("toolCameraButton")->click();
     QVERIFY(window.findChild<QDockWidget*>("qhyCameraDock")->isVisible());
     window.findChild<DisplayPanel*>()->findChild<QComboBox*>("displayMode")->setCurrentIndex(2);
     QDir().mkpath(SELENEWATCH_CAMERA_QA_DIR);
@@ -793,6 +799,7 @@ void UiTest::cameraReadbacksRestartAndDisconnectKeepSeparateEvidence()
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("sigmaReading")->text().contains("Settling"),3000);
     QVERIFY(!QFile::exists(eventsFolder(dir.path(), Target::Moon)+"/candidates.txt"));
     QVERIFY(window.findChild<QDockWidget*>("detectionDock")->isVisible());
+    window.findChild<QToolButton*>("toolCameraButton")->click();
     QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("framesReadout")->text().contains("SDK drops: 3"),3000);
     // Unaligned ROI width auto-rounds to camera alignment rules (127 -> 128) on Apply.
@@ -884,7 +891,7 @@ void UiTest::saveARecordingManuallyThroughTheWindow()
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("fileLabel")->text().contains("48 frames, "),3000);
     auto* save=window.findChild<QPushButton*>("saveNowButton");
     QVERIFY(save); QVERIFY(!save->isEnabled());
-    window.findChild<DisplayPanel*>()->findChild<QDoubleSpinBox*>("postSeconds")->setValue(.3);
+    window.findChild<CaptureStorageDialog*>()->findChild<QDoubleSpinBox*>("postSeconds")->setValue(.3);
     window.findChild<QPushButton*>("startButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(!window.findChild<PreviewWidget*>()->imageRect().isEmpty(),3000);
     window.findChild<QPushButton*>("monitoringButton")->click();
@@ -974,7 +981,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QTemporaryDir directory;
     MainWindow window(nullptr, directory.path());
     auto* panel = window.findChild<DetectionPanel*>();
-    auto* display = window.findChild<DisplayPanel*>();
+    auto* capture = window.findChild<CaptureStorageDialog*>();
     auto* guiding = window.findChild<GuidingPanel*>();
     auto* choice = panel->findChild<QComboBox*>("targetChoice");
     auto* sigma = panel->findChild<QDoubleSpinBox*>("detectionSigma");
@@ -983,12 +990,12 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QVERIFY(choice->isEnabled());
     QVERIFY(guiding->isEnabled());
     QCOMPARE(panel->settings().brighteningShare, 0.0);
-    QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{10} * 1024 * 1024 * 1024);
+    QCOMPARE(capture->captureSettings().diskReserveBytes, uint64_t{10} * 1024 * 1024 * 1024);
     // Feature-31: the flashes leave out the sunlit side and never watch for darkening.
     QVERIFY(!panel->settings().darkening);
     QCOMPARE(panel->settings().ignoreAboveShare, 0.3);
     sigma->setValue(7);
-    display->findChild<QDoubleSpinBox*>("postSeconds")->setValue(4);
+    capture->findChild<QDoubleSpinBox*>("postSeconds")->setValue(4);
 
     // The Moon's shadows: their own detection settings, the Moon's capture settings.
     chooseWatch(window, Watch::MoonShadows);
@@ -999,8 +1006,8 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().minPixels, 20);
     QVERIFY(panel->settings().oneFrame); // Feature-49: the ISS needs one frame.
     QCOMPARE(panel->settings().ignoreAboveShare, 0.0);
-    QCOMPARE(display->captureSettings().target, Target::Moon);
-    QCOMPARE(display->captureSettings().postSeconds, 4.0);
+    QCOMPARE(capture->captureSettings().target, Target::Moon);
+    QCOMPARE(capture->captureSettings().postSeconds, 4.0);
     QVERIFY(guiding->isEnabled());
     QCOMPARE(QSettings().value("detection/sigma").toDouble(), 7.0); // The flashes keep the Moon's keys.
     QCOMPARE(QSettings().value("moon/watch").toString(), QString("shadows"));
@@ -1015,9 +1022,9 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().maxPatchBoxRatio, 30.0);
     QCOMPARE(panel->settings().brighteningShare, 0.02);
     QCOMPARE(panel->settings().releaseSeconds, 20.0);
-    QCOMPARE(display->captureSettings().target, Target::Sky);
-    QCOMPARE(display->captureSettings().postSeconds, 5.0);
-    QCOMPARE(display->captureSettings().maxPostSeconds, 20.0);
+    QCOMPARE(capture->captureSettings().target, Target::Sky);
+    QCOMPARE(capture->captureSettings().postSeconds, 5.0);
+    QCOMPARE(capture->captureSettings().maxPostSeconds, 20.0);
     QVERIFY(!guiding->isEnabled());
     QCOMPARE(QSettings().value("moonShadows/detection/sigma").toDouble(), 14.0);
     QCOMPARE(QSettings().value("target").toInt(), 1);
@@ -1035,8 +1042,8 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().brighteningShare, 0.0);
     QVERIFY(panel->settings().mask.empty());
     QVERIFY(!panel->drawingMask());
-    QCOMPARE(display->captureSettings().target, Target::Moon);
-    QCOMPARE(display->captureSettings().maxPostSeconds, 10.0);
+    QCOMPARE(capture->captureSettings().target, Target::Moon);
+    QCOMPARE(capture->captureSettings().maxPostSeconds, 10.0);
     QVERIFY(guiding->isEnabled());
     QCOMPARE(QSettings().value("sky/detection/sigma").toDouble(), 9.0);
     QCOMPARE(QSettings().value("sky/detection/mask").toString(), QString("0,400 640,400 640,480 0,480"));
@@ -1050,7 +1057,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(QSettings().value("sky/watch").toString(), QString("fast"));
     auto* follower = panel->findChild<QDoubleSpinBox*>("followMaxExposure");
     QCOMPARE(follower->value(), 40.0); // Feature-35: the fast sky's follower stops at 40 ms.
-    display->findChild<QDoubleSpinBox*>("postSeconds")->setValue(6);
+    capture->findChild<QDoubleSpinBox*>("postSeconds")->setValue(6);
 
     // Feature-35: the slow sky keeps its own detection, capture and follower
     // settings, and the sky's mask is its own too.
@@ -1062,9 +1069,9 @@ void UiTest::eachTargetKeepsItsOwnSettings()
     QCOMPARE(panel->settings().referenceTimeConstantSeconds, 10.0);
     QCOMPARE(panel->settings().releaseSeconds, 60.0);
     QVERIFY(panel->settings().mask.empty());
-    QCOMPARE(display->captureSettings().target, Target::Sky);
-    QCOMPARE(display->captureSettings().historySeconds, 20.0);
-    QCOMPARE(display->captureSettings().maxPostSeconds, 60.0);
+    QCOMPARE(capture->captureSettings().target, Target::Sky);
+    QCOMPARE(capture->captureSettings().historySeconds, 20.0);
+    QCOMPARE(capture->captureSettings().maxPostSeconds, 60.0);
     QCOMPARE(follower->value(), 2000.0);
     QVERIFY(!guiding->isEnabled());
     QCOMPARE(QSettings().value("sky/watch").toString(), QString("slow"));
@@ -1074,7 +1081,7 @@ void UiTest::eachTargetKeepsItsOwnSettings()
 
     chooseWatch(window, Watch::Sky);
     QCOMPARE(panel->settings().sigma, 9.0);
-    QCOMPARE(display->captureSettings().postSeconds, 6.0);
+    QCOMPARE(capture->captureSettings().postSeconds, 6.0);
     QCOMPARE(follower->value(), 40.0);
     chooseWatch(window, Watch::SkySlow);
     QCOMPARE(panel->settings().sigma, 8.0);
@@ -1136,24 +1143,24 @@ void UiTest::diskReserveStartsAtTenGiBAndIsRemembered()
     constexpr uint64_t kGiB = uint64_t{1024} * 1024 * 1024;
     {
         MainWindow window(nullptr, directory.path());
-        auto* display = window.findChild<DisplayPanel*>();
-        auto* reserve = display->findChild<QDoubleSpinBox*>("diskReserveGiB");
+        auto* capture = window.findChild<CaptureStorageDialog*>();
+        auto* reserve = capture->findChild<QDoubleSpinBox*>("diskReserveGiB");
         QCOMPARE(reserve->value(), 10.0);
         reserve->setValue(25);
-        QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
+        QCOMPARE(capture->captureSettings().diskReserveBytes, 25 * kGiB);
 
         chooseWatch(window, Watch::Sky);
         QCOMPARE(reserve->value(), 10.0);
         reserve->setValue(0);
         QCOMPARE(reserve->text(), QString("None"));
-        QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
+        QCOMPARE(capture->captureSettings().diskReserveBytes, uint64_t{0});
     }
     MainWindow window(nullptr, directory.path());
-    auto* display = window.findChild<DisplayPanel*>();
-    QCOMPARE(display->captureSettings().target, Target::Sky);
-    QCOMPARE(display->captureSettings().diskReserveBytes, uint64_t{0});
+    auto* capture = window.findChild<CaptureStorageDialog*>();
+    QCOMPARE(capture->captureSettings().target, Target::Sky);
+    QCOMPARE(capture->captureSettings().diskReserveBytes, uint64_t{0});
     chooseWatch(window, Watch::MoonFlashes);
-    QCOMPARE(display->captureSettings().diskReserveBytes, 25 * kGiB);
+    QCOMPARE(capture->captureSettings().diskReserveBytes, 25 * kGiB);
 }
 
 // The controls whose text is cut off: drawn narrower or lower than their
@@ -1198,6 +1205,7 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
     chooseSource(window, "zwo");
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.findChild<QToolButton*>("toolCameraButton")->click();
     QVERIFY(window.findChild<QDockWidget*>("cameraDock")->isVisible());
     // Feature-26: with the auto-tune panel open too.
     window.findChild<QPushButton*>("autoTuneButton")->click();
@@ -1205,18 +1213,18 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
     for (const QSize size : {QSize(1366, 700), QSize(1536, 880)})
     {
         window.resize(size);
-        for (QDockWidget* dock : window.findChildren<QDockWidget*>())
+        for (const char* modeBtn : {"workspaceFlashesButton", "workspaceTimelapseButton"})
         {
-            if (dock->isHidden()) continue;
-            dock->raise();
+            window.findChild<QToolButton*>(modeBtn)->click();
             QApplication::processEvents();
-            const QString where = QString("%1x%2, %3 tab: ").arg(size.width()).arg(size.height()).arg(dock->windowTitle());
+            const QString where = QString("%1x%2, %3: ").arg(size.width()).arg(size.height()).arg(modeBtn);
             if (window.size() != size)
                 problems << where + QString("the window cannot be smaller than %1x%2").arg(window.width()).arg(window.height());
             for (const QString& problem : squeezedControls(window))
                 problems << where + problem;
         }
     }
+    window.findChild<QToolButton*>("workspaceFlashesButton")->click();
     // The window itself can be made well narrower than a laptop screen, for
     // every watch: it can be resized in width, not only in height.
     // Also verify no dock QScrollArea overflows horizontally (including Sky
@@ -1398,9 +1406,15 @@ void UiTest::everyControlHasHelp()
         chooseWatch(window, watch);
         for (QWidget* widget : window.findChildren<QWidget*>())
         {
-            // The auto-tune window is part of the window (Feature-28).
-            if ((widget->window() != &window && widget->window()->objectName() != "autoTuneWindow")
-                || widget->objectName().startsWith("qt_")) continue;
+            // Include the main window, auto-tune, Capture & storage, and floating tool docks.
+            const QString winName = widget->window() ? widget->window()->objectName() : QString();
+            const bool ours = widget->window() == &window
+                || winName == "autoTuneWindow"
+                || winName == "captureStorageDialog"
+                || winName == "displayDock"
+                || winName == "guidingDock"
+                || winName == "cameraDock";
+            if (!ours || widget->objectName().startsWith("qt_")) continue;
             if (qobject_cast<QScrollBar*>(widget) || qobject_cast<QTabBar*>(widget->parentWidget())) continue;
             if (qobject_cast<QLineEdit*>(widget) && (qobject_cast<QAbstractSpinBox*>(widget->parentWidget())
                     || qobject_cast<QComboBox*>(widget->parentWidget()))) continue;
@@ -2423,8 +2437,9 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         window.selectRecording(input); window.show();
         window.setTestingTools(true); // the test flash on a recording
         auto* panel = window.findChild<DisplayPanel*>();
-        window.findChild<QDockWidget*>("displayDock")->raise();
-        panel->setCaptureSettings(chosen);
+        auto* capture = window.findChild<CaptureStorageDialog*>();
+        window.findChild<QToolButton*>("toolDisplayButton")->click();
+        capture->setCaptureSettings(chosen);
         auto* start = window.findChild<QPushButton*>("startButton");
         auto* stop = window.findChild<QPushButton*>("stopButton");
         auto* preview = window.findChild<PreviewWidget*>();
@@ -2432,7 +2447,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         window.findChild<QPushButton*>("monitoringButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(!preview->imageRect().isEmpty(), 5000);
         QTRY_COMPARE_WITH_TIMEOUT(panel->findChild<QDoubleSpinBox*>("displayWhite")->maximum(), 4095.0, 3000);
-        QVERIFY(!panel->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
+        QVERIFY(!capture->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
         const auto brightness = [&] {
             const QRect rect = preview->imageRect();
             const QPoint point(rect.x() + rect.width() * 47 / 64, rect.y() + rect.height() * 24 / 48);
@@ -2488,7 +2503,7 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         }
         QVERIFY(checked > 1);
         stop->click();
-        QVERIFY(panel->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
+        QVERIFY(capture->findChild<QDoubleSpinBox*>("historySeconds")->isEnabled());
         // A stopped recording can still be restretched from the retained raw frame.
         const int before = brightness();
         panel->findChild<QSlider*>("blackSlider")->setValue(12);
@@ -2500,10 +2515,11 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
     QCOMPARE(file.readAll(), inputBefore);
     MainWindow restored(nullptr, QDir(output.path()).filePath("restored-events"));
     auto* panel = restored.findChild<DisplayPanel*>();
+    auto* restoredCapture = restored.findChild<CaptureStorageDialog*>();
     QCOMPARE(panel->displaySettings().mode, savedDisplay.mode);
     QCOMPARE(panel->displaySettings().black, savedDisplay.black);
-    QCOMPARE(panel->captureSettings().historySeconds, chosen.historySeconds);
-    QCOMPARE(panel->captureSettings().memoryBytes, chosen.memoryBytes);
+    QCOMPARE(restoredCapture->captureSettings().historySeconds, chosen.historySeconds);
+    QCOMPARE(restoredCapture->captureSettings().memoryBytes, chosen.memoryBytes);
 }
 
 void UiTest::outputFolderSafetyAndMigration()
@@ -4027,12 +4043,14 @@ void UiTest::guiLayoutThemesFocusViewAndPersistence()
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
 
-        // Option B: all docks live in the single right-hand sidebar (no left or bottom dock).
+        // Right sidebar holds the active mode dock + optional Histogram; Camera/Guiding/Display are floating tools.
         auto* cameraDock = window.findChild<QDockWidget*>("cameraDock");
         auto* detectionDock = window.findChild<QDockWidget*>("detectionDock");
         auto* histogramDock = window.findChild<QDockWidget*>("histogramDock");
-        QVERIFY(cameraDock && detectionDock && histogramDock);
-        QCOMPARE(window.dockWidgetArea(cameraDock), Qt::RightDockWidgetArea);
+        auto* camToolBtn = window.findChild<QToolButton*>("toolCameraButton");
+        QVERIFY(cameraDock && detectionDock && histogramDock && camToolBtn);
+        QVERIFY(cameraDock->isFloating());
+        QVERIFY(cameraDock->isHidden());
         QCOMPARE(window.dockWidgetArea(detectionDock), Qt::RightDockWidgetArea);
         QCOMPARE(window.dockWidgetArea(histogramDock), Qt::RightDockWidgetArea);
 
@@ -4091,17 +4109,16 @@ void UiTest::guiLayoutThemesFocusViewAndPersistence()
         QVERIFY(!connectStartup->isVisibleTo(&window));
         chooseSource(window, "zwo");
 
-        // Focus view hides all open docks for maximum preview width, then restores them.
+        // Focus view hides all open docks (sidebar + floating tools) for maximum preview width, then restores them.
         auto* histToggle = window.findChild<QToolButton*>("previewHistogramToggle");
         auto* focusBtn = window.findChild<QToolButton*>("previewFocusView");
         QVERIFY(histToggle && focusBtn);
+        camToolBtn->click();
         histToggle->click();
         QApplication::processEvents();
+        QVERIFY(!cameraDock->isHidden());
         QVERIFY(!histogramDock->isHidden());
-        // Verify the 3-slot right sidebar stacks Camera above Detection and Histogram below Detection (not crushed into one tab bar).
-        QVERIFY(cameraDock->y() < detectionDock->y());
         QVERIFY(detectionDock->y() < histogramDock->y());
-        QVERIFY(!window.tabifiedDockWidgets(detectionDock).contains(cameraDock));
         QVERIFY(!window.tabifiedDockWidgets(detectionDock).contains(histogramDock));
         const int previewWidthWithPanels = window.findChild<PreviewWidget*>()->width();
         focusBtn->click();
@@ -4273,49 +4290,110 @@ void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
     auto* wsShadows = window.findChild<QToolButton*>("workspaceShadowsButton");
     auto* wsSky = window.findChild<QToolButton*>("workspaceSkyButton");
     auto* wsTimelapse = window.findChild<QToolButton*>("workspaceTimelapseButton");
+    auto* toolGuiding = window.findChild<QToolButton*>("toolGuidingButton");
+    auto* toolDisplay = window.findChild<QToolButton*>("toolDisplayButton");
     auto* tlPrimary = window.findChild<QPushButton*>("toolbarTimelapseButton");
     auto* monitoring = window.findChild<QPushButton*>("monitoringButton");
+    auto* detectionDock = window.findChild<QDockWidget*>("detectionDock");
+    auto* displayDock = window.findChild<QDockWidget*>("displayDock");
     auto* guidingDock = window.findChild<QDockWidget*>("guidingDock");
     auto* timelapseDock = window.findChild<QDockWidget*>("timelapseDock");
     auto* watchCombo = window.findChild<QComboBox*>("targetChoice");
-    QVERIFY(wsFlashes && wsShadows && wsSky && wsTimelapse && tlPrimary && monitoring && guidingDock && timelapseDock && watchCombo);
+    auto* tlStrip = window.findChild<TimelapseStackStrip*>("timelapseStackStrip");
+    auto* tlViewLive = window.findChild<QToolButton*>("tlViewLiveButton");
+    auto* tlViewLatest = window.findChild<QToolButton*>("tlViewLatestButton");
+    auto* tlViewLoop = window.findChild<QToolButton*>("tlViewLoopButton");
+    auto* captureAction = window.findChild<QAction*>("captureStorageAction");
+    QVERIFY(wsFlashes && wsShadows && wsSky && wsTimelapse && toolGuiding && toolDisplay
+        && tlPrimary && monitoring && detectionDock && displayDock && guidingDock && timelapseDock
+        && watchCombo && tlStrip && tlViewLive && tlViewLatest && tlViewLoop && captureAction);
 
-    // Starts on Flashes: Moon-only docks visible, toolbar Time-lapse primary hidden.
+    // Starts on Flashes: right sidebar shows Detection only; Guiding/Display are floating tools; Time-lapse strip hidden.
     QVERIFY(wsFlashes->isChecked());
     QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonFlashes));
-    QVERIFY(!guidingDock->isHidden());
-    QVERIFY(!timelapseDock->isHidden());
+    QVERIFY(!detectionDock->isHidden());
+    QVERIFY(timelapseDock->isHidden());
+    QVERIFY(guidingDock->isFloating() && guidingDock->isHidden());
+    QVERIFY(displayDock->isFloating() && displayDock->isHidden());
+    QVERIFY(!toolGuiding->isHidden() && !toolGuiding->isChecked());
+    QVERIFY(!toolDisplay->isHidden() && !toolDisplay->isChecked());
     QVERIFY(tlPrimary->isHidden());
+    QVERIFY(tlStrip->isHidden());
 
-    // Shadows / crossings workspace switches watch cleanly.
+    // Toggling floating Display & Guiding windows via top bar buttons opens/closes them in sync.
+    toolDisplay->click();
+    QVERIFY(!displayDock->isHidden() && displayDock->isFloating());
+    displayDock->hide();
+    QVERIFY(!toolDisplay->isChecked());
+    toolGuiding->click();
+    QVERIFY(!guidingDock->isHidden() && guidingDock->isFloating());
+
+    // Session -> Capture & storage opens the dedicated dialog while Display remains screen-only.
+    captureAction->trigger();
+    auto* captureDlg = window.findChild<CaptureStorageDialog*>("captureStorageDialog");
+    QVERIFY(captureDlg && captureDlg->isVisible());
+    captureDlg->close();
+
+    // Shadows / crossings mode switches watch cleanly.
     wsShadows->click();
     QVERIFY(wsShadows->isChecked());
     QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonShadows));
     QVERIFY(tlPrimary->isHidden());
 
-    // Sky workspace hides Moon-only docks (Guiding & lunar/planetary Time-lapse).
+    // Sky mode hides Moon-only Guiding tool window & button and Time-lapse dock.
     wsSky->click();
     QVERIFY(wsSky->isChecked());
     QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::Sky));
     QVERIFY(guidingDock->isHidden());
+    QVERIFY(toolGuiding->isHidden());
     QVERIFY(timelapseDock->isHidden());
 
-    // Time-lapse workspace restores Moon-only docks, switches back from Sky, and
-    // promotes Start time-lapse onto the main command toolbar.
+    // Time-lapse mode swaps the right sidebar to Time-lapse, shows the bottom stack strip
+    // and viewport switcher, and promotes Start time-lapse onto the main command toolbar.
     wsTimelapse->click();
     QVERIFY(wsTimelapse->isChecked());
     QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonShadows));
-    QVERIFY(!guidingDock->isHidden());
+    QVERIFY(detectionDock->isHidden());
     QVERIFY(!timelapseDock->isHidden());
+    QVERIFY(!toolGuiding->isHidden());
+    QVERIFY(!tlStrip->isHidden());
+    QVERIFY(!tlViewLive->isHidden() && tlViewLive->isChecked());
     QVERIFY(!tlPrimary->isHidden());
     QVERIFY(tlPrimary->isEnabled());
     QCOMPARE(tlPrimary->text(), QString("Start time-lapse"));
     QVERIFY(monitoring->isHidden());
 
-    // Starting and stopping time-lapse via the unified toolbar button works directly from Stopped.
+    // Configure fast synthetic time-lapse bursts and verify the dedicated viewport + bottom strip populate.
+    window.findChild<QDoubleSpinBox*>("timelapseInterval")->setValue(0.5);
+    window.findChild<QDoubleSpinBox*>("timelapseWindow")->setValue(0.2);
+    window.findChild<QDoubleSpinBox*>("timelapseKeepPercent")->setValue(100.0);
     tlPrimary->click();
     QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Stop time-lapse", 5000);
     QVERIFY(!wsFlashes->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(tlStrip->stackCount() >= 2, 15000);
+
+    // Switch viewport to Latest stack, Sequence loop, inspect stack #1, then return to Live camera.
+    auto* hint = window.findChild<QLabel*>("previewHintLabel");
+    tlViewLatest->click();
+    QVERIFY(tlViewLatest->isChecked() && hint && hint->text().contains("Latest stack #"));
+    tlViewLoop->click();
+    QVERIFY(tlViewLoop->isChecked() && hint && hint->text().contains("Sequence loop:"));
+    auto* firstCard = tlStrip->findChild<QToolButton*>("timelapseStackCard_1");
+    QVERIFY(firstCard);
+    firstCard->click();
+    QVERIFY(hint && hint->text().contains("Inspecting stack #1"));
+    tlViewLive->click();
+    QVERIFY(tlViewLive->isChecked());
+
+    // Collapsible Latest stacks strip persists open/closed state in QSettings.
+    auto* stripToggle = tlStrip->toggleButton();
+    QVERIFY(stripToggle && stripToggle->isChecked());
+    stripToggle->click();
+    QVERIFY(!tlStrip->isExpanded());
+    QVERIFY(!QSettings().value("ui/sections/timelapseStrip").toBool());
+    stripToggle->click();
+    QVERIFY(tlStrip->isExpanded());
+
     tlPrimary->click();
     QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Start time-lapse" && tlPrimary->isEnabled(), 15000);
     QVERIFY(wsFlashes->isEnabled());

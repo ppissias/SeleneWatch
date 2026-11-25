@@ -2,14 +2,13 @@
 
 Open proposals, ideas not yet proposed, and what remains to check in the field. What is already in the program, with its full design and review history, is in [implemented features.md](implemented%20features.md). When moving completed features to `implemented features.md`, append them in full detail without removing or condensing specifications, review notes, or design decisions.
 
-On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026, Feature-45 to Feature-49 on 23 November 2026, and Feature-50 on 24 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
+On 21 November 2026 every feature whose software was complete moved there: Features 5, 8, 9, 10, 12, 13, 14, 16, 17, 18, 22 to 26 and 28 to 31, and Feature-32 once it was built the same day. Feature-33 to Feature-44 followed on 22 November 2026, Feature-45 to Feature-49 on 23 November 2026, Feature-50 on 24 November 2026, and Feature-51 on 25 November 2026. Their remaining checks at the telescope or on hardware are listed under [Field validation](#field-validation) at the end of this file.
 
 ## Contents
 
 | Feature | Focus | Status |
 | --- | --- | --- |
 | [Feature-27 — Detector tuning, capture status and nightly review](#feature-27--detector-tuning-capture-status-and-nightly-review) | Explain detector feedback, show what is being saved, review a night's coverage and candidates, and validate tuning on earthshine | Item 3 (nightly review) implemented; items 1 and 2 proposed |
-| [Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)](#feature-51--observation-workspaces--instrument-ui-redesign-phases-14) | Top-level workspaces, unified Start action, collapsible essential/advanced Detection & Guiding panels, Guiding bullseye plot, preview viewport tools, and Time-lapse central viewport & filmstrip | Proposed (in progress) |
 | [Ideas not yet proposed](#ideas-not-yet-proposed) | Work set aside in earlier features, waiting for data, hardware or a decision | Not proposed |
 | [Field validation](#field-validation) | Checks of implemented features that need the sky, a mount or a camera | Open |
 
@@ -43,37 +42,6 @@ Let the observer step through candidates using the existing overviews and animat
 - Exercise Preview and Monitoring with continuous recording both on and off. In each combination the banner correctly names both activities, including after recording stops or fails.
 - Review a watch with zero candidates and a watch containing a known interruption, a saved clip and an unsaved candidate. The observer can account for each outcome, open a saved preview and find their follow-up mark after reopening the night.
 - Make a representative earthshine recording the next lunar validation milestone. Replay the same span with candidate settings under consideration for Feature-26. Count candidates and clips requiring review on the original data. In separate marked trials, report flashes recovered out of those injected, with their positions, amplitudes and durations. Use both measurements when choosing an observing profile. [Open lunar calibration work](docs/feature-9-validation.md)
-
----
-
-## Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)
-
-*Proposed and approved on 25 November 2026 following the UI & workflow evaluation (`SeleneWatch-UI-Evaluation`).*
-
-Organize SeleneWatch around the observer's goal ("simple to operate, powerful to configure") while preserving every scientific capability, numeric control, evidence rule, and existing Qt Widgets architecture. Deliberately scoped to **Phases 1–4** (skipping a separate desktop Monitor dashboard since **Status on your phone** already serves browser monitoring on laptops too, skipping a Review workspace for now, and keeping the existing **Night Red** UI theme as-is).
-
-### Phase 1 — Observation Workspaces & Unified Start Controls
-- Promote the four primary observation workflows to a top-level workspace bar (`Flashes` | `Shadows / crossings` | `Sky` | `Time-lapse`) using a `QToolBar` + exclusive `QActionGroup`.
-- Switching workspaces activates the corresponding watch (syncing cleanly with Detection's **Watching** selector, while keeping Fast/Slow Sky selectable in the Sky workspace), brings the right dock forward (hiding Moon-only Guiding on Sky), and never resets settings or interrupts a running session.
-- Unify the primary session action on the main toolbar: **Start monitoring** on detection workspaces, and **Start time-lapse / Stop time-lapse** when in the **Time-lapse** workspace (synced with the Time-lapse panel button so existing workflows and tests stay compatible).
-
-### Phase 2 — Essential / Advanced Detection Grouping & Preview Viewport Tools
-- Add one small reusable `CollapsibleSection` widget in `src/ui/widgets/` (persisting open/closed state in `QSettings`).
-- Move the live sensitivity trace (`PeakHistory`) directly beneath **Sensitivity K**.
-- Keep essential controls immediately visible (`Tune camera & detection…`, `Profile`, `Sensitivity K` + trace, `Minimum patch`, `Allow a one-frame trigger`, `Stabilize detection against drift/shake`, plus Sky's Fast/Slow, horizon mask, and exposure follower) and place secondary geometry/background/overlay diagnostics in collapsible **Advanced detection** and **Diagnostics & overlays** sections.
-- Place context-sensitive quick drawing buttons (**Lock box**, **Anchor**, **Mask**, **ROI**) on the preview `View:` bar alongside **Stabilized view** so observers do not have to switch tabs to draw regions.
-
-### Phase 3 — Guiding Live Instrument Panel
-- Add prominent live telemetry header readouts (**Match score**, **Drift speed**, **Mount**) and a live 2D `(ΔX, ΔY)` **Drift bullseye plot** showing recent drift trail and current offset inside the tolerance circle.
-- Group secondary tuning (`Give up at`, `Aggressiveness`, `Max pulse`, `Lock lost after`) into a collapsible **Advanced guiding** section using `CollapsibleSection`.
-
-### Phase 4 — Dedicated Time-lapse Viewport & Bottom Stack Filmstrip
-- Add a **`Live camera` | `Latest stack` | `Sequence loop`** viewport switcher in the Time-lapse workspace so the observer can inspect stacks or watch the animated sequence right in the large central preview at any zoom/pan.
-- Add a compact, collapsible bottom **Latest stacks** horizontal thumbnail strip in the Time-lapse workspace (clickable to inspect any recent stack), sized to keep the preview generous on `1366×700` laptop screens.
-
-### Verification & acceptance (per phase)
-- Keep all existing widget `objectName`s and core behaviour intact; zero impact on raw SER evidence or capture path.
-- After each phase: full `Release-x64` build, complete 26-suite `ctest` (including `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, and horizontal-overflow checks), and real Windows GUI E2E (`tests/gui_e2e_test.ps1`) with visual screenshot inspection.
 
 ---
 
