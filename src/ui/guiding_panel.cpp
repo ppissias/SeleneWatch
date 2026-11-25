@@ -436,6 +436,7 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* scroll = new QScrollArea(this);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
     scroll->setWidget(content);

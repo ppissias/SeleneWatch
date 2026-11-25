@@ -30,6 +30,7 @@ DisplayPanel::DisplayPanel(QWidget* parent) : QWidget(parent)
     auto* scroll = new QScrollArea(this);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* content = new QWidget(scroll);
     auto* form = new QFormLayout(content);
     mode_ = new QComboBox(content); mode_->setObjectName("displayMode");

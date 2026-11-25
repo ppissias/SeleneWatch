@@ -62,6 +62,7 @@
 #include <QtWidgets/QRadioButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTabBar>
 #include <QtWidgets/QTableWidget>
@@ -1217,6 +1218,34 @@ void UiTest::everyControlFitsOnASmallLaptopScreen()
     }
     // The window itself can be made well narrower than a laptop screen, for
     // every watch: it can be resized in width, not only in height.
+    // Also verify no dock QScrollArea overflows horizontally (including Sky
+    // with "Follow the sky's brightness" expanded and SkySlow).
+    auto checkNoHorizontalOverflow = [&](const QString& tag) {
+        for (QDockWidget* dock : window.findChildren<QDockWidget*>())
+        {
+            if (dock->isHidden()) continue;
+            dock->raise();
+            QApplication::processEvents();
+            for (QScrollArea* scroll : dock->findChildren<QScrollArea*>())
+            {
+                if (!scroll->isVisible() || !scroll->widget()) continue;
+                if (scroll->horizontalScrollBarPolicy() != Qt::ScrollBarAlwaysOff)
+                    problems << tag + QString(" %1 allows horizontal scrollbar").arg(dock->objectName());
+                if (scroll->widget()->width() > scroll->viewport()->width() + 1)
+                    problems << tag + QString(" %1 content overflows viewport (%2 > %3)")
+                        .arg(dock->objectName()).arg(scroll->widget()->width()).arg(scroll->viewport()->width());
+            }
+        }
+    };
+    window.resize(1366, 700);
+    for (const Watch watch : {Watch::MoonFlashes, Watch::MoonShadows, Watch::Sky, Watch::SkySlow})
+    {
+        emit window.findChild<DetectionPanel*>()->watchRequested(watch);
+        if (watch == Watch::Sky)
+            window.findChild<QCheckBox*>("followSky")->setChecked(true);
+        QApplication::processEvents();
+        checkNoHorizontalOverflow(QString("1366x700 %1:").arg(watchName(watch)));
+    }
     for (const Watch watch : {Watch::MoonFlashes, Watch::MoonShadows, Watch::Sky})
     {
         emit window.findChild<DetectionPanel*>()->watchRequested(watch);
@@ -1421,10 +1450,14 @@ void UiTest::everyControlHasHelp()
     followCheck->setChecked(false);
     QVERIFY(followControls->isHidden());
 
-    bool exposureRowHasHelp = false;
+    bool minExposureHasHelp = false;
+    bool maxExposureHasHelp = false;
     for (QLabel* label : window.findChildren<QLabel*>())
-        exposureRowHasHelp |= label->text().startsWith("Exposure <a") && label->buddy() == nullptr && label->text().contains("ⓘ");
-    QVERIFY(exposureRowHasHelp);
+    {
+        minExposureHasHelp |= label->text().startsWith("Min exposure <a") && label->text().contains("ⓘ");
+        maxExposureHasHelp |= label->text().startsWith("Max exposure <a") && label->text().contains("ⓘ");
+    }
+    QVERIFY(minExposureHasHelp && maxExposureHasHelp);
 }
 
 // A number box is never capped narrower than its widest value with its

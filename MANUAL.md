@@ -309,7 +309,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
 3. Open **View → Time-lapse**:
    - **Target preset:** **Moon** or **Planet**.
    - **Interval** and **Capture window**. For a planet, keep the capture window short (a minute or so) so its rotation does not blur a burst.
-   - **Moon: Select lunar anchor** and drag a box around a sunlit area that will stay lit, with steady shadows, for the whole session.
+   - **Moon: Lunar anchor → Select…** and drag a box around a sunlit area that will stay lit, with steady shadows, for the whole session.
    - **Sharpening**, **Stops** (when the session ends, or after a number of stacks; [1.8](#18-ending-a-session-by-itself)), and **Output**: MP4, GIF, SER (plus **Stretch SER (match MP4)** when SER is ticked), and frames per second.
    - **Also save raw SER bursts** keeps every stacked frame. It can fill a drive in one night, so it asks first and is off again the next time SeleneWatch starts.
    - **Also watch for transits** (Moon or Planet): watches for shadows between the bursts, with the shadows watch's settings ([chapter 4](#4-shadows-crossing-the-moon)).

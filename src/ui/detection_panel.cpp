@@ -237,7 +237,7 @@ private:
 DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 {
     setObjectName("detectionPanel");
-    setMinimumWidth(330);
+    setMinimumWidth(340);
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     // Feature-26: above the scrolled settings, so it is always in view. It
@@ -266,6 +266,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     auto* scroll = new QScrollArea(this);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     content_ = new QWidget;
     auto* content = content_;
     auto* column = new QVBoxLayout(content);
@@ -277,6 +278,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     targetRow->addWidget(new QLabel("Watching", content));
     target_ = new QComboBox(content);
     target_->setObjectName("targetChoice");
+    target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    target_->setMinimumContentsLength(16);
     // Feature-31: the Moon's flashes and its shadows are watched apart.
     target_->addItem("The Moon: flashes on the earthlit side", static_cast<int>(Watch::MoonFlashes));
     target_->addItem("The Moon (or Sun): shadows on the sunlit side", static_cast<int>(Watch::MoonShadows));
@@ -375,7 +378,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     followControls_ = new QWidget(sky_);
     followControls_->setObjectName("followControls");
     auto* followForm = new QFormLayout(followControls_);
-    followForm->setContentsMargins(16, 0, 0, 0);
+    followForm->setContentsMargins(12, 0, 0, 0);
     minExposure_ = new QDoubleSpinBox(followControls_);
     minExposure_->setObjectName("followMinExposure");
     minExposure_->setToolTip("Shortest exposure the follower may use (for a bright dusk or dawn sky).");
@@ -385,7 +388,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     for (auto* spin : {minExposure_, maxExposure_}) { spin->setRange(0.01, 60000); spin->setDecimals(2); spin->setSuffix(" ms"); }
     maxGain_ = new QDoubleSpinBox(followControls_);
     maxGain_->setObjectName("followMaxGain");
-    maxGain_->setToolTip("Highest gain the follower may use once exposure reaches its longest limit. Set the step to Gain fixed (0) to adjust only exposure.");
+    maxGain_->setToolTip("Highest gain the follower may use once exposure reaches its longest limit. Set Gain step to Gain fixed (0) to adjust only exposure.");
     gainStep_ = new QDoubleSpinBox(followControls_);
     gainStep_->setObjectName("followGainStep");
     gainStep_->setToolTip("How much the follower changes gain per step (0 = Gain fixed).");
@@ -395,19 +398,12 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     followReading_->setObjectName("followReading");
     followReading_->setWordWrap(true);
     followReading_->hide();
-    auto* exposureRow = new QHBoxLayout;
-    exposureRow->addWidget(minExposure_);
-    exposureRow->addWidget(new QLabel("to", followControls_));
-    exposureRow->addWidget(maxExposure_);
-    // Each box is as wide as its widest value; the rest of the row stays empty.
-    exposureRow->addStretch(1);
-    followForm->addRow("Exposure", exposureRow);
-    auto* gainRow = new QHBoxLayout;
-    gainRow->addWidget(maxGain_);
-    gainRow->addWidget(new QLabel("in steps of", followControls_));
-    gainRow->addWidget(gainStep_);
-    gainRow->addStretch(1);
-    followForm->addRow("Gain up to", gainRow);
+    // Separate rows keep the dock free of horizontal overflow even with wide
+    // native Windows 11 spinbox buttons or high DPI scaling.
+    followForm->addRow("Min exposure", minExposure_);
+    followForm->addRow("Max exposure", maxExposure_);
+    followForm->addRow("Max gain", maxGain_);
+    followForm->addRow("Gain step", gainStep_);
     followForm->addRow(followReading_);
     followControls_->hide();
     skyForm->addRow(followControls_);
@@ -415,7 +411,7 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     timelapseRow_ = new QWidget(sky_);
     auto* timelapseLayout = new QHBoxLayout(timelapseRow_);
     timelapseLayout->setContentsMargins(0, 0, 0, 0);
-    timelapse_ = new QCheckBox("Time-lapse while monitoring, every", timelapseRow_);
+    timelapse_ = new QCheckBox("Time-lapse while monitoring", timelapseRow_);
     timelapse_->setObjectName("watchTimelapse");
     timelapseInterval_ = new QSpinBox(timelapseRow_);
     timelapseInterval_->setObjectName("watchTimelapseInterval");

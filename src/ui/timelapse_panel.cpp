@@ -35,6 +35,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* body = new QWidget(scroll);
     auto* root = new QVBoxLayout(body);
 
@@ -85,6 +86,8 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     sharpening_ = new QComboBox(body);
     sharpening_->setObjectName("timelapseSharpening");
+    sharpening_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    sharpening_->setMinimumContentsLength(14);
     sharpening_->setToolTip("Sharpening applied to each stack for the video and sharpened/ copies. The unsharpened stacks are always kept, and Re-sharpen can change it later.");
     form->addRow("Sharpening", sharpening_);
 
@@ -94,10 +97,11 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     form->addRow(cropToLock_);
 
     auto* anchorRow = new QHBoxLayout();
+    anchorRow->setSpacing(4);
     selectAnchor_ = new QToolButton(body);
     selectAnchor_->setObjectName("timelapseSelectAnchor");
     selectAnchor_->setCheckable(true);
-    selectAnchor_->setText("Select lunar anchor");
+    selectAnchor_->setText("Select…");
     selectAnchor_->setToolTip("Strongly recommended for the Moon. Drag a box on a sunlit region that keeps steady "
         "shadows for the whole session: each stack's shift and rotation are then fitted inside it only. Without an "
         "anchor they are fitted over the whole frame, sky included, and a passing cloud can rotate a stack wrongly.");
@@ -117,6 +121,8 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
 
     stopKind_ = new QComboBox(body);
     stopKind_->setObjectName("timelapseStopKind");
+    stopKind_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    stopKind_->setMinimumContentsLength(14);
     stopKind_->setToolTip("When the time-lapse ends: when the session ends (the Ends setting above the preview, or "
         "Stop), or also after a number of stacks. The video is built when it ends.");
     stopKind_->addItem("When the session ends", static_cast<int>(StopConditionKind::Manual));
@@ -131,6 +137,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     form->addRow("Stack count", targetStacks_);
 
     auto* outRow = new QHBoxLayout();
+    outRow->setSpacing(4);
     writeMp4_ = new QCheckBox("MP4", body);
     writeMp4_->setObjectName("timelapseMp4");
     writeMp4_->setToolTip("Builds timelapse.mp4 (H.264) from the stacks when the time-lapse ends.");
@@ -160,7 +167,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
         "further processing in SER Player. On applies the same black/white stretch and gamma as timelapse.mp4.");
     form->addRow(stretchSer_);
 
-    saveRawSer_ = new QCheckBox("Also save raw SER bursts (uses a lot of disk space)", body);
+    saveRawSer_ = new QCheckBox("Also save raw SER bursts (large files)", body);
     saveRawSer_->setObjectName("timelapseSaveSer");
     saveRawSer_->setToolTip("Writes every stacked frame of every burst to raw/*.ser. This can fill a drive in "
         "one night. Turning it on asks for confirmation, and it is off again each time SeleneWatch starts.");
@@ -238,7 +245,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     latestCol->addWidget(new QLabel("Latest stack", liveBox));
     latestThumb_ = new QLabel(liveBox);
     latestThumb_->setObjectName("timelapseLatestThumb");
-    latestThumb_->setMinimumSize(140, 100);
+    latestThumb_->setMinimumSize(130, 96);
     latestThumb_->setAlignment(Qt::AlignCenter);
     latestThumb_->setStyleSheet("background:#111; color:#888; border:1px solid #333;");
     latestThumb_->setText("--");
@@ -257,7 +264,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     filmCol->addLayout(filmHead);
     filmstripThumb_ = new QLabel(liveBox);
     filmstripThumb_->setObjectName("timelapseFilmstripThumb");
-    filmstripThumb_->setMinimumSize(140, 100);
+    filmstripThumb_->setMinimumSize(130, 96);
     filmstripThumb_->setAlignment(Qt::AlignCenter);
     filmstripThumb_->setStyleSheet("background:#111; color:#888; border:1px solid #333;");
     filmstripThumb_->setText("--");

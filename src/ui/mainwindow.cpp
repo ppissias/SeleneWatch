@@ -2529,6 +2529,7 @@ void MainWindow::addCameraFamily(CameraFamilyPanel* panel,const QString& dockTit
     auto* scroll=new QScrollArea(dock);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setWidget(panel);
     dock->setWidget(scroll);
     addDockWidget(Qt::RightDockWidgetArea,dock);
