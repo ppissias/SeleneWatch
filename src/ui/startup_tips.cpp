@@ -121,7 +121,7 @@ const std::vector<StartupTip>& allStartupTips()
         // ── Phase 2: Camera depth, ROI, timing, review & rehearsal ───────────
         {
             "Keep full sensor depth with RAW16",
-            "Choosing <b>RAW16</b> in <b>Tools &rarr; Camera</b> preserves every ADC bit delivered by your sensor "
+            "Choosing <b>RAW16</b> in <b>Tools &rarr; Camera settings</b> preserves every ADC bit delivered by your sensor "
             "instead of scaling to 8 bits. Use <b>View &rarr; Histogram</b> in <b>Preview</b> to verify that sunlit "
             "lunar terrain or planetary bands stay unclipped for transits and time-lapses.",
             kSectionSource
@@ -129,7 +129,7 @@ const std::vector<StartupTip>& allStartupTips()
         {
             "Draw a hardware camera ROI on the preview",
             "Need faster frame rates or smaller files when imaging a planet or a single lunar crater? Click "
-            "<b>ROI</b> above the preview (or <b>Draw ROI</b> in <b>Tools &rarr; Camera</b>) and drag a box directly "
+            "<b>ROI</b> above the preview (or <b>Draw ROI</b> in <b>Tools &rarr; Camera settings</b>) and drag a box directly "
             "on the live image to crop the sensor readout, or reset to full frame whenever you need the whole field back.",
             kSectionSource
         },

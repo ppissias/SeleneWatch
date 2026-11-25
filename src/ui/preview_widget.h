@@ -57,6 +57,10 @@ public:
     [[nodiscard]] QPointF displayShift() const { return displayShift_; }
     // Frame coordinates. found is drawn green when valid, amber otherwise.
     void setLockBoxes(std::optional<QRect> locked, std::optional<QRectF> found, bool foundValid);
+    // Frame coordinates. Automatic stabilization lock indicator shown when
+    // Stabilize detection is active without an explicit Guiding lock box.
+    void setAutoStabilizeBox(std::optional<QRectF> box, QString label = {});
+    [[nodiscard]] std::optional<QRectF> autoStabilizeBox() const { return autoStabilizeBox_; }
     // Frame coordinates. Optional lunar constant anchor region (Feature-18).
     void setAnchorBox(std::optional<QRect> anchor);
     // Frame coordinates. The detection mask (Feature-11), drawn hatched, and
@@ -111,6 +115,8 @@ private:
     std::optional<QPoint> selected_;
     std::optional<QRect> lockBox_;
     std::optional<QRectF> foundBox_;
+    std::optional<QRectF> autoStabilizeBox_;
+    QString autoStabilizeLabel_;
     std::optional<QRect> anchorBox_;
     bool foundValid_{false};
     std::vector<QPolygon> mask_;

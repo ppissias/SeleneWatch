@@ -68,7 +68,7 @@ To guide a mount (for the Moon and the planets), install the [ASCOM Platform](ht
 
 *The main window while monitoring the Moon: the Mode and Tools bar at the top, the command bar and preview toolbar below it, the live image filling the window, and the Detection panel with the live peak-sigma graph and histogram on the right.*
 
-**The mode bar** at the very top switches between the four observing modes — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, swapping the right sidebar to the active mode's controls (**Detection** or **Time-lapse**), and updating the primary start action without resetting settings. On the right side of the same bar, **Tools** toggle buttons (**Camera**, **Guiding**, **Display**) open or hide floating instrument windows (which can also be docked by dragging) without crowding the sidebar.
+**The mode bar** at the very top switches between the four observing modes — **Flashes**, **Shadows / crossings**, **Sky**, and **Time-lapse** — selecting the matching watch, swapping the right sidebar to the active mode's controls (**Detection** or **Time-lapse**), and updating the primary start action without resetting settings. Right beside them on the same bar, highlighted **Tools** toggle buttons (**Camera settings**, **Guiding**, **Display**) open or hide floating instrument windows (which can also be docked by dragging) without crowding the sidebar.
 
 **The command bar** below it holds what you use most:
 - **Source**: a camera, a recording, or the synthetic test scenes (with testing tools on). **Connect at startup** opens the same camera next time.

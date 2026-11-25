@@ -462,27 +462,36 @@ void MainWindow::arrangeTopControls()
     workspaceTimelapseButton_ = makeWorkspaceBtn("Time-lapse", "workspaceTimelapseButton",
         "Lunar & planetary time-lapses: capture periodic bursts, stack the sharpest frames, and build a video.",
         Workspace::TimeLapse);
-    wsRow->addStretch(1);
 
-    // Floating instrument tool windows toggled from the right side of the Mode bar.
+    wsRow->addSpacing(20);
+    auto* wsSep = new QFrame(wsBar);
+    wsSep->setFrameShape(QFrame::VLine);
+    wsSep->setFrameShadow(QFrame::Sunken);
+    wsRow->addWidget(wsSep);
+    wsRow->addSpacing(14);
+
+    // Floating instrument tool windows grouped right after Mode: toward the center
+    // and highlighted so the observer spots Camera, Guiding, and Display immediately.
     auto* toolsLabel = new QLabel("Tools:", wsBar);
     wsRow->addWidget(toolsLabel);
     auto makeToolBtn = [&](const QString& text, const QString& objName, const QString& tip) {
         auto* btn = new QToolButton(wsBar);
         btn->setObjectName(objName);
+        btn->setProperty("toolWindowButton", true);
         btn->setText(text);
         btn->setCheckable(true);
         btn->setToolTip(tip);
         wsRow->addWidget(btn);
         return btn;
     };
-    toolCameraButton_ = makeToolBtn("Camera", "toolCameraButton",
-        "Open or hide the floating Camera controls window for the selected camera (can also be docked by dragging).");
+    toolCameraButton_ = makeToolBtn("Camera settings", "toolCameraButton",
+        "Open or hide the floating Camera settings window for the selected camera (can also be docked by dragging).");
     toolGuidingButton_ = makeToolBtn("Guiding", "toolGuidingButton",
         "Open or hide the floating Feature lock & Guiding instrument window (Moon & planets; can also be docked by dragging).");
     toolDisplayButton_ = makeToolBtn("Display", "toolDisplayButton",
         "Open or hide the floating live Display stretch window (screen only; raw recordings and detection are unchanged).");
     toolCameraButton_->hide();
+    wsRow->addStretch(1);
     connect(toolCameraButton_, &QToolButton::toggled, this, [this](bool on) {
         CameraFamilyPanel* selected = selectedCamera();
         for (const auto& family : cameraFamilies_)
@@ -3280,12 +3289,30 @@ void MainWindow::updateStabilizeReadout(const DetectionSummary& summary)
     }
     if (ui_ && ui_->previewWidget)
     {
+        const bool lockedOrHolding = summary.stabilizationState == StabilizationState::Locked
+            || summary.stabilizationState == StabilizationState::GraceHold;
         const bool shiftActive = tlViewMode_ == TimelapseViewMode::Live && enabled
-            && stabilizedViewButton_ && stabilizedViewButton_->isChecked()
-            && (summary.stabilizationState == StabilizationState::Locked
-                || summary.stabilizationState == StabilizationState::GraceHold);
+            && stabilizedViewButton_ && stabilizedViewButton_->isChecked() && lockedOrHolding;
         ui_->previewWidget->setDisplayShift(shiftActive
             ? QPointF(summary.stabilizationDx, summary.stabilizationDy) : QPointF(0.0, 0.0));
+
+        const bool showAutoBox = tlViewMode_ == TimelapseViewMode::Live && enabled && lockedOrHolding
+            && (summary.stabilizationSource == StabilizationSource::AutoPatch
+                || summary.stabilizationSource == StabilizationSource::IsolatedDisk)
+            && summary.stabilizationLockWidth > 0 && summary.stabilizationLockHeight > 0;
+        if (showAutoBox)
+        {
+            const QString label = summary.stabilizationMethod == StabilizationMethod::DiskCentroid
+                ? "Auto stabilize (disk)" : "Auto stabilize";
+            ui_->previewWidget->setAutoStabilizeBox(
+                QRectF(summary.stabilizationLockX, summary.stabilizationLockY,
+                    summary.stabilizationLockWidth, summary.stabilizationLockHeight),
+                label);
+        }
+        else
+        {
+            ui_->previewWidget->setAutoStabilizeBox(std::nullopt);
+        }
     }
     if (!stabilizeLabel_ || !stabilizeSeparator_) return;
     stabilizeSeparator_->setVisible(enabled);

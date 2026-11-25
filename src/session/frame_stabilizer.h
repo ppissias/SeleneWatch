@@ -91,6 +91,7 @@ private:
     Measurement measureDiskCentroid(const Frame& frame) const;
     bool refreshFeatureLock(const Frame& frame, double currentDx, double currentDy);
     void adoptPreferredRegion(const Frame& frame, LockRegion region, StepResult& out);
+    void populateLockBounds(FrameShift& shift) const;
 
     int width_{0}, height_{0}, bits_{0};
     PixelFormat format_{PixelFormat::Mono8};

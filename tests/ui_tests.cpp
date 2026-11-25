@@ -4291,6 +4291,24 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     QVERIFY(!stabViewBtn->isChecked());
     chooseWatch(window, Watch::Sky);
     QVERIFY(stabViewBtn->isHidden());
+
+    // When Stabilize detection is active in Moon Preview without a manual
+    // Guiding lock box, PreviewWidget shows the visual auto-stabilize box and
+    // hides it again when stabilization is turned off.
+    chooseWatch(window, Watch::MoonFlashes);
+    useSynthetic(window);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* preview = window.findChild<PreviewWidget*>();
+    QVERIFY(preview && !preview->autoStabilizeBox().has_value());
+    winBox->setChecked(true);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(preview->autoStabilizeBox().has_value()
+        && preview->autoStabilizeBox()->isValid(), 5000);
+    winBox->setChecked(false);
+    QVERIFY(!preview->autoStabilizeBox().has_value());
+    window.findChild<QPushButton*>("stopButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 5000);
 }
 
 void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()

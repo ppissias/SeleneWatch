@@ -117,6 +117,9 @@ QString darkStyleSheet()
         "QToolButton:checked { background: #2b5b8c; color: #ffffff; border-color: #4a89c7; }"
         "QToolButton:disabled { color: #677082; border-color: #262b35; background: #1c2028; }"
         "QToolButton:checked:disabled { background: #233a54; color: #a7c2df; border-color: #35587d; }"
+        "QToolButton[toolWindowButton=\"true\"] { background: #1b3b42; color: #b8eef7; border: 1px solid #2f6c78; font-weight: 600; padding: 2px 9px; }"
+        "QToolButton[toolWindowButton=\"true\"]:hover { background: #234d56; color: #dcf8fc; border-color: #4292a2; }"
+        "QToolButton[toolWindowButton=\"true\"]:checked { background: #1d7484; color: #ffffff; border: 1px solid #52c3d6; font-weight: bold; }"
         "QGroupBox { border: 1px solid #303746; border-radius: 4px; margin-top: 8px; padding-top: 6px; }"
         "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #c5cddb; }"
         "QStatusBar { background: #161920; border-top: 1px solid #2c3340; }"
@@ -138,6 +141,9 @@ QString nightRedStyleSheet()
         "QToolButton:checked { background: #6e1212; color: #ff9999; border-color: #a62424; }"
         "QToolButton:disabled { color: #5c1b1b; border-color: #290909; background: #140303; }"
         "QToolButton:checked:disabled { background: #470e0e; color: #c46868; border-color: #6b1a1a; }"
+        "QToolButton[toolWindowButton=\"true\"] { background: #360909; color: #f56868; border: 1px solid #781a1a; font-weight: 600; padding: 2px 9px; }"
+        "QToolButton[toolWindowButton=\"true\"]:hover { background: #4a0e0e; color: #ff8888; border-color: #9e2424; }"
+        "QToolButton[toolWindowButton=\"true\"]:checked { background: #871717; color: #ffcccc; border: 1px solid #cc3333; font-weight: bold; }"
         "QGroupBox { border: 1px solid #421010; border-radius: 4px; margin-top: 8px; padding-top: 6px; }"
         "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #d63a3a; }"
         "QStatusBar { background: #0e0202; border-top: 1px solid #3b0e0e; }"
@@ -185,6 +191,9 @@ void applyUiTheme(UiTheme theme)
             "QToolBar { border: none; border-bottom: 1px solid palette(mid); padding: 2px 4px; }"
             "QToolButton { border: 1px solid palette(mid); border-radius: 3px; padding: 2px 7px; }"
             "QToolButton:checked { background: palette(highlight); color: palette(highlighted-text); border-color: palette(highlight); }"
+            "QToolButton[toolWindowButton=\"true\"] { background: #d8eef2; color: #124852; border: 1px solid #6ab0bd; font-weight: 600; padding: 2px 9px; }"
+            "QToolButton[toolWindowButton=\"true\"]:hover { background: #c4e4ea; color: #0c3942; border-color: #4696a6; }"
+            "QToolButton[toolWindowButton=\"true\"]:checked { background: #1a6d7c; color: #ffffff; border: 1px solid #13535e; font-weight: bold; }"
             "QStatusBar::item { border: none; }"));
         return;
     }

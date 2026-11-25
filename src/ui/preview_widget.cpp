@@ -46,6 +46,8 @@ void PreviewWidget::clear()
     selected_.reset();
     lockBox_.reset();
     foundBox_.reset();
+    autoStabilizeBox_.reset();
+    autoStabilizeLabel_.clear();
     pressPosition_.reset();
     dragging_ = false;
     leftPanning_ = false;
@@ -133,6 +135,14 @@ void PreviewWidget::setLockBoxes(std::optional<QRect> locked, std::optional<QRec
     lockBox_ = locked;
     foundBox_ = found;
     foundValid_ = foundValid;
+    update();
+}
+
+void PreviewWidget::setAutoStabilizeBox(std::optional<QRectF> box, QString label)
+{
+    if (autoStabilizeBox_ == box && autoStabilizeLabel_ == label) return;
+    autoStabilizeBox_ = box;
+    autoStabilizeLabel_ = std::move(label);
     update();
 }
 
@@ -394,7 +404,7 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
         }
         painter.restore();
     }
-    if (lockBox_ || foundBox_ || anchorBox_ || dragging_)
+    if (lockBox_ || foundBox_ || autoStabilizeBox_ || anchorBox_ || dragging_)
     {
         painter.save();
         painter.setClipRect(visibleImage);
@@ -402,6 +412,14 @@ void PreviewWidget::paintEvent(QPaintEvent* /*event*/)
         {
             painter.setPen(QPen(QColor("#ff99dd"), 1.5, Qt::DashDotLine));
             painter.drawRect(toWidget(*anchorBox_));
+        }
+        if (autoStabilizeBox_ && autoStabilizeBox_->isValid() && !lockBox_)
+        {
+            const QColor col("#f0c04a");
+            const QRectF r = toWidget(*autoStabilizeBox_);
+            painter.setPen(QPen(col, 1.5, Qt::DashLine));
+            painter.drawRect(r);
+            drawBoxLabel(painter, r, autoStabilizeLabel_.isEmpty() ? QString("Auto stabilize") : autoStabilizeLabel_, col);
         }
         if (lockBox_)
         {

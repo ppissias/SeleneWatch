@@ -100,6 +100,10 @@ struct DetectionSummary
     double stabilizationDx{0};
     double stabilizationDy{0};
     double stabilizationMs{0};
+    int stabilizationLockX{0};
+    int stabilizationLockY{0};
+    int stabilizationLockWidth{0};
+    int stabilizationLockHeight{0};
 };
 
 // A compact reading for the live history plot, timestamped by the source.

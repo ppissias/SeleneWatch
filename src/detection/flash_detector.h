@@ -24,6 +24,9 @@ struct FrameShift
     StabilizationMethod method{StabilizationMethod::None};
     StabilizationSource source{StabilizationSource::None};
     double estimatorMs{0};
+    // Current-frame visual bounds of the active stabilization lock (AutoPatch
+    // or IsolatedDisk) so the preview can show where stabilization locked.
+    int lockX{0}, lockY{0}, lockWidth{0}, lockHeight{0};
 };
 
 // Feature-9: per-pixel running reference and variance, in native sample

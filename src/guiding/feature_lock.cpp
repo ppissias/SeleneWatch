@@ -162,17 +162,47 @@ bool FeatureLock::isIsolatedDisk(const Frame& frame, LockRegion region)
 
     const double bg = percentile(border, 0.50);
     const double borderP95 = percentile(border, 0.95);
+    const double borderP99 = percentile(border, 0.99);
     const double bodyP995 = percentile(interior, 0.995);
     const double highest = highestCode(frame);
     if (bodyP995 - bg < std::max(12.0, 0.04 * highest)) return false;
-    if (borderP95 > bg + 0.25 * (bodyP995 - bg)) return false;
-
     const double thresh = bg + 0.25 * (bodyP995 - bg);
+    if (borderP95 > thresh || borderP99 > thresh) return false;
+
+    // A true isolated planet, Moon, or Sun disk is compact and reasonably round
+    // (including Saturn's rings or a lunar crescent) rather than scattered streaks
+    // or a dim scene's noisy tail spanning the frame.
     size_t bright = 0;
-    for (double v : interior)
-        if (v > thresh) ++bright;
-    const double share = static_cast<double>(bright) / static_cast<double>(interior.size());
-    return share >= 0.004 && share <= 0.78;
+    int minGx = std::numeric_limits<int>::max(), maxGx = -1;
+    int minGy = std::numeric_limits<int>::max(), maxGy = -1;
+    int cols = 0, rows = 0;
+    for (int y = y0 + ring, gy = 0; y < y1 - ring; y += step, ++gy)
+    {
+        rows = gy + 1;
+        int gx = 0;
+        for (int x = x0 + ring; x < x1 - ring; x += step, ++gx)
+        {
+            if (sample(frame, x, y) > thresh)
+            {
+                ++bright;
+                if (gx < minGx) minGx = gx;
+                if (gx > maxGx) maxGx = gx;
+                if (gy < minGy) minGy = gy;
+                if (gy > maxGy) maxGy = gy;
+            }
+        }
+        cols = std::max(cols, gx);
+    }
+    if (bright == 0 || cols <= 0 || rows <= 0) return false;
+    const double share = static_cast<double>(bright) / static_cast<double>(cols * rows);
+    if (share < 0.004 || share > 0.78) return false;
+
+    const int bw = maxGx - minGx + 1;
+    const int bh = maxGy - minGy + 1;
+    const double bboxFill = static_cast<double>(bright) / static_cast<double>(bw * bh);
+    const double aspect = static_cast<double>(std::max(bw, bh)) / static_cast<double>(std::max(1, std::min(bw, bh)));
+    if (bboxFill < 0.22 || aspect > 3.2) return false;
+    return true;
 }
 
 DiskCentroidSample FeatureLock::measureDiskCentroid(const Frame& frame, LockRegion searchBox)

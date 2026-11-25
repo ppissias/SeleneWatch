@@ -346,6 +346,10 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
     summary_.stabilizationDx = shift.dx;
     summary_.stabilizationDy = shift.dy;
     summary_.stabilizationMs = shift.estimatorMs;
+    summary_.stabilizationLockX = shift.lockX;
+    summary_.stabilizationLockY = shift.lockY;
+    summary_.stabilizationLockWidth = shift.lockWidth;
+    summary_.stabilizationLockHeight = shift.lockHeight;
     map_.reset();
     candidates_.clear();
     protected_.assign(pixels, 0);

@@ -92,6 +92,7 @@ private slots:
     void detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState();
     void detectorLearningPeriodSlowRateFloorAndSessionFlow();
     void stabilizedDetectionWithActiveFeatureLockAndGuidePulse();
+    void nonDiskStationarySceneUsesFeatureLockWithoutJumping();
 };
 
 // Feature-31: for flashes on the earthlit side, pixels whose learned
@@ -1174,6 +1175,61 @@ void DetectionTest::stabilizedDetectionWithActiveFeatureLockAndGuidePulse()
     QVERIFY2(eventTxt.contains("stabilize_detection=yes"), qPrintable(eventTxt));
     QVERIFY2(eventTxt.contains("stabilization_state=locked"), qPrintable(eventTxt));
     QVERIFY2(eventTxt.contains("stabilization_method=feature_lock"), qPrintable(eventTxt));
+}
+
+void DetectionTest::nonDiskStationarySceneUsesFeatureLockWithoutJumping()
+{
+    // Regression test for stationary dim scene with vertical low-contrast stripes
+    // spanning the frame edges plus a small bright glint (e.g. indoor/glare test):
+    // isIsolatedDisk() must reject sparse/edge-touching brightness so FrameStabilizer
+    // does NOT run noisy DiskCentroid and instead locks stably via FeatureLock.
+    std::mt19937 rng(42);
+    std::normal_distribution<double> noise(0.0, 1.8);
+    auto makeFrame = [&](uint64_t idx) {
+        Frame f;
+        f.width = 320;
+        f.height = 240;
+        f.frameIndex = idx;
+        f.timestamp = std::chrono::system_clock::time_point{}
+            + std::chrono::milliseconds{static_cast<int64_t>(idx) * 33};
+        f.data.resize(static_cast<size_t>(f.width) * f.height);
+        for (int y = 0; y < f.height; ++y)
+        {
+            for (int x = 0; x < f.width; ++x)
+            {
+                double v = 24.0;
+                // Dim vertical stripe spanning top-to-bottom plus a faint wall gradient.
+                if (x >= 95 && x <= 118) v += 16.0;
+                if (x >= 260) v += 10.0;
+                // One small bright 2D textured reflection spot inside the stripe.
+                const double r = std::hypot(x - 108.0, y - 140.0);
+                if (r < 12.0) v += 65.0 * std::exp(-(r * r) / 30.0) + 12.0 * std::sin(x * 0.7) * std::cos(y * 0.7);
+                v += noise(rng);
+                f.data[static_cast<size_t>(y) * f.width + x] = static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+            }
+        }
+        return f;
+    };
+
+    const Frame f0 = makeFrame(0);
+    QVERIFY(!FeatureLock::isIsolatedDisk(f0));
+
+    FrameStabilizer stabilizer;
+    const auto r0 = stabilizer.step(f0, 1.0 / 30.0);
+    QCOMPARE(r0.shift.state, StabilizationState::Locked);
+    QCOMPARE(r0.shift.method, StabilizationMethod::FeatureLock);
+    QCOMPARE(r0.shift.source, StabilizationSource::AutoPatch);
+    QVERIFY(r0.shift.lockWidth >= 64 && r0.shift.lockHeight >= 64);
+
+    double maxJump = 0.0;
+    for (uint64_t i = 1; i < 30; ++i)
+    {
+        const auto r = stabilizer.step(makeFrame(i), 1.0 / 30.0);
+        QCOMPARE(r.shift.state, StabilizationState::Locked);
+        QCOMPARE(r.shift.method, StabilizationMethod::FeatureLock);
+        maxJump = std::max(maxJump, std::hypot(r.shift.dx, r.shift.dy));
+    }
+    QVERIFY2(maxJump < 0.75, qPrintable(QString("stationary scene jumped by %1 px").arg(maxJump)));
 }
 
 int main(int argc, char** argv)

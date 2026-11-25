@@ -324,6 +324,11 @@ FrameStabilizer::StepResult FrameStabilizer::step(
     if (!(frameIntervalSec > 0.0) || !std::isfinite(frameIntervalSec)) frameIntervalSec = 1.0 / 30.0;
     frameIntervalSec = std::min(frameIntervalSec, 1.0);
 
+    const auto stamp = [&](FrameShift s) {
+        populateLockBounds(s);
+        return s;
+    };
+
     if (state_ == StabilizationState::Off || !sameLayout(frame))
     {
         reset();
@@ -332,7 +337,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
         if (initEstimator(frame, preferredLockRegion))
         {
             state_ = StabilizationState::Locked;
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0};
+            out.shift = stamp({ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0});
             out.logEvent = std::string("registration_locked method=") + stabilizationMethodName(method_);
         }
         else
@@ -355,7 +360,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
         adoptPreferredRegion(frame, *preferredLockRegion, out);
         if (out.resetDetector)
         {
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0};
+            out.shift = stamp({ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0});
             return out;
         }
     }
@@ -398,7 +403,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
                 if (refreshFeatureLock(frame, lastDx_, lastDy_)) sinceRefreshSec_ = 0.0;
             }
 
-            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs};
+            out.shift = stamp({ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs});
             return out;
         }
 
@@ -406,7 +411,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
         if (graceElapsedSec_ <= graceSeconds)
         {
             state_ = StabilizationState::GraceHold;
-            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs};
+            out.shift = stamp({ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs});
             return out;
         }
 
@@ -446,7 +451,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
             sinceRefreshSec_ = 0.0;
             reacquireStreak_ = 0;
             out.resetDetector = true;
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, m.elapsedMs};
+            out.shift = stamp({ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, m.elapsedMs});
             out.logEvent = std::string("registration_locked method=") + stabilizationMethodName(method_);
             return out;
         }
@@ -454,4 +459,28 @@ FrameStabilizer::StepResult FrameStabilizer::step(
 
     out.shift = {ShiftMode::Off, 0.0, 0.0, StabilizationState::LostFallback, method_, source_, m.elapsedMs};
     return out;
+}
+
+void FrameStabilizer::populateLockBounds(FrameShift& shift) const
+{
+    if (shift.state != StabilizationState::Locked && shift.state != StabilizationState::GraceHold)
+        return;
+    if (method_ == StabilizationMethod::FeatureLock && lock_)
+    {
+        const LockRegion r = lock_->region();
+        shift.lockX = r.x + static_cast<int>(std::lround(shift.dx - anchorDx_));
+        shift.lockY = r.y + static_cast<int>(std::lround(shift.dy - anchorDy_));
+        shift.lockWidth = r.width;
+        shift.lockHeight = r.height;
+    }
+    else if (method_ == StabilizationMethod::DiskCentroid && refWeight_ > 0.0)
+    {
+        const double cx = refCx_ + shift.dx;
+        const double cy = refCy_ + shift.dy;
+        const int radius = std::clamp(static_cast<int>(std::lround(std::sqrt(refWeight_ / 3.14159265358979) * 1.15)), 24, 240);
+        shift.lockX = static_cast<int>(std::lround(cx)) - radius;
+        shift.lockY = static_cast<int>(std::lround(cy)) - radius;
+        shift.lockWidth = radius * 2;
+        shift.lockHeight = radius * 2;
+    }
 }

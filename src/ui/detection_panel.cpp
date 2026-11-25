@@ -95,7 +95,13 @@ QString decisionText(const DetectionSummary& summary, bool monitoring)
 
 QString stateText(const DetectionSummary& summary, const QString& decision)
 {
-    return QString("Noise floor %1 ADU (minimum %2). %3 (%4, %5).\n%6   Detector %7 ms/frame\nActive patches %8. Longest %9 s. Background learning outside %10 protected pixels.\n%11")
+    return QString("Noise floor: %1 ADU (minimum %2)\n"
+                   "%3 (%4, %5)\n"
+                   "%6\n"
+                   "Detector: %7 ms/frame\n"
+                   "Active patches: %8 · Longest: %9 s\n"
+                   "Protected pixels: %10\n"
+                   "%11")
         .arg(summary.noiseFloor, 0, 'f', 2).arg(summary.settings.minNoiseAdu, 0, 'f', 2)
         .arg(summary.settings.darkening ? "Deepest fall" : "Peak").arg(summary.peakX).arg(summary.peakY)
         .arg(decision).arg(summary.processingMs, 0, 'f', 2).arg(summary.activePatches).arg(summary.longestActiveSeconds, 0, 'f', 1)
@@ -544,6 +550,15 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     stabilizeStatus_->hide();
     layout->addWidget(stabilizeStatus_, 8, 0, 1, 2);
 
+    overlay_ = new QComboBox(essentialGrid);
+    overlay_->setObjectName("detectionOverlay");
+    overlay_->addItems({"None", "Sigma map", "Noise map"});
+    layout->addWidget(named("Preview overlay", overlay_, essentialGrid), 9, 0);
+    layout->addWidget(overlay_, 9, 1);
+    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, essentialGrid);
+    mapScale_->setText("Overlays affect the display only.");
+    layout->addWidget(mapScale_, 10, 0, 1, 2);
+
     // Collapsible Advanced detection section (persists open/closed state).
     advancedSection_ = new CollapsibleSection("Advanced detection", "ui/sections/detectionAdvanced", false, content);
     advancedSection_->setObjectName("advancedDetectionSection");
@@ -628,10 +643,14 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     minimumNoise_->setRange(0.01, 65535.0);
     minimumNoise_->setSuffix(" ADU");
     minimumNoise_->setSingleStep(0.1);
-    minimumNoise_->setToolTip("Lower bound for estimated noise in native sample units.");
+    minimumNoise_->setToolTip(
+        "Safety floor for estimated pixel noise (in native ADU). Normally leave this below your camera's real noise "
+        "(e.g. 0.5 ADU for 8-bit) so it only prevents dead-quiet pixels from dividing by ~0. Raising it above the "
+        "camera's measured noise clamps every pixel's noise up to this value, lowering sensitivity across the frame "
+        "(and making the Noise map uniform red because every pixel sits at the same clamped value).");
     noiseSlider_ = new MeterSlider(minimumNoise_->minimum(), minimumNoise_->maximum(), background);
     noiseSlider_->setObjectName("minimumNoiseSlider");
-    noiseSlider_->setToolTip("Minimum noise: the lowest noise a pixel is assumed to have.");
+    noiseSlider_->setToolTip("Minimum noise: lower bound (safety floor) for estimated pixel noise in native ADU.");
     model->addRow("Reference time", referenceTime_);
     model->addRow(referenceSlider_);
     model->addRow("Minimum noise", minimumNoise_);
@@ -639,21 +658,12 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     advancedSection_->contentLayout()->addWidget(background);
     column->addWidget(advancedSection_);
 
-    // Collapsible Diagnostics & overlays section (persists open/closed state).
-    diagnosticsSection_ = new CollapsibleSection("Diagnostics && overlays", "ui/sections/detectionDiagnostics", false, content);
+    // Collapsible Diagnostics section (persists open/closed state).
+    diagnosticsSection_ = new CollapsibleSection("Diagnostics", "ui/sections/detectionDiagnostics", false, content);
     diagnosticsSection_->setObjectName("diagnosticsDetectionSection");
     diagnosticsSection_->toggleButton()->setObjectName("diagnosticsDetectionToggle");
-    diagnosticsSection_->toggleButton()->setToolTip("Shows display-only Sigma/Noise preview overlays and live detector diagnostics.");
+    diagnosticsSection_->toggleButton()->setToolTip("Shows live detector noise floor, peak position, timing, and patch diagnostics.");
     auto* diagHost = diagnosticsSection_->content();
-    auto* diagForm = new QFormLayout;
-    diagForm->setContentsMargins(0, 0, 0, 0);
-    overlay_ = new QComboBox(diagHost); overlay_->setObjectName("detectionOverlay");
-    overlay_->addItems({"None", "Sigma map", "Noise map"});
-    diagForm->addRow("Preview overlay", overlay_);
-    diagnosticsSection_->contentLayout()->addLayout(diagForm);
-    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, diagHost);
-    mapScale_->setText("Overlays affect the display only.");
-    diagnosticsSection_->contentLayout()->addWidget(mapScale_);
     state_ = new ReadoutLabel({stateText(widest, decisionText(widest, false)),
         stateText(widestFall, decisionText(widestFall, false)), kSettlingState}, diagHost);
     state_->setObjectName("detectionState");
