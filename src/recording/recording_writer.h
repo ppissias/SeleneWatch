@@ -36,6 +36,8 @@
 class RecordingWriter
 {
 public:
+    // Parameters captured at recording start (output folder, stream/site
+    // provenance, frame limit, disk reserve, and bounded queue budget).
     struct Start
     {
         // The recording goes in <folder>/<UTC stamp>/.
@@ -53,6 +55,7 @@ public:
         size_t queueBytes{0};
     };
 
+    // Value snapshot of the writer thread's active recording progress and stats.
     struct Status
     {
         // Taking frames.

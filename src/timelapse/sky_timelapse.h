@@ -38,6 +38,7 @@
 class SkyTimelapse
 {
 public:
+    // Value snapshot of the sky time-lapse writer's progress and final outcome.
     struct Status
     {
         bool active{false};

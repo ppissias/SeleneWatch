@@ -42,6 +42,8 @@ public:
     static constexpr double kDefaultRecenterMarginPx = 32.0;
     static constexpr double kDefaultTemplateRefreshSeconds = 60.0;
 
+    // Per-frame stabilization output: measured shift, optional detector reset
+    // or integer recenter step, and any transition log line for session.txt.
     struct StepResult
     {
         FrameShift shift;

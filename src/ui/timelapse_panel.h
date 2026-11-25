@@ -23,6 +23,10 @@ class QSpinBox;
 class QTimer;
 class QToolButton;
 
+// Right-sidebar panel for Mode: Time-lapse. Owns persisted time-lapse burst,
+// lunar anchor, transit-watch, and export controls; forwards start/stop and
+// anchor-drawing requests to MainWindow and displays live TimelapseSession
+// progress, telemetry, and warnings without touching capture threads directly.
 class TimelapsePanel : public QWidget
 {
     Q_OBJECT

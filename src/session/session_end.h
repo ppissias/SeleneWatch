@@ -39,6 +39,7 @@ enum class MountAtEnd { Unset, KeepTracking, StopTracking };
 
 enum class EndCause { LocalTime, Duration, Dawn, MoonBelow };
 
+// Earliest scheduled automatic stop time and the condition that triggers it.
 struct PlannedEnd
 {
     std::chrono::system_clock::time_point time;

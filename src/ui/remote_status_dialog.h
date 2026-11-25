@@ -19,6 +19,7 @@ class QSpinBox;
 class RemoteStatusDialog : public QDialog
 {
 public:
+    // Phone status server configuration (enabled flag, TCP port, and access key).
     struct Settings
     {
         bool enabled{false};

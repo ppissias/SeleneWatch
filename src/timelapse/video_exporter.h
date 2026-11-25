@@ -14,6 +14,8 @@
 #include <optional>
 #include <vector>
 
+// Keep/drop outcome for one stack from evaluateStackQualityFilter(), recording
+// its comparison reference quality and whether the observer overrode it.
 struct StackFilterDecision
 {
     bool kept{true};
@@ -31,6 +33,8 @@ struct StackFilterDecision
     const std::vector<std::optional<bool>>& manualOverrides = {},
     int localWindowRadius = 5);
 
+// Outcome of exporting or re-sharpening a time-lapse sequence: generated MP4,
+// GIF, and SER paths, kept/dropped stack counts, and any failure reason.
 struct TimelapseExportResult
 {
     bool ok{false};
@@ -54,6 +58,8 @@ struct TimelapseExportResult
     std::atomic<bool>* cancel = nullptr,
     const std::map<QString, bool>& stackOverrides = {});
 
+// Optional post-capture stack re-alignment settings applied non-destructively
+// during ResharpenDialog / resharpenTimelapseSession() before sharpening.
 struct RealignOptions
 {
     StackRealignMode mode{StackRealignMode::Off};

@@ -93,6 +93,7 @@ struct EarthshineArea
     std::string problem;
     [[nodiscard]] TuneArea pixels(int width, int height) const;
 };
+// Rectangular pixel region in native frame coordinates.
 struct PixelBox
 {
     int x{0}, y{0}, width{0}, height{0};
@@ -105,6 +106,7 @@ struct TuneControl
     double value{0}, minimum{0}, maximum{0};
     bool operator==(const TuneControl&) const = default;
 };
+// Snapshot of a camera's tunable exposure, gain, and offset bounds/values.
 struct TuneCamera
 {
     std::optional<TuneControl> exposure, gain, offset;
@@ -132,6 +134,8 @@ struct TuneMeasurement
     BrightnessSample brightness;
 };
 
+// Inputs to suggestCamera(): active workflow, current camera ranges, measured
+// scene brightness, and optional Sky exposure-follower bounds.
 struct CameraTuneInput
 {
     TuneWorkflow workflow{TuneWorkflow::MoonFlashes};
@@ -144,6 +148,8 @@ struct CameraTuneInput
     double followFromMs{1}, followToMs{2000}, followMaxGain{0}, followGainStep{0};
 };
 
+// Proposed camera control adjustments, warnings, and summary verdict returned
+// by suggestCamera() for the observer to review before applying.
 struct CameraSuggestion
 {
     std::vector<TuneRow> rows;
@@ -232,6 +238,8 @@ struct TuneEvent
     int pixels{0};
     double peakSigma{0};
 };
+// Aggregate event count and sample candidates recorded for one (K, minPixels)
+// detector configuration during an Auto-tune watch.
 struct KRowResult
 {
     double k{0};

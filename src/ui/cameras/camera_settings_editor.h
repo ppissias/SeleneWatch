@@ -33,6 +33,8 @@ struct RoiConstraints
     // (e.g. 1024 on USB2 ZWO ASI120 cameras).
     int pixelCountMultiple{1};
 };
+// Hardware-aligned camera ROI produced by alignRoi(), flagging whether the
+// requested coordinates or size had to be snapped to sensor step rules.
 struct AlignedRoi
 {
     int x{0},y{0},width{0},height{0};

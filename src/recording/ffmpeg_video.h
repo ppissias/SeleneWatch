@@ -71,6 +71,8 @@ bool encodeImagesWithFfmpeg(const std::vector<QImage>& frames,
     QString& error,
     std::atomic<bool>* cancel = nullptr);
 
+// Size, frame-rate, and timeout limits for compact looping event preview GIFs
+// encoded on the EventWriter thread.
 struct EventPreviewGifOptions
 {
     int fps{4};

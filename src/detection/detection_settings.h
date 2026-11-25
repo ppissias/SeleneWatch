@@ -4,6 +4,9 @@
 
 #include <cmath>
 
+// Observer-configurable thresholds, patch geometry limits, background-learning
+// constants, and watch-specific options copied by FlashDetector before each
+// frame and recorded on every trigger.
 struct DetectionSettings
 {
     double sigma{6.0};

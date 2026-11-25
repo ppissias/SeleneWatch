@@ -27,6 +27,12 @@ class QTableWidgetItem;
 class QTimer;
 class QToolButton;
 
+// Post-capture time-lapse re-processing dialog (Session -> Re-sharpen
+// time-lapse...). Lets the observer compare synchronized Before/After previews
+// while adjusting optional stack re-alignment, linear sharpening, cloud
+// brightness levelling, quality filtering with per-stack overrides, and
+// MP4/GIF/SER video assembly on a background worker thread without modifying
+// the original raw FITS stacks.
 class ResharpenDialog : public QDialog
 {
     Q_OBJECT

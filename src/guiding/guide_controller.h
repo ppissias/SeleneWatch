@@ -29,6 +29,7 @@
 class GuideController
 {
 public:
+    // Tolerance, gain, pulse limits, and safety thresholds for GuideController.
     struct Settings
     {
         double tolerancePixels{10};

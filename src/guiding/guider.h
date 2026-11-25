@@ -69,6 +69,8 @@ struct GuideStatus
     std::string trackingStopResult;
 };
 
+// Value snapshot of the guider thread's combined feature-lock and mount-guiding
+// state, copied to the window whenever status changes.
 struct GuiderStatus
 {
     LockStatus lock;

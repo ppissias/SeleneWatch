@@ -34,6 +34,8 @@ struct SkyExposureState
     std::optional<std::chrono::steady_clock::time_point> lastChange;
 };
 
+// One exposure or gain step recommended by decideSkyExposure() along with the
+// plain-text reason logged in session.txt.
 struct SkyExposureChange
 {
     double exposureUs{0};

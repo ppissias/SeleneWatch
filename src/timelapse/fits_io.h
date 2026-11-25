@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+// FITS header metadata written beside each 32-bit float time-lapse stack
+// (observation timestamps, camera/site provenance, alignment shift/rotation,
+// and stacking quality).
 struct FitsMetadata
 {
     std::chrono::system_clock::time_point dateObs{};

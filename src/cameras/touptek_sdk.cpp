@@ -102,6 +102,9 @@ constexpr unsigned fourCC(char a, char b, char c, char d)
 
 std::string utf8(const wchar_t* text) { return QString::fromWCharArray(text).toStdString(); }
 
+// Runtime-loaded ToupTek SDK adapter behind ToupTekApi. The only translation
+// unit that includes toupcam.h; loads the observer's x64 toupcam.dll
+// dynamically via vendor_runtime.
 class ToupTekSdk final : public ToupTekApi
 {
 public:

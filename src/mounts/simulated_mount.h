@@ -24,6 +24,7 @@ class SimulatedPointing
 public:
     using Clock = std::chrono::steady_clock;
 
+    // Drift rate, guide speed, backlash, orientation, and fault injection options.
     struct Settings
     {
         // How the Moon drifts against the mount's tracking, arcseconds per second.

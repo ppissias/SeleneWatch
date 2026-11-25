@@ -35,6 +35,8 @@ enum class TimelapseWork { Idle, Capturing, Stacking };
 // Coverage state for the optional lunar transit watch, published by Session.
 enum class TransitWatchState { Off, Watching, Saving, Capturing, Stacking, Finished };
 
+// Periodic value snapshot of an active or finalizing TimelapseSession, copied
+// to the window for progress bars, telemetry labels, warnings, and thumbnails.
 struct TimelapseStatus
 {
     bool active{false};
@@ -69,6 +71,8 @@ struct TimelapseStatus
     TransitWatchState transitWatch{TransitWatchState::Off};
 };
 
+// Final summary delivered once TimelapseSession finishes stacking and video
+// export (including stop reason, stack counts, export paths, and transit folder).
 struct TimelapseFinishResult
 {
     bool ok{false};
@@ -96,6 +100,8 @@ struct TimelapseFinishResult
 class TimelapseSession
 {
 public:
+    // Immutable session configuration and notification callbacks supplied when
+    // constructing a TimelapseSession.
     struct Config
     {
         QString timelapsesRoot;

@@ -87,6 +87,9 @@ struct VideoToneSettings
     [[nodiscard]] bool operator==(const VideoToneSettings&) const = default;
 };
 
+// Complete observer settings for one lunar or planetary time-lapse run:
+// burst cadence, frame selection, lunar anchor, stop condition, raw SER bursts,
+// optional transit watch between bursts, sharpening, and video export options.
 struct TimelapseSettings
 {
     static constexpr int kMaxFramesCap = 200;
@@ -122,6 +125,8 @@ bool loadProfileJson(const QString& path, SharpeningSettings& sharpening,
     VideoToneSettings& video, QString& error,
     std::optional<QRect>* outCommonOverlap = nullptr);
 
+// Named sharpening and video-tone preset persisted in QSettings for reuse in
+// TimelapsePanel and ResharpenDialog.
 struct SavedSharpeningProfile
 {
     QString name;

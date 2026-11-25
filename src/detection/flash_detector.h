@@ -12,6 +12,8 @@
 // Subpixel uses bilinear interpolation (per-channel 2-pixel lattice on Bayer).
 enum class ShiftMode { Off, Integer, Subpixel };
 
+// Per-frame stabilization shift, estimator state, and visual lock bounds passed
+// from FrameStabilizer into FlashDetector::observe() without altering raw pixels.
 struct FrameShift
 {
     ShiftMode mode{ShiftMode::Off};

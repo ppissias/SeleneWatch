@@ -26,6 +26,8 @@ inline constexpr int kCurrentSettingsVersion = 1;
 // True when path appears to sit inside OneDrive, Dropbox, Google Drive, or iCloud Drive.
 [[nodiscard]] bool isCloudSyncedPath(const QString& path);
 
+// Validation outcome for an output root folder: drive presence, writability,
+// free disk space, and whether the Disk reserve safety margin is satisfied.
 struct OutputFolderCheck
 {
     bool ok{false};

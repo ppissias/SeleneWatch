@@ -52,6 +52,8 @@ struct PreparedBurstFrame
     double targetBrightness{0};
 };
 
+// Outcome of aligning and sigma-clipping one burst of frames into a linear
+// 32-bit float FITS stack, together with its valid overlap rectangle.
 struct BurstStackResult
 {
     FitsImage stack;
@@ -67,6 +69,8 @@ enum class StackRealignMode
     AutoMultiPoint
 };
 
+// Outcome of aligning or re-aligning a stack onto the session reference stack:
+// warped FITS image, measured shift/rotation, valid overlap, and RANSAC inliers.
 struct SessionAlignResult
 {
     FitsImage aligned;

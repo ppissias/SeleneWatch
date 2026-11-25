@@ -20,6 +20,7 @@
 
 enum class ReportLinkAction { Open, Show };
 
+// Validated local file target and action parsed from a selenewatch: report link.
 struct ReportLinkTarget
 {
     ReportLinkAction action{ReportLinkAction::Open};

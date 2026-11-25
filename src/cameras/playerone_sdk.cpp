@@ -107,6 +107,9 @@ std::string text(const char* buffer, size_t size)
     return {buffer, length};
 }
 
+// Runtime-loaded Player One SDK adapter behind PlayerOneApi. The only
+// translation unit that includes PlayerOneCamera.h; loads the observer's x64
+// PlayerOneCamera.dll dynamically via vendor_runtime.
 class PlayerOneSdk final : public PlayerOneApi
 {
 public:

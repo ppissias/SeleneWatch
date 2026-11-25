@@ -66,6 +66,8 @@ struct ActivityRun
     double movedPixels{0};
 };
 
+// Objective classification (group + plain-text measurements) produced by
+// describeClip() / describeEvent() and written into event.txt and report.html.
 struct ClipDescription
 {
     ClipGroup group{ClipGroup::Other};
