@@ -32,6 +32,7 @@ For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md).
 4. [Shadows crossing the Moon](#4-shadows-crossing-the-moon)
 5. [Impact flashes on the Moon's dark side](#5-impact-flashes-on-the-moons-dark-side)
 6. [Feature lock and guiding](#6-feature-lock-and-guiding)
+   - [6.1 How SeleneWatch tracks the Moon, Sun and planets](#61-how-selenewatch-tracks-the-moon-sun-and-planets)
 7. [Recording every frame](#7-recording-every-frame)
 8. [The report and the saved files](#8-the-report-and-the-saved-files)
 9. [Test signals](#9-test-signals)
@@ -482,7 +483,7 @@ For the Moon and the planets. Even with the mount tracking, the Moon drifts slow
 
 ### Step by step
 
-1. **Lock on a feature.** In Preview, open **View → Guiding**. **Draw lock box** and drag a box around a crater or other detail with contrast in both directions (not a straight limb or a flat sea), or click a point and **Lock at selection**. A planet: put the box around the whole disk, with some dark sky. The box turns amber when the feature is briefly lost (clouds, a bump), and the lock searches for it for **Lock lost after** (2 minutes unless you change it).
+1. **Lock on a feature.** In Preview, open **View → Guiding**. **Draw lock box** and drag a box around a crater or other detail with contrast in both directions (not a straight limb or a flat sea), or click a point and **Lock at selection**. A planet (or a full-disk Moon or Sun): put the box around the whole disk with some dark sky; SeleneWatch automatically tracks it by **Disk centroid** rather than a fixed crater template ([section 6.1](#61-how-selenewatch-tracks-the-moon-sun-and-planets)). The box turns amber when the lock is briefly lost (clouds, a bump), and searches for it for **Lock lost after** (2 minutes unless you change it).
 2. **Connect the mount.** Under **Mount**, choose **ASCOM telescope**, **Choose…** your driver, and **Connect**. Make sure tracking is on in the mount's driver: SeleneWatch never turns it on.
 3. **Calibrate.** With the lock held, press **Calibrate** (about a minute). SeleneWatch measures how the field drifts on its own, then moves the mount a little west, east, north and south, and learns which way each axis moves the image. Calibrate again after a meridian flip.
 4. **Start guiding.** **Tolerance** (3% of the frame's shorter side) is how far the feature may drift before a correction; **Give up at** (15%) is how far before guiding gives up. **Aggressiveness** and **Max pulse** set how strongly it corrects.
@@ -499,6 +500,36 @@ For the Moon and the planets. Even with the mount tracking, the Moon drifts slow
 | **Tolerance**, **Give up at** | When corrections start (3%), and when guiding gives up (15%) |
 | **Aggressiveness**, **Max pulse** | The share of the drift removed each time (85%), and the longest correction (3 s) |
 | **Lock lost after** | How long a lost feature is searched for (2 min) |
+
+### 6.1 How SeleneWatch tracks the Moon, Sun and planets
+
+SeleneWatch aligns images in three places: **Guiding**, **Live detection stabilization** (**Stabilize detection against drift/shake** in the Detection panel), and **Time-lapse stacking**. Guiding and live detection stabilization share the same tracking engine and automatically pick between two methods based on what is inside the frame:
+
+- **Disk centroid** — used when an isolated bright disk sits inside dark sky borders (planets such as Jupiter, Mars or Saturn, or a wide-field full Moon or full Sun). It tracks the geometric edge of the disk using a clipped-limb brightness weight, so planetary rotation (such as Jupiter turning over several hours), cloud-band changes, interior impact flashes and small shadow transits do not pull the centre away.
+- **Feature Lock** — used when lunar terrain or craters fill the frame or the lock box. It matches the 2D crater pattern inside the lock box to sub-pixel precision.
+
+| Task | How it tracks | Automatic or chosen by you? |
+| --- | --- | --- |
+| **Guiding** (mount corrections) | **Disk centroid** if your lock box encloses an isolated bright disk with dark sky borders; **Feature Lock** if your lock box lies on lunar terrain | Automatic from the box you draw |
+| **Live detection stabilization** (optional, off by default) | **Disk centroid** on an isolated bright disk (even if you drew a guiding box around the planet); **Feature Lock** using your guiding box if it sits on lunar terrain, or an auto-picked crater patch if no lock box is set | Automatic from the frame and guiding box |
+| **Time-lapse stacking** (burst alignment and video) | **Moon** aligns stacks by shift and rotation (with your lunar anchor); **Planet** centres each stack on the planet's disk without rotating | Chosen by you (**Target preset** in Time-lapse) |
+
+**Drawing a guiding box on a planet vs. the Moon.** When guiding on Jupiter, Mars or Saturn, draw the lock box around the whole planet with dark sky around all four sides of the box. Both Guiding and Live detection stabilization recognize the isolated disk and track it by **Disk centroid**, while Time-lapse follows your **Planet** preset. When watching lunar craters or earthshine, draw the box on craters inside the lunar surface: both Guiding and Live detection stabilization use **Feature Lock** on your chosen crater.
+
+**Multi-hour slow field rotation and changing lunar shadows.**
+- **Disk centroid** is inherently unaffected by field rotation or planetary rotation over any session length.
+- **Live detection stabilization** refreshes its **Feature Lock** reference periodically (while keeping the exact sub-pixel offset) so slow polar-alignment rotation and changing shadows over hours never break lock.
+- **Guiding** with **Feature Lock** leaves its template untouched while correlation stays strong (85% or higher). If slow field rotation or changing shadows gently lower correlation into the 72–85% band for at least 5 seconds while locked, Guiding automatically refreshes the template (at most once every 5 minutes) while preserving the exact sub-pixel offset, preventing lock decay without introducing random-walk drift.
+
+**Safety when lock is lost.**
+- **Guiding** rejects a **Disk centroid** frame if bright disk pixels touch the edge of the search window or frame (preventing a clipped planet from sending a wrong guide pulse) or if passing clouds change the visible disk area sharply, handing over to the normal **Searching** / **Lock lost** safety rules.
+- **Live detection stabilization** holds the last valid shift for up to 0.5 s during brief dips (such as a dark shadow crossing the lock region). If lock stays lost longer (clouds or a slew), it cleanly resets only the detector reference—keeping the pre-event buffer and any open clip intact—logs `registration_lost` in `session.txt`, and continues running normal unstabilized detection until 3 consistent matches re-lock cleanly. Raw frames in `event.ser` are always saved untouched.
+
+**Where to see the active mode.**
+- **Guiding panel:** shows **Locked (Disk centroid)** or **Locked (Feature Lock)**.
+- **Detection panel** (below **Stabilize detection against drift/shake**): shows what stabilization chose and why—`Disk centroid (isolated disk)`, `Feature Lock (using guiding box)`, `Feature Lock (auto crater patch)`, `holding last shift`, or `lost — running unstabilized`—along with the live shift in pixels.
+- **Time-lapse panel** (below **Also watch for transits**): summarizes both the stacking preset (**Moon** shift & rotation or **Planet** disk-centred) and whether between-burst shadow watching is stabilized or unstabilized.
+- **Main window status bar:** shows the active lock method beside `Lock:` (e.g. `Lock: Disk centroid, dx …`) and, whenever detection stabilization is ticked, a compact `Stab: Disk centroid` / `Stab: Feature Lock` / `Stab: lost (unstabilized)` readout so you can check both even when docks are collapsed.
 
 ---
 

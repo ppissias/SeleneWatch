@@ -908,6 +908,143 @@ private slots:
         QVERIFY(QString::fromUtf8(second.readAll()).contains("mount_pulses_in_clip: 0"));
     }
 
+    // Harmonised FeatureLock + DiskCentroid: a guiding box around an isolated
+    // rotating planet selects DiskCentroid, tracks sub-pixel shifts despite
+    // surface rotation, and rejects edge-clipped or cloud-dimmed frames.
+    void diskCentroidTracksRotatingPlanetAndRejectsClippedEdgeAndClouds()
+    {
+        auto renderPlanet = [](double cx, double cy, double spotAngleDeg, double cloudHalfScale = 1.0, uint64_t idx = 0) {
+            auto frame = std::make_shared<Frame>();
+            frame->width = 240; frame->height = 180;
+            frame->frameIndex = idx;
+            frame->timestamp = at(static_cast<double>(idx) * 0.25);
+            frame->data.resize(240 * 180);
+            const double rad = spotAngleDeg * 3.14159265358979323846 / 180.0;
+            const double spotX = 12.0 * std::cos(rad);
+            const double spotY = 5.0 * std::sin(rad);
+            for (int y = 0; y < 180; ++y)
+            {
+                for (int x = 0; x < 240; ++x)
+                {
+                    const double dx = x - cx, dy = y - cy;
+                    const double r = std::hypot(dx, dy);
+                    double val = 6.0;
+                    if (r < 32.0)
+                    {
+                        const double limb = 1.0 / (1.0 + std::exp((r - 26.0) / 1.2));
+                        double surf = 180.0 - 25.0 * std::cos(dy * 0.35);
+                        if (std::hypot(dx - spotX, dy - spotY) < 6.0) surf -= 60.0;
+                        if (dx < 0.0) surf *= cloudHalfScale;
+                        val += limb * std::max(0.0, surf);
+                    }
+                    frame->data[static_cast<size_t>(y) * 240 + x] = static_cast<uint8_t>(std::clamp(std::lround(val), 0L, 255L));
+                }
+            }
+            return frame;
+        };
+
+        const auto f0 = renderPlanet(120.0, 90.0, 0.0, 1.0, 0);
+        const LockRegion planetBox{76, 46, 88, 88};
+        std::string refusal;
+        const auto lock = FeatureLock::take(*f0, planetBox, refusal);
+        QVERIFY2(lock.has_value(), refusal.c_str());
+        QCOMPARE(lock->method(), LockMethod::DiskCentroid);
+
+        // Planet shifts sub-pixel AND its surface feature rotates 90 degrees -> centroid stays exact.
+        const auto shifted = renderPlanet(123.4, 87.2, 90.0, 1.0, 1);
+        const LockMatch m = lock->find(*shifted, 0.0, 0.0, LockTracker::kTrackRadius);
+        QVERIFY2(m.valid, m.reason.c_str());
+        QVERIFY2(std::abs(m.dx - 3.4) < 0.15 && std::abs(m.dy + 2.8) < 0.15,
+            qPrintable(QString("measured dx=%1 dy=%2").arg(m.dx).arg(m.dy)));
+
+        // Planet drifts onto the frame edge -> edge-clipping guard rejects match.
+        const auto clipped = renderPlanet(18.0, 90.0, 120.0, 1.0, 2);
+        const LockMatch mClipped = lock->find(*clipped, -102.0, 0.0, LockTracker::kTrackRadius);
+        QVERIFY(!mClipped.valid);
+        QVERIFY2(mClipped.reason.find("clipped") != std::string::npos || mClipped.reason.find("border") != std::string::npos,
+            mClipped.reason.c_str());
+
+        // Passing cloud obscures half the planet -> area-change guard rejects match.
+        const auto cloudy = renderPlanet(120.0, 90.0, 45.0, 0.05, 3);
+        const LockMatch mCloudy = lock->find(*cloudy, 0.0, 0.0, LockTracker::kTrackRadius);
+        QVERIFY(!mCloudy.valid);
+        QVERIFY2(mCloudy.reason.find("area") != std::string::npos, mCloudy.reason.c_str());
+    }
+
+    // Multi-hour lunar guiding: LockTracker refreshes its Feature Lock template
+    // only after sustained gentle decay in [0.72, 0.85), preserving sub-pixel offset.
+    void lockTrackerRefreshesTemplateOnGentleDecay()
+    {
+        auto renderSceneWithNoise = [](double shiftX, double shiftY, double extraNoiseSigma, double sec, uint64_t idx) {
+            Render r{.shiftX = shiftX, .shiftY = shiftY, .noiseSeed = static_cast<uint32_t>(idx) + 17, .noiseSigma = extraNoiseSigma};
+            return render(r, sec, idx);
+        };
+
+        LockTracker tracker;
+        const auto f0 = renderSceneWithNoise(0.0, 0.0, 1.0, 0.0, 0);
+        QVERIFY(tracker.lock(*f0, kRegion));
+        QCOMPARE(tracker.status().method, LockMethod::FeatureLock);
+        QCOMPARE(tracker.status().templateRefreshes, 0);
+
+        // Healthy score (>= 0.85) over 8 seconds triggers zero refreshes.
+        for (int i = 1; i <= 32; ++i)
+            tracker.step(*renderSceneWithNoise(1.5, -0.5, 1.0, i * 0.25, static_cast<uint64_t>(i)));
+        QCOMPARE(tracker.status().templateRefreshes, 0);
+
+        // Simulate gentle long-term appearance drift (changing lunar shadow angle):
+        // blend an orthogonal shifted-with-scene texture of amplitude 0.72 so NCC sits
+        // steadily near 1/sqrt(1 + 0.72^2) ~= 0.81 (inside [0.72, 0.85)) for > 5 s.
+        auto renderDrifted = [&](double shiftX, double shiftY, double sec, uint64_t idx) {
+            Frame f = *renderSceneWithNoise(shiftX, shiftY, 1.0, sec, idx);
+            for (int y = 0; y < f.height; ++y)
+                for (int x = 0; x < f.width; ++x)
+                {
+                    const size_t p = static_cast<size_t>(y) * f.width + x;
+                    const double drift = 0.72 * (brightness(x - shiftX + 70.0, y - shiftY + 55.0) - 100.0);
+                    f.data[p] = static_cast<uint8_t>(std::clamp(std::lround(f.data[p] + drift), 0L, 255L));
+                }
+            return f;
+        };
+
+        int refreshesAfterDecay = 0;
+        double dxBeforeRefresh = 0.0;
+        double dyBeforeRefresh = 0.0;
+        double dxAtRefresh = 0.0;
+        double dyAtRefresh = 0.0;
+        for (int i = 33; i <= 70; ++i)
+        {
+            const int prevRefreshes = tracker.status().templateRefreshes;
+            const double prevDx = tracker.status().foundDx;
+            const double prevDy = tracker.status().foundDy;
+            tracker.step(renderDrifted(2.2, -1.1, i * 0.25, static_cast<uint64_t>(i)));
+            refreshesAfterDecay = tracker.status().templateRefreshes;
+            if (prevRefreshes == 0 && refreshesAfterDecay == 1)
+            {
+                dxBeforeRefresh = prevDx;
+                dyBeforeRefresh = prevDy;
+                dxAtRefresh = tracker.status().foundDx;
+                dyAtRefresh = tracker.status().foundDy;
+            }
+        }
+        QCOMPARE(refreshesAfterDecay, 1);
+        QCOMPARE(tracker.status().state, LockState::Locked);
+        // Zero jump across the template refresh, and score recovers back near 1.0.
+        QVERIFY2(std::abs(dxAtRefresh - dxBeforeRefresh) < 0.15 && std::abs(dyAtRefresh - dyBeforeRefresh) < 0.15,
+            qPrintable(QString("jump across refresh: before=(%1,%2) at=(%3,%4)")
+                .arg(dxBeforeRefresh).arg(dyBeforeRefresh).arg(dxAtRefresh).arg(dyAtRefresh)));
+        QVERIFY(tracker.status().lastMatch.has_value());
+        QVERIFY2(tracker.status().lastMatch->score > 0.95,
+            qPrintable(QString("score after refresh=%1").arg(tracker.status().lastMatch->score)));
+
+        // Subsequent shift (+1.5, +0.8) after refresh is tracked accurately in the original frame.
+        tracker.step(renderDrifted(3.7, -0.3, 71 * 0.25, 71));
+        QCOMPARE(tracker.status().templateRefreshes, 1);
+        QVERIFY2(std::abs((tracker.status().foundDx - dxAtRefresh) - 1.5) < 0.15
+                && std::abs((tracker.status().foundDy - dyAtRefresh) - 0.8) < 0.15,
+            qPrintable(QString("post-refresh delta=(%1,%2), wanted=(1.5,0.8)")
+                .arg(tracker.status().foundDx - dxAtRefresh).arg(tracker.status().foundDy - dyAtRefresh)));
+    }
+
 private:
     // A stepped simulation: the simulated mount and pointing, and an
     // estimate built the way the tracker builds it (median of the matches

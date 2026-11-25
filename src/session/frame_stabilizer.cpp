@@ -31,141 +31,6 @@ inline float readPixel(const Frame& frame, int x, int y)
     return 0.0f;
 }
 
-double percentile(std::vector<double> values, double p)
-{
-    if (values.empty()) return 0.0;
-    const size_t idx = std::min(values.size() - 1,
-        static_cast<size_t>(std::floor(p * static_cast<double>(values.size() - 1))));
-    std::nth_element(values.begin(), values.begin() + static_cast<ptrdiff_t>(idx), values.end());
-    return values[idx];
-}
-
-// True when an isolated bright body (planet, full Moon/Sun) sits inside dark
-// sky borders within the given rectangle rather than filling its edges.
-bool rectContainsIsolatedDisk(const Frame& frame, int x0, int y0, int w, int h)
-{
-    x0 = std::clamp(x0, 0, frame.width);
-    y0 = std::clamp(y0, 0, frame.height);
-    const int x1 = std::clamp(x0 + w, x0, frame.width);
-    const int y1 = std::clamp(y0 + h, y0, frame.height);
-    const int rw = x1 - x0;
-    const int rh = y1 - y0;
-    if (rw < 32 || rh < 32) return false;
-
-    const int ring = std::min(4, std::min(rw, rh) / 8);
-    std::vector<double> border;
-    border.reserve(static_cast<size_t>(rw + rh) * 4);
-    for (int y = y0; y < y1; y += 2)
-    {
-        for (int x = x0; x < x1; x += 2)
-        {
-            if (x < x0 + ring || x >= x1 - ring || y < y0 + ring || y >= y1 - ring)
-                border.push_back(readPixel(frame, x, y));
-        }
-    }
-    std::vector<double> interior;
-    const int step = std::max(2, std::min(rw, rh) / 64);
-    for (int y = y0 + ring; y < y1 - ring; y += step)
-        for (int x = x0 + ring; x < x1 - ring; x += step)
-            interior.push_back(readPixel(frame, x, y));
-    if (border.empty() || interior.empty()) return false;
-
-    const double bg = percentile(border, 0.50);
-    const double borderP95 = percentile(border, 0.95);
-    const double bodyP995 = percentile(interior, 0.995);
-    const double maxCode = frame.format == PixelFormat::Mono16 ? ((1 << frame.significantBits) - 1) : 255.0;
-    if (bodyP995 - bg < std::max(12.0, 0.04 * maxCode)) return false;
-    if (borderP95 > bg + 0.25 * (bodyP995 - bg)) return false;
-
-    const double thresh = bg + 0.25 * (bodyP995 - bg);
-    size_t bright = 0;
-    for (double v : interior)
-        if (v > thresh) ++bright;
-    const double share = static_cast<double>(bright) / static_cast<double>(interior.size());
-    return share >= 0.004 && share <= 0.78;
-}
-
-bool isIsolatedDisk(const Frame& frame)
-{
-    return rectContainsIsolatedDisk(frame, 0, 0, frame.width, frame.height);
-}
-
-struct CentroidSample
-{
-    bool valid{false};
-    double cx{0}, cy{0}, weight{0};
-    std::string reason;
-};
-
-CentroidSample sampleDiskCentroid(const Frame& frame)
-{
-    CentroidSample c;
-    const bool bayer = frame.bayer != BayerPattern::None && frame.format != PixelFormat::RGB888;
-    const int stride = (frame.width > 640 || frame.height > 640 || bayer) ? 2 : 1;
-
-    std::vector<double> border;
-    border.reserve(static_cast<size_t>(frame.width + frame.height) * 2 / stride + 16);
-    const int ring = std::min(4, std::min(frame.width, frame.height) / 8);
-    for (int x = 0; x < frame.width; x += stride * 2)
-    {
-        border.push_back(readPixel(frame, x, 0));
-        border.push_back(readPixel(frame, x, frame.height - 1));
-    }
-    for (int y = ring; y < frame.height - ring; y += stride * 2)
-    {
-        border.push_back(readPixel(frame, 0, y));
-        border.push_back(readPixel(frame, frame.width - 1, y));
-    }
-    const double bg = percentile(border, 0.50);
-
-    std::vector<double> grid;
-    const int gStep = std::max(stride, std::min(frame.width, frame.height) / 48);
-    grid.reserve(2500);
-    for (int y = 0; y < frame.height; y += gStep)
-        for (int x = 0; x < frame.width; x += gStep)
-            grid.push_back(readPixel(frame, x, y));
-    const double hi = percentile(grid, 0.995);
-    const double maxCode = frame.format == PixelFormat::Mono16 ? ((1 << frame.significantBits) - 1) : 255.0;
-    if (hi - bg < std::max(12.0, 0.04 * maxCode))
-    {
-        c.reason = "low_contrast";
-        return c;
-    }
-
-    // Clipped limb weight keeps the centroid anchored on the geometric disk edge
-    // and insensitive to interior flashes or small dark transits.
-    const double thresh = bg + 0.25 * (hi - bg);
-    const double invRamp = 1.0 / std::max(4.0, 0.20 * (hi - thresh));
-    double sumW = 0.0, sumWX = 0.0, sumWY = 0.0;
-    for (int y = 0; y < frame.height; y += stride)
-    {
-        for (int x = 0; x < frame.width; x += stride)
-        {
-            const double v = readPixel(frame, x, y);
-            if (v <= thresh) continue;
-            const double w = std::min(1.0, (v - thresh) * invRamp);
-            sumW += w;
-            sumWX += w * x;
-            sumWY += w * y;
-        }
-    }
-    if (sumW < 12.0)
-    {
-        c.reason = "target_missing";
-        return c;
-    }
-    c.cx = sumWX / sumW;
-    c.cy = sumWY / sumW;
-    c.weight = sumW;
-    if (c.cx < 4.0 || c.cx > frame.width - 5.0 || c.cy < 4.0 || c.cy > frame.height - 5.0)
-    {
-        c.reason = "target_on_border";
-        return c;
-    }
-    c.valid = true;
-    return c;
-}
-
 std::string sanitizeReason(const std::string& raw)
 {
     if (raw.empty()) return "lock_lost";
@@ -183,6 +48,7 @@ void FrameStabilizer::reset()
     width_ = height_ = bits_ = 0;
     state_ = StabilizationState::Off;
     method_ = StabilizationMethod::None;
+    source_ = StabilizationSource::None;
     initialized_ = false;
     refCx_ = refCy_ = refWeight_ = 0.0;
     lock_.reset();
@@ -204,12 +70,13 @@ bool FrameStabilizer::sameLayout(const Frame& frame) const
 
 bool FrameStabilizer::initDiskCentroid(const Frame& frame)
 {
-    const auto c = sampleDiskCentroid(frame);
+    const DiskCentroidSample c = FeatureLock::measureDiskCentroid(frame, {0, 0, frame.width, frame.height});
     if (!c.valid) return false;
     refCx_ = c.cx;
     refCy_ = c.cy;
     refWeight_ = c.weight;
     method_ = StabilizationMethod::DiskCentroid;
+    source_ = StabilizationSource::IsolatedDisk;
     lock_.reset();
     return true;
 }
@@ -220,13 +87,14 @@ bool FrameStabilizer::initFeatureLock(const Frame& frame, std::optional<LockRegi
     if (preferredLockRegion && preferredLockRegion->width >= FeatureLock::kMinTemplateSide
         && preferredLockRegion->height >= FeatureLock::kMinTemplateSide)
     {
-        auto locked = FeatureLock::take(frame, *preferredLockRegion, refusal);
+        auto locked = FeatureLock::take(frame, *preferredLockRegion, refusal, false);
         if (locked)
         {
             lock_ = std::move(locked);
             anchorDx_ = 0.0;
             anchorDy_ = 0.0;
             method_ = StabilizationMethod::FeatureLock;
+            source_ = StabilizationSource::GuidingBox;
             preferredApplied_ = true;
             appliedPreferred_ = *preferredLockRegion;
             return true;
@@ -277,13 +145,14 @@ bool FrameStabilizer::initFeatureLock(const Frame& frame, std::optional<LockRegi
 
     for (const auto& c : candidates)
     {
-        auto locked = FeatureLock::take(frame, c.r, refusal);
+        auto locked = FeatureLock::take(frame, c.r, refusal, false);
         if (locked)
         {
             lock_ = std::move(locked);
             anchorDx_ = 0.0;
             anchorDy_ = 0.0;
             method_ = StabilizationMethod::FeatureLock;
+            source_ = StabilizationSource::AutoPatch;
             preferredApplied_ = false;
             return true;
         }
@@ -295,16 +164,14 @@ bool FrameStabilizer::initEstimator(const Frame& frame, std::optional<LockRegion
 {
     initialized_ = false;
     method_ = StabilizationMethod::None;
-    const bool isolatedFrame = isIsolatedDisk(frame);
-    // If the observer drew a guiding box around an isolated planet/disk (dark
-    // sky borders inside the box as well), DiskCentroid is faster and immune to
-    // planetary rotation. If the box lies on lunar terrain (surface touching
-    // its edges), honour the observer's chosen Feature Lock crater patch.
+    source_ = StabilizationSource::None;
+    const bool isolatedFrame = FeatureLock::isIsolatedDisk(frame);
+    // Harmonised with FeatureLock: a guiding box drawn around an isolated
+    // planet/disk uses DiskCentroid (rotation-invariant); a guiding box on
+    // lunar terrain uses Feature Lock on the observer's chosen crater patch.
     if (preferredLockRegion)
     {
-        const bool boxAroundDisk = isolatedFrame
-            && rectContainsIsolatedDisk(frame, preferredLockRegion->x, preferredLockRegion->y,
-                preferredLockRegion->width, preferredLockRegion->height);
+        const bool boxAroundDisk = isolatedFrame && FeatureLock::isIsolatedDisk(frame, *preferredLockRegion);
         if (boxAroundDisk && initDiskCentroid(frame))
         {
             preferredApplied_ = true;
@@ -318,13 +185,11 @@ bool FrameStabilizer::initEstimator(const Frame& frame, std::optional<LockRegion
             return true;
         }
     }
-    // Without a terrain lock box: isolated bright disk -> DiskCentroid.
     if (isolatedFrame && initDiskCentroid(frame))
     {
         initialized_ = true;
         return true;
     }
-    // Extended lunar surface without a lock box -> auto-picked FeatureLock patch.
     if (initFeatureLock(frame, std::nullopt))
     {
         initialized_ = true;
@@ -337,11 +202,11 @@ FrameStabilizer::Measurement FrameStabilizer::measureDiskCentroid(const Frame& f
 {
     const auto t0 = std::chrono::steady_clock::now();
     Measurement out;
-    const auto c = sampleDiskCentroid(frame);
+    const DiskCentroidSample c = FeatureLock::measureDiskCentroid(frame, {0, 0, frame.width, frame.height});
     out.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     if (!c.valid) { out.reason = c.reason; return out; }
     const double areaRatio = refWeight_ > 0.0 ? c.weight / refWeight_ : 0.0;
-    if (areaRatio < 0.55 || areaRatio > 1.65)
+    if (areaRatio < 0.65 || areaRatio > 1.45)
     {
         out.reason = "disk_area_changed";
         out.score = std::max(0.0, 1.0 - std::abs(1.0 - areaRatio));
@@ -389,7 +254,7 @@ bool FrameStabilizer::refreshFeatureLock(const Frame& frame, double currentDx, d
     if (next.x < 16 || next.y < 16 || next.x + next.width > frame.width - 16 || next.y + next.height > frame.height - 16)
         return false;
     std::string refusal;
-    auto fresh = FeatureLock::take(frame, next, refusal);
+    auto fresh = FeatureLock::take(frame, next, refusal, false);
     if (!fresh) return false;
     lock_ = std::move(fresh);
     anchorDx_ = currentDx;
@@ -399,9 +264,7 @@ bool FrameStabilizer::refreshFeatureLock(const Frame& frame, double currentDx, d
 
 void FrameStabilizer::adoptPreferredRegion(const Frame& frame, LockRegion region, StepResult& out)
 {
-    // Guiding box drawn around an isolated planet/disk: keep/use DiskCentroid
-    // so planetary rotation never degrades stabilization.
-    if (isIsolatedDisk(frame) && rectContainsIsolatedDisk(frame, region.x, region.y, region.width, region.height))
+    if (FeatureLock::isIsolatedDisk(frame) && FeatureLock::isIsolatedDisk(frame, region))
     {
         preferredApplied_ = true;
         appliedPreferred_ = region;
@@ -428,17 +291,17 @@ void FrameStabilizer::adoptPreferredRegion(const Frame& frame, LockRegion region
     }
 
     std::string refusal;
-    auto fresh = FeatureLock::take(frame, region, refusal);
+    auto fresh = FeatureLock::take(frame, region, refusal, false);
     if (!fresh) return;
     lock_ = std::move(fresh);
     method_ = StabilizationMethod::FeatureLock;
+    source_ = StabilizationSource::GuidingBox;
     initialized_ = true;
     preferredApplied_ = true;
     appliedPreferred_ = region;
     sinceRefreshSec_ = 0.0;
     if (state_ == StabilizationState::Locked || state_ == StabilizationState::GraceHold)
     {
-        // Anchor-preserving handoff: keep the detector's reference untouched with zero jump.
         anchorDx_ = lastDx_;
         anchorDy_ = lastDy_;
     }
@@ -469,19 +332,18 @@ FrameStabilizer::StepResult FrameStabilizer::step(
         if (initEstimator(frame, preferredLockRegion))
         {
             state_ = StabilizationState::Locked;
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, 0.0};
+            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0};
             out.logEvent = std::string("registration_locked method=") + stabilizationMethodName(method_);
         }
         else
         {
             state_ = StabilizationState::LostFallback;
-            out.shift = {ShiftMode::Off, 0.0, 0.0, state_, StabilizationMethod::None, 0.0};
+            out.shift = {ShiftMode::Off, 0.0, 0.0, state_, StabilizationMethod::None, StabilizationSource::None, 0.0};
             out.logEvent = "registration_lost reason=no_lockable_feature";
         }
         return out;
     }
 
-    // If the observer sets or moves a Feature Lock box while running, adopt it smoothly.
     const auto regionChanged = [&]() {
         if (!preferredLockRegion) return false;
         if (!preferredApplied_) return true;
@@ -493,7 +355,7 @@ FrameStabilizer::StepResult FrameStabilizer::step(
         adoptPreferredRegion(frame, *preferredLockRegion, out);
         if (out.resetDetector)
         {
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, 0.0};
+            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, 0.0};
             return out;
         }
     }
@@ -513,7 +375,6 @@ FrameStabilizer::StepResult FrameStabilizer::step(
             lastDy_ = m.dy;
             sinceRefreshSec_ += frameIntervalSec;
 
-            // Tier 3: in-place integer recenter when accumulated drift exceeds margin.
             if (std::abs(lastDx_) >= recenterMarginPx || std::abs(lastDy_) >= recenterMarginPx)
             {
                 const bool bayer = frame.bayer != BayerPattern::None && frame.format != PixelFormat::RGB888;
@@ -530,7 +391,6 @@ FrameStabilizer::StepResult FrameStabilizer::step(
                 }
             }
 
-            // Periodic anchor-preserving template refresh for multi-hour rotation / illumination drift.
             if (method_ == StabilizationMethod::FeatureLock
                 && (sinceRefreshSec_ >= templateRefreshSeconds
                     || (m.score >= 0.72 && m.score < 0.85 && sinceRefreshSec_ >= 5.0)))
@@ -538,30 +398,27 @@ FrameStabilizer::StepResult FrameStabilizer::step(
                 if (refreshFeatureLock(frame, lastDx_, lastDy_)) sinceRefreshSec_ = 0.0;
             }
 
-            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, m.elapsedMs};
+            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs};
             return out;
         }
 
-        // Tier 1: transient loss -> reject bad estimate and hold last valid (dx, dy).
         graceElapsedSec_ += frameIntervalSec;
         if (graceElapsedSec_ <= graceSeconds)
         {
             state_ = StabilizationState::GraceHold;
-            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, m.elapsedMs};
+            out.shift = {ShiftMode::Subpixel, lastDx_, lastDy_, state_, method_, source_, m.elapsedMs};
             return out;
         }
 
-        // Tier 2: sustained loss -> cleanly reset detector to unstabilized fallback.
         state_ = StabilizationState::LostFallback;
         reacquireStreak_ = 0;
         lastDx_ = lastDy_ = 0.0;
         out.resetDetector = true;
-        out.shift = {ShiftMode::Off, 0.0, 0.0, state_, method_, m.elapsedMs};
+        out.shift = {ShiftMode::Off, 0.0, 0.0, state_, method_, source_, m.elapsedMs};
         out.logEvent = "registration_lost reason=" + sanitizeReason(m.valid ? "step_too_large" : m.reason);
         return out;
     }
 
-    // LostFallback: attempt clean re-acquisition after consecutive consistent matches.
     if (!initialized_) initEstimator(frame, preferredLockRegion);
     if (initialized_)
     {
@@ -589,12 +446,12 @@ FrameStabilizer::StepResult FrameStabilizer::step(
             sinceRefreshSec_ = 0.0;
             reacquireStreak_ = 0;
             out.resetDetector = true;
-            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, m.elapsedMs};
+            out.shift = {ShiftMode::Subpixel, 0.0, 0.0, state_, method_, source_, m.elapsedMs};
             out.logEvent = std::string("registration_locked method=") + stabilizationMethodName(method_);
             return out;
         }
     }
 
-    out.shift = {ShiftMode::Off, 0.0, 0.0, StabilizationState::LostFallback, method_, m.elapsedMs};
+    out.shift = {ShiftMode::Off, 0.0, 0.0, StabilizationState::LostFallback, method_, source_, m.elapsedMs};
     return out;
 }

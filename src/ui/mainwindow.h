@@ -315,6 +315,7 @@ private:
     void updateStreamReadout();
     void updateCandidateReadout();
     void updateStatusLabel();
+    void updateStabilizeReadout(const DetectionSummary& summary);
     void updateFrameLabel(const Frame& frame);
     void updateBlipReadout();
 
@@ -498,6 +499,8 @@ private:
     QLabel* bufferLabel_{nullptr};
     QLabel* frameLabel_{nullptr};
     QLabel* modeLabel_{nullptr};
+    QFrame* stabilizeSeparator_{nullptr};
+    QLabel* stabilizeLabel_{nullptr};
     QTimer* bufferReadoutTimer_{nullptr};
     QPushButton* recordButton_{nullptr};
     // Whether the Record button is drawn as the red Stop button (Feature-33).

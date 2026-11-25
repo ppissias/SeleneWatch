@@ -6,6 +6,27 @@
 #include <string>
 #include <vector>
 
+// How FeatureLock tracks the target inside the lock box:
+// - FeatureLock: zero-mean normalised cross-correlation on craters/surface detail.
+// - DiskCentroid: clipped-limb centre-of-gravity centroid on an isolated bright
+//   disk surrounded by dark sky (planets, full Moon/Sun), immune to planetary rotation.
+enum class LockMethod { FeatureLock, DiskCentroid };
+
+[[nodiscard]] inline const char* lockMethodName(LockMethod method)
+{
+    return method == LockMethod::DiskCentroid ? "disk_centroid" : "feature_lock";
+}
+
+// One clipped-limb disk centroid measurement in native frame coordinates.
+struct DiskCentroidSample
+{
+    bool valid{false};
+    double cx{0}, cy{0};
+    double weight{0};
+    bool edgeClipped{false};
+    std::string reason;
+};
+
 // A rectangle in frame pixels, as the observer chose it.
 struct LockRegion
 {
@@ -65,19 +86,30 @@ public:
     static constexpr double kMinStructureRatio = 0.1;
     static constexpr double kMaxSaturatedFraction = 0.5;
 
-    // Takes the template from frame. Empty, with the reason in refusal, when
-    // the region is outside the frame, too small, saturated, too flat, or has
+    // Takes the lock from frame. Automatically uses DiskCentroid when both the
+    // frame and region show an isolated bright disk surrounded by dark sky
+    // (planets, full Moon/Sun) and allowDiskCentroid is true; otherwise takes a
+    // binned Feature Lock template. Empty, with the reason in refusal, when the
+    // region is outside the frame, too small, saturated, too flat, or has
     // structure in one direction only.
-    [[nodiscard]] static std::optional<FeatureLock> take(const Frame& frame, LockRegion region, std::string& refusal);
+    [[nodiscard]] static std::optional<FeatureLock> take(const Frame& frame, LockRegion region, std::string& refusal,
+        bool allowDiskCentroid = true);
+
+    // Shared isolated-disk check and clipped-limb centroid estimator, reused by
+    // both FeatureLock guiding and FrameStabilizer (one implementation).
+    [[nodiscard]] static bool isIsolatedDisk(const Frame& frame);
+    [[nodiscard]] static bool isIsolatedDisk(const Frame& frame, LockRegion region);
+    [[nodiscard]] static DiskCentroidSample measureDiskCentroid(const Frame& frame, LockRegion searchBox);
 
     // Searches within radiusPixels of the expected offset. The match is valid
     // when the score reaches kMinLockScore and the peak is not on the edge of
     // the search window (the window edge includes the frame edge).
     [[nodiscard]] LockMatch find(const Frame& frame, double expectedDx, double expectedDy, int radiusPixels) const;
 
-    // The region the template covers: the chosen one, trimmed to whole bins.
+    // The region the lock covers: the chosen one, trimmed to whole bins.
     [[nodiscard]] LockRegion region() const { return region_; }
     [[nodiscard]] int binning() const { return binning_; }
+    [[nodiscard]] LockMethod method() const { return method_; }
     [[nodiscard]] const LockQuality& quality() const { return quality_; }
 
     // True when frame has the layout the template was taken from.
@@ -86,6 +118,7 @@ public:
 private:
     FeatureLock() = default;
 
+    LockMethod method_{LockMethod::FeatureLock};
     LockRegion region_;
     int binning_{1};
     int templateWidth_{0}, templateHeight_{0};
@@ -95,5 +128,7 @@ private:
     // Template minus its mean, row by row, and the sum of its squares.
     std::vector<float> template_;
     double energy_{0};
+    // DiskCentroid reference anchor (native frame pixels and clipped weight).
+    double refCx_{0}, refCy_{0}, refWeight_{0};
     LockQuality quality_;
 };

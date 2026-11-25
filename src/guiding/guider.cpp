@@ -759,7 +759,8 @@ void Guider::logLock(const LockStatus& before, const LockStatus& after, bool loc
         if (after.state == LockState::Locked)
         {
             lines += time + " guide_lock" + frame
-                + QString(" region=%1,%2,%3,%4 binning=%5 contrast=%6 structure=%7 saturated=%8\n")
+                + QString(" method=%1 region=%2,%3,%4,%5 binning=%6 contrast=%7 structure=%8 saturated=%9\n")
+                      .arg(lockMethodName(after.method))
                       .arg(after.region.x).arg(after.region.y).arg(after.region.width).arg(after.region.height)
                       .arg(after.binning).arg(after.quality.contrast, 0, 'f', 1)
                       .arg(after.quality.structureRatio, 0, 'f', 3).arg(after.quality.saturatedFraction, 0, 'f', 3);
@@ -780,6 +781,10 @@ void Guider::logLock(const LockStatus& before, const LockStatus& after, bool loc
     {
         lines += time + QString(" guide_state state=\"%1\"").arg(lockStateName(after.state)) + frame
             + " reason=" + quotedText(after.message) + "\n";
+    }
+    if (after.templateRefreshes > before.templateRefreshes)
+    {
+        lines += time + QString(" guide_template_refresh count=%1").arg(after.templateRefreshes) + frame + "\n";
     }
     const bool due = !lastLogTime_ || after.frameTime < *lastLogTime_
         || after.frameTime - *lastLogTime_ >= std::chrono::seconds{1};

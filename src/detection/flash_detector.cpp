@@ -340,6 +340,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
     summary_.probeX = display.probeX; summary_.probeY = display.probeY;
     summary_.stabilizationState = shift.state;
     summary_.stabilizationMethod = shift.method;
+    summary_.stabilizationSource = shift.source;
     summary_.stabilizationDx = shift.dx;
     summary_.stabilizationDy = shift.dy;
     summary_.stabilizationMs = shift.estimatorMs;
@@ -644,6 +645,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
         candidate.longestActiveSeconds = summary_.longestActiveSeconds;
         candidate.stabilizationState = summary_.stabilizationState;
         candidate.stabilizationMethod = summary_.stabilizationMethod;
+        candidate.stabilizationSource = summary_.stabilizationSource;
         candidate.stabilizationDx = summary_.stabilizationDx;
         candidate.stabilizationDy = summary_.stabilizationDy;
         candidate.stabilizationMs = summary_.stabilizationMs;

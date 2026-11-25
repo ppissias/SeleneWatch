@@ -541,7 +541,8 @@ void UiTest::dragLocksOnAFeatureAndClickStillSelects()
         QCOMPARE(pixels.size(), 0);
         QVERIFY(!preview->selectedPosition());
         QTRY_VERIFY2_WITH_TIMEOUT(state->text().contains("Locked"), qPrintable(message->text()), 5000);
-        QTRY_VERIFY_WITH_TIMEOUT(readout->text().startsWith("Lock: dx"), 5000);
+        QTRY_VERIFY2_WITH_TIMEOUT(readout->text().startsWith("Lock: ") && readout->text().contains(", dx "),
+            qPrintable(readout->text()), 5000);
         QVERIFY(window.findChild<QLabel*>("lockDriftLabel")->text().contains("median of"));
 
         window.findChild<QPushButton*>("unlockButton")->click();
@@ -4135,14 +4136,37 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     view.summary.settings = panel.settings();
     view.summary.stabilizationState = StabilizationState::Locked;
     view.summary.stabilizationMethod = StabilizationMethod::DiskCentroid;
+    view.summary.stabilizationSource = StabilizationSource::IsolatedDisk;
     view.summary.stabilizationDx = 1.4;
     view.summary.stabilizationDy = -0.6;
     panel.setView(view);
-    QVERIFY2(status->text().contains("locked (Disk centroid"), qPrintable(status->text()));
+    QVERIFY2(status->text().contains("Disk centroid (isolated disk)"), qPrintable(status->text()));
+
+    view.summary.stabilizationMethod = StabilizationMethod::FeatureLock;
+    view.summary.stabilizationSource = StabilizationSource::GuidingBox;
+    panel.setView(view);
+    QVERIFY2(status->text().contains("Feature Lock (using guiding box)"), qPrintable(status->text()));
+
+    view.summary.stabilizationSource = StabilizationSource::AutoPatch;
+    panel.setView(view);
+    QVERIFY2(status->text().contains("Feature Lock (auto crater patch)"), qPrintable(status->text()));
 
     view.summary.stabilizationState = StabilizationState::LostFallback;
     panel.setView(view);
     QVERIFY2(status->text().contains("lost — running unstabilized"), qPrintable(status->text()));
+
+    // Guiding panel shows "Locked (Disk centroid)" / "Locked (Feature Lock)".
+    GuidingPanel guiding;
+    GuiderStatus gs;
+    gs.lock.state = LockState::Locked;
+    gs.lock.method = LockMethod::DiskCentroid;
+    guiding.setStatus(gs);
+    QVERIFY2(guiding.findChild<QLabel*>("lockStateLabel")->text().contains("Disk centroid"),
+        qPrintable(guiding.findChild<QLabel*>("lockStateLabel")->text()));
+    gs.lock.method = LockMethod::FeatureLock;
+    guiding.setStatus(gs);
+    QVERIFY2(guiding.findChild<QLabel*>("lockStateLabel")->text().contains("Feature Lock"),
+        qPrintable(guiding.findChild<QLabel*>("lockStateLabel")->text()));
 
     // Shadows watch keeps stabilization visible; Sky watches hide and force it off.
     panel.setWatch(Watch::MoonShadows);
@@ -4154,6 +4178,19 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     panel.setWatch(Watch::SkySlow);
     QVERIFY(box->isHidden());
     QVERIFY(!panel.settings().stabilizeDetection);
+
+    // MainWindow status bar shows stabilizeReadout only when stabilization is ticked.
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    auto* stabBar = window.findChild<QLabel*>("stabilizeReadout");
+    auto* winBox = window.findChild<QCheckBox*>("stabilizeDetection");
+    QVERIFY(stabBar && winBox);
+    QVERIFY(stabBar->isHidden());
+    winBox->setChecked(true);
+    QVERIFY(!stabBar->isHidden());
+    QVERIFY(stabBar->text().startsWith("Stab:"));
+    winBox->setChecked(false);
+    QVERIFY(stabBar->isHidden());
 }
 
 int main(int argc, char** argv)

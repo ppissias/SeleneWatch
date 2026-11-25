@@ -32,7 +32,7 @@ public:
     [[nodiscard]] TimelapseSettings settings() const;
     void setSettings(const TimelapseSettings& settings);
     void refreshProfiles();
-    void setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable);
+    void setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable, bool stabilized = false);
 
     void setStreamInfo(bool running, bool monitoring, bool recording, bool timeLapsing,
         double estimatedFps, int frameWidth, int frameHeight, int bytesPerPixel, bool hasLock,
@@ -75,6 +75,7 @@ private:
     bool moonWatch_{true};
     bool transitEditable_{true};
     bool transitSettingsSaved_{false};
+    bool transitStabilized_{false};
     double estimatedFps_{30.0};
     int frameWidth_{640};
     int frameHeight_{480};

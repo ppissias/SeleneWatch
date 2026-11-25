@@ -45,6 +45,9 @@ bool LockTracker::lock(const Frame& frame, LockRegion region)
     clearEstimate();
     candidate_.reset();
     restart_ = false;
+    anchorDx_ = anchorDy_ = 0.0;
+    decaySince_.reset();
+    lastRefresh_.reset();
     status_ = {};
     status_.frameIndex = frame.frameIndex;
     status_.frameTime = frame.timestamp;
@@ -54,6 +57,7 @@ bool LockTracker::lock(const Frame& frame, LockRegion region)
         return false;
     }
     status_.state = LockState::Locked;
+    status_.method = lock_->method();
     status_.region = lock_->region();
     status_.binning = lock_->binning();
     status_.quality = lock_->quality();
@@ -70,6 +74,9 @@ void LockTracker::unlock(std::string reason)
     clearEstimate();
     candidate_.reset();
     lastStep_.reset();
+    anchorDx_ = anchorDy_ = 0.0;
+    decaySince_.reset();
+    lastRefresh_.reset();
     status_ = {};
     status_.frameIndex = frameIndex;
     status_.frameTime = frameTime;
@@ -109,7 +116,13 @@ bool LockTracker::step(const Frame& frame)
     status_.frameTime = now;
 
     const bool searching = status_.state == LockState::Searching;
-    const LockMatch match = lock_->find(frame, status_.foundDx, status_.foundDy, searching ? kSearchRadius : kTrackRadius);
+    LockMatch match = lock_->find(frame, status_.foundDx - anchorDx_, status_.foundDy - anchorDy_,
+        searching ? kSearchRadius : kTrackRadius);
+    if (match.valid)
+    {
+        match.dx += anchorDx_;
+        match.dy += anchorDy_;
+    }
     status_.lastMatch = match;
 
     if (!searching)
@@ -121,6 +134,46 @@ bool LockTracker::step(const Frame& frame)
             lastValid_ = now;
             offsets_.push_back({now, match.dx, match.dy});
             driftOffsets_.push_back({now, match.dx, match.dy});
+
+            // Conservative score-triggered template refresh for multi-hour lunar
+            // field rotation / shadow change: only when gently decaying in
+            // [0.72, 0.85) for >= 5 s, at most once every 5 minutes, preserving
+            // the exact current sub-pixel offset (zero jump).
+            if (lock_->method() == LockMethod::FeatureLock
+                && match.score >= kRefreshScoreFloor && match.score < kRefreshScoreCeiling)
+            {
+                if (!decaySince_) decaySince_ = now;
+                const bool sustained = seconds(now - *decaySince_) >= kRefreshDecaySeconds;
+                const bool cooled = !lastRefresh_ || seconds(now - *lastRefresh_) >= kRefreshCooldownSeconds;
+                if (sustained && cooled)
+                {
+                    const bool mosaic = frame.bayer != BayerPattern::None && frame.format != PixelFormat::RGB888;
+                    const int stepX = mosaic ? 2 * static_cast<int>(std::lround((match.dx - anchorDx_) / 2.0))
+                                             : static_cast<int>(std::lround(match.dx - anchorDx_));
+                    const int stepY = mosaic ? 2 * static_cast<int>(std::lround((match.dy - anchorDy_) / 2.0))
+                                             : static_cast<int>(std::lround(match.dy - anchorDy_));
+                    LockRegion next = lock_->region();
+                    next.x += stepX;
+                    next.y += stepY;
+                    std::string refusal;
+                    if (next.x >= 0 && next.y >= 0 && next.x + next.width <= frame.width && next.y + next.height <= frame.height)
+                    {
+                        if (auto fresh = FeatureLock::take(frame, next, refusal, false))
+                        {
+                            lock_ = std::move(fresh);
+                            anchorDx_ = match.dx;
+                            anchorDy_ = match.dy;
+                            lastRefresh_ = now;
+                            decaySince_.reset();
+                            ++status_.templateRefreshes;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                decaySince_.reset();
+            }
         }
         else if (seconds(now - lastValid_) > kLockLostSeconds)
         {
@@ -128,6 +181,7 @@ bool LockTracker::step(const Frame& frame)
             status_.message = std::format("No valid match for {:.0f} s ({}). Searching within {} pixels.",
                 kLockLostSeconds, match.reason, kSearchRadius);
             searchingSince_ = now;
+            decaySince_.reset();
             clearEstimate();
             candidate_.reset();
         }

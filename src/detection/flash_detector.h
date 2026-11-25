@@ -22,6 +22,7 @@ struct FrameShift
     double dy{0};
     StabilizationState state{StabilizationState::Off};
     StabilizationMethod method{StabilizationMethod::None};
+    StabilizationSource source{StabilizationSource::None};
     double estimatorMs{0};
 };
 

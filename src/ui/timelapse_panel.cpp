@@ -453,10 +453,11 @@ void TimelapsePanel::setSettings(const TimelapseSettings& s)
     updateEstimates();
 }
 
-void TimelapsePanel::setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable)
+void TimelapsePanel::setTransitOptions(bool moonWatch, bool hasSavedSettings, bool editable, bool stabilized)
 {
     moonWatch_ = moonWatch;
     transitSettingsSaved_ = hasSavedSettings;
+    transitStabilized_ = stabilized;
     transitEditable_ = editable;
     updateTransitControls();
 }
@@ -465,12 +466,15 @@ void TimelapsePanel::updateTransitControls()
 {
     const bool available = moonWatch_;
     const bool selected = available && watchTransits_->isChecked();
+    const bool planet = preset_->currentData().toInt() == static_cast<int>(TimelapsePreset::Planet);
     watchTransits_->setVisible(available);
     watchTransits_->setEnabled(transitEditable_);
     transitHelp_->setVisible(selected);
-    transitHelp_->setText(transitSettingsSaved_
-        ? "Uses your saved The Moon (or Sun): shadows on the sunlit side settings. Watching pauses during burst capture and stacking."
-        : "Using default transit settings. Watching pauses during burst capture and stacking.");
+    const QString stackingText = planet ? "Stacking: Planet (disk-centred)." : "Stacking: Moon (shift & rotation).";
+    const QString watchText = transitSettingsSaved_
+        ? QString("Between bursts: saved shadows watch (%1).").arg(transitStabilized_ ? "stabilized" : "unstabilized")
+        : QString("Between bursts: default shadows watch (%1).").arg(transitStabilized_ ? "stabilized" : "unstabilized");
+    transitHelp_->setText(stackingText + " " + watchText + " Watching pauses during bursts and stacking.");
     configureTransits_->setVisible(selected);
     configureTransits_->setEnabled(transitEditable_);
 }

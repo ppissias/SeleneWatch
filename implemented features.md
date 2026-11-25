@@ -3677,3 +3677,19 @@ Measured in Release x64 with `SeleneWatchProbe stabilize-bench` ([full benchmark
   - `ui`: `stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus` plus `everyControlHasHelp` and layout tests.
   - All **26/26 CTest suites** passed in `Debug-x64` (built with `-j 2` while the observer's live Release session remained undisturbed).
 - **Pending field validation:** live telescope check on earthshine, sunlit Moon, and planetary streams; Release build & desktop GUI E2E test once the live Release observing session finishes.
+
+### Stage 2b — Guiding/Stabilization harmonization, multi-hour lunar refresh, and Option B UI readouts (25 November 2026)
+
+- **Shared isolated-disk detection & Disk centroid (`FeatureLock`):**
+  - Moved the isolated-disk detector (`FeatureLock::isIsolatedDisk`) and clipped-limb Disk centroid (`FeatureLock::measureDiskCentroid`) into `FeatureLock` (`src/guiding/feature_lock.{h,cpp}`) as the single shared implementation used by both Guiding (`LockTracker`) and Live Detection Stabilization (`FrameStabilizer`).
+  - Two-level isolated-disk check (whole frame + drawn box) selects `LockMethod::DiskCentroid` when a guiding box surrounds an isolated planet or full-disk Moon/Sun (making planetary guiding immune to planetary rotation like Jupiter's), while keeping `LockMethod::FeatureLock` (NCC) whenever the box lies on lunar terrain or around a bright crater on flat mare.
+  - Added edge-clipping guard (rejects disks touching the 2 px box/frame border) and cloud-area guard (`0.65 <= weight / refWeight <= 1.45`).
+- **Multi-hour lunar field rotation & shadow drift (`LockTracker`):**
+  - Added a conservative, score-triggered, anchor-preserving template refresh for `LockMethod::FeatureLock`: stays completely idle while score ≥ 0.85; refreshes only if score stays steadily in `[0.72, 0.85)` for ≥ 5 s, at most once every 5 minutes, preserving exact sub-pixel `(anchorDx_, anchorDy_)` with zero jump and logging `guide_template_refresh` in `guiding.txt`.
+- **Consistent UI & Option B readouts (`Feature Lock` / `Disk centroid`):**
+  - Guiding panel shows `Locked (Disk centroid)` / `Locked (Feature Lock)` and logs `method=` on `guide_lock`.
+  - Detection panel shows `Stabilization: Disk centroid (isolated disk)` / `Feature Lock (using guiding box)` / `Feature Lock (auto crater patch)` / `holding last shift (brief dip)` / `lost — running unstabilized`.
+  - Time-lapse panel shows both stacking alignment (`Moon (shift & rotation)` vs. `Planet (disk-centred)`) and whether between-burst transit watching is stabilized or unstabilized (with **Also watch for transits** enabled for both Moon and Planet presets).
+  - Main window status bar shows the active lock method (`Lock: Feature Lock, dx …` / `Lock: Disk centroid, dx …`) and a compact `Stab: …` readout (hidden when stabilization is off).
+- **Documentation:** Added dedicated section **6.1 How SeleneWatch tracks the Moon, Sun and planets** in `MANUAL.md` alongside updated panel/status-bar descriptions.
+- **Tests:** Added `diskCentroidTracksRotatingPlanetAndRejectsClippedEdgeAndClouds` and `lockTrackerRefreshesTemplateOnGentleDecay` in `tests/guiding_tests.cpp`, updated status-bar readout assertion in `tests/ui_tests.cpp`, and verified `dependency_rules`, `watch_settings`, `detection`, `ui`, `session_record`, `guiding`, and `timelapse` test suites in `Debug-x64`.

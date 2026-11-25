@@ -487,6 +487,8 @@ void GuidingPanel::setStatus(const GuiderStatus& status)
     unlockButton_->setEnabled(locked_);
     QString state = lockStateName(lock.state);
     state[0] = state[0].toUpper();
+    if (lock.state == LockState::Locked)
+        state += lock.method == LockMethod::DiskCentroid ? " (Disk centroid)" : " (Feature Lock)";
     state_->setText("<b>" + state + "</b>");
     drift_->setText(driftText(lock, arcsecPerPixel_));
     driftSpeed_->setText(driftSpeedText(lock, guide));

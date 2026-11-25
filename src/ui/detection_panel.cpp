@@ -1064,12 +1064,16 @@ void DetectionPanel::setView(const DetectionView& view)
     if (showStab)
     {
         const QString methodLabel = summary.stabilizationMethod == StabilizationMethod::DiskCentroid
-            ? "Disk centroid" : summary.stabilizationMethod == StabilizationMethod::FeatureLock
-            ? "Feature Lock" : "auto";
+            ? "Disk centroid (isolated disk)"
+            : summary.stabilizationMethod == StabilizationMethod::FeatureLock
+                ? (summary.stabilizationSource == StabilizationSource::GuidingBox
+                    ? "Feature Lock (using guiding box)"
+                    : "Feature Lock (auto crater patch)")
+                : "auto";
         switch (summary.stabilizationState)
         {
         case StabilizationState::Locked:
-            stabilizeStatus_->setText(QString("Stabilization: locked (%1, shift %2, %3 px)")
+            stabilizeStatus_->setText(QString("Stabilization: %1 · shift %2, %3 px")
                 .arg(methodLabel)
                 .arg(summary.stabilizationDx >= 0 ? QString("+%1").arg(summary.stabilizationDx, 0, 'f', 1) : QString::number(summary.stabilizationDx, 'f', 1))
                 .arg(summary.stabilizationDy >= 0 ? QString("+%1").arg(summary.stabilizationDy, 0, 'f', 1) : QString::number(summary.stabilizationDy, 'f', 1)));

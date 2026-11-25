@@ -24,9 +24,10 @@ struct DetectionDisplayRequest
 // or a large share of the frame that rose (Feature-11) or fell at once.
 enum class ChangeKind { Rise, LargeRise, Fall, LargeFall };
 
-// Feature-50: runtime shift stabilization state and active estimator.
+// Feature-50: runtime shift stabilization state, active estimator, and why it was chosen.
 enum class StabilizationState { Off, Locked, GraceHold, LostFallback };
 enum class StabilizationMethod { None, FeatureLock, DiskCentroid };
+enum class StabilizationSource { None, IsolatedDisk, GuidingBox, AutoPatch };
 
 [[nodiscard]] inline const char* stabilizationStateName(StabilizationState state)
 {
@@ -92,6 +93,7 @@ struct DetectionSummary
     // Feature-50: stabilization telemetry for this frame.
     StabilizationState stabilizationState{StabilizationState::Off};
     StabilizationMethod stabilizationMethod{StabilizationMethod::None};
+    StabilizationSource stabilizationSource{StabilizationSource::None};
     double stabilizationDx{0};
     double stabilizationDy{0};
     double stabilizationMs{0};

@@ -27,9 +27,11 @@ enum class LockState
 struct LockStatus
 {
     LockState state{LockState::Off};
+    LockMethod method{LockMethod::FeatureLock};
     LockRegion region;
     int binning{1};
     LockQuality quality;
+    int templateRefreshes{0};
 
     // The latest search, valid or not. Empty before the first one.
     std::optional<LockMatch> lastMatch;
@@ -80,6 +82,13 @@ public:
     static constexpr int kSearchRadius = 64;
     // Two matches this close resume a lost lock.
     static constexpr double kReacquirePixels = 3.0;
+    // Conservative score-triggered template refresh for multi-hour lunar
+    // field rotation and changing crater shadows: never fires while score >= 0.85,
+    // requires steady decay for 5 s, and waits at least 5 minutes between refreshes.
+    static constexpr double kRefreshScoreCeiling = 0.85;
+    static constexpr double kRefreshScoreFloor = 0.72;
+    static constexpr double kRefreshDecaySeconds = 5.0;
+    static constexpr double kRefreshCooldownSeconds = 300.0;
 
     // Takes the template from frame. False, with the reason in the status,
     // when the region cannot be locked; an earlier lock is then released.
@@ -124,4 +133,8 @@ private:
     std::optional<LockMatch> candidate_;
     bool restart_{false};
     double searchSeconds_{kDefaultSearchSeconds};
+    // Anchor offset accumulated across conservative Feature Lock template refreshes.
+    double anchorDx_{0}, anchorDy_{0};
+    std::optional<std::chrono::system_clock::time_point> decaySince_;
+    std::optional<std::chrono::system_clock::time_point> lastRefresh_;
 };

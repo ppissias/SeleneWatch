@@ -62,6 +62,7 @@ public:
 
     [[nodiscard]] StabilizationState state() const { return state_; }
     [[nodiscard]] StabilizationMethod method() const { return method_; }
+    [[nodiscard]] StabilizationSource source() const { return source_; }
     [[nodiscard]] LockRegion activeLockRegion() const { return lock_ ? lock_->region() : LockRegion{}; }
 
     // Tunable limits (defaults match Stage 1 verified parameters; exposed for tests).
@@ -98,6 +99,7 @@ private:
 
     StabilizationState state_{StabilizationState::Off};
     StabilizationMethod method_{StabilizationMethod::None};
+    StabilizationSource source_{StabilizationSource::None};
     bool initialized_{false};
 
     // DiskCentroid anchor

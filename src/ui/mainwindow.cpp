@@ -871,6 +871,12 @@ void MainWindow::setupDetectionPanel()
         session_->setDetectionSettings(detectionPanel_->settings());
         ui_->previewWidget->setMask(maskRects(detectionPanel_->settings().mask));
         onDetectionSettingsChangedForAutoTune();
+        updateStabilizeReadout(latestDetection_);
+        if (timelapsePanel_ && watch_ == Watch::MoonShadows)
+            timelapsePanel_->setTransitOptions(target() == Target::Moon,
+                hasSavedDetectionSettings(Watch::MoonShadows),
+                !session_->isRunning() || session_->canChangePreviewWatch(),
+                detectionPanel_->settings().stabilizeDetection);
     });
     connect(detectionPanel_, &DetectionPanel::watchRequested, this, &MainWindow::onWatchRequested);
 
@@ -2241,12 +2247,13 @@ void MainWindow::onLockChanged()
     if (status.lastMatch) found = QRectF(locked).translated(status.foundDx, status.foundDy);
     const bool valid = status.lastMatch && status.lastMatch->valid && status.state == LockState::Locked;
     ui_->previewWidget->setLockBoxes(locked, found, valid);
+    const QString methodTag = status.method == LockMethod::DiskCentroid ? "Disk centroid" : "Feature Lock";
     if (status.state != LockState::Locked)
         lockLabel_->setText(QString("Lock: %1").arg(lockStateName(status.state)) + guiding);
     else if (status.estimateValid)
-        lockLabel_->setText(QString("Lock: dx %1, dy %2 px").arg(status.estimateDx, 0, 'f', 1).arg(status.estimateDy, 0, 'f', 1) + guiding);
+        lockLabel_->setText(QString("Lock: %1, dx %2, dy %3 px").arg(methodTag).arg(status.estimateDx, 0, 'f', 1).arg(status.estimateDy, 0, 'f', 1) + guiding);
     else
-        lockLabel_->setText("Lock: measuring" + guiding);
+        lockLabel_->setText(QString("Lock: %1 (measuring)").arg(methodTag) + guiding);
 }
 
 void MainWindow::renderPreview()
@@ -2294,6 +2301,13 @@ void MainWindow::setupStatusBar()
     frameLabel_ = new ElidedLabel("No frame yet");
     lockLabel_ = new ElidedLabel("Lock: off");
     lockLabel_->setObjectName("lockReadout");
+    stabilizeSeparator_ = new QFrame;
+    stabilizeSeparator_->setFrameShape(QFrame::VLine);
+    stabilizeSeparator_->setFrameShadow(QFrame::Sunken);
+    stabilizeSeparator_->hide();
+    stabilizeLabel_ = new ElidedLabel;
+    stabilizeLabel_->setObjectName("stabilizeReadout");
+    stabilizeLabel_->hide();
 
     // Room for the usual values, so the readouts do not shift as numbers
     // change. A longer text widens its readout while the window has room.
@@ -2319,6 +2333,8 @@ void MainWindow::setupStatusBar()
         }
         readouts->addWidget(label);
     }
+    readouts->addWidget(stabilizeSeparator_);
+    readouts->addWidget(stabilizeLabel_);
     readouts->addStretch(1);
 
     auto* area = new QWidget(this);
@@ -2648,8 +2664,37 @@ void MainWindow::updateControls()
         const bool hasLock = session_->guider().status().lock.state == LockState::Locked;
         timelapsePanel_->setStreamInfo(running, monitoring || pending, session_->recordingStatus().active, timeLapsing,
             measuredFps_, lastFrameWidth_, lastFrameHeight_, lastFrameBpp_, hasLock, timeLapseFinalizing);
+        const bool transitStabilized = watch_ == Watch::MoonShadows
+            ? detectionPanel_->settings().stabilizeDetection
+            : savedDetectionSettings(Watch::MoonShadows).stabilizeDetection;
         timelapsePanel_->setTransitOptions(target() == Target::Moon,
-            hasSavedDetectionSettings(Watch::MoonShadows), watchEditable);
+            hasSavedDetectionSettings(Watch::MoonShadows), watchEditable, transitStabilized);
+    }
+    updateStabilizeReadout(latestDetection_);
+}
+
+void MainWindow::updateStabilizeReadout(const DetectionSummary& summary)
+{
+    if (!stabilizeLabel_ || !stabilizeSeparator_) return;
+    const bool enabled = target() != Target::Sky && detectionPanel_ && detectionPanel_->settings().stabilizeDetection;
+    stabilizeSeparator_->setVisible(enabled);
+    stabilizeLabel_->setVisible(enabled);
+    if (!enabled) return;
+    switch (summary.stabilizationState)
+    {
+    case StabilizationState::Locked:
+        stabilizeLabel_->setText(summary.stabilizationMethod == StabilizationMethod::DiskCentroid
+            ? "Stab: Disk centroid" : "Stab: Feature Lock");
+        break;
+    case StabilizationState::GraceHold:
+        stabilizeLabel_->setText("Stab: holding shift");
+        break;
+    case StabilizationState::LostFallback:
+        stabilizeLabel_->setText("Stab: lost (unstabilized)");
+        break;
+    case StabilizationState::Off:
+        stabilizeLabel_->setText("Stab: waiting");
+        break;
     }
 }
 
@@ -3344,6 +3389,7 @@ void MainWindow::showLatestFrame()
             latestDetection_ = view.summary;
             try { detectionPanel_->setView(view); }
             catch (const MemoryLimitError&) { showMessage("Overlay skipped: RAM ceiling reached"); }
+            updateStabilizeReadout(view.summary);
             if (detectionDock_->isVisible())
                 ui_->previewWidget->setDetectionOverlay(detectionPanel_->overlayImage(),
                     {view.summary.boxX, view.summary.boxY, view.summary.boxWidth, view.summary.boxHeight});

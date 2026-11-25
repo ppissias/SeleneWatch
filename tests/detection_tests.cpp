@@ -686,7 +686,7 @@ void DetectionTest::stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer()
                 const double dy = f == 0 ? 0.0 : -0.45 * std::cos(f * 0.5) - 0.05 * static_cast<double>(f);
                 const Frame frame = shiftedLunarDisk(f, W, H, dx, dy, bayer);
                 const bool trig = det.analyze(frame, {}, {ShiftMode::Subpixel, dx, dy,
-                    StabilizationState::Locked, StabilizationMethod::DiskCentroid, 0.1});
+                    StabilizationState::Locked, StabilizationMethod::DiskCentroid, StabilizationSource::IsolatedDisk, 0.1});
                 det.updateReference(frame);
                 if (f >= 10) QVERIFY2(!trig, "stabilized quiet shifted frame should not false-trigger");
             }
@@ -705,7 +705,7 @@ void DetectionTest::stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer()
                 }
 
             const bool triggered = det.analyze(eventFrame, {}, {ShiftMode::Subpixel, dx, dy,
-                StabilizationState::Locked, StabilizationMethod::DiskCentroid, 0.1});
+                StabilizationState::Locked, StabilizationMethod::DiskCentroid, StabilizationSource::IsolatedDisk, 0.1});
             QVERIFY(triggered);
             QCOMPARE(det.candidates().size(), size_t{1});
             const auto& c = det.candidates().front();

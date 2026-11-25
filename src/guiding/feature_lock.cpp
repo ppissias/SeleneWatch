@@ -75,6 +75,15 @@ double median(std::vector<double> values)
     return *middle;
 }
 
+double percentile(std::vector<double> values, double p)
+{
+    if (values.empty()) return 0.0;
+    const size_t idx = std::min(values.size() - 1,
+        static_cast<size_t>(std::floor(p * static_cast<double>(values.size() - 1))));
+    std::nth_element(values.begin(), values.begin() + static_cast<ptrdiff_t>(idx), values.end());
+    return values[idx];
+}
+
 // Pixel noise of an image with structure. The 3 x 3 operator is a second
 // difference across times a second difference down, so smooth shading,
 // ramps, and gentle curvature give nearly nothing, while independent noise
@@ -118,7 +127,159 @@ double vertex(double before, double peak, double after)
 
 } // namespace
 
-std::optional<FeatureLock> FeatureLock::take(const Frame& frame, LockRegion region, std::string& refusal)
+bool FeatureLock::isIsolatedDisk(const Frame& frame)
+{
+    return isIsolatedDisk(frame, {0, 0, frame.width, frame.height});
+}
+
+bool FeatureLock::isIsolatedDisk(const Frame& frame, LockRegion region)
+{
+    const int x0 = std::clamp(region.x, 0, frame.width);
+    const int y0 = std::clamp(region.y, 0, frame.height);
+    const int x1 = std::clamp(region.x + region.width, x0, frame.width);
+    const int y1 = std::clamp(region.y + region.height, y0, frame.height);
+    const int rw = x1 - x0;
+    const int rh = y1 - y0;
+    if (rw < 32 || rh < 32) return false;
+
+    const int ring = std::min(4, std::min(rw, rh) / 8);
+    std::vector<double> border;
+    border.reserve(static_cast<size_t>(rw + rh) * 4);
+    for (int y = y0; y < y1; y += 2)
+    {
+        for (int x = x0; x < x1; x += 2)
+        {
+            if (x < x0 + ring || x >= x1 - ring || y < y0 + ring || y >= y1 - ring)
+                border.push_back(sample(frame, x, y));
+        }
+    }
+    std::vector<double> interior;
+    const int step = std::max(2, std::min(rw, rh) / 64);
+    for (int y = y0 + ring; y < y1 - ring; y += step)
+        for (int x = x0 + ring; x < x1 - ring; x += step)
+            interior.push_back(sample(frame, x, y));
+    if (border.empty() || interior.empty()) return false;
+
+    const double bg = percentile(border, 0.50);
+    const double borderP95 = percentile(border, 0.95);
+    const double bodyP995 = percentile(interior, 0.995);
+    const double highest = highestCode(frame);
+    if (bodyP995 - bg < std::max(12.0, 0.04 * highest)) return false;
+    if (borderP95 > bg + 0.25 * (bodyP995 - bg)) return false;
+
+    const double thresh = bg + 0.25 * (bodyP995 - bg);
+    size_t bright = 0;
+    for (double v : interior)
+        if (v > thresh) ++bright;
+    const double share = static_cast<double>(bright) / static_cast<double>(interior.size());
+    return share >= 0.004 && share <= 0.78;
+}
+
+DiskCentroidSample FeatureLock::measureDiskCentroid(const Frame& frame, LockRegion searchBox)
+{
+    DiskCentroidSample out;
+    const int x0 = std::clamp(searchBox.x, 0, frame.width);
+    const int y0 = std::clamp(searchBox.y, 0, frame.height);
+    const int x1 = std::clamp(searchBox.x + searchBox.width, x0, frame.width);
+    const int y1 = std::clamp(searchBox.y + searchBox.height, y0, frame.height);
+    const int rw = x1 - x0;
+    const int rh = y1 - y0;
+    if (rw < 16 || rh < 16)
+    {
+        out.reason = "search box is outside the frame";
+        return out;
+    }
+
+    const bool mosaic = isMosaic(frame);
+    const int stride = (rw > 640 || rh > 640 || mosaic) ? 2 : 1;
+
+    std::vector<double> border;
+    border.reserve(static_cast<size_t>(rw + rh) * 2 / stride + 16);
+    const int ring = std::min(4, std::min(rw, rh) / 8);
+    for (int x = x0; x < x1; x += stride * 2)
+    {
+        border.push_back(sample(frame, x, y0));
+        border.push_back(sample(frame, x, y1 - 1));
+    }
+    for (int y = y0 + ring; y < y1 - ring; y += stride * 2)
+    {
+        border.push_back(sample(frame, x0, y));
+        border.push_back(sample(frame, x1 - 1, y));
+    }
+    const double bg = percentile(border, 0.50);
+
+    std::vector<double> grid;
+    const int gStep = std::max(stride, std::min(rw, rh) / 48);
+    grid.reserve(2500);
+    for (int y = y0; y < y1; y += gStep)
+        for (int x = x0; x < x1; x += gStep)
+            grid.push_back(sample(frame, x, y));
+    const double hi = percentile(grid, 0.995);
+    const double highest = highestCode(frame);
+    if (hi - bg < std::max(12.0, 0.04 * highest))
+    {
+        out.reason = "disk contrast too low";
+        return out;
+    }
+
+    const double thresh = bg + 0.25 * (hi - bg);
+    // Edge-clipping guard: if bright disk pixels touch the 2-pixel border of
+    // the search box (or frame boundary), reject so a clipped planet never
+    // pulls the centroid sideways.
+    size_t borderChecked = 0, borderBright = 0;
+    for (int x = x0; x < x1; x += stride)
+    {
+        ++borderChecked; if (sample(frame, x, y0) > thresh) ++borderBright;
+        ++borderChecked; if (sample(frame, x, y1 - 1) > thresh) ++borderBright;
+    }
+    for (int y = y0 + stride; y < y1 - stride; y += stride)
+    {
+        ++borderChecked; if (sample(frame, x0, y) > thresh) ++borderBright;
+        ++borderChecked; if (sample(frame, x1 - 1, y) > thresh) ++borderBright;
+    }
+    if (borderChecked > 0 && static_cast<double>(borderBright) / static_cast<double>(borderChecked) > 0.05)
+    {
+        out.edgeClipped = true;
+        out.reason = "the disk is clipped at the edge";
+        return out;
+    }
+
+    // Clipped-limb weight stays anchored to the geometric disk edge and is
+    // insensitive to interior flashes, cloud-band rotation, or small shadows.
+    const double invRamp = 1.0 / std::max(4.0, 0.20 * (hi - thresh));
+    double sumW = 0.0, sumWX = 0.0, sumWY = 0.0;
+    for (int y = y0; y < y1; y += stride)
+    {
+        for (int x = x0; x < x1; x += stride)
+        {
+            const double v = sample(frame, x, y);
+            if (v <= thresh) continue;
+            const double w = std::min(1.0, (v - thresh) * invRamp);
+            sumW += w;
+            sumWX += w * x;
+            sumWY += w * y;
+        }
+    }
+    if (sumW < 12.0)
+    {
+        out.reason = "too few bright disk pixels";
+        return out;
+    }
+    out.cx = sumWX / sumW;
+    out.cy = sumWY / sumW;
+    out.weight = sumW;
+    if (out.cx < x0 + 3.0 || out.cx > x1 - 4.0 || out.cy < y0 + 3.0 || out.cy > y1 - 4.0)
+    {
+        out.edgeClipped = true;
+        out.reason = "disk centroid is on the border";
+        return out;
+    }
+    out.valid = true;
+    return out;
+}
+
+std::optional<FeatureLock> FeatureLock::take(const Frame& frame, LockRegion region, std::string& refusal,
+    bool allowDiskCentroid)
 {
     const int x0 = std::max(region.x, 0);
     const int y0 = std::max(region.y, 0);
@@ -128,6 +289,52 @@ std::optional<FeatureLock> FeatureLock::take(const Frame& frame, LockRegion regi
     {
         refusal = std::format("The region must lie in the frame and be at least {0} x {0} pixels.", kMinTemplateSide);
         return std::nullopt;
+    }
+
+    // Harmonised isolated-disk detection: when both the frame and the chosen
+    // region contain an isolated bright disk surrounded by dark sky (planets,
+    // full Moon/Sun), track via clipped-limb DiskCentroid so planetary rotation
+    // never degrades the lock.
+    const LockRegion clamped{x0, y0, x1 - x0, y1 - y0};
+    if (allowDiskCentroid && isIsolatedDisk(frame) && isIsolatedDisk(frame, clamped))
+    {
+        const DiskCentroidSample centroid = measureDiskCentroid(frame, clamped);
+        if (centroid.valid)
+        {
+            const double highest = highestCode(frame);
+            size_t saturated = 0;
+            double sum = 0.0, sumSq = 0.0;
+            const size_t total = static_cast<size_t>(clamped.width) * clamped.height;
+            for (int y = y0; y < y1; ++y)
+                for (int x = x0; x < x1; ++x)
+                {
+                    const double v = sample(frame, x, y);
+                    sum += v; sumSq += v * v;
+                    if (v >= highest - 0.5) ++saturated;
+                }
+            const double satFrac = total > 0 ? static_cast<double>(saturated) / static_cast<double>(total) : 0.0;
+            if (satFrac <= kMaxSaturatedFraction)
+            {
+                FeatureLock lock;
+                lock.method_ = LockMethod::DiskCentroid;
+                lock.region_ = clamped;
+                lock.binning_ = 1;
+                lock.frameWidth_ = frame.width;
+                lock.frameHeight_ = frame.height;
+                lock.format_ = frame.format;
+                lock.bayer_ = frame.bayer;
+                lock.refCx_ = centroid.cx;
+                lock.refCy_ = centroid.cy;
+                lock.refWeight_ = centroid.weight;
+                const double mean = sum / static_cast<double>(total);
+                const double var = std::max(0.0, sumSq / static_cast<double>(total) - mean * mean);
+                lock.quality_.saturatedFraction = satFrac;
+                lock.quality_.noiseAdu = 1.0 / std::sqrt(12.0);
+                lock.quality_.contrast = std::sqrt(var) / lock.quality_.noiseAdu;
+                lock.quality_.structureRatio = 1.0;
+                return lock;
+            }
+        }
     }
 
     const bool mosaic = isMosaic(frame);
@@ -236,6 +443,35 @@ LockMatch FeatureLock::find(const Frame& frame, double expectedDx, double expect
     if (!sameLayout(frame))
     {
         match.reason = "the frame layout differs from the locked one";
+        return match;
+    }
+
+    if (method_ == LockMethod::DiskCentroid)
+    {
+        const int baseDx = static_cast<int>(std::lround(expectedDx));
+        const int baseDy = static_cast<int>(std::lround(expectedDy));
+        const LockRegion search{
+            region_.x + baseDx - radiusPixels,
+            region_.y + baseDy - radiusPixels,
+            region_.width + 2 * radiusPixels,
+            region_.height + 2 * radiusPixels
+        };
+        const DiskCentroidSample c = measureDiskCentroid(frame, search);
+        if (!c.valid)
+        {
+            match.reason = c.reason;
+            return match;
+        }
+        const double ratio = refWeight_ > 0.0 ? c.weight / refWeight_ : 0.0;
+        match.score = std::clamp(1.0 - std::abs(1.0 - ratio), 0.0, 1.0);
+        if (ratio < 0.65 || ratio > 1.45)
+        {
+            match.reason = std::format("disk area changed ({:.0f}% of reference)", 100.0 * ratio);
+            return match;
+        }
+        match.dx = c.cx - refCx_;
+        match.dy = c.cy - refCy_;
+        match.valid = true;
         return match;
     }
 
