@@ -4203,9 +4203,26 @@ void UiTest::stabilizeDetectionCheckboxIsForMoonOnlyAndShowsStatus()
     QVERIFY2(guiding.findChild<QLabel*>("lockStateLabel")->text().contains("Disk centroid"),
         qPrintable(guiding.findChild<QLabel*>("lockStateLabel")->text()));
     gs.lock.method = LockMethod::FeatureLock;
+    gs.lock.lastMatch = LockMatch{1.5, -0.8, 0.962, true, {}};
+    gs.lock.estimateValid = true;
+    gs.lock.estimateDx = 1.5;
+    gs.lock.estimateDy = -0.8;
+    gs.lock.driftRateValid = true;
+    gs.lock.driftRateDx = 0.20;
+    gs.lock.driftRateDy = 0.15;
     guiding.setStatus(gs);
     QVERIFY2(guiding.findChild<QLabel*>("lockStateLabel")->text().contains("Feature Lock"),
         qPrintable(guiding.findChild<QLabel*>("lockStateLabel")->text()));
+    // Feature-51 Phase 3: live instrument header metrics, bullseye plot, and collapsible Advanced guiding.
+    QCOMPARE(guiding.findChild<QLabel*>("guideMetricScore")->text(), QString("0.962"));
+    QVERIFY(guiding.findChild<QLabel*>("guideMetricSpeed")->text().contains("0.25 px/s"));
+    QCOMPARE(guiding.findChild<QLabel*>("guideMetricMount")->text(), QString("Off"));
+    QVERIFY(guiding.findChild<QWidget*>("driftTargetPlot") != nullptr);
+    auto* advGuide = guiding.findChild<QToolButton*>("advancedGuidingToggle");
+    QVERIFY(advGuide && !advGuide->isChecked());
+    advGuide->click();
+    QVERIFY(advGuide->isChecked());
+    advGuide->click();
 
     // Shadows watch keeps stabilization visible; Sky watches hide and force it off.
     panel.setWatch(Watch::MoonShadows);

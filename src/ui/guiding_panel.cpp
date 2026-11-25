@@ -1,9 +1,13 @@
 #include "ui/guiding_panel.h"
+#include "ui/widgets/collapsible_section.h"
 #include "ui/widgets/readout_label.h"
+#include "ui/widgets/theme.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QPointF>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimeZone>
+#include <QtGui/QPainter>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
@@ -13,9 +17,12 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
+#include <deque>
 #include <numbers>
 
 namespace {
@@ -247,15 +254,183 @@ GuiderStatus widestStatus()
 
 } // namespace
 
+// Live 2D bullseye drift plot (Feature-51 Phase 3): renders recent (dx, dy)
+// offsets inside concentric tolerance rings so the observer can judge tracking
+// stability at a glance.
+class DriftTargetWidget final : public QWidget
+{
+public:
+    explicit DriftTargetWidget(QWidget* parent = nullptr) : QWidget(parent)
+    {
+        setObjectName("driftTargetPlot");
+        setFixedHeight(148);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setToolTip("Live 2D drift plot relative to the lock origin. The inner circle is the guiding Tolerance; "
+                   "the trail shows recent valid measurements (+X right, +Y down).");
+    }
+
+    void setSample(LockState state, bool hasOffset, double dx, double dy, double tolerancePx)
+    {
+        state_ = state;
+        tolerancePx_ = tolerancePx > 0.5 ? tolerancePx : 15.0;
+        if (state == LockState::Off)
+        {
+            trail_.clear();
+            hasCurrent_ = false;
+            update();
+            return;
+        }
+        if (hasOffset && std::isfinite(dx) && std::isfinite(dy))
+        {
+            const QPointF pt(dx, dy);
+            if (!hasCurrent_ || std::hypot(pt.x() - current_.x(), pt.y() - current_.y()) > 1e-4)
+            {
+                trail_.push_back(pt);
+                if (trail_.size() > 60) trail_.pop_front();
+            }
+            current_ = pt;
+            hasCurrent_ = true;
+        }
+        update();
+    }
+
+    void setTolerance(double tolerancePx)
+    {
+        tolerancePx_ = tolerancePx > 0.5 ? tolerancePx : 15.0;
+        update();
+    }
+
+    [[nodiscard]] int trailCount() const { return static_cast<int>(trail_.size()); }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const UiTheme theme = currentUiTheme();
+        const bool nightRed = theme == UiTheme::NightRed;
+        const bool light = theme == UiTheme::System && palette().color(QPalette::Window).lightness() > 128;
+
+        const QColor bg = nightRed ? QColor("#120303") : light ? QColor("#f5f7fa") : QColor("#141820");
+        const QColor border = nightRed ? QColor("#421010") : light ? QColor("#cfd6e0") : QColor("#2c3342");
+        const QColor grid = nightRed ? QColor("#541818") : light ? QColor("#b8c2d0") : QColor("#3a4457");
+        const QColor tolColor = nightRed ? QColor("#a62424") : light ? QColor("#2f78c4") : QColor("#4c7cb0");
+        const QColor labelCol = nightRed ? QColor("#c84c4c") : light ? QColor("#4a5568") : QColor("#8f9bb0");
+        const QColor trailCol = nightRed ? QColor("#cc3838") : QColor("#5ec4e8");
+        const QColor okDot = nightRed ? QColor("#ff5a5a") : QColor("#5cd88f");
+        const QColor warnDot = nightRed ? QColor("#d94040") : QColor("#f0ad4e");
+
+        p.fillRect(rect(), bg);
+        p.setPen(border);
+        p.drawRect(rect().adjusted(0, 0, -1, -1));
+
+        const int margin = 18;
+        const double radius = std::max(24.0, std::min(width(), height()) * 0.5 - margin);
+        const QPointF centre(width() * 0.5, height() * 0.5);
+
+        // Scale so the tolerance ring sits near 45% of plot radius, expanding
+        // smoothly if current drift travels beyond the outer ring.
+        double maxSpan = tolerancePx_ * 2.2;
+        if (hasCurrent_) maxSpan = std::max(maxSpan, std::hypot(current_.x(), current_.y()) * 1.15);
+        const double pxPerImgPx = radius / maxSpan;
+
+        // Crosshairs.
+        p.setPen(QPen(grid, 1));
+        p.drawLine(QPointF(centre.x() - radius, centre.y()), QPointF(centre.x() + radius, centre.y()));
+        p.drawLine(QPointF(centre.x(), centre.y() - radius), QPointF(centre.x(), centre.y() + radius));
+
+        // Outer reference ring and highlighted Tolerance ring.
+        p.setPen(QPen(grid, 1, Qt::DotLine));
+        p.drawEllipse(centre, radius, radius);
+        const double tolR = std::clamp(tolerancePx_ * pxPerImgPx, 6.0, radius);
+        p.setPen(QPen(tolColor, 1.25));
+        p.drawEllipse(centre, tolR, tolR);
+
+        // Axis labels.
+        QFont small = font();
+        small.setPointSizeF(std::max(7.5, small.pointSizeF() - 1.0));
+        p.setFont(small);
+        p.setPen(labelCol);
+        p.drawText(QRectF(centre.x() - 18, centre.y() - radius - 14, 36, 13), Qt::AlignCenter, "−Y");
+        p.drawText(QRectF(centre.x() - 18, centre.y() + radius + 1, 36, 13), Qt::AlignCenter, "+Y");
+        p.drawText(QRectF(centre.x() - radius - 22, centre.y() - 7, 20, 14), Qt::AlignRight | Qt::AlignVCenter, "−X");
+        p.drawText(QRectF(centre.x() + radius + 3, centre.y() - 7, 22, 14), Qt::AlignLeft | Qt::AlignVCenter, "+X");
+        p.drawText(QRectF(6, height() - 16, width() - 12, 14), Qt::AlignRight | Qt::AlignVCenter,
+            QString("Tol %1 px").arg(tolerancePx_, 0, 'f', 1));
+
+        // Trail polyline and current offset dot.
+        if (trail_.size() >= 2)
+        {
+            QPolygonF poly;
+            poly.reserve(static_cast<int>(trail_.size()));
+            for (const QPointF& pt : trail_)
+                poly << (centre + QPointF(pt.x() * pxPerImgPx, pt.y() * pxPerImgPx));
+            p.setPen(QPen(trailCol, 1.5));
+            p.drawPolyline(poly);
+        }
+        if (hasCurrent_)
+        {
+            const QPointF pos = centre + QPointF(current_.x() * pxPerImgPx, current_.y() * pxPerImgPx);
+            const bool inside = std::hypot(current_.x(), current_.y()) <= tolerancePx_;
+            const QColor dot = (state_ == LockState::Locked && inside) ? okDot : warnDot;
+            p.setPen(Qt::NoPen);
+            p.setBrush(dot);
+            p.drawEllipse(pos, 4.0, 4.0);
+        }
+        else if (state_ == LockState::Off)
+        {
+            p.setPen(labelCol);
+            p.drawText(rect().adjusted(6, 4, -6, 0), Qt::AlignLeft | Qt::AlignTop, "Unlocked");
+        }
+    }
+
+private:
+    LockState state_{LockState::Off};
+    double tolerancePx_{15.0};
+    bool hasCurrent_{false};
+    QPointF current_;
+    std::deque<QPointF> trail_;
+};
+
 GuidingPanel::GuidingPanel(QWidget* parent)
     : QWidget(parent)
 {
-    // The lock.
+    // The lock & live guiding instrument (Feature-51 Phase 3).
     auto* lockBox = new QGroupBox("Feature lock", this);
-    auto* hint = new QLabel("Press <b>Draw lock box</b>, then drag a rectangle on the image around a crater or other "
-        "detail to lock on it; or click a pixel and press <b>Lock at selection</b>. The lock measures how far the field "
-        "drifts. Its box is drawn in cyan, labelled <i>Guiding lock</i>.", lockBox);
-    hint->setWordWrap(true);
+    auto makeMetric = [&](const QString& caption, const char* objName, const QString& tip) {
+        auto* card = new QWidget(lockBox);
+        auto* col = new QVBoxLayout(card);
+        col->setContentsMargins(4, 2, 4, 2);
+        col->setSpacing(1);
+        auto* cap = new QLabel(caption, card);
+        cap->setStyleSheet("font-size: 10px; color: #8c96a8;");
+        auto* val = new QLabel("—", card);
+        val->setObjectName(objName);
+        val->setStyleSheet("font-size: 13px; font-weight: bold;");
+        val->setToolTip(tip);
+        cap->setToolTip(tip);
+        col->addWidget(cap);
+        col->addWidget(val);
+        return std::pair{card, val};
+    };
+    auto [scoreCard, scoreVal] = makeMetric("Match score", "guideMetricScore",
+        "Correlation score of the latest feature lock match (or Disk centroid when tracking a planetary disk).");
+    auto [speedCard, speedVal] = makeMetric("Drift speed", "guideMetricSpeed",
+        "Measured live drift speed over recent unpulsed frames.");
+    auto [mountCard, mountVal] = makeMetric("Mount", "guideMetricMount",
+        "Current mount / guiding state (Off, Connected, Calibrating, or Guiding).");
+    metricScore_ = scoreVal;
+    metricSpeed_ = speedVal;
+    metricMount_ = mountVal;
+    auto* metricsRow = new QHBoxLayout;
+    metricsRow->setContentsMargins(0, 0, 0, 0);
+    metricsRow->setSpacing(6);
+    metricsRow->addWidget(scoreCard, 1);
+    metricsRow->addWidget(speedCard, 1);
+    metricsRow->addWidget(mountCard, 1);
+
+    driftPlot_ = new DriftTargetWidget(lockBox);
+
     // The readouts keep room for their longest texts, and the lock message
     // for two lines, so the controls below them stay where they are.
     const GuiderStatus widest = widestStatus();
@@ -300,7 +475,8 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     lockButtons->addWidget(unlockButton_);
     lockButtons->addStretch();
     auto* lockLayout = new QVBoxLayout(lockBox);
-    lockLayout->addWidget(hint);
+    lockLayout->addLayout(metricsRow);
+    lockLayout->addWidget(driftPlot_);
     lockLayout->addLayout(lockForm);
     lockLayout->addWidget(message_);
     lockLayout->addLayout(lockButtons);
@@ -417,16 +593,27 @@ GuidingPanel::GuidingPanel(QWidget* parent)
     auto* guideForm = new QFormLayout;
     guideForm->addRow("Calibration", calibration_);
     guideForm->addRow("Tolerance", toleranceRow);
-    guideForm->addRow("Give up at", giveUpRow);
-    guideForm->addRow("Aggressiveness", aggressiveness_);
-    guideForm->addRow("Max pulse", maxPulse_);
-    guideForm->addRow("Lock lost after", lostAfter_);
     guideForm->addRow("Status", guiding_);
+
+    // Feature-51 Phase 3: secondary guiding tuning lives in a persistent collapsible section.
+    advancedSection_ = new CollapsibleSection("Advanced guiding", "ui/sections/guidingAdvanced", false, guideBox);
+    advancedSection_->setObjectName("advancedGuidingSection");
+    advancedSection_->toggleButton()->setObjectName("advancedGuidingToggle");
+    advancedSection_->toggleButton()->setToolTip("Shows give-up limit, correction aggressiveness, maximum pulse duration, and lock-loss timeout.");
+    auto* advForm = new QFormLayout;
+    advForm->setContentsMargins(0, 0, 0, 0);
+    advForm->addRow("Give up at", giveUpRow);
+    advForm->addRow("Aggressiveness", aggressiveness_);
+    advForm->addRow("Max pulse", maxPulse_);
+    advForm->addRow("Lock lost after", lostAfter_);
+    advancedSection_->contentLayout()->addLayout(advForm);
+    advancedSection_->contentLayout()->addWidget(endsNote);
+
     auto* guideLayout = new QVBoxLayout(guideBox);
     guideLayout->addWidget(guideHint);
     guideLayout->addLayout(guideButtons);
     guideLayout->addLayout(guideForm);
-    guideLayout->addWidget(endsNote);
+    guideLayout->addWidget(advancedSection_);
     guideLayout->addWidget(guideMessage_);
 
     // The readouts keep room for long texts, so the panel scrolls when the
@@ -502,6 +689,51 @@ void GuidingPanel::setStatus(const GuiderStatus& status)
     guiding_->setText(guidingText(guide));
     guideMessage_->setText(QString::fromStdString(guide.message));
     guideMessage_->setVisible(!guide.message.empty());
+
+    // Update live instrument header metrics and 2D drift bullseye plot.
+    if (lock.state == LockState::Off)
+    {
+        metricScore_->setText("—");
+        metricSpeed_->setText("—");
+    }
+    else
+    {
+        if (lock.lastMatch)
+            metricScore_->setText(lock.method == LockMethod::DiskCentroid
+                ? QString("Disk (%1)").arg(lock.lastMatch->score, 0, 'f', 2)
+                : QString::number(lock.lastMatch->score, 'f', 3));
+        else
+            metricScore_->setText(lock.method == LockMethod::DiskCentroid ? "Disk" : "Locked");
+
+        if (lock.driftRateValid)
+        {
+            const double pxSec = std::hypot(lock.driftRateDx, lock.driftRateDy);
+            metricSpeed_->setText(arcsecPerPixel_
+                ? QString("%1″/s").arg(pxSec * *arcsecPerPixel_, 0, 'f', 2)
+                : QString("%1 px/s").arg(pxSec, 0, 'f', 2));
+        }
+        else if (guide.mode == GuideMode::Guiding && guide.driftEstimateValid)
+        {
+            const double pxSec = std::hypot(guide.driftRaPxPerSec, guide.driftDecPxPerSec);
+            metricSpeed_->setText(arcsecPerPixel_
+                ? QString("%1″/s").arg(pxSec * *arcsecPerPixel_, 0, 'f', 2)
+                : QString("%1 px/s").arg(pxSec, 0, 'f', 2));
+        }
+        else
+        {
+            metricSpeed_->setText("…");
+        }
+    }
+    metricMount_->setText(!guide.mountConnected ? "Off"
+        : guide.mode == GuideMode::Guiding ? "Guiding"
+        : guide.mode == GuideMode::Calibrating ? "Calibrating"
+        : "Connected");
+    const double tolPx = frameShortSide_ > 0 ? tolerancePercent() / 100.0 * frameShortSide_ : 15.0;
+    const bool hasSample = lock.estimateValid || (lock.lastMatch && lock.lastMatch->valid);
+    const double plotDx = lock.estimateValid ? lock.estimateDx : (lock.lastMatch ? lock.lastMatch->dx : 0.0);
+    const double plotDy = lock.estimateValid ? lock.estimateDy : (lock.lastMatch ? lock.lastMatch->dy : 0.0);
+    driftPlot_->setSample(lock.state, hasSample, plotDx, plotDy, tolPx);
+
     updateMountControls();
     updateTolerance();
 }
@@ -536,6 +768,7 @@ void GuidingPanel::updateTolerance()
     };
     toleranceReadout_->setText(format(tolerancePercent()));
     giveUpReadout_->setText(format(giveUpPercent()));
+    if (driftPlot_) driftPlot_->setTolerance(tolerancePercent() / 100.0 * frameShortSide_);
 }
 
 void GuidingPanel::setAvailable(bool running, bool pixelSelected)

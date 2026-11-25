@@ -9,6 +9,8 @@ class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
 class QSpinBox;
+class CollapsibleSection;
+class DriftTargetWidget;
 
 // The Guiding dock: the feature lock, the mount, the calibration, and
 // guiding. It holds no guiding state; the window passes each status the
@@ -72,6 +74,10 @@ private:
     void updateTolerance();
     void updateMountControls();
 
+    QLabel* metricScore_;
+    QLabel* metricSpeed_;
+    QLabel* metricMount_;
+    DriftTargetWidget* driftPlot_;
     QLabel* state_;
     QLabel* drift_;
     QLabel* driftSpeed_;
@@ -100,6 +106,7 @@ private:
     QSpinBox* maxPulse_;
     QPushButton* guideButton_;
     QSpinBox* lostAfter_;
+    CollapsibleSection* advancedSection_;
     QLabel* guiding_;
     QLabel* guideMessage_;
 
