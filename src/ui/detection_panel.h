@@ -165,7 +165,7 @@ private:
     PeakHistory* history_;
     QImage overlayImage_;
     DetectionSummary latest_;
-    bool monitoring_{false}, settling_{false};
+    bool monitoring_{false}, settling_{false}, warmingUp_{false};
     bool timeLapseActive_{false}, timeLapseTransits_{false};
     QString timeLapseDetail_;
     bool updating_{false};

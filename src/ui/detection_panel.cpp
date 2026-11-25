@@ -40,6 +40,11 @@ double boxArea(const DetectionSummary& summary)
 
 const QString kSettlingReading = "Settling after camera change — relearning before threshold feedback.";
 const QString kSettlingState = "Preview capture is OFF. Settling is an estimate; Monitoring starts fresh with verified camera settings.";
+
+QString adaptingReading(double remainingSeconds)
+{
+    return QString("Adapting detector to the scene… (%1 s)").arg(std::max(0.0, remainingSeconds), 0, 'f', 1);
+}
 const QString kOverlaySkipped = "Overlay skipped: RAM ceiling reached. Detection continues.";
 
 // Feature-45: with darkening, the peak is the deepest fall.
@@ -198,6 +203,9 @@ public:
         points_ = view.history;
         threshold_ = view.summary.settings.sigma;
         falls_ = view.summary.settings.darkening;
+        warmingUp_ = view.summary.warmingUp && !view.settling;
+        warmupTotal_ = view.summary.warmupTotalSeconds;
+        warmupRemaining_ = view.summary.warmupRemainingSeconds;
         update();
     }
 protected:
@@ -206,6 +214,30 @@ protected:
         QPainter painter(this);
         const bool nightRed = currentUiTheme() == UiTheme::NightRed;
         painter.fillRect(rect(), nightRed ? QColor("#0b0202") : QColor("#151c27"));
+        if (warmingUp_)
+        {
+            const QRectF box = QRectF(rect()).adjusted(12, 14, -12, -14);
+            painter.setPen(nightRed ? QColor("#e06666") : QColor("#e3b34a"));
+            painter.drawText(QRectF(box.left(), box.top(), box.width(), 24), Qt::AlignCenter,
+                adaptingReading(warmupRemaining_));
+            const QRectF bar(box.left() + 12, box.top() + 34, std::max(20.0, box.width() - 24), 8);
+            painter.setPen(QPen(nightRed ? QColor("#541818") : QColor("#364152"), 1));
+            painter.setBrush(nightRed ? QColor("#220707") : QColor("#1d2633"));
+            painter.drawRoundedRect(bar, 3, 3);
+            const double frac = warmupTotal_ > 0.0
+                ? std::clamp(1.0 - warmupRemaining_ / warmupTotal_, 0.0, 1.0) : 0.0;
+            if (frac > 0.0)
+            {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(nightRed ? QColor("#c83737") : QColor("#4d94d4"));
+                painter.drawRoundedRect(QRectF(bar.left() + 1, bar.top() + 1,
+                    std::max(2.0, (bar.width() - 2) * frac), bar.height() - 2), 2, 2);
+            }
+            painter.setPen(nightRed ? QColor("#a84848") : QColor("#9aa6b8"));
+            painter.drawText(QRectF(box.left(), bar.bottom() + 8, box.width(), 20), Qt::AlignCenter,
+                "Learning background and noise before scoring");
+            return;
+        }
         const QRectF plot = QRectF(rect()).adjusted(8, 8, -8, -22);
         double high = std::max(threshold_ * 1.3, 1.0);
         for (const auto& p : points_) high = std::max(high, p.peakSigma * 1.05);
@@ -233,6 +265,9 @@ private:
     std::vector<DetectionHistoryPoint> points_;
     double threshold_{6};
     bool falls_{false};
+    bool warmingUp_{false};
+    double warmupTotal_{0};
+    double warmupRemaining_{0};
 };
 
 DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
@@ -461,7 +496,8 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     const DetectionSummary widest = widestSummary();
     const DetectionSummary widestFall = widestFallSummary();
     sigmaReading_ = new ReadoutLabel({peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, false),
-        peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, true), kSettlingReading}, essentialGrid);
+        peakText(widest.peakSigma, widest.settings.sigma, widest.peakSigma, true), kSettlingReading,
+        adaptingReading(15.0)}, essentialGrid);
     sigmaReading_->setObjectName("sigmaReading");
     sigmaReading_->setText("Waiting for measurements");
     // A measured patch is at most a few thousand pixels (a shadow some tens
@@ -1052,7 +1088,8 @@ void DetectionPanel::setView(const DetectionView& view)
     const auto& summary = view.summary;
     latest_ = summary;
     settling_ = view.settling;
-    const bool measuring = summary.ready && !view.settling;
+    warmingUp_ = summary.warmingUp && !view.settling;
+    const bool measuring = summary.ready && !view.settling && !summary.warmingUp;
     const bool hasPatch = measuring && summary.brightPixels > 0 && !summary.patchSearchLimited;
     double high = 0;
     int big = 0;
@@ -1077,9 +1114,13 @@ void DetectionPanel::setView(const DetectionView& view)
     }
     else
     {
-        sigmaReading_->setText(view.settling ? kSettlingReading : "Learning the reference — waiting for measurements.");
+        sigmaReading_->setText(view.settling ? kSettlingReading
+            : summary.warmingUp ? adaptingReading(summary.warmupRemainingSeconds)
+            : "Learning the reference — waiting for measurements.");
         const DetectionSettings shown = settings();
-        sizeReading_->setText(QString("Allowed patch size %1–%2 px.").arg(shown.minPixels).arg(shown.patchMaxPixels()));
+        sizeReading_->setText(summary.warmingUp
+            ? QString("Learning background and noise before scoring.")
+            : QString("Allowed patch size %1–%2 px.").arg(shown.minPixels).arg(shown.patchMaxPixels()));
     }
     updateDecision();
     const bool showStab = watchTarget(watch_) != Target::Sky && stabilize_->isChecked();
@@ -1212,6 +1253,10 @@ void DetectionPanel::updateDecision()
     const auto& summary=latest_;
     if (settling_)
         state_->setText(kSettlingState);
+    else if (warmingUp_)
+        state_->setText(monitoring_
+            ? QString("Monitoring — adapting detector to the scene (%1 s remaining).").arg(summary.warmupRemainingSeconds, 0, 'f', 1)
+            : QString("Adapting detector to the scene (%1 s remaining). Capture OFF.").arg(summary.warmupRemainingSeconds, 0, 'f', 1));
     else if (!summary.ready)
         state_->setText(QString("Learning reference (%1 frame(s)). Capture %2.").arg(summary.learningFrames).arg(monitoring_?"ON":"OFF"));
     else

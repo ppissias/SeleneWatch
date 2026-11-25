@@ -53,6 +53,7 @@ public:
     // Source thread. May call the candidate and clip callbacks before returning.
     void onFrame(const FramePtr& frame, DetectionDisplayRequest display = {}, FrameShift shift = {});
     void setDetectionSettings(const DetectionSettings& settings);
+    void setDetectorWarmupEnabled(bool enabled);
     [[nodiscard]] const DetectionSummary& detectionSummary() const;
     [[nodiscard]] const std::vector<DetectionSummary>& detectionCandidates() const;
     // Source thread, or after it is joined. Marks the latest retained frame

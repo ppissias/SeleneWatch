@@ -82,6 +82,9 @@ struct DetectionSummary
     int probeX{-1}, probeY{-1};
     double processingMs{0};
     bool ready{false};
+    bool warmingUp{false};
+    double warmupTotalSeconds{0};
+    double warmupRemainingSeconds{0};
     bool passed{false};
     bool triggered{false};
     bool firing{false};

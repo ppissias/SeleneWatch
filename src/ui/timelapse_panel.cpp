@@ -197,7 +197,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     auto* btnRow = new QHBoxLayout();
     startStopButton_ = new QPushButton("Start time-lapse", body);
     startStopButton_->setObjectName("timelapseStartButton");
-    startStopButton_->setToolTip("Starts the time-lapse from the current stream (starting Preview if needed), or stops it and builds the video.");
+    startStopButton_->setToolTip("Starts the time-lapse from the running Preview stream, or stops it and builds the video. Start Preview first to check framing, exposure, and your lunar anchor.");
     resharpenButton_ = new QPushButton("Re-sharpen…", body);
     resharpenButton_->setObjectName("timelapseResharpenButton");
     resharpenButton_->setToolTip("Opens Re-sharpen for a finished time-lapse: try other sharpening and tone settings, and rebuild the video, without changing the stacks.");
@@ -483,7 +483,7 @@ void TimelapsePanel::setStreamInfo(bool running, bool monitoring, bool recording
     else
     {
         startStopButton_->setText(timeLapsing_ ? "Stop time-lapse" : "Start time-lapse");
-        startStopButton_->setEnabled(timeLapsing_ || (!monitoring_ && !recording_));
+        startStopButton_->setEnabled(timeLapsing_ || (running_ && !monitoring_ && !recording_));
     }
     resharpenButton_->setEnabled(!busy);
     updateEstimates();

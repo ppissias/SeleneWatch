@@ -70,6 +70,14 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
           if (auto ended = notifications_.watchTimelapseEnded) post([ended, status] { ended(status); });
       })
 {
+    // Feature-52: let the detector learn background and noise for one Reference
+    // time (capped at 15 s) before scoring or triggering on any live/recorded stream.
+    capture_.setDetectorWarmupEnabled(true);
+}
+
+void Session::setDetectorWarmupEnabled(bool enabled)
+{
+    if (!running_) capture_.setDetectorWarmupEnabled(enabled);
 }
 
 Session::~Session()
@@ -1158,7 +1166,8 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     // Feature-26: auto-tune measures after the live detector learned from the frame.
     if (tuneWatch_.busy())
     {
-        const AutoTuneWatch::Context context{settings, mode_.load() == Mode::Preview, settling, tuneSpareBytes_.load()};
+        const bool adapting = settling || capture_.detectionSummary().warmingUp;
+        const AutoTuneWatch::Context context{settings, mode_.load() == Mode::Preview, adapting, tuneSpareBytes_.load()};
         if (const auto flash = tuneWatch_.onFrame(*published, capture_.detector(), capture_.detectionCandidates(), context))
         {
             if (recording_) tuneWatch_.cancel("A recording is running: the test flash would be written into it.");

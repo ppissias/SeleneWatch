@@ -203,6 +203,7 @@ void MainWindow::updateAutoTune()
     situation.recording = session_->recordingStatus().active;
     situation.testingTools = testingTools_;
     situation.busy = autoTuneMeasuring();
+    situation.adapting = latestDetection_.warmingUp;
     situation.haveBox = earthshineBox_.has_value();
     situation.canRestore = tuneRestore_.has_value();
     situation.twilight = twilightAdvice();

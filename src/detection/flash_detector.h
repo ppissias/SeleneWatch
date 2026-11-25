@@ -53,6 +53,11 @@ struct FrameShift
 class FlashDetector
 {
 public:
+    // Feature-52: initial learning period (1 x Reference time, capped at 15 s,
+    // minimum 5 frames) so per-pixel noise settles before scoring or triggering.
+    static constexpr double kMaxWarmupSeconds = 15.0;
+    static constexpr size_t kMinWarmupFrames = 5;
+
     explicit FlashDetector(DetectionSettings settings = {}, MemoryBudget budget = {});
     // Repeated settling frames reuse charged arrays instead of reallocating
     // full images. A normal reset releases them for a new run/layout.
@@ -60,6 +65,8 @@ public:
     // Retain the learned reference, but confirm patches again after arming.
     void rearm();
     void setSettings(const DetectionSettings& settings);
+    void setWarmupEnabled(bool enabled) { warmupEnabled_ = enabled; }
+    [[nodiscard]] bool warmupEnabled() const { return warmupEnabled_; }
 
     // Source thread, in this order for each frame: analyze, inspect/copy derived
     // measurements, updateReference with that same immutable frame.
@@ -128,6 +135,9 @@ private:
     std::vector<Patch> active_;
     std::vector<DetectionSummary> candidates_;
     size_t learnedFrames_{0};
+    double learnedSeconds_{0};
+    bool warmupEnabled_{false};
+    bool firstFrame_{false};
     std::deque<DetectionHistoryPoint> history_;
     std::shared_ptr<const DetectionMap> map_;
     int width_{0}, height_{0};

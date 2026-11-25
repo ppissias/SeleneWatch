@@ -368,13 +368,18 @@ try {
         Invoke-UiaClick $mon $Label
         Wait-Until { $mon.Current.Name -like "*Stop monitoring*" } "$Label - active"
     }
+    function Wait-DetectorAdapted([string]$Label) {
+        $sigLbl = Find-UiaElement -Root $mainWin -IdSuffix "sigmaReading" -TimeoutMs 5000
+        Wait-Until {
+            ($sigLbl.Current.Name -notlike "*Adapting detector*") -and ($sigLbl.Current.Name -notlike "*Learning the reference*") -and ($sigLbl.Current.Name -notlike "*Waiting for measurements*")
+        } "$Label - detector adapted to scene" -TimeoutMs 15000
+    }
 
     # --- Scenario 1: Moon Preview, Zoom (100%/200%/Fit), Detection Profile, Bright + Darkening Clips ---
     Write-Host "`n[1/4] Synthetic Moon: Preview Zoom + Detection Profile + Bright & Darkening Clips..."
-    Select-DockTab $mainWin "Detection"
     Select-UiaComboItem -Combo $sourceCombo -ItemText "Synthetic" -ProcessId $proc.Id
     $null = Start-StreamUi "Start synthetic Moon preview"
-    Start-Sleep -Milliseconds 700
+    Wait-DetectorAdapted "Moon flashes preview"
 
     # Test Preview Zoom buttons: 100%, 200%, Fit.
     $zoom100 = Find-UiaElement -Root $mainWin -IdSuffix "previewZoom100"
@@ -439,8 +444,9 @@ try {
     Select-UiaComboItem -Combo $targetCombo -ItemText "Shadows / crossings (Moon, Sun, planets)" -ProcessId $proc.Id
     Start-Sleep -Milliseconds 300
     $null = Start-StreamUi "Start Moon shadows preview"
+    Wait-DetectorAdapted "Moon shadows preview"
     Start-MonitoringUi "Start Moon shadows monitoring"
-    Start-Sleep -Milliseconds 700
+    Start-Sleep -Milliseconds 300
     $shadowEventsDir = Join-Path (Get-ChildItem -LiteralPath (Join-Path $TempOut "events\moon") -Filter "session-*" -Directory |
         Sort-Object Name | Select-Object -Last 1).FullName "clips"
     Assert-True ($shadowEventsDir -ne $moonEventsDir) "The shadows watch must start its own session"
@@ -477,7 +483,7 @@ try {
     Start-Sleep -Milliseconds 300
 
     $null = Start-StreamUi "Start synthetic Sky preview"
-    Start-Sleep -Milliseconds 700
+    Wait-DetectorAdapted "Sky preview"
     Save-WindowScreenshot $mainWin (Join-Path $ScreenshotDir "02_synthetic_sky.png")
 
     # Feature-26: a quick auto-tune K watch on the synthetic sky (not a camera,
@@ -679,9 +685,9 @@ try {
         $speedCombo = Find-UiaElement -Root $mainWin -IdSuffix "speedComboBox"
         Select-UiaComboItem -Combo $speedCombo -ItemText "Real time" -ProcessId $proc.Id
         $null = Start-StreamUi "Start real lunar AVI preview"
-        Start-Sleep -Milliseconds 800
+        Wait-DetectorAdapted "Real lunar AVI preview"
         Start-MonitoringUi "Start real lunar AVI monitoring"
-        Start-Sleep -Milliseconds 700
+        Start-Sleep -Milliseconds 400
         Click-ElementAtFraction $previewEl 0.5 0.5
         Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready on real lunar AVI"
         $realWatch = Get-ChildItem -LiteralPath (Join-Path $TempOut "events\moon") -Directory -Filter "session-*" | Sort-Object Name | Select-Object -Last 1
@@ -694,15 +700,16 @@ try {
         Write-Host "  Real lunar AVI blip clip recorded on disk."
         Stop-StreamUi "Stop real lunar AVI monitoring"
 
-        Select-UiaComboItem -Combo $speedCombo -ItemText "Fast" -ProcessId $proc.Id
-
-        # Switch to Time-lapse workspace and start directly from Stopped via the unified toolbar Start time-lapse button!
+        # Feature-52: Preview comes first everywhere, even for recordings. Start Preview in
+        # Real time, launch Time-lapse from the toolbar, then switch Speed to Fast.
         $wsTimelapse = Find-UiaElement -Root $mainWin -IdSuffix "workspaceTimelapseButton" -TimeoutMs 5000
-        Invoke-UiaClick $wsTimelapse "Switch to Time-lapse workspace"
+        Invoke-UiaClick $wsTimelapse "Switch to Time-lapse mode"
         Start-Sleep -Milliseconds 250
+        $null = Start-StreamUi "Start real lunar AVI preview for time-lapse"
         $toolbarTlBtn = Find-UiaElement -Root $mainWin -IdSuffix "toolbarTimelapseButton" -TimeoutMs 5000
-        Wait-Until { $toolbarTlBtn.Current.IsEnabled } "Toolbar Start time-lapse enabled for recording" -TimeoutMs 5000
+        Wait-Until { $toolbarTlBtn.Current.IsEnabled } "Toolbar Start time-lapse enabled in Preview" -TimeoutMs 5000
         Invoke-UiaClick $toolbarTlBtn "Start real lunar time-lapse from toolbar"
+        Select-UiaComboItem -Combo $speedCombo -ItemText "Fast" -ProcessId $proc.Id
         Wait-Until {
             @(Get-ChildItem -Path $tlRoot -Directory).Count -ge 2
         } "Second (real lunar) session directory created" -TimeoutMs 15000
@@ -716,7 +723,7 @@ try {
             Invoke-UiaClick $tlStartBtn "Stop real lunar time-lapse"
         }
         Wait-Until {
-            ($tlTiming.Current.Name -like "Finished (*") -and ($tlStartBtn.Current.Name -like "*Start*") -and $tlStartBtn.Current.IsEnabled
+            ($tlTiming.Current.Name -like "Finished (*") -and ($tlStartBtn.Current.Name -like "*Start*")
         } "Real lunar time-lapse finalized" -TimeoutMs 30000
         Write-Host "  Real lunar completed: $($tlTiming.Current.Name)"
 

@@ -56,6 +56,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-49 — The shadows watch and the ISS](#feature-49--the-shadows-watch-and-the-iss)
 - [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection)
 - [Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)](#feature-51--observation-workspaces--instrument-ui-redesign-phases-14)
+- [Feature-52 — Detector Learning Period & Preview-First Session Consistency](#feature-52--detector-learning-period--preview-first-session-consistency)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3735,3 +3736,27 @@ Organize SeleneWatch around the observer's goal ("simple to operate, powerful to
 ### Verification & acceptance
 - Preserved all core capture/evidence paths and raw SER guarantees; updated `MANUAL.md`, `tests/ui_tests.cpp`, and `tests/gui_e2e_test.ps1`.
 - Verified across full `Release-x64` build, all 26 CTest suites (including `everyControlFitsOnASmallLaptopScreen`, `everyControlHasHelp`, and `observationWorkspacesSyncWatchDocksAndPrimaryAction`), and real Windows GUI E2E (`tests/gui_e2e_test.ps1`) with visual screenshot inspection.
+
+
+---
+
+## Feature-52 — Detector Learning Period & Preview-First Session Consistency
+
+*Proposed, approved, and implemented on 25 November 2026.*
+
+Two workflow and reliability improvements decided after testing shaky planetary footage (Jupiter) and reviewing session startup across all four modes:
+
+### 1. Detector learning period (warmup)
+- **Root cause addressed:** Previously `FlashDetector` set `variance_ = 0` on frame 1 and marked `ready = true` on frame 2, producing immediate `100–500 σ` startup spikes on shaky targets that distorted the 10-second `PeakHistory` graph and could fire false clips in the first second of fresh Monitoring runs.
+- **Warmup rule (`FlashDetector`):** When warmup is enabled (enabled by default in `Session` for every live and recorded stream), the detector learns per-pixel mean and variance cleanly with zero pixels protected for `1 × Reference time` (`settings_.referenceTimeConstantSeconds`, capped at `15 s` via `kMaxWarmupSeconds`, minimum `5` frames via `kMinWarmupFrames`).
+- **No startup spikes or false triggers:** While `summary.warmingUp` is true, `summary.ready` stays `false`, candidates are suppressed, and `history_` does not record startup spikes. Transitioning from an already-adapted Preview into Monitoring (`rearm()`) preserves `learnedFrames_` and `learnedSeconds_` so Monitoring arms immediately; cold Monitoring starts, watch changes, and stabilization resets adapt cleanly before firing while the pre-event ring buffer keeps recording raw frames.
+- **Clear UI feedback (`DetectionPanel` & `AutoTune`):** During warmup, `PeakHistory` paints a calm *"Adapting detector to the scene… (X.X s)"* countdown with a horizontal progress bar, `sigmaReading` and `detectionState` report remaining seconds, `MeterSlider` markers stay clear, and **Tune camera & detection…** (`autoTuneButton`) pauses until adapted—while `Sensitivity K`, `Minimum patch`, `Profile`, `Watching`, and checkboxes remain editable.
+
+### 2. Consistent Preview-first workflow everywhere (including recordings)
+- **Time-lapse requires Preview first:** Both the top command bar's **Start time-lapse** (`toolbarTimelapseButton`) and the sidebar's **Start time-lapse** (`timelapseStartButton`) require an active Preview stream (matching **Start monitoring**), and `MainWindow::onStartTimeLapse()` no longer auto-starts a stream from Stopped.
+- **Uncluttered Stopped state:** While Stopped, only **Start preview** appears on the command bar across all four modes (`Flashes`, `Shadows / crossings`, `Sky`, `Time-lapse`), ensuring observers always verify framing, exposure/histogram, and lock/anchor regions before starting capture or stacking.
+
+### Verification & acceptance
+- Added `DetectionTest::detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState` in `tests/detection_tests.cpp` verifying suppression during `1 × Reference time`, empty history during warmup, post-warmup triggering, zero-wait `rearm()`, and the `15 s` cap.
+- Updated `MANUAL.md`, `tests/ui_tests.cpp`, and `tests/gui_e2e_test.ps1` (including `Wait-DetectorAdapted` and Preview-first recording Time-lapse in Scenario 4).
+- Verified with full `Release-x64` build, all 26 CTest suites, and real Windows GUI E2E (`tests/gui_e2e_test.ps1`) with screenshot inspection.

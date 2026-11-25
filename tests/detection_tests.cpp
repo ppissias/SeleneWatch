@@ -89,6 +89,7 @@ private slots:
     void stabilizedDetectionRecoversShiftedFlashesShadowsAndBayer();
     void frameStabilizerHandlesOcclusionCloudsAndRecenter();
     void stabilizedSessionPreservesRawSerAndLogsMetadata();
+    void detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState();
 };
 
 // Feature-31: for flashes on the earthlit side, pixels whose learned
@@ -544,11 +545,15 @@ void DetectionTest::aOneFrameBlipThroughSessionIsSaved()
     Session::Notifications notices;
     notices.previewReady = [&] {
         const auto preview = running->takePreview();
-        if (preview.frame && !requested) requested = running->requestBlip({20, 20, 4, 50, 1});
+        if (preview.frame && preview.detection && preview.detection->summary.ready && !requested)
+            requested = running->requestBlip({20, 20, 4, 50, 1});
     };
     notices.ended = [&] { ended = true; };
     notices.clipWritten = [&](const auto& result) { results.push_back(result); };
     Session session(&context, QDir(directory.path()).filePath("events"), std::move(notices));
+    DetectionSettings fastRef;
+    fastRef.referenceTimeConstantSeconds = 0.25;
+    session.setDetectionSettings(fastRef);
     running = &session;
     session.setSource(std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString())));
     QVERIFY2(session.start(error, Session::Mode::Monitoring), qPrintable(error));
@@ -585,6 +590,7 @@ void DetectionTest::aLoopFlushesTheClipAtItsBoundary()
     notices.candidateStarted = [&] { ++candidates; };
     notices.clipWritten = [&](const auto& result) { results.push_back(result); };
     Session session(&context, QDir(directory.path()).filePath("events"), std::move(notices));
+    session.setDetectorWarmupEnabled(false);
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
     source->setLoopSeconds(1);
     session.setSource(std::move(source));
@@ -844,6 +850,7 @@ void DetectionTest::stabilizedSessionPreservesRawSerAndLogsMetadata()
     settings.sigma = 8.0;
     settings.minPixels = 4;
     settings.oneFrame = true;
+    settings.referenceTimeConstantSeconds = 0.3;
     settings.stabilizeDetection = true;
     session.setWatch(Watch::MoonFlashes);
     session.setDetectionSettings(settings);
@@ -883,6 +890,64 @@ void DetectionTest::stabilizedSessionPreservesRawSerAndLogsMetadata()
         QCOMPARE(saved.data.size(), rawBytes[origIdx].size());
         QVERIFY(std::equal(saved.data.begin(), saved.data.end(), rawBytes[origIdx].begin()));
     }
+}
+
+void DetectionTest::detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState()
+{
+    DetectionSettings settings;
+    settings.sigma = 6.0;
+    settings.minPixels = 8;
+    settings.oneFrame = true;
+    settings.referenceTimeConstantSeconds = 1.0;
+
+    FlashDetector detector(settings);
+    detector.setWarmupEnabled(true);
+
+    // First frame initializes mean and reports warmingUp for 1 x Reference time.
+    QVERIFY(!observe(detector, flat(0, 100)));
+    QVERIFY(!detector.summary().ready);
+    QVERIFY(detector.summary().warmingUp);
+    QCOMPARE(detector.summary().warmupTotalSeconds, 1.0);
+    QVERIFY(detector.view().history.empty());
+
+    // A bright flash during the 1.0 s learning period must NOT trigger or pollute history.
+    for (uint64_t i = 1; i < 20; ++i)
+    {
+        Frame f = flat(i, 100);
+        if (i == 5) patch(f, 20, 20, 4, 80);
+        QVERIFY(!observe(detector, f));
+        QVERIFY(detector.summary().warmingUp);
+        QVERIFY(!detector.summary().ready);
+        QVERIFY(detector.view().history.empty());
+    }
+
+    // Advance past 1.0 s of stream time (33 ms/frame -> 32+ frames > 1.0 s).
+    for (uint64_t i = 20; i <= 35; ++i)
+        QVERIFY(!observe(detector, flat(i, 100)));
+    QVERIFY(detector.summary().ready);
+    QVERIFY(!detector.summary().warmingUp);
+    QVERIFY(!detector.view().history.empty());
+
+    // After adapting, a real flash on settled pixels triggers cleanly.
+    Frame realFlash = flat(36, 100);
+    patch(realFlash, 40, 20, 4, 60);
+    QVERIFY(observe(detector, realFlash));
+
+    // rearm() (Preview -> Monitoring handover) preserves the adapted state with zero wait.
+    detector.rearm();
+    Frame afterRearm = flat(37, 100);
+    patch(afterRearm, 30, 15, 4, 60);
+    QVERIFY(observe(detector, afterRearm));
+    QVERIFY(detector.summary().ready);
+    QVERIFY(!detector.summary().warmingUp);
+
+    // Very long Reference time is capped at kMaxWarmupSeconds (15 s).
+    DetectionSettings slow = settings;
+    slow.referenceTimeConstantSeconds = 60.0;
+    FlashDetector slowDet(slow);
+    slowDet.setWarmupEnabled(true);
+    observe(slowDet, flat(0, 100));
+    QCOMPARE(slowDet.summary().warmupTotalSeconds, FlashDetector::kMaxWarmupSeconds);
 }
 
 int main(int argc, char** argv)

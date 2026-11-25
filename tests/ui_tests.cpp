@@ -456,7 +456,9 @@ void UiTest::previewShowsWouldTriggerWithoutSaving()
         window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(100);
         window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(10);
         auto* inject=window.findChild<QPushButton*>("injectBlipButton");
-        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(),3000); inject->click();
+        auto* sigmaLbl = window.findChild<QLabel*>("sigmaReading");
+        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled() && !sigmaLbl->text().contains("Adapting") && !sigmaLbl->text().contains("Learning"), 6000);
+        inject->click();
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("detectionState")->text().contains("Would trigger"),3000);
         QVERIFY(window.findChild<QLabel*>("sigmaReading")->text().contains("% of threshold"));
         QVERIFY(window.findChild<QLabel*>("patchReading")->text().contains("allowed"));
@@ -2471,7 +2473,8 @@ void UiTest::stretchARecordingWhileCapturingThenRestoreSettings()
         window.findChild<QDoubleSpinBox*>("blipAmplitudeSpinBox")->setValue(50);
         window.findChild<QSpinBox*>("blipFramesSpinBox")->setValue(1);
         auto* inject = window.findChild<QPushButton*>("injectBlipButton");
-        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(), 3000);
+        auto* sigmaLbl = window.findChild<QLabel*>("sigmaReading");
+        QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled() && !sigmaLbl->text().contains("Adapting") && !sigmaLbl->text().contains("Learning"), 6000);
         inject->click();
         QString folder;
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
@@ -3598,6 +3601,9 @@ void UiTest::closingDuringTimelapseWaitsForTheVideo()
     tl->findChild<QCheckBox*>("timelapseGif")->setChecked(false);
     auto* startTl = tl->findChild<QPushButton*>("timelapseStartButton");
     auto* statsLabel = tl->findChild<QLabel*>("timelapseStats");
+    QVERIFY(!startTl->isEnabled()); // Feature-52: Preview always comes first.
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->isEnabled(), 5000);
     startTl->click();
     QTRY_VERIFY_WITH_TIMEOUT(statsLabel->text().contains("Stacks: 1"), 15000);
 
@@ -3694,6 +3700,9 @@ void UiTest::aSessionEndsByItselfAndStopsTheMountsTracking()
     tl->findChild<QComboBox*>("timelapseStopKind")->setCurrentIndex(0);
     tl->findChild<QSpinBox*>("timelapseVideoFps")->setValue(5);
     auto* startTl = tl->findChild<QPushButton*>("timelapseStartButton");
+    QVERIFY(!startTl->isEnabled()); // Feature-52: Preview always comes first.
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(startTl->isEnabled(), 5000);
     startTl->click();
     QTRY_VERIFY_WITH_TIMEOUT(startTl->text().contains("Stop"), 5000);
     QTRY_VERIFY_WITH_TIMEOUT(tl->findChild<QLabel*>("timelapseStats")->text().contains("Stacks: 1"), 15000);
@@ -4348,8 +4357,8 @@ void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
     QVERIFY(toolGuiding->isHidden());
     QVERIFY(timelapseDock->isHidden());
 
-    // Time-lapse mode swaps the right sidebar to Time-lapse, shows the bottom stack strip
-    // and viewport switcher, and promotes Start time-lapse onto the main command toolbar.
+    // Time-lapse mode swaps the right sidebar to Time-lapse and shows the bottom stack strip
+    // and viewport switcher. Feature-52: Start time-lapse requires Preview first everywhere.
     wsTimelapse->click();
     QVERIFY(wsTimelapse->isChecked());
     QCOMPARE(watchCombo->currentData().toInt(), static_cast<int>(Watch::MoonShadows));
@@ -4358,15 +4367,17 @@ void UiTest::observationWorkspacesSyncWatchDocksAndPrimaryAction()
     QVERIFY(!toolGuiding->isHidden());
     QVERIFY(!tlStrip->isHidden());
     QVERIFY(!tlViewLive->isHidden() && tlViewLive->isChecked());
-    QVERIFY(!tlPrimary->isHidden());
-    QVERIFY(tlPrimary->isEnabled());
-    QCOMPARE(tlPrimary->text(), QString("Start time-lapse"));
+    QVERIFY(tlPrimary->isHidden());
+    QVERIFY(!window.findChild<QPushButton*>("timelapseStartButton")->isEnabled());
     QVERIFY(monitoring->isHidden());
 
-    // Configure fast synthetic time-lapse bursts and verify the dedicated viewport + bottom strip populate.
+    // Configure fast synthetic time-lapse bursts, start Preview first, then start Time-lapse from the toolbar.
     window.findChild<QDoubleSpinBox*>("timelapseInterval")->setValue(0.5);
     window.findChild<QDoubleSpinBox*>("timelapseWindow")->setValue(0.2);
     window.findChild<QDoubleSpinBox*>("timelapseKeepPercent")->setValue(100.0);
+    window.findChild<QPushButton*>("startButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!tlPrimary->isHidden() && tlPrimary->isEnabled(), 5000);
+    QCOMPARE(tlPrimary->text(), QString("Start time-lapse"));
     tlPrimary->click();
     QTRY_VERIFY_WITH_TIMEOUT(tlPrimary->text() == "Stop time-lapse", 5000);
     QVERIFY(!wsFlashes->isEnabled());

@@ -44,6 +44,7 @@ public:
         bool recording{false};    // A manual recording is running.
         bool testingTools{false};
         bool busy{false};         // A measurement is waiting or running.
+        bool adapting{false};     // Detector is in its initial learning period.
         bool haveBox{false};      // Moon flashes: an earthshine box is drawn.
         bool canRestore{false};   // The camera loop changed settings that can be set back.
         QString twilight;         // Advice about the Sun's altitude; empty when none.

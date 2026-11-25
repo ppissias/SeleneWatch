@@ -157,6 +157,7 @@ private slots:
         notices.clipWritten=[&](const auto& result) { clips.push_back(result); };
         notices.timeLapseFinished=[&](const auto& result) { finished=result; };
         Session session(&context, dir.path(), std::move(notices));
+        session.setDetectorWarmupEnabled(false);
         auto source=std::make_unique<ControlledSource>();
         auto* controlled=source.get();
         session.setSource(std::move(source));
@@ -226,6 +227,7 @@ private slots:
             notices.candidateStarted=[&]{++candidates;};
             notices.clipWritten=[&](const auto& r){results.push_back(r);};
             Session session(&context,dir.path(),std::move(notices));
+            session.setDetectorWarmupEnabled(false);
             auto source=std::make_unique<ControlledSource>(); auto* controlled=source.get();
             session.setSource(std::move(source));
             QString error; QVERIFY(session.start(error));

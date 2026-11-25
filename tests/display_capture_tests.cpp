@@ -362,6 +362,7 @@ void DisplayCaptureTest::memoryFailurePreservesTheOpenClipAndReportsItsEnd()
     notices.failed = [&](const QString& text) { failure = text; };
     notices.clipWritten = [&](const auto& result) { results.push_back(result); };
     Session session(&context, output.path(), std::move(notices));
+    session.setDetectorWarmupEnabled(false);
     CaptureSettings settings; settings.memoryBytes = 8 * 1024 * 1024;
     session.setCaptureSettings(settings);
     session.setSource(std::make_unique<MemoryTestSource>());
@@ -394,6 +395,7 @@ void DisplayCaptureTest::memoryCapSplitsTheRunAndLeavesRoomForItsDifference()
     notices.ended = [&] { ended = true; };
     notices.clipWritten = [&](const auto& result) { results.push_back(result); };
     Session session(&context, output.path(), std::move(notices));
+    session.setDetectorWarmupEnabled(false);
     session.setCaptureSettings({0.005, 0.01, 100, 8 * 1024 * 1024});
     session.setSource(std::make_unique<MemoryTestSource>(false));
     QString error;

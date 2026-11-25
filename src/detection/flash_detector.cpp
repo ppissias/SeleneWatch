@@ -313,6 +313,8 @@ void FlashDetector::reset(bool releaseBuffers)
     lastShift_ = {};
     history_.clear(); map_.reset();
     learnedFrames_ = 0;
+    learnedSeconds_ = 0;
+    firstFrame_ = false;
     width_ = height_ = bits_ = 0;
     previousTime_ = {};
     summary_ = {};
@@ -359,6 +361,8 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
         mean_.assign(pixels, 0.0f);
         variance_.assign(pixels, 0.0f);
         learnedFrames_ = 1;
+        learnedSeconds_ = 0;
+        firstFrame_ = true;
         for (int ry = view.ryMin; ry < view.ryMax; ++ry)
         {
             view.fillRow(ry, rowBuf_.data());
@@ -368,9 +372,34 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
         active_.clear();
         history_.clear();
         largeChange_ = {}; holdAll_ = false;
+        if (warmupEnabled_)
+        {
+            const double warmupTarget = std::clamp(settings_.referenceTimeConstantSeconds, 0.0, kMaxWarmupSeconds);
+            summary_.warmingUp = true;
+            summary_.warmupTotalSeconds = warmupTarget;
+            summary_.warmupRemainingSeconds = warmupTarget;
+        }
     }
     else
     {
+        firstFrame_ = false;
+        const double warmupTarget = warmupEnabled_
+            ? std::clamp(settings_.referenceTimeConstantSeconds, 0.0, kMaxWarmupSeconds)
+            : 0.0;
+        const bool warming = warmupEnabled_
+            && ((learnedFrames_ < kMinWarmupFrames) || (learnedSeconds_ < warmupTarget));
+        if (warming)
+        {
+            summary_.ready = false;
+            summary_.warmingUp = true;
+            summary_.warmupTotalSeconds = warmupTarget;
+            summary_.warmupRemainingSeconds = std::max(0.0, warmupTarget - learnedSeconds_);
+            active_.clear();
+            largeChange_ = {};
+            holdAll_ = false;
+        }
+        else
+        {
         summary_.ready = true;
         // Feature-11: the mask as pixels, rebuilt when it or the frame changes.
         if (settings_.mask != maskBuiltFor_ || maskWidth_ != width_ || maskHeight_ != height_)
@@ -632,6 +661,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
         summary_.newlyReleased = newlyReleased;
         active_ = std::move(patches);
         map_ = std::move(map);
+        }
     }
     summary_.newCandidates = candidates_.size(); summary_.activePatches = active_.size();
     // A held brightening protects every pixel, so nothing learns this frame.
@@ -654,9 +684,12 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
     copyContext(strongest_);
     awaitingUpdate_ = true;
     previousTime_ = frame.timestamp;
-    history_.push_back({frame.timestamp, summary_.peakSigma, summary_.patchSearchLimited ? 0 : summary_.brightPixels});
-    while (!history_.empty() && (history_.size() > 4096
-        || frame.timestamp - history_.front().time > std::chrono::seconds{10})) history_.pop_front();
+    if (summary_.ready)
+    {
+        history_.push_back({frame.timestamp, summary_.peakSigma, summary_.patchSearchLimited ? 0 : summary_.brightPixels});
+        while (!history_.empty() && (history_.size() > 4096
+            || frame.timestamp - history_.front().time > std::chrono::seconds{10})) history_.pop_front();
+    }
     summary_.processingMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     strongest_.processingMs = summary_.processingMs;
     return summary_.triggered;
@@ -669,7 +702,7 @@ void FlashDetector::updateReference(const Frame& frame)
         || frame.significantBits != bits_ || frame.alignment != alignment_ || frame.bayer != bayer_
         || frame.data.size() != mean_.size() * static_cast<size_t>(bytesPerPixel(format_)))
         throw std::logic_error("reference update requires the frame just analyzed");
-    if (summary_.ready && summary_.protectedPixels < mean_.size())
+    if (!firstFrame_ && summary_.protectedPixels < mean_.size())
     {
         const auto started = std::chrono::steady_clock::now();
         const ShiftedView view(frame, lastShift_);
@@ -690,6 +723,7 @@ void FlashDetector::updateReference(const Frame& frame)
             }
         }
         if (learnedFrames_ < 1'000'000) ++learnedFrames_;
+        learnedSeconds_ += frameInterval_;
         summary_.processingMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     }
     awaitingUpdate_ = false;

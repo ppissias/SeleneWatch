@@ -221,6 +221,7 @@ void SessionRecordTest::aScheduledRecordingTakesEveryFrameInItsSpan()
     Session::Notifications notices;
     notices.ended = [&] { ended = true; };
     Session session(&context, output, notices);
+    session.setDetectorWarmupEnabled(false);
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
     source->setSpeed(RecordingSource::Speed::Fast);
     session.setSource(std::move(source));
@@ -475,6 +476,7 @@ void SessionRecordTest::theSiteIsRecordedEverywhere()
     Session::Notifications notices;
     notices.ended = [&] { ended = true; };
     Session session(&context, output, notices);
+    session.setDetectorWarmupEnabled(false);
     session.setSite(site);
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
     source->setSpeed(RecordingSource::Speed::Fast);

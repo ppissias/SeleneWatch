@@ -128,6 +128,8 @@ public:
 
     // Context thread. Copied by the source before the next frame.
     void setDetectionSettings(const DetectionSettings& settings);
+    // While stopped. Feature-52 learning period is enabled by default for all sessions.
+    void setDetectorWarmupEnabled(bool enabled);
 
     // Feature-26: one auto-tune measurement at a time, in Preview only. It
     // reads frames and never changes them, except that a flash check has one

@@ -2366,6 +2366,7 @@ void SessionTest::serFileThroughSessionWritesAClip()
         notifications.candidateStarted = [&candidates] { ++candidates; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectorWarmupEnabled(false);
         session.setDetectionSettings({6, 8, 400, false});
 
         auto source = std::make_unique<RecordingSource>(fsPath(path));
@@ -2422,6 +2423,7 @@ void SessionTest::endOfFileHandsOffTheOpenClip()
         notifications.ended = [&ended] { ended = true; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectorWarmupEnabled(false);
         session.setDetectionSettings({6, 8, 400, false});
 
         auto source = std::make_unique<RecordingSource>(fsPath(path));
@@ -2477,6 +2479,7 @@ void SessionTest::loopJumpFiresNoCandidate()
         notifications.candidateStarted = [&candidates] { ++candidates; };
         notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
         Session session(&context, root, std::move(notifications));
+        session.setDetectorWarmupEnabled(false);
         session.setDetectionSettings({6, 8, 400, false});
 
         // A loop longer than the file loops the whole file.
@@ -2586,6 +2589,7 @@ void SessionTest::injectedRecordingWritesMarkedPixels()
     notifications.clipWritten = [&](const ClipWriteResult& result) { results.push_back(result); };
     {
         Session session(&context, root, std::move(notifications));
+        session.setDetectorWarmupEnabled(false);
         session.setDetectionSettings({6, 8, 400, false});
         running = &session;
         session.setSource(std::make_unique<RecordingSource>(fsPath(path)));

@@ -72,7 +72,8 @@ To guide a mount (for the Moon and the planets), install the [ASCOM Platform](ht
 
 **The command bar** below it holds what you use most:
 - **Source**: a camera, a recording, or the synthetic test scenes (with testing tools on). **Connect at startup** opens the same camera next time.
-- **Start preview** and then **Stop**; **Start monitoring** / **Stop monitoring** (or **Start time-lapse** / **Stop time-lapse** in **Time-lapse** mode); **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)).
+- **Start preview** and then **Stop**; once Preview is running, **Start monitoring** / **Stop monitoring** (or **Start time-lapse** / **Stop time-lapse** in **Time-lapse** mode); **Save now**, which saves a clip by hand while monitoring; and **Record** with an optional number of frames ([chapter 7](#7-recording-every-frame)). Preview always comes first—even for recordings—so you can check framing, exposure, and anchor/lock boxes before starting a session.
+- **Detector learning period:** Whenever a stream starts (or after a watch change or detector reset), the detector adapts to the scene's background and noise for one **Reference time** (`2 s` by default for Moon and Fast sky, `10 s` for Slow sky, capped at `15 s`). During this countdown, **Peak σ** feedback, triggers, and **Tune camera & detection…** pause with a clear *Adapting detector to the scene…* progress bar so startup spikes never distort the graph or fire false clips, while your sliders and profiles stay editable. Once Preview has adapted, pressing **Start monitoring** arms immediately.
 - **Ends** and **Change…**: when the session ends by itself ([1.8](#18-ending-a-session-by-itself)).
 - **The mode badge** on the right: **STOPPED**, **PREVIEW**, **MONITORING** or **TIME-LAPSE**.
 

@@ -336,21 +336,23 @@ void AutoTunePanel::updateButtons()
     const bool anyTicked = std::any_of(cameraRows_.begin(), cameraRows_.end(), [](const auto& row) { return row.first->isChecked(); });
     applyCamera_->setEnabled(idle && s.camera && !s.recording && camera_.has_value() && anyTicked);
     applyCamera_->setVisible(!cameraRows_.empty());
-    watch_->setEnabled(idle && !needBox);
-    higher_->setEnabled(idle && !needBox && !kRows_.empty());
-    tryButton_->setEnabled(idle && !needBox);
+    const bool detectorReady = idle && !s.adapting;
+    watch_->setEnabled(detectorReady && !needBox);
+    higher_->setEnabled(detectorReady && !needBox && !kRows_.empty());
+    tryButton_->setEnabled(detectorReady && !needBox);
     applyK_->setEnabled(!s.busy && choice_.k.has_value());
-    minPatchWatch_->setEnabled(idle && !needBox && s.workflow == TuneWorkflow::MoonFlashes && !s.recording);
+    minPatchWatch_->setEnabled(detectorReady && !needBox && s.workflow == TuneWorkflow::MoonFlashes && !s.recording);
     applyMinPatch_->setEnabled(!s.busy && minChoice_.minPixels.has_value());
     // Feature-45: the shadows' watch looks only for falls, so a test flash
     // there would always be missed.
     const bool flashes = s.testingTools && s.workflow != TuneWorkflow::MoonTransits;
-    checkFlash_->setEnabled(idle && flashes && !s.recording);
+    checkFlash_->setEnabled(detectorReady && flashes && !s.recording);
     checkFlash_->setVisible(flashes);
     cancel_->setVisible(s.busy);
     drawBox_->setEnabled(s.preview);
     QString why;
     if (!s.preview) why = "Auto-tune measures in Preview, once frames arrive.";
+    else if (s.adapting) why = "Adapting detector to the scene… measurement buttons unlock once background noise is learned.";
     else if (needBox) why = "Draw a box on the earthshine first.";
     else if (!s.camera) why = "A recording is playing: only the sensitivity (K) can be tuned.";
     else if (s.recording) why = "A recording is running: camera changes and the test flash wait until it ends.";

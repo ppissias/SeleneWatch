@@ -139,6 +139,7 @@ void EventCapture::finishPartial(std::string reason) { handOff(std::move(reason)
 size_t EventCapture::bufferSize() const { return ring_.size(); }
 RingUsage EventCapture::historyUsage() const { return ring_.usage(); }
 void EventCapture::setDetectionSettings(const DetectionSettings& settings) { detector_.setSettings(settings); }
+void EventCapture::setDetectorWarmupEnabled(bool enabled) { detector_.setWarmupEnabled(enabled); }
 const DetectionSummary& EventCapture::detectionSummary() const { return detector_.summary(); }
 const std::vector<DetectionSummary>& EventCapture::detectionCandidates() const { return detector_.candidates(); }
 DetectionView EventCapture::detectionView() const { return detector_.view(); }

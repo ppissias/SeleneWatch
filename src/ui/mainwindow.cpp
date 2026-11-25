@@ -523,7 +523,7 @@ void MainWindow::arrangeTopControls()
     ui_->stopButton->setText("Stop");
     toolbarTimelapseButton_ = new QPushButton("Start time-lapse", bar);
     toolbarTimelapseButton_->setObjectName("toolbarTimelapseButton");
-    toolbarTimelapseButton_->setToolTip("Starts a lunar or planetary time-lapse (starting Preview automatically if stopped), or stops it and builds the video.");
+    toolbarTimelapseButton_->setToolTip("Starts a lunar or planetary time-lapse from the running Preview stream, or stops it and builds the video. Start Preview first.");
     toolbarTimelapseButton_->hide();
     connect(toolbarTimelapseButton_, &QPushButton::clicked, this, [this] {
         if (session_->mode() == Session::Mode::TimeLapse) onStopTimeLapse();
@@ -1801,15 +1801,11 @@ void MainWindow::onStartTimeLapse()
         return;
     }
     if (!ensureOutputFolderReady("time-lapse")) return;
-    if (!session_->isRunning())
+    if (!session_->isRunning() || session_->mode() != Session::Mode::Preview)
     {
-        if (selectedCamera() && !validateCameraSettings()) return;
-        startStream(Session::Mode::Preview);
-        if (!session_->isRunning()) return;
-    }
-    if (session_->mode() != Session::Mode::Preview)
-    {
-        showMessage("Stop Monitoring before starting a time-lapse.", 4000);
+        showMessage(session_->mode() == Session::Mode::Monitoring
+            ? "Stop Monitoring before starting a time-lapse."
+            : "Start Preview first before starting a time-lapse.", 4000);
         return;
     }
     if (session_->recordingStatus().active)
@@ -3163,7 +3159,7 @@ void MainWindow::updateControls()
     ui_->monitoringButton->setText(monitoring?"Stop monitoring":"Start monitoring");
     if (toolbarTimelapseButton_)
     {
-        toolbarTimelapseButton_->setVisible(showTlPrimary);
+        toolbarTimelapseButton_->setVisible((running && showTlPrimary) || timeLapseFinalizing);
         if (timeLapseFinalizing)
         {
             toolbarTimelapseButton_->setText("Finalizing…");
@@ -3179,8 +3175,8 @@ void MainWindow::updateControls()
         else
         {
             toolbarTimelapseButton_->setText("Start time-lapse");
-            toolbarTimelapseButton_->setEnabled(!monitoring && !pending && !session_->recordingStatus().active
-                && chosen && (!selected || selected->hasCamera()));
+            toolbarTimelapseButton_->setEnabled(running && !monitoring && !pending && !session_->sourceFinished()
+                && !session_->recordingStatus().active);
             toolbarTimelapseButton_->setStyleSheet(primaryActionStyle(currentUiTheme()));
         }
     }
@@ -3999,8 +3995,10 @@ void MainWindow::showLatestFrame()
         // frame N and its measured (dx, dy) render in lockstep (zero 1-frame lag).
         if (packet.detection)
         {
+            const bool warmupChanged = latestDetection_.warmingUp != packet.detection->summary.warmingUp;
             latestDetection_ = packet.detection->summary;
             updateStabilizeReadout(latestDetection_);
+            if (warmupChanged) updateAutoTune();
         }
         renderPreview();
         updateHistogram();
