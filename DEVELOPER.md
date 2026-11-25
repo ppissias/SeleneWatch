@@ -114,6 +114,7 @@ These apply to everyone, including coding agents.
 - **Separate refactoring from behaviour changes.** A refactoring keeps behaviour, saved settings and file formats; a change to them needs an explicit decision and its own commit.
 - **Document every new type** with a header comment covering its responsibility, and any ownership, units or threading contract; update it when behaviour changes.
 - **Keep documentation current in the same change:** behaviour in MANUAL.md, design in this guide or PROJECT_DESCRIPTION.md, pending work only in features.md or DESIGN-IMPROVEMENTS.md.
+- **Run the full test suite — including GUI E2E — after significant changes and before releases:** after implementing significant changes and before every release, run the full Release build, the complete `ctest` suite (`packaging\make_release.ps1`), and the real Windows GUI end-to-end test (`tests\gui_e2e_test.ps1`) and inspect its screenshots in `out\gui-e2e\` (checking first that no live observing run is using `out\build\release` or the desktop).
 - **Diagnostic programs and test output** go in a scratch folder or the ignored `out\`, never in tracked files. Manual probes that are kept belong in `tools/`.
 - **Commits:** descriptive messages with the validation in the body; stage only your own changes; never put private details or the observer's location in a commit message, a screenshot or a tracked file.
 
@@ -257,7 +258,7 @@ There are two levels of GUI testing:
 | Level | What it is | Runs | When |
 | --- | --- | --- | --- |
 | **Offscreen UI suite** (`ui`, `preview` in CTest) | Qt Test drives the real `MainWindow`, docks and dialogs without showing them (`QT_QPA_PLATFORM=offscreen`): saved settings, confirmations (raw SER), closing during a time-lapse, Re-sharpen, profiles, zoom, Moon/Sky clips written on disk | Every `ctest` run, and `packaging\make_release.ps1` | After every change |
-| **Real Windows GUI E2E** (`tests/gui_e2e_test.ps1`) | The built Release `SeleneWatch.exe` on the real desktop, driven through Windows UI Automation | By hand; takes a few minutes and opens a visible window (do not use the mouse or keyboard while it runs) | After changes to the window, docks, dialogs, threads, time-lapse or packaging, and **before every release** |
+| **Real Windows GUI E2E** (`tests/gui_e2e_test.ps1`) | The built Release `SeleneWatch.exe` on the real desktop, driven through Windows UI Automation | By hand; takes a few minutes and opens a visible window (do not use the mouse or keyboard while it runs) | **After every significant change** (especially to the window, docks, dialogs, threads, tracking, time-lapse or packaging) and **before every release** |
 
 ```powershell
 cmake --build --preset Release-x64

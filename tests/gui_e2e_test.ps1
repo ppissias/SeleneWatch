@@ -436,7 +436,7 @@ try {
     # Feature-31: shadows on the sunlit side are their own watch. Switch to it,
     # monitor again and inject a Dark transit -> a darkening clip in a new session.
     $targetCombo = Find-UiaElement -Root $mainWin -IdSuffix "targetChoice"
-    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon: shadows on the sunlit side" -ProcessId $proc.Id
+    Select-UiaComboItem -Combo $targetCombo -ItemText "The Moon (or Sun): shadows on the sunlit side" -ProcessId $proc.Id
     Start-Sleep -Milliseconds 300
     $null = Start-StreamUi "Start Moon shadows preview"
     Start-MonitoringUi "Start Moon shadows monitoring"
@@ -713,7 +713,9 @@ try {
         $realFits = @(Get-ChildItem (Join-Path $realSession "stacks") -Filter "*.fits")
         Assert-True ($realFits.Count -ge 1) "Expected >=1 real lunar FITS stack"
 
-        if ($stopBtn.Current.IsEnabled) {
+        $stopBtn = $null
+        try { $stopBtn = Find-UiaElement -Root $mainWin -IdSuffix "stopButton" -TimeoutMs 500 } catch {}
+        if ($stopBtn -and $stopBtn.Current.IsEnabled) {
             Invoke-UiaClick $stopBtn "Stop real lunar stream"
         }
     } else {
