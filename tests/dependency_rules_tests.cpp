@@ -18,6 +18,7 @@ class DependencyRulesTest : public QObject
 private slots:
     void eachFolderIncludesOnlyWhatItMay();
     void onlyTheWindowUsesQtWidgets();
+    void everyHeaderAndClassIsDocumented();
 
 private:
     struct Include
@@ -124,6 +125,78 @@ void DependencyRulesTest::onlyTheWindowUsesQtWidgets()
             problems << relative;
     }
     QVERIFY2(problems.isEmpty(), qPrintable("Qt Widgets outside ui/ and app/: " + problems.join(", ")));
+}
+
+// Principle 1 (DEVELOPER.md): every header in src/ must carry a documentation
+// comment, and every top-level class/struct definition in src/**/*.h (as well
+// as every class definition in src/**/*.cpp) must have a high-level comment
+// directly above it.
+void DependencyRulesTest::everyHeaderAndClassIsDocumented()
+{
+    QVERIFY2(QDir(kSource).exists(), qPrintable(kSource));
+    static const QRegularExpression topLevelType(R"re(^(class|struct)\s+([A-Z][A-Za-z0-9_]*)\b(.*)$)re");
+    static const QRegularExpression cppClass(R"re(^\s*class\s+([A-Z][A-Za-z0-9_]*)\b(.*)$)re");
+
+    auto hasLeadingComment = [](const QStringList& lines, int index) {
+        int j = index - 1;
+        while (j >= 0 && lines[j].trimmed().isEmpty()) --j;
+        if (j < 0) return false;
+        const QString prev = lines[j].trimmed();
+        return prev.startsWith("//") || prev.endsWith("*/");
+    };
+
+    QStringList problems;
+    const QDir root(kSource);
+    QDirIterator it(kSource, {"*.h", "*.cpp"}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+    {
+        const QString path = it.next();
+        const QString relative = root.relativeFilePath(path);
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QString content = QString::fromUtf8(file.readAll());
+        const QStringList lines = content.split('\n');
+        const bool isHeader = relative.endsWith(".h");
+
+        if (isHeader)
+        {
+            bool anyComment = false;
+            for (const QString& raw : lines)
+            {
+                const QString trimmed = raw.trimmed();
+                if (trimmed.startsWith("//") || trimmed.contains("/*")) { anyComment = true; break; }
+            }
+            if (!anyComment)
+                problems << QString("%1: header has no documentation comment").arg(relative);
+        }
+
+        for (int i = 0; i < lines.size(); ++i)
+        {
+            QString line = lines[i];
+            if (line.endsWith('\r')) line.chop(1);
+            if (isHeader)
+            {
+                const auto m = topLevelType.match(line);
+                if (!m.hasMatch()) continue;
+                const QString rest = m.captured(3).trimmed();
+                if (rest.endsWith(';') && !rest.contains('{')) continue; // forward declaration
+                if (!hasLeadingComment(lines, i))
+                    problems << QString("%1:%2: undocumented %3 %4")
+                        .arg(relative).arg(i + 1).arg(m.captured(1), m.captured(2));
+            }
+            else
+            {
+                const auto m = cppClass.match(line);
+                if (!m.hasMatch()) continue;
+                const QString rest = m.captured(2).trimmed();
+                if (rest.endsWith(';') && !rest.contains('{')) continue; // forward declaration
+                if (!hasLeadingComment(lines, i))
+                    problems << QString("%1:%2: undocumented class %3")
+                        .arg(relative).arg(i + 1).arg(m.captured(1));
+            }
+        }
+    }
+    QVERIFY2(problems.isEmpty(), qPrintable("Undocumented headers/classes:\n" + problems.join('\n')));
 }
 
 QTEST_GUILESS_MAIN(DependencyRulesTest)

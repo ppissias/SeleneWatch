@@ -48,6 +48,7 @@ The design rules that follow from them, each with what checks it: the build or a
 | **A watch's saved settings are read and written only through `settings/watch_settings`,** the one place that knows their QSettings keys; the detection settings' fields are listed once there, for the watch and for named profiles. | The `watch_settings` test, in the registry and in a portable `.ini`, including the keys earlier versions wrote |
 | **The processing core has no Qt Widgets.** Everything below the window builds and tests without one. | The build: `selenewatch_core` links only Qt Core and Qt Gui; the `dependency_rules` test |
 | **Each folder under `src/` has one job, and its dependencies point one way** ([Code organization](#10-code-organization-and-extension-boundaries)). | The `dependency_rules` test |
+| **Every header and class under `src/` has a high-level comment** (Principle 1: readable code). | The `dependency_rules` test |
 | **Vendor SDK headers stay in one `*_sdk.cpp`** behind the family's `*_api.h`. | Review, and the builds without SDKs |
 | **The mount is sent only guide pulses,** and a stop of tracking at the end of a session the observer chose; nothing SeleneWatch sends can leave it moving ([Mount guiding](PROJECT_DESCRIPTION.md#mount-guiding)). | The guiding tests with `SimulatedMount` |
 | **Collaborators are passed in and listeners are explicit.** No singletons, service locator, global event bus or mutable static application state. | Review |

@@ -2,6 +2,9 @@
 
 #include <QtCore/QString>
 
+// Application-wide visual themes (System, Dark, and dark-adaptation-safe
+// Red night vision) persisted in QSettings, plus shared themed stylesheet
+// helpers for mode pills, action buttons, and banners.
 enum class UiTheme
 {
     System,
