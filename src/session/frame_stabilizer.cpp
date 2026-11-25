@@ -41,25 +41,32 @@ double percentile(std::vector<double> values, double p)
 }
 
 // True when an isolated bright body (planet, full Moon/Sun) sits inside dark
-// sky borders rather than an extended surface filling the frame edges.
-bool isIsolatedDisk(const Frame& frame)
+// sky borders within the given rectangle rather than filling its edges.
+bool rectContainsIsolatedDisk(const Frame& frame, int x0, int y0, int w, int h)
 {
-    if (frame.width < 32 || frame.height < 32) return false;
-    const int ring = std::min(4, std::min(frame.width, frame.height) / 8);
+    x0 = std::clamp(x0, 0, frame.width);
+    y0 = std::clamp(y0, 0, frame.height);
+    const int x1 = std::clamp(x0 + w, x0, frame.width);
+    const int y1 = std::clamp(y0 + h, y0, frame.height);
+    const int rw = x1 - x0;
+    const int rh = y1 - y0;
+    if (rw < 32 || rh < 32) return false;
+
+    const int ring = std::min(4, std::min(rw, rh) / 8);
     std::vector<double> border;
-    border.reserve(static_cast<size_t>(frame.width + frame.height) * 4);
-    for (int y = 0; y < frame.height; y += 2)
+    border.reserve(static_cast<size_t>(rw + rh) * 4);
+    for (int y = y0; y < y1; y += 2)
     {
-        for (int x = 0; x < frame.width; x += 2)
+        for (int x = x0; x < x1; x += 2)
         {
-            if (x < ring || x >= frame.width - ring || y < ring || y >= frame.height - ring)
+            if (x < x0 + ring || x >= x1 - ring || y < y0 + ring || y >= y1 - ring)
                 border.push_back(readPixel(frame, x, y));
         }
     }
     std::vector<double> interior;
-    const int step = std::max(2, std::min(frame.width, frame.height) / 64);
-    for (int y = ring; y < frame.height - ring; y += step)
-        for (int x = ring; x < frame.width - ring; x += step)
+    const int step = std::max(2, std::min(rw, rh) / 64);
+    for (int y = y0 + ring; y < y1 - ring; y += step)
+        for (int x = x0 + ring; x < x1 - ring; x += step)
             interior.push_back(readPixel(frame, x, y));
     if (border.empty() || interior.empty()) return false;
 
@@ -76,6 +83,11 @@ bool isIsolatedDisk(const Frame& frame)
         if (v > thresh) ++bright;
     const double share = static_cast<double>(bright) / static_cast<double>(interior.size());
     return share >= 0.004 && share <= 0.78;
+}
+
+bool isIsolatedDisk(const Frame& frame)
+{
+    return rectContainsIsolatedDisk(frame, 0, 0, frame.width, frame.height);
 }
 
 struct CentroidSample
@@ -283,19 +295,36 @@ bool FrameStabilizer::initEstimator(const Frame& frame, std::optional<LockRegion
 {
     initialized_ = false;
     method_ = StabilizationMethod::None;
-    // Priority 1: observer's active Feature Lock box (explicit choice wins).
-    if (preferredLockRegion && initFeatureLock(frame, preferredLockRegion))
+    const bool isolatedFrame = isIsolatedDisk(frame);
+    // If the observer drew a guiding box around an isolated planet/disk (dark
+    // sky borders inside the box as well), DiskCentroid is faster and immune to
+    // planetary rotation. If the box lies on lunar terrain (surface touching
+    // its edges), honour the observer's chosen Feature Lock crater patch.
+    if (preferredLockRegion)
+    {
+        const bool boxAroundDisk = isolatedFrame
+            && rectContainsIsolatedDisk(frame, preferredLockRegion->x, preferredLockRegion->y,
+                preferredLockRegion->width, preferredLockRegion->height);
+        if (boxAroundDisk && initDiskCentroid(frame))
+        {
+            preferredApplied_ = true;
+            appliedPreferred_ = *preferredLockRegion;
+            initialized_ = true;
+            return true;
+        }
+        if (initFeatureLock(frame, preferredLockRegion))
+        {
+            initialized_ = true;
+            return true;
+        }
+    }
+    // Without a terrain lock box: isolated bright disk -> DiskCentroid.
+    if (isolatedFrame && initDiskCentroid(frame))
     {
         initialized_ = true;
         return true;
     }
-    // Priority 2: isolated bright disk surrounded by dark sky -> DiskCentroid.
-    if (isIsolatedDisk(frame) && initDiskCentroid(frame))
-    {
-        initialized_ = true;
-        return true;
-    }
-    // Priority 3: auto-picked FeatureLock crater patch on extended surface.
+    // Extended lunar surface without a lock box -> auto-picked FeatureLock patch.
     if (initFeatureLock(frame, std::nullopt))
     {
         initialized_ = true;
@@ -370,6 +399,34 @@ bool FrameStabilizer::refreshFeatureLock(const Frame& frame, double currentDx, d
 
 void FrameStabilizer::adoptPreferredRegion(const Frame& frame, LockRegion region, StepResult& out)
 {
+    // Guiding box drawn around an isolated planet/disk: keep/use DiskCentroid
+    // so planetary rotation never degrades stabilization.
+    if (isIsolatedDisk(frame) && rectContainsIsolatedDisk(frame, region.x, region.y, region.width, region.height))
+    {
+        preferredApplied_ = true;
+        appliedPreferred_ = region;
+        if (method_ == StabilizationMethod::DiskCentroid && initialized_) return;
+        if (initDiskCentroid(frame))
+        {
+            initialized_ = true;
+            if (state_ == StabilizationState::Locked || state_ == StabilizationState::GraceHold)
+            {
+                refCx_ -= lastDx_;
+                refCy_ -= lastDy_;
+            }
+            else
+            {
+                lastDx_ = lastDy_ = 0.0;
+                graceElapsedSec_ = 0.0;
+                reacquireStreak_ = 0;
+                state_ = StabilizationState::Locked;
+                out.resetDetector = true;
+                out.logEvent = "registration_locked method=disk_centroid";
+            }
+        }
+        return;
+    }
+
     std::string refusal;
     auto fresh = FeatureLock::take(frame, region, refusal);
     if (!fresh) return;

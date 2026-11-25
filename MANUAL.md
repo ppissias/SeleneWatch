@@ -311,7 +311,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
    - **Moon: Select lunar anchor** and drag a box around a sunlit area that will stay lit, with steady shadows, for the whole session.
    - **Sharpening**, **Stops** (when the session ends, or after a number of stacks; [1.8](#18-ending-a-session-by-itself)), and **Output**: MP4, GIF, SER (plus **Stretch SER (match MP4)** when SER is ticked), and frames per second.
    - **Also save raw SER bursts** keeps every stacked frame. It can fill a drive in one night, so it asks first and is off again the next time SeleneWatch starts.
-   - **Also watch for transits** (Moon): watches for shadows between the bursts, with the shadows watch's settings ([chapter 4](#4-shadows-crossing-the-moon)).
+   - **Also watch for transits** (Moon or Planet): watches for shadows between the bursts, with the shadows watch's settings ([chapter 4](#4-shadows-crossing-the-moon)).
 4. Press **Start time-lapse**. The panel shows the latest stack, a short loop of the last stacks, and each stack's sharpness, shift and rotation, with any warnings.
 5. When it ends, the panel shows the video being built. If you close SeleneWatch during a time-lapse, it asks first and finishes the video; **Close without video** leaves the stacks, and the video can be made later.
 
@@ -358,7 +358,7 @@ With **Also watch for transits**, the shadows watch runs between the bursts and 
 | **Stops** | When the session ends, or after a number of stacks |
 | **Output** | MP4, GIF and lossless SER (linear by default, or stretched to match MP4), frames per second |
 | **Also save raw SER bursts** | Keeps every stacked frame (very large) |
-| **Also watch for transits** | Moon: the shadows watch between bursts |
+| **Also watch for transits** | Moon or Planet: the shadows watch between bursts |
 
 ---
 

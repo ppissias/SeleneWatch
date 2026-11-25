@@ -68,7 +68,6 @@ bool VideoToneSettings::valid() const
 
 bool TimelapseSettings::valid() const
 {
-    if (watchTransits && preset != TimelapsePreset::Moon) return false;
     if (!std::isfinite(intervalSeconds) || intervalSeconds < 0.2 || intervalSeconds > 86400.0) return false;
     if (!std::isfinite(captureWindowSeconds) || captureWindowSeconds < 0.1 || captureWindowSeconds > intervalSeconds) return false;
     if (!std::isfinite(keepPercent) || keepPercent < 1.0 || keepPercent > 100.0) return false;

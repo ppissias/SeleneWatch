@@ -396,7 +396,7 @@ TimelapseSettings TimelapsePanel::settings() const
     s.stopKind = static_cast<StopConditionKind>(stopKind_->currentData().toInt());
     s.targetStacks = targetStacks_->value();
     s.saveRawSer = saveRawSer_->isChecked();
-    s.watchTransits = moonWatch_ && s.preset == TimelapsePreset::Moon && watchTransits_->isChecked();
+    s.watchTransits = moonWatch_ && watchTransits_->isChecked();
 
     const QString key = sharpening_->currentData().toString();
     if (key == "preset:off") s.sharpening = sharpeningForPreset(SharpeningPreset::Off);
@@ -463,7 +463,7 @@ void TimelapsePanel::setTransitOptions(bool moonWatch, bool hasSavedSettings, bo
 
 void TimelapsePanel::updateTransitControls()
 {
-    const bool available = moonWatch_ && preset_->currentData().toInt() == static_cast<int>(TimelapsePreset::Moon);
+    const bool available = moonWatch_;
     const bool selected = available && watchTransits_->isChecked();
     watchTransits_->setVisible(available);
     watchTransits_->setEnabled(transitEditable_);

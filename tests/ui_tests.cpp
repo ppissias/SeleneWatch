@@ -2648,10 +2648,11 @@ void UiTest::watchesCanChangeInPreviewAndTransitControlsFollowTheMoon()
     QVERIFY(autoTuneBtn->isEnabled() && sigmaBox->isEnabled() && tlBanner->isHidden());
     QVERIFY(!timeLapse->findChild<QPushButton*>("timelapseOpenTransits")->isHidden());
 
+    // Planet preset keeps Also watch for transits available (Sky watches hide it).
     auto* preset = timeLapse->findChild<QComboBox*>("timelapsePreset");
     preset->setCurrentIndex(1);
-    QVERIFY(transits->isHidden());
-    QVERIFY(!timeLapse->settings().watchTransits);
+    QVERIFY(!transits->isHidden());
+    QVERIFY(timeLapse->settings().watchTransits);
 }
 
 void UiTest::timelapsePanelAndResharpenWorkflow()

@@ -756,7 +756,18 @@ void DetectionTest::frameStabilizerHandlesOcclusionCloudsAndRecenter()
         s.sigma = 8.0; s.minPixels = 4; s.oneFrame = false; s.stabilizeDetection = true;
         FlashDetector det(s);
 
-        // Provide an explicit preferred lock region (as when guiding).
+        // 2a. A guiding box drawn *around* an isolated planet/disk (dark sky border inside the box)
+        // keeps DiskCentroid so planetary rotation never degrades stabilization.
+        {
+            FrameStabilizer planetStab;
+            const Frame planetFrame = shiftedLunarDisk(0, 240, 180, 0.0, 0.0);
+            const LockRegion aroundPlanet{36, 10, 168, 160};
+            planetStab.step(planetFrame, 1.0 / 30.0, aroundPlanet);
+            QCOMPARE(planetStab.method(), StabilizationMethod::DiskCentroid);
+        }
+
+        // 2b. A guiding box placed *inside* lunar terrain (surface touching its borders)
+        // honours FeatureLock on the observer's chosen crater patch.
         const LockRegion preferred{64, 48, 96, 96};
         int graceCount = 0, lostCount = 0;
         bool sawLostEvent = false, sawRelockedEvent = false;
