@@ -47,6 +47,7 @@ private slots:
     void testMarkSurvivesWithoutSidecar();
     void aLaterTestFrameMarksTheWholeSource();
     void declarationsRejectContradictionsAndLegacyFilesStillInfer();
+    void malformedAndTruncatedSerFilesFailGracefully();
 };
 
 void SerWriterTest::exactPixelsHeaderAndTimes_data()
@@ -253,6 +254,127 @@ void SerWriterTest::declarationsRejectContradictionsAndLegacyFilesStillInfer()
             QCOMPARE(read.testSource,mark=="SeleneWatch TEST DATA");
         }
         else QVERIFY(reason.find("layout")!=std::string::npos);
+    }
+}
+
+void SerWriterTest::malformedAndTruncatedSerFilesFailGracefully()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto writeBytes = [&](const QString& name, const QByteArray& bytes) -> std::filesystem::path {
+        const QString p = QDir(dir.path()).filePath(name);
+        QFile f(p);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
+        if (f.write(bytes) != bytes.size()) return {};
+        f.close();
+        return std::filesystem::path(p.toStdWString());
+    };
+
+    // 1. Empty, truncated header, and invalid magic are rejected with a reason.
+    for (const auto& [name, data] : std::vector<std::pair<QString, QByteArray>>{
+             {"empty.ser", QByteArray()},
+             {"short.ser", QByteArray("LUCAM-RECORDER", 14)},
+             {"bad_magic.ser", QByteArray(200, 'X')}})
+    {
+        SerReader reader;
+        std::string reason;
+        QVERIFY2(!reader.open(writeBytes(name, data), 30, reason), qPrintable(name));
+        QVERIFY(!reason.empty());
+    }
+
+    // Build a valid 5-frame Mono8 SER in memory to mutate for edge cases.
+    QByteArray valid5;
+    {
+        QBuffer buf(&valid5);
+        QVERIFY(buf.open(QIODevice::ReadWrite));
+        Frame f;
+        f.width = 4; f.height = 4; f.format = PixelFormat::Mono8;
+        f.data.assign(16, 42);
+        SerWriter w(buf);
+        QString err;
+        QVERIFY(w.start(f, "test", err));
+        for (int i = 0; i < 5; ++i)
+        {
+            f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1700000000 + i};
+            QVERIFY(w.append(f, err));
+        }
+        QVERIFY(w.finish(err));
+    }
+
+    // 2. Zero frames declared (header only, frameCount = 0) fails cleanly.
+    {
+        QByteArray zero = valid5.left(178);
+        zero[38] = zero[39] = zero[40] = zero[41] = 0;
+        SerReader reader;
+        std::string reason;
+        QVERIFY(!reader.open(writeBytes("zero.ser", zero), 30, reason));
+        QVERIFY(!reason.empty());
+    }
+
+    // 3. Truncated mid-frame (header claims 5 frames = 178 + 80 bytes, file cut to 178 + 40).
+    {
+        QByteArray trunc = valid5.left(178 + 40);
+        SerReader reader;
+        std::string reason;
+        const bool opened = reader.open(writeBytes("trunc.ser", trunc), 30, reason);
+        if (opened)
+        {
+            // If reader tolerates partial recordings, it must clamp frameCount to complete frames
+            // and never read past EOF.
+            QVERIFY(reader.frameCount() <= 2);
+            Frame out;
+            out.data.resize(reader.frameBytes());
+            for (int i = 0; i < reader.frameCount(); ++i)
+                QVERIFY(reader.readFrame(i, out, reason));
+            QVERIFY(!reader.readFrame(4, out, reason));
+        }
+        else
+        {
+            QVERIFY(!reason.empty());
+        }
+    }
+
+    // 4. Non-monotonic / zeroed timestamp trailer does not crash or yield negative duration.
+    {
+        QByteArray badTs = valid5;
+        const int trailerOff = 178 + 5 * 16;
+        // Zero out 2nd timestamp and invert 4th timestamp behind 1st.
+        for (int b = 0; b < 8; ++b) badTs[trailerOff + 8 + b] = 0;
+        for (int b = 0; b < 8; ++b) badTs[trailerOff + 24 + b] = badTs[trailerOff + b];
+        SerReader reader;
+        std::string reason;
+        QVERIFY2(reader.open(writeBytes("nonmono.ser", badTs), 30, reason), reason.c_str());
+        QCOMPARE(reader.frameCount(), 5);
+        Frame out;
+        out.data.resize(reader.frameBytes());
+        for (int i = 0; i < 5; ++i)
+            QVERIFY2(reader.readFrame(i, out, reason), reason.c_str());
+    }
+
+    // 5. Odd Bayer dimensions (5x3 RGGB) open and read cleanly without out-of-bounds access.
+    {
+        QByteArray oddBayer;
+        QBuffer buf(&oddBayer);
+        QVERIFY(buf.open(QIODevice::ReadWrite));
+        Frame f;
+        f.width = 5; f.height = 3; f.format = PixelFormat::Mono8; f.bayer = BayerPattern::RGGB;
+        f.data.assign(15, 77);
+        SerWriter w(buf);
+        QString err;
+        QVERIFY(w.start(f, "odd bayer", err));
+        QVERIFY(w.append(f, err));
+        QVERIFY(w.finish(err));
+
+        SerReader reader;
+        std::string reason;
+        QVERIFY2(reader.open(writeBytes("odd_bayer.ser", oddBayer), 30, reason), reason.c_str());
+        QCOMPARE(reader.frameCount(), 1);
+        Frame out;
+        out.data.resize(reader.frameBytes());
+        QVERIFY2(reader.readFrame(0, out, reason), reason.c_str());
+        QCOMPARE(out.width, 5);
+        QCOMPARE(out.height, 3);
+        QCOMPARE(out.data.size(), size_t{15});
     }
 }
 

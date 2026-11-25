@@ -90,6 +90,8 @@ private slots:
     void frameStabilizerHandlesOcclusionCloudsAndRecenter();
     void stabilizedSessionPreservesRawSerAndLogsMetadata();
     void detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState();
+    void detectorLearningPeriodSlowRateFloorAndSessionFlow();
+    void stabilizedDetectionWithActiveFeatureLockAndGuidePulse();
 };
 
 // Feature-31: for flashes on the earthlit side, pixels whose learned
@@ -948,6 +950,230 @@ void DetectionTest::detectorLearningPeriodSuppressesStartupSpikesAndRearmPreserv
     slowDet.setWarmupEnabled(true);
     observe(slowDet, flat(0, 100));
     QCOMPARE(slowDet.summary().warmupTotalSeconds, FlashDetector::kMaxWarmupSeconds);
+}
+
+void DetectionTest::detectorLearningPeriodSlowRateFloorAndSessionFlow()
+{
+    // 1. Slow frame rate (0.5 fps / 2.0 s per frame) with 2.0 s Reference time:
+    //    even after >2.0 s of stream time has elapsed, warmup must enforce the
+    //    kMinWarmupFrames (5 frames) floor so background noise is not estimated
+    //    from 1-2 frames.
+    DetectionSettings slowSettings;
+    slowSettings.sigma = 6.0;
+    slowSettings.minPixels = 8;
+    slowSettings.oneFrame = true;
+    slowSettings.referenceTimeConstantSeconds = 2.0;
+
+    FlashDetector slowDet(slowSettings);
+    slowDet.setWarmupEnabled(true);
+    for (uint64_t i = 0; i < FlashDetector::kMinWarmupFrames; ++i)
+    {
+        Frame f = flat(i, 100);
+        f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{static_cast<int64_t>(i) * 2};
+        if (i == 2) patch(f, 20, 20, 4, 80); // > 2 s elapsed, but still < 5 frames!
+        QVERIFY(!observe(slowDet, f));
+        QVERIFY(slowDet.summary().warmingUp);
+        QVERIFY(!slowDet.summary().ready);
+    }
+    // Frame 5 (6th frame, 5 learned intervals >= kMinWarmupFrames and >= 2 s) completes warmup.
+    {
+        Frame f = flat(FlashDetector::kMinWarmupFrames, 100);
+        f.timestamp = std::chrono::system_clock::time_point{}
+            + std::chrono::seconds{static_cast<int64_t>(FlashDetector::kMinWarmupFrames) * 2};
+        QVERIFY(!observe(slowDet, f));
+        QVERIFY(!slowDet.summary().warmingUp);
+        QVERIFY(slowDet.summary().ready);
+    }
+
+    // 2. End-to-end Session Preview -> Monitoring flow with warmup enabled:
+    //    a flash during Preview warmup must not fire; once adapted, entering
+    //    Monitoring preserves adapted state and saves a subsequent flash cleanly.
+    QTemporaryDir dir;
+    const QString input = QDir(dir.path()).filePath("warmup_flow.ser");
+    {
+        QFile file(input);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        SerWriter ser(file);
+        QString err;
+        for (uint64_t i = 0; i < 120; ++i)
+        {
+            Frame f = flat(i, 100);
+            if (i == 4) patch(f, 16, 16, 4, 90);  // During 0.5 s Preview warmup -> suppressed
+            if (i == 75) patch(f, 36, 20, 4, 90); // During Monitoring -> must trigger & save
+            if (i == 0) QVERIFY2(ser.start(f, "TEST: warmup session flow", err), qPrintable(err));
+            QVERIFY2(ser.append(f, err), qPrintable(err));
+        }
+        QVERIFY2(ser.finish(err), qPrintable(err));
+    }
+
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    bool ended = false;
+    bool sawWarmingUp = false;
+    bool sawAdaptedInPreview = false;
+    bool sawWarmupInMonitoring = false;
+    Session::Notifications notices;
+    notices.clipWritten = [&](const auto& r) { results.push_back(r); };
+    notices.ended = [&] { ended = true; };
+
+    Session session(&context, dir.path(), std::move(notices));
+    DetectionSettings settings = defaultDetectionSettings(Watch::MoonFlashes);
+    settings.ignoreAboveShare = 0.0;
+    settings.sigma = 6.0;
+    settings.minPixels = 8;
+    settings.oneFrame = true;
+    settings.referenceTimeConstantSeconds = 0.4;
+    session.setWatch(Watch::MoonFlashes);
+    session.setDetectionSettings(settings);
+    CaptureSettings capture = defaultCaptureSettings(Watch::MoonFlashes);
+    capture.postSeconds = 0.2;
+    session.setCaptureSettings(capture);
+
+    auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
+    source->setSpeed(RecordingSource::Speed::RealTime);
+    session.setSource(std::move(source));
+
+    QString err;
+    QVERIFY2(session.start(err, Session::Mode::Preview), qPrintable(err));
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const auto pkt = session.takePreview();
+        if (pkt.detection)
+        {
+            if (pkt.detection->summary.warmingUp) sawWarmingUp = true;
+            if (!pkt.detection->summary.warmingUp && pkt.detection->summary.ready) sawAdaptedInPreview = true;
+        }
+        return sawAdaptedInPreview;
+    }()), 5000);
+    QVERIFY(sawWarmingUp);
+    QVERIFY(results.empty());
+
+    // Hand off from Preview to Monitoring: detector stays adapted (no second warmup).
+    QVERIFY(session.requestMonitoring(true));
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const auto pkt = session.takePreview();
+        if (pkt.detection && session.mode() == Session::Mode::Monitoring && pkt.detection->summary.warmingUp)
+            sawWarmupInMonitoring = true;
+        return ended;
+    }()), 8000);
+    session.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!results.empty(), 5000);
+    QVERIFY(!sawWarmupInMonitoring);
+    QCOMPARE(static_cast<int>(results.size()), 1);
+}
+
+void DetectionTest::stabilizedDetectionWithActiveFeatureLockAndGuidePulse()
+{
+    // Build a textured lunar crater field that drifts smoothly and undergoes a
+    // sharp simulated mount guide-pulse step at frames 40..42, followed by a
+    // real bright flash on frame 64. With active Feature Lock + Stabilize
+    // detection enabled, the guide-pulse step must produce zero false triggers,
+    // and the real flash must be captured with stabilization_method=feature_lock.
+    auto makeCraterFrame = [](uint64_t idx, double shiftX, double shiftY) {
+        Frame f;
+        f.width = 160;
+        f.height = 120;
+        f.frameIndex = idx;
+        f.timestamp = std::chrono::system_clock::time_point{}
+            + std::chrono::milliseconds{static_cast<int64_t>(idx) * 33};
+        f.testSource = true;
+        f.data.resize(static_cast<size_t>(f.width) * f.height);
+        for (int y = 0; y < f.height; ++y)
+        {
+            for (int x = 0; x < f.width; ++x)
+            {
+                const double sx = x - shiftX;
+                const double sy = y - shiftY;
+                // Edge-to-edge sunlit lunar surface (not an isolated planetary disk)
+                // with high-contrast craters inside the lock box for NCC Feature Lock.
+                double v = 115.0 + 18.0 * std::sin(sx * 0.08 + sy * 0.05) + 14.0 * std::cos(sx * 0.17 - sy * 0.13);
+                const double r1 = std::hypot(sx - 76.0, sy - 58.0);
+                const double r2 = std::hypot(sx - 92.0, sy - 68.0);
+                const double r3 = std::hypot(sx - 64.0, sy - 70.0);
+                v += 45.0 * std::exp(-std::pow((r1 - 12.0) / 3.0, 2)) - 30.0 * std::exp(-(r1 * r1) / 70.0);
+                v += 38.0 * std::exp(-std::pow((r2 - 8.0) / 2.5, 2)) - 24.0 * std::exp(-(r2 * r2) / 35.0);
+                v += 32.0 * std::exp(-std::pow((r3 - 9.0) / 2.8, 2));
+                v += 12.0 * std::sin(sx * 0.25) * std::cos(sy * 0.25);
+                f.data[static_cast<size_t>(y) * f.width + x] = static_cast<uint8_t>(std::clamp(std::lround(v), 10L, 215L));
+            }
+        }
+        return f;
+    };
+
+    QTemporaryDir dir;
+    const QString input = QDir(dir.path()).filePath("lock_and_pulse.ser");
+    {
+        QFile file(input);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        SerWriter ser(file);
+        QString err;
+        for (uint64_t i = 0; i < 90; ++i)
+        {
+            double dx = 0.08 * static_cast<double>(i);
+            double dy = -0.05 * static_cast<double>(i);
+            // Simulate a mount guide correction pulse stepping the field cleanly.
+            if (i >= 40) { dx -= 3.5; dy += 2.2; }
+            Frame f = makeCraterFrame(i, dx, dy);
+            if (i == 64)
+            {
+                const int fx = static_cast<int>(std::lround(115.0 + dx));
+                const int fy = static_cast<int>(std::lround(45.0 + dy));
+                patch(f, fx - 1, fy - 1, 4, 85);
+            }
+            if (i == 0) QVERIFY2(ser.start(f, "TEST: feature lock + stabilized detection", err), qPrintable(err));
+            QVERIFY2(ser.append(f, err), qPrintable(err));
+        }
+        QVERIFY2(ser.finish(err), qPrintable(err));
+    }
+
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    bool ended = false;
+    Session::Notifications notices;
+    notices.clipWritten = [&](const auto& r) { results.push_back(r); };
+    notices.ended = [&] { ended = true; };
+
+    Session session(&context, dir.path(), std::move(notices));
+    DetectionSettings settings = defaultDetectionSettings(Watch::MoonFlashes);
+    settings.ignoreAboveShare = 0.0;
+    settings.sigma = 9.0;
+    settings.minPixels = 4;
+    settings.oneFrame = true;
+    settings.referenceTimeConstantSeconds = 0.3;
+    settings.stabilizeDetection = true;
+    session.setWatch(Watch::MoonFlashes);
+    session.setDetectionSettings(settings);
+    CaptureSettings capture = defaultCaptureSettings(Watch::MoonFlashes);
+    capture.postSeconds = 0.2;
+    session.setCaptureSettings(capture);
+
+    auto source = std::make_unique<RecordingSource>(std::filesystem::path(input.toStdWString()));
+    source->setSpeed(RecordingSource::Speed::RealTime);
+    session.setSource(std::move(source));
+
+    QString err;
+    QVERIFY2(session.start(err, Session::Mode::Preview), qPrintable(err));
+    // Lock Feature Lock onto the textured crater region in Preview.
+    session.guider().requestLock(LockRegion{48, 32, 64, 64});
+    bool adapted = false;
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const auto pkt = session.takePreview();
+        if (pkt.detection && !pkt.detection->summary.warmingUp && pkt.detection->summary.ready)
+            adapted = true;
+        const bool locked = session.guider().status().lock.state == LockState::Locked;
+        return locked && adapted;
+    }()), 5000);
+
+    QVERIFY(session.requestMonitoring(true));
+    QTRY_VERIFY_WITH_TIMEOUT(ended, 8000);
+    session.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!results.empty(), 5000);
+
+    // Exactly one clip (the real flash at frame 64; zero false triggers from the guide-pulse step).
+    QCOMPARE(static_cast<int>(results.size()), 1);
+    const QString eventTxt = contents(QDir(results.front().folder).filePath("event.txt"));
+    QVERIFY2(eventTxt.contains("stabilize_detection=yes"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("stabilization_state=locked"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("stabilization_method=feature_lock"), qPrintable(eventTxt));
 }
 
 int main(int argc, char** argv)

@@ -20,6 +20,7 @@ private slots:
     void onlyTheLocalNetworkIsAnswered();
     void theServerAnswersOverTheNetwork();
     void theAddressFitsInAReadableQrCode();
+    void timelapseSnapshotEndpointsAndConcurrentRequests();
 };
 
 namespace {
@@ -195,6 +196,130 @@ void RemoteTest::theAddressFitsInAReadableQrCode()
         QVERIFY(dark(corner.x() + 3, corner.y() + 3));
     }
     QVERIFY(qrImage(QString(5000, 'a')).isNull());
+}
+
+void RemoteTest::timelapseSnapshotEndpointsAndConcurrentRequests()
+{
+    const QString key = "abcdefghjkmn";
+    RemoteStatus state = example();
+    state.state = "Time-lapse";
+    state.detail = "TIME-LAPSE";
+    state.timelapse = "Stacks: 12 · Next burst in 18 s";
+    state.stacks = 12;
+    state.hasLastStack = true;
+    state.hasPreview = true;
+    state.lock = "Feature Lock";
+    state.locked = true;
+
+    const QByteArray fakePng("PNGSTACKBYTES12345");
+    const QByteArray fakeJpg("JPGPREVIEWBYTES67890");
+    RemoteSources src;
+    src.status = [&] { return state; };
+    src.lastStack = [&] { return fakePng; };
+    src.preview = [&] { return fakeJpg; };
+
+    // Verify Time-lapse JSON fields and image endpoints directly.
+    const QJsonObject obj = QJsonDocument::fromJson(statusJson(state)).object();
+    QCOMPARE(obj["state"].toString(), QString("Time-lapse"));
+    QCOMPARE(obj["timelapse"].toString(), QString("Stacks: 12 · Next burst in 18 s"));
+    QCOMPARE(obj["stacks"].toInt(), 12);
+    QCOMPARE(obj["hasLastStack"].toBool(), true);
+    QCOMPARE(obj["hasPreview"].toBool(), true);
+    QCOMPARE(obj["lock"].toString(), QString("Feature Lock"));
+
+    const RemoteResponse stackResp = respond(get("/last-stack.png?key=" + key.toLatin1() + "&t=12"), key, src);
+    QCOMPARE(stackResp.code, 200);
+    QCOMPARE(stackResp.type, QByteArray("image/png"));
+    QCOMPARE(stackResp.body, fakePng);
+    const RemoteResponse prevResp = respond(get("/preview.jpg?key=" + key.toLatin1()), key, src);
+    QCOMPARE(prevResp.code, 200);
+    QCOMPARE(prevResp.type, QByteArray("image/jpeg"));
+    QCOMPARE(prevResp.body, fakeJpg);
+    QCOMPARE(respond(get("/last-stack.png?key=" + key.toLatin1()), key, sources()).code, 404);
+
+    // Burst of 12 simultaneous TCP clients hitting /status.json, /last-stack.png,
+    // /preview.jpg, and an unauthorized key while the snapshot updates.
+    StatusServer server(src);
+    QString err;
+    QVERIFY2(server.start(0, key, err, QHostAddress::LocalHost), qPrintable(err));
+    const quint16 port = server.port();
+
+    struct Client
+    {
+        std::unique_ptr<QTcpSocket> sock;
+        QByteArray request;
+        QByteArray reply;
+        int expectedCode{200};
+        QByteArray expectedBody;
+    };
+    std::vector<Client> clients;
+    const QByteArray k = key.toLatin1();
+    for (int i = 0; i < 12; ++i)
+    {
+        Client c;
+        c.sock = std::make_unique<QTcpSocket>();
+        if (i % 4 == 0)
+        {
+            c.request = get("/status.json?key=" + k) + "\r\n";
+            c.expectedCode = 200;
+        }
+        else if (i % 4 == 1)
+        {
+            c.request = get("/last-stack.png?key=" + k) + "\r\n";
+            c.expectedCode = 200;
+            c.expectedBody = fakePng;
+        }
+        else if (i % 4 == 2)
+        {
+            c.request = get("/preview.jpg?key=" + k) + "\r\n";
+            c.expectedCode = 200;
+            c.expectedBody = fakeJpg;
+        }
+        else
+        {
+            c.request = get("/status.json?key=invalidkey00") + "\r\n";
+            c.expectedCode = 403;
+        }
+        c.sock->connectToHost(QHostAddress::LocalHost, port);
+        clients.push_back(std::move(c));
+    }
+
+    for (auto& c : clients)
+    {
+        QVERIFY(c.sock->waitForConnected(3000));
+        c.sock->write(c.request);
+    }
+
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < 5000)
+    {
+        state.stacks += 1;
+        QTest::qWait(10);
+        bool allDone = true;
+        for (auto& c : clients)
+        {
+            c.reply += c.sock->readAll();
+            if (c.sock->state() != QAbstractSocket::UnconnectedState) allDone = false;
+        }
+        if (allDone) break;
+    }
+
+    for (auto& c : clients)
+    {
+        c.reply += c.sock->readAll();
+        QCOMPARE(c.sock->state(), QAbstractSocket::UnconnectedState);
+        const QByteArray expectedHead = "HTTP/1.1 " + QByteArray::number(c.expectedCode) + " ";
+        QVERIFY2(c.reply.startsWith(expectedHead), c.reply.left(120).constData());
+        const int sep = c.reply.indexOf("\r\n\r\n");
+        QVERIFY(sep > 0);
+        const QByteArray body = c.reply.mid(sep + 4);
+        if (!c.expectedBody.isEmpty())
+            QCOMPARE(body, c.expectedBody);
+        else if (c.expectedCode == 200)
+            QCOMPARE(QJsonDocument::fromJson(body).object()["state"].toString(), QString("Time-lapse"));
+    }
+    server.stop();
 }
 
 QTEST_MAIN(RemoteTest)

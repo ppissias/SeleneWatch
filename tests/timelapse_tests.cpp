@@ -268,6 +268,7 @@ private slots:
     void serTimelapseExportLinearAndStretchedWithTimestamps();
     void anUnclosedVideoStillPlays();
     void realignStacksFeatureBoxAndAutoMultiPoint();
+    void realignUnderHeavyCloudReopenAndCorruptProfile();
 };
 
 namespace {
@@ -2893,6 +2894,121 @@ void TimelapseTests::realignStacksFeatureBoxAndAutoMultiPoint()
         QVERIFY2(readFitsFloat(savedStacksDir.filePath("stack_0002.fits"), aligned2, rErr), qPrintable(rErr));
         QVERIFY2(std::abs(aligned2.meta.rotationDeg - (-4.0)) < 0.5,
             qPrintable(QString("saved stack_0002 ALIGNROT=%1").arg(aligned2.meta.rotationDeg)));
+    }
+}
+
+void TimelapseTests::realignUnderHeavyCloudReopenAndCorruptProfile()
+{
+    const int w = 256, h = 256;
+    const auto refField = makeLunarCraterField(w, h);
+    FitsImage ref;
+    ref.width = w;
+    ref.height = h;
+    ref.channels = 1;
+    ref.pixels = refField;
+    ref.meta.targetPreset = "moon";
+
+    // 1. Heavy cloud blanking >65% of the frame: AutoMultiPoint must stay finite
+    //    and bounded (never produce NaN or wild rotation spikes).
+    {
+        auto movField = warpFloatField(refField, w, h, 6.0, -4.0, 2.5);
+        for (int y = 0; y < 175; ++y)
+            for (int x = 0; x < w; ++x)
+                movField[static_cast<size_t>(y) * w + x] = 0.02f;
+        FitsImage mov = ref;
+        mov.pixels = std::move(movField);
+
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::AutoMultiPoint, /*allowRotation=*/true);
+        QVERIFY(std::isfinite(res.shiftX) && std::isfinite(res.shiftY) && std::isfinite(res.rotationDeg));
+        QVERIFY2(std::abs(res.rotationDeg) <= 15.0,
+            qPrintable(QString("heavy cloud wild rotation=%1").arg(res.rotationDeg)));
+        QCOMPARE(res.aligned.pixels.size(), ref.pixels.size());
+        for (float px : res.aligned.pixels) QVERIFY(std::isfinite(px));
+    }
+
+    // 2. FeatureBox completely covered by flat cloud: degrades cleanly without NaN/crash.
+    {
+        FitsImage mov = ref;
+        std::fill(mov.pixels.begin(), mov.pixels.end(), 0.05f);
+        const QRect box(96, 64, 80, 80);
+        const SessionAlignResult res = realignStackToReference(
+            mov, ref, StackRealignMode::FeatureBox, /*allowRotation=*/true, box);
+        QVERIFY(std::isfinite(res.shiftX) && std::isfinite(res.shiftY) && std::isfinite(res.rotationDeg));
+        QVERIFY(res.usedFallback || std::abs(res.rotationDeg) <= 15.0);
+        QCOMPARE(res.aligned.pixels.size(), ref.pixels.size());
+    }
+
+    // 3. Chained Re-sharpen re-open: saveAlignedStacks=true produces a folder whose
+    //    stacks/ can be re-opened cleanly in a second Re-sharpen pass without re-aligning.
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const QString sessionDir = tmp.filePath("session");
+        const QString stacksDir = QDir(sessionDir).filePath("stacks");
+        QVERIFY(QDir().mkpath(stacksDir));
+
+        auto writeStack = [&](const QString& name, const std::vector<float>& pix) {
+            FitsImage img = ref;
+            img.pixels = pix;
+            img.meta.qualityScore = 0.9;
+            QString err;
+            QVERIFY2(writeFitsFloat(QDir(stacksDir).filePath(name), img, err), qPrintable(err));
+        };
+        writeStack("stack_0001.fits", refField);
+        writeStack("stack_0002.fits", warpFloatField(refField, w, h, 5.0, -3.5, 3.0));
+
+        SharpeningSettings sharp = sharpeningForPreset(SharpeningPreset::Mild);
+        VideoToneSettings tone;
+        tone.writeMp4 = false;
+        tone.writeGif = false;
+        tone.writeSer = true;
+        tone.cropToOverlap = true;
+
+        RealignOptions opts;
+        opts.mode = StackRealignMode::AutoMultiPoint;
+        opts.allowRotation = true;
+        opts.referenceFileName = "stack_0001.fits";
+        opts.saveAlignedStacks = true;
+
+        QString alignedRunDir;
+        const TimelapseExportResult r1 = resharpenTimelapseSession(
+            sessionDir, {}, sharp, tone, /*rebuildVideoOnly=*/false, alignedRunDir, {}, nullptr, {}, opts);
+        QVERIFY2(r1.ok, qPrintable(r1.error));
+        QCOMPARE(r1.stacksUsed, 2);
+
+        // Second pass directly on alignedRunDir with no re-alignment and stronger sharpening.
+        SharpeningSettings stronger = sharp;
+        stronger.amount = 0.9;
+        QString secondRunDir;
+        const TimelapseExportResult r2 = resharpenTimelapseSession(
+            alignedRunDir, {}, stronger, tone, /*rebuildVideoOnly=*/false, secondRunDir, {}, nullptr, {}, RealignOptions{});
+        QVERIFY2(r2.ok, qPrintable(r2.error));
+        QCOMPARE(r2.stacksUsed, 2);
+        QVERIFY(QFileInfo::exists(QDir(secondRunDir).filePath("timelapse.ser")));
+    }
+
+    // 4. Corrupt / missing sharpening_profile.json fails gracefully without crashing.
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        SharpeningSettings ls;
+        VideoToneSettings lv;
+        QString err;
+        QVERIFY(!loadProfileJson(tmp.filePath("does_not_exist.json"), ls, lv, err));
+        QVERIFY(!err.isEmpty());
+
+        for (const QByteArray& bad : {QByteArray(), QByteArray("{truncated"), QByteArray("[1, 2, 3]"), QByteArray("null")})
+        {
+            const QString p = tmp.filePath("bad.json");
+            QFile f(p);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(bad);
+            f.close();
+            err.clear();
+            QVERIFY(!loadProfileJson(p, ls, lv, err));
+            QVERIFY(!err.isEmpty());
+        }
     }
 }
 
