@@ -72,6 +72,7 @@ private slots:
     void settingsAffectTheNextFrame();
     void adjustableModelSettingsReachTheDetector();
     void overlaysChangeNoPixelsOrDecisions();
+    void maskOverlayMarksIgnoredPixelsAndMatchesDecisions();
     void capturedSettingsAndPeakRemainAtTheirOriginalValues();
     void aOneFrameBlipThroughSessionIsSaved();
     void aLoopFlushesTheClipAtItsBoundary();
@@ -494,6 +495,62 @@ void DetectionTest::overlaysChangeNoPixelsOrDecisions()
         QCOMPARE(frame.data, bytes);
         if (i > 0) QVERIFY(decorated.view().map);
     }
+}
+
+void DetectionTest::maskOverlayMarksIgnoredPixelsAndMatchesDecisions()
+{
+    // Build a frame with a bright left half (200 ADU, > 50% ceiling) and dark right half (40 ADU),
+    // plus a drawn polygon mask in the dark right half.
+    DetectionSettings settings;
+    settings.ignoreAboveShare = 0.5;
+    settings.mask = DetectionMask{}.with(DetectionMask::rectangle(40, 10, 12, 12));
+
+    FlashDetector plain(settings), decorated(settings);
+    plain.setWarmupEnabled(true);
+    decorated.setWarmupEnabled(true);
+
+    for (int i = 0; i < 12; ++i)
+    {
+        Frame frame = flat(static_cast<uint64_t>(i), 40);
+        for (int y = 0; y < frame.height; ++y)
+            for (int x = 0; x < 32; ++x)
+                frame.data[static_cast<size_t>(y) * frame.width + x] = 200;
+        if (i == 9) patch(frame, 48, 30, 4, 80); // dark unmasked region
+
+        const bool expected = observe(plain, frame);
+        const bool actual = observe(decorated, frame, {DetectionOverlay::Mask, -1, -1, true});
+        QCOMPARE(actual, expected);
+        QCOMPARE(decorated.summary().brightPixels, plain.summary().brightPixels);
+
+        const auto map = decorated.view().map;
+        QVERIFY(map != nullptr); // Available immediately, including frame 1 and warmup.
+        QCOMPARE(map->kind, DetectionOverlay::Mask);
+        QCOMPARE(map->width, frame.width);
+        QCOMPARE(map->height, frame.height);
+        // Bright sunlit pixel (x=10, y=20) -> excluded (1.0).
+        QCOMPARE(map->values[20 * frame.width + 10], 1.0f);
+        // Polygon-masked dark pixel (x=44, y=14) -> excluded (1.0).
+        QCOMPARE(map->values[14 * frame.width + 44], 1.0f);
+        // Unmasked dark pixel (x=50, y=30) -> watched (0.0).
+        QCOMPARE(map->values[30 * frame.width + 50], 0.0f);
+    }
+
+    // With a stabilization shift of (+4, 0), native x=0..3 are outside valid overlap -> border (0.5).
+    Frame shifted = flat(12, 40);
+    for (int y = 0; y < shifted.height; ++y)
+        for (int x = 0; x < 32; ++x)
+            shifted.data[static_cast<size_t>(y) * shifted.width + x] = 200;
+    FrameShift shift;
+    shift.mode = ShiftMode::Integer;
+    shift.dx = 4.0;
+    shift.dy = 0.0;
+    decorated.analyze(shifted, {DetectionOverlay::Mask, -1, -1, true}, shift);
+    decorated.updateReference(shifted);
+    const auto shiftedMap = decorated.view().map;
+    QVERIFY(shiftedMap != nullptr);
+    QCOMPARE(shiftedMap->values[20 * shifted.width + 1], 0.5f);
+    QCOMPARE(shiftedMap->values[20 * shifted.width + 10], 1.0f);
+    QCOMPARE(shiftedMap->values[30 * shifted.width + 50], 0.0f);
 }
 
 void DetectionTest::capturedSettingsAndPeakRemainAtTheirOriginalValues()

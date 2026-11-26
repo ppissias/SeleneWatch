@@ -552,10 +552,11 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
 
     overlay_ = new QComboBox(essentialGrid);
     overlay_->setObjectName("detectionOverlay");
-    overlay_->addItems({"None", "Sigma map", "Noise map"});
+    overlay_->addItems({"None", "Sigma map", "Noise map", "Excluded mask"});
     layout->addWidget(named("Preview overlay", overlay_, essentialGrid), 9, 0);
     layout->addWidget(overlay_, 9, 1);
-    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped}, essentialGrid);
+    mapScale_ = new ReadoutLabel({noiseScaleText(9999.99), kOverlaySkipped,
+        "Red hatch: excluded (100.0%). Clear: watched (100.0%). Display only."}, essentialGrid);
     mapScale_->setText("Overlays affect the display only.");
     layout->addWidget(mapScale_, 10, 0, 1, 2);
 
@@ -742,7 +743,8 @@ void DetectionPanel::showWatchedChange()
     oneFrame_->setToolTip(QString("Off requires two consecutive passing frames. %1 can then be missed.")
         .arg(falls ? "A shadow seen on one frame only" : "A single-frame flash"));
     overlay_->setToolTip(QString("Draws a map on the preview, for the screen only: none, the sigma map (pixels that %1 "
-        "in red), or the noise map.").arg(falls ? "fell by K or more" : "are at or above K"));
+        "in red), the noise map, or the excluded mask (red hatch marks pixels ignored by Ignore brighter than, a horizon "
+        "mask, or the stabilized edge; clear pixels are watched).").arg(falls ? "fell by K or more" : "are at or above K"));
 }
 
 DetectionSettings DetectionPanel::settings() const
@@ -1180,6 +1182,47 @@ void DetectionPanel::setView(const DetectionView& view)
     }
     const auto& map = *view.map;
     if (map.kind != overlay() || map.values.empty()) return;
+    if (map.kind == DetectionOverlay::Mask)
+    {
+        overlayImage_ = makeBudgetImage(map.width, map.height, QImage::Format_ARGB32, map.values.get_allocator().budget);
+        size_t excluded = 0;
+        for (int y = 0; y < map.height; ++y)
+        {
+            auto* row = reinterpret_cast<QRgb*>(overlayImage_.scanLine(y));
+            const size_t rowOff = static_cast<size_t>(y) * static_cast<size_t>(map.width);
+            for (int x = 0; x < map.width; ++x)
+            {
+                const float value = map.values[rowOff + static_cast<size_t>(x)];
+                if (value >= 0.75f)
+                {
+                    const bool hatch = ((x + y) % 10) < 2;
+                    row[x] = hatch ? qRgba(255, 95, 75, 165) : qRgba(220, 55, 45, 85);
+                    ++excluded;
+                }
+                else if (value >= 0.25f)
+                {
+                    row[x] = qRgba(200, 155, 50, 95);
+                    ++excluded;
+                }
+                else
+                {
+                    row[x] = qRgba(0, 0, 0, 0);
+                }
+            }
+        }
+        const size_t total = static_cast<size_t>(map.width) * static_cast<size_t>(map.height);
+        if (excluded == 0)
+        {
+            mapScale_->setText("All pixels watched (0% excluded). Display only.");
+        }
+        else
+        {
+            const double excludedPct = total > 0 ? 100.0 * static_cast<double>(excluded) / static_cast<double>(total) : 0.0;
+            mapScale_->setText(QString("Red hatch: excluded (%1%). Clear: watched (%2%). Display only.")
+                .arg(excludedPct, 0, 'f', 1).arg(100.0 - excludedPct, 0, 'f', 1));
+        }
+        return;
+    }
     double scale = summary.settings.sigma;
     if (map.kind == DetectionOverlay::Noise)
     {

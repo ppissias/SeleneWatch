@@ -438,7 +438,7 @@ Small meteoroids hit the Moon all the time. On the night side, lit only faintly 
 
 SeleneWatch learns, pixel by pixel, the earthshine's brightness and its noise, over the last two seconds. A pixel that rises K times its own noise is marked, so the same K works on the quiet earthshine and on noisier areas. Marked pixels that touch form a patch; a patch of the right size and shape is a candidate. Because a flash can last a single frame, one frame is enough by default.
 
-The sunlit side and its glare are left out (**Ignore brighter than**, 30% of the camera's range): no flash can be seen there, and its shimmer would only trigger falsely. The excluded area follows the Moon as it drifts.
+The sunlit side and its glare are left out (**Ignore brighter than**, 30% of the camera's range): no flash can be seen there, and its shimmer would only trigger falsely. The excluded area follows the Moon as it drifts. Switch **Preview overlay** to **Excluded mask** to shade the ignored pixels in red hatch on screen so you can verify that the earthshine is clear and the sunlit glare is covered.
 
 ### Step by step
 
@@ -478,7 +478,7 @@ To check your settings by hand, turn on **View → Testing tools**, click on the
 | **Allow a one-frame trigger** | A flash on a single frame triggers | On |
 | **Stabilize detection against drift/shake** | Aligns each frame to sub-pixel precision inside the detector before checking for flashes (raw saved SER frames stay untouched). Uses your active Feature Lock box if set, otherwise tracks the disk centroid or an automatic crater patch. Falls back cleanly to unstabilized detection if lock is lost | Off |
 | **Reference time**, **Minimum noise** | How quickly the background is learned, and the smallest noise assumed | 2 s, 0.5 |
-| **Preview overlay** | Shows on screen the pixels above K, or each pixel's noise | None |
+| **Preview overlay** | Shows on screen the pixels above K (**Sigma map**), each pixel's noise (**Noise map**), or the pixels ignored by **Ignore brighter than**, a horizon mask, or the stabilized border (**Excluded mask**) | None |
 | **Profile** | Saves and loads named detection settings | — |
 | **Pre-event history / Quiet tail / Maximum after trigger** (Session → Capture & storage…) | How much of the clip is kept before and after | 5 s, 3 s, 10 s |
 | **RAM ceiling / Disk reserve** (Session → Capture & storage…) | Memory for frames, and free disk space always left | 2048 MiB, 10 GiB |
@@ -542,7 +542,7 @@ SeleneWatch aligns images in three places: **Guiding**, **Live detection stabili
 - **Detection panel** (below **Stabilize detection against drift/shake**): shows what stabilization chose and why—`Disk centroid (isolated disk)`, `Feature Lock (using guiding box)`, `Feature Lock (auto crater patch)`, `holding last shift`, or `lost — running unstabilized`—along with the live shift in pixels.
 - **Time-lapse panel** (below **Also watch for transits**): summarizes both the stacking preset (**Moon** shift & rotation or **Planet** disk-centred) and whether between-burst shadow watching is stabilized or unstabilized.
 - **Main window status bar:** shows the active lock method beside `Lock:` (e.g. `Lock: Disk centroid, dx …`) and, whenever detection stabilization is ticked, a compact `Stab: Disk centroid` / `Stab: Feature Lock` / `Stab: lost (unstabilized)` readout so you can check both even when docks are collapsed.
-- **Stabilized view button** (in the **View:** bar above the preview, beside **Histogram**): when **Stabilize detection against drift/shake** is ticked, toggle **Stabilized view** on to shift the live preview (and any **Sigma map** or **Noise map** overlay) in lockstep with detector stabilization. This is display-only—raw recordings and `event.ser` clips are never altered—and mouse clicks or drawn boxes map automatically back to raw frame coordinates.
+- **Stabilized view button** (in the **View:** bar above the preview, beside **Histogram**): when **Stabilize detection against drift/shake** is ticked, toggle **Stabilized view** on to shift the live preview (and any **Sigma map**, **Noise map**, or **Excluded mask** overlay) in lockstep with detector stabilization. This is display-only—raw recordings and `event.ser` clips are never altered—and mouse clicks or drawn boxes map automatically back to raw frame coordinates.
 
 ---
 

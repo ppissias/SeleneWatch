@@ -357,6 +357,45 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
     if (!(frameInterval_ > 0) || !std::isfinite(frameInterval_)) frameInterval_ = 1.0/30;
     frameInterval_ = std::min(frameInterval_, 10.0);
 
+    const auto syncMaskAndCeiling = [&](float& outCeiling) -> bool {
+        if (settings_.mask != maskBuiltFor_ || maskWidth_ != width_ || maskHeight_ != height_)
+        {
+            masked_.assign(settings_.mask.empty() ? 0 : pixels, 0);
+            if (!settings_.mask.empty()) settings_.mask.fill(width_, height_, masked_.data());
+            unmaskedPixels_ = pixels - static_cast<size_t>(std::count(masked_.begin(), masked_.end(), uint8_t{1}));
+            maskBuiltFor_ = settings_.mask; maskWidth_ = width_; maskHeight_ = height_;
+        }
+        outCeiling = settings_.ignoreAboveShare > 0
+            ? static_cast<float>(settings_.ignoreAboveShare * (format_ == PixelFormat::Mono16 ? (1 << bits_) - 1 : 255))
+            : std::numeric_limits<float>::infinity();
+        return !masked_.empty();
+    };
+    const auto fillMaskOverlay = [&] {
+        if (!display.makeMap || display.overlay != DetectionOverlay::Mask) return;
+        float ceiling = std::numeric_limits<float>::infinity();
+        const bool masking = syncMaskAndCeiling(ceiling);
+        try
+        {
+            auto map = std::make_shared<DetectionMap>(budget_);
+            map->width = width_; map->height = height_; map->kind = DetectionOverlay::Mask;
+            map->values.assign(pixels, 0.5f);
+            for (int ry = view.ryMin; ry < view.ryMax; ++ry)
+            {
+                const size_t rowOff = static_cast<size_t>(ry) * width_;
+                const int ny = std::clamp(ry + view.nativeDy, 0, height_ - 1);
+                const size_t mapRowOff = static_cast<size_t>(ny) * width_;
+                for (int rx = view.rxMin; rx < view.rxMax; ++rx)
+                {
+                    const size_t i = rowOff + rx;
+                    const int nx = std::clamp(rx + view.nativeDx, 0, width_ - 1);
+                    map->values[mapRowOff + nx] = ((masking && masked_[i]) || mean_[i] > ceiling) ? 1.0f : 0.0f;
+                }
+            }
+            map_ = std::move(map);
+        }
+        catch (const MemoryLimitError&) { summary_.overlaySkipped = true; }
+    };
+
     if (width_ != frame.width || height_ != frame.height || format_ != frame.format
         || bits_ != frame.significantBits || alignment_ != frame.alignment || bayer_ != frame.bayer)
     {
@@ -383,6 +422,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
             summary_.warmupTotalSeconds = warmupTarget;
             summary_.warmupRemainingSeconds = warmupTarget;
         }
+        fillMaskOverlay();
     }
     else
     {
@@ -401,25 +441,14 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
             active_.clear();
             largeChange_ = {};
             holdAll_ = false;
+            fillMaskOverlay();
         }
         else
         {
         summary_.ready = true;
-        // Feature-11: the mask as pixels, rebuilt when it or the frame changes.
-        if (settings_.mask != maskBuiltFor_ || maskWidth_ != width_ || maskHeight_ != height_)
-        {
-            masked_.assign(settings_.mask.empty() ? 0 : pixels, 0);
-            if (!settings_.mask.empty()) settings_.mask.fill(width_, height_, masked_.data());
-            unmaskedPixels_ = pixels - static_cast<size_t>(std::count(masked_.begin(), masked_.end(), uint8_t{1}));
-            maskBuiltFor_ = settings_.mask; maskWidth_ = width_; maskHeight_ = height_;
-        }
-        // Feature-31: with a ceiling, a pixel whose learned brightness is above
-        // it (the sunlit side) is left out like a masked one. The reference
-        // follows the Moon's drift, so the left-out area moves with it.
-        const bool masking = !masked_.empty();
-        const float ceiling = settings_.ignoreAboveShare > 0
-            ? static_cast<float>(settings_.ignoreAboveShare * (format_ == PixelFormat::Mono16 ? (1 << bits_) - 1 : 255))
-            : std::numeric_limits<float>::infinity();
+        // Feature-11 & Feature-31: polygon mask plus brightness ceiling (sunlit side).
+        float ceiling = std::numeric_limits<float>::infinity();
+        const bool masking = syncMaskAndCeiling(ceiling);
         const auto isMasked = [&](size_t i) { return (masking && masked_[i]) || mean_[i] > ceiling; };
 
         // Median absolute deviation on a bounded grid within the valid overlap.
@@ -471,7 +500,7 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
             {
                 map = std::make_shared<DetectionMap>(budget_);
                 map->width = width_; map->height = height_; map->kind = display.overlay;
-                map->values.assign(pixels, 0.0f);
+                map->values.assign(pixels, display.overlay == DetectionOverlay::Mask ? 0.5f : 0.0f);
             }
             catch (const MemoryLimitError&) { map.reset(); summary_.overlaySkipped = true; }
         }
@@ -492,8 +521,9 @@ bool FlashDetector::analyze(const Frame& frame, DetectionDisplayRequest display,
                 if (map)
                 {
                     const int nx = std::clamp(rx + view.nativeDx, 0, width_ - 1);
-                    map->values[mapRowOff + nx] = static_cast<float>(
-                        display.overlay == DetectionOverlay::Noise ? noise : std::max(0.0, sigma));
+                    map->values[mapRowOff + nx] = display.overlay == DetectionOverlay::Mask
+                        ? (isMasked(i) ? 1.0f : 0.0f)
+                        : static_cast<float>(display.overlay == DetectionOverlay::Noise ? noise : std::max(0.0, sigma));
                 }
                 if (isMasked(i)) continue;
                 if (sigma > summary_.peakSigma)

@@ -8,8 +8,9 @@
 #include <memory>
 #include <vector>
 
-// Which derived detector map, if any, to show on the preview.
-enum class DetectionOverlay { None, Sigma, Noise };
+// Which derived detector map, if any, to show on the preview (Mask highlights
+// pixels excluded by Ignore brighter than, a horizon mask, or shifted borders).
+enum class DetectionOverlay { None, Sigma, Noise, Mask };
 
 // A request for derived display data. It has no effect on trigger decisions.
 struct DetectionDisplayRequest

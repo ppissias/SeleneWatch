@@ -2375,6 +2375,29 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(2);
         QTest::qWait(150);
         QVERIFY(window.grab().save(QString(SELENEWATCH_UI_QA_DIR) + "/window-noise.png"));
+        // Excluded mask overlay: temporarily set Ignore brighter than to 50% so the bright
+        // synthetic Moon disk is hatched excluded while the surrounding sky remains clear.
+        panel->findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(50);
+        panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(3);
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            const QImage img = panel->overlayImage();
+            if (img.isNull()) return false;
+            bool sawClear = false;
+            bool sawExcluded = false;
+            for (int y = 0; y < img.height(); y += 4)
+            {
+                for (int x = 0; x < img.width(); x += 4)
+                {
+                    const int a = qAlpha(img.pixel(x, y));
+                    if (a == 0) sawClear = true;
+                    else if (a > 0) sawExcluded = true;
+                }
+            }
+            return sawClear && sawExcluded;
+        }()), 5000);
+        QVERIFY(window.grab().save(QString(SELENEWATCH_UI_QA_DIR) + "/window-mask.png"));
+        panel->findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(chosen.ignoreAboveShare);
+        panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(2);
         QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
         QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(), 3000);
         auto* readout = window.findChild<QLabel*>("blipStatusLabel");

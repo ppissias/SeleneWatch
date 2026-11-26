@@ -83,7 +83,8 @@ const std::vector<StartupTip>& allStartupTips()
             "For lunar impact flashes, open <b>View &rarr; Histogram</b> in <b>Preview</b> and expose so earthshine "
             "sits around <code>3&ndash;10%</code> of full scale with <b>At 0</b> at <code>0.00%</code>. "
             "<b>Ignore brighter than</b> (<code>30%</code> default) automatically excludes the bright sunlit crescent "
-            "and terminator glare while following lunar drift.",
+            "and terminator glare while following lunar drift. Switch <b>Preview overlay</b> to <b>Excluded mask</b> "
+            "to see the ignored bright region shaded directly on the live preview.",
             kSectionLunar
         },
         {
@@ -97,7 +98,8 @@ const std::vector<StartupTip>& allStartupTips()
         {
             "Diagnosing triggers with overlays",
             "Not sure why a threshold is firing in <b>Preview</b>? Switch <b>Preview overlay</b> in <b>Detection</b> "
-            "to <b>Sigma map</b> (pixels at or above <b>K</b> light up red) or <b>Noise map</b> to spot drifting "
+            "to <b>Sigma map</b> (pixels at or above <b>K</b> light up red), <b>Noise map</b>, or <b>Excluded mask</b> "
+            "(red hatch shows pixels ignored by <b>Ignore brighter than</b> or a horizon mask) to spot drifting "
             "lunar limbs, hot pixels, or noisy edges at a glance. Overlays affect the display only.",
             kSectionLunar
         },
