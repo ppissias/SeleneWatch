@@ -7,6 +7,7 @@
 #include <QtCore/QRect>
 #include <QtGui/QImage>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <optional>
@@ -165,19 +166,23 @@ struct BrightnessMatch
     const QRect& crop = {},
     bool alignedPixels = true);
 void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite,
-    const QRect& crop = {});
+    const QRect& crop = {}, std::array<double, 3>* outChannelBlack = nullptr);
 
 // Tone-maps a linear float FitsImage into an 8-bit QImage (Format_RGB888 or
 // Format_Grayscale8) for live thumbnails or FFmpeg video export.
 // When reference is non-null and levelling != Off, equalizes brightness (and
 // optionally low-frequency uneven clouds) to reference inside crop before
-// applying black/white stretch and gamma.
+// applying black/white stretch and gamma. When channelBlack is provided for an
+// RGB image, each channel subtracts its own additive black floor while sharing
+// the common contrast span (white - black), neutralizing daytime blue sky or
+// light-pollution cast without washing out planetary colour ratios.
 [[nodiscard]] QImage toneMapFitsToImage(const FitsImage& image,
     double black, double white, double gamma, double brightnessScale = 1.0,
     const QRect& crop = {}, int maxLongSide = 0,
     const FitsImage* reference = nullptr,
     BrightnessLevellingMode levelling = BrightnessLevellingMode::Off,
-    bool alignedPixels = true);
+    bool alignedPixels = true,
+    const std::array<double, 3>* channelBlack = nullptr);
 
 // Converts a linear float FitsImage into a lossless Frame for SER export
 // (Mono16 16-bit for mono stacks, RGB888 for colour stacks), sharing the same
@@ -189,4 +194,5 @@ void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& 
     const QRect& crop = {},
     const FitsImage* reference = nullptr,
     BrightnessLevellingMode levelling = BrightnessLevellingMode::Off,
-    bool alignedPixels = true);
+    bool alignedPixels = true,
+    const std::array<double, 3>* channelBlack = nullptr);

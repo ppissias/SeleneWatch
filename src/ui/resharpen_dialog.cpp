@@ -1175,25 +1175,35 @@ void ResharpenDialog::updatePreview()
 
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
+    std::array<double, 3> channelBlack{black, black, black};
+    const std::array<double, 3>* chBlackPtr = nullptr;
     if (tone.autoStretch)
-        computeAutoStretchLevels(*refFits, black, white, crop);
+    {
+        computeAutoStretchLevels(*refFits, black, white, crop, &channelBlack);
+        if (refFits->channels == 3) chBlackPtr = &channelBlack;
+    }
 
     const bool alignedPixels = refFits->meta.targetPreset != "planet";
 
     if (cachedBeforeImg_.isNull() || cachedBeforeBlack_ != black
         || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma
+        || cachedBeforeAutoStretch_ != tone.autoStretch
+        || cachedBeforeChannelBlack_ != channelBlack
         || cachedBeforeCrop_ != crop)
     {
-        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, crop, 0);
+        cachedBeforeImg_ = toneMapFitsToImage(*loadedRaw_, black, white, tone.gamma, 1.0, crop, 0,
+            nullptr, BrightnessLevellingMode::Off, true, chBlackPtr);
         cachedBeforeBlack_ = black;
         cachedBeforeWhite_ = white;
         cachedBeforeGamma_ = tone.gamma;
+        cachedBeforeAutoStretch_ = tone.autoStretch;
+        cachedBeforeChannelBlack_ = channelBlack;
         cachedBeforeCrop_ = crop;
         beforeView_->setImage(cachedBeforeImg_);
     }
 
     const QImage after = toneMapFitsToImage(*afterFits, black, white, tone.gamma, 1.0, crop, 0,
-        refFits, tone.brightnessMode, alignedPixels);
+        refFits, tone.brightnessMode, alignedPixels, chBlackPtr);
     afterView_->setImage(after);
 }
 

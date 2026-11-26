@@ -248,6 +248,8 @@ private slots:
     void stopMidWindowPreservesBurstAndConcurrentStop();
     void exposureUnitsAndFailedFitsWriteHandling();
     void rawSerRetainsOnlyKeptFramesAndWorkerDebayers();
+    void autoStretchNeutralizesAdditiveBlueSkyWithoutWashingOutRedPlanet();
+    void moonAlignmentRejectsBogusRotationOnLowContrastSmallAnchor();
     void rotatedMoonInscribedOverlapHasNoBlackCorners();
     void guidingRecoveryCloudBaselineAndMissedWindows();
     void fitsBitpixStrictValidationAndConsistentScaling();
@@ -3010,6 +3012,115 @@ void TimelapseTests::realignUnderHeavyCloudReopenAndCorruptProfile()
             QVERIFY(!err.isEmpty());
         }
     }
+}
+
+void TimelapseTests::autoStretchNeutralizesAdditiveBlueSkyWithoutWashingOutRedPlanet()
+{
+    const int w = 160, h = 120;
+    const size_t n = static_cast<size_t>(w) * h;
+
+    // 1. Daytime/twilight neutral Moon over an additive pale-blue sky (R=0.37, G=0.41, B=0.55).
+    FitsImage dayMoon;
+    dayMoon.width = w;
+    dayMoon.height = h;
+    dayMoon.channels = 3;
+    dayMoon.pixels.resize(3 * n);
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const double r2 = std::pow((x - w * 0.65) / 48.0, 2) + std::pow((y - h * 0.55) / 48.0, 2);
+            const float moon = r2 < 1.0 ? static_cast<float>(0.34 * (1.0 - 0.5 * r2)) : 0.0f;
+            const size_t idx = static_cast<size_t>(y) * w + x;
+            dayMoon.pixels[idx] = 0.37f + moon;
+            dayMoon.pixels[n + idx] = 0.41f + moon;
+            dayMoon.pixels[2 * n + idx] = 0.55f + moon;
+        }
+    }
+
+    double black = 0.0, white = 1.0;
+    std::array<double, 3> chBlack{0.0, 0.0, 0.0};
+    computeAutoStretchLevels(dayMoon, black, white, {}, &chBlack);
+    const QImage mappedMoon = toneMapFitsToImage(dayMoon, black, white, 1.0, 1.0, {}, 0,
+        nullptr, BrightnessLevellingMode::Off, true, &chBlack);
+    QCOMPARE(mappedMoon.format(), QImage::Format_RGB888);
+
+    double sumR = 0.0, sumG = 0.0, sumB = 0.0;
+    for (int y = 0; y < h; ++y)
+    {
+        const uint8_t* row = mappedMoon.constScanLine(y);
+        for (int x = 0; x < w; ++x)
+        {
+            sumR += row[3 * x];
+            sumG += row[3 * x + 1];
+            sumB += row[3 * x + 2];
+        }
+    }
+    const double meanR = sumR / n, meanG = sumG / n, meanB = sumB / n;
+    // Additive blue sky is removed cleanly so R, G, B stay closely balanced (no neon blue cast).
+    QVERIFY2(std::abs(meanR - meanB) < 6.0 && std::abs(meanR - meanG) < 6.0,
+        qPrintable(QString("Daytime Moon should neutralize blue sky, got RGB=(%1, %2, %3)").arg(meanR).arg(meanG).arg(meanB)));
+
+    // 2. Night-time red Mars disk on black sky must remain vividly red (shared span preserves colour ratios).
+    FitsImage mars;
+    mars.width = w;
+    mars.height = h;
+    mars.channels = 3;
+    mars.pixels.resize(3 * n);
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const double r2 = std::pow((x - w * 0.5) / 28.0, 2) + std::pow((y - h * 0.5) / 28.0, 2);
+            const float disk = r2 < 1.0 ? static_cast<float>(std::sqrt(1.0 - r2)) : 0.0f;
+            const size_t idx = static_cast<size_t>(y) * w + x;
+            mars.pixels[idx] = 0.01f + 0.85f * disk;
+            mars.pixels[n + idx] = 0.01f + 0.42f * disk;
+            mars.pixels[2 * n + idx] = 0.01f + 0.22f * disk;
+        }
+    }
+    computeAutoStretchLevels(mars, black, white, {}, &chBlack);
+    const QImage mappedMars = toneMapFitsToImage(mars, black, white, 1.0, 1.0, {}, 0,
+        nullptr, BrightnessLevellingMode::Off, true, &chBlack);
+    const QColor center = mappedMars.pixelColor(w / 2, h / 2);
+    QVERIFY2(center.red() > 200 && center.red() > center.blue() * 2.5,
+        qPrintable(QString("Mars must stay red, got RGB=(%1, %2, %3)").arg(center.red()).arg(center.green()).arg(center.blue())));
+}
+
+void TimelapseTests::moonAlignmentRejectsBogusRotationOnLowContrastSmallAnchor()
+{
+    // Simulate a low-contrast daytime Moon (640x480) with a small 133x124 anchor and a pure
+    // translation of (+18, -12) px plus mild additive sky haze and gradient.
+    const int w = 640, h = 480;
+    const std::vector<float> base = makeLunarCraterField(w, h);
+    auto makeLowContrast = [&](double dx, double dy, float haze) {
+        FitsImage f;
+        f.width = w;
+        f.height = h;
+        f.channels = 1;
+        f.pixels.resize(static_cast<size_t>(w) * h);
+        for (int y = 0; y < h; ++y)
+        {
+            for (int x = 0; x < w; ++x)
+            {
+                const double v = sampleBilinear(base, w, h, x + dx, y + dy);
+                // Low-contrast daytime compression (sky ~0.45, bright craters ~0.68).
+                const double grad = 0.04 * (1.0 - static_cast<double>(y) / h);
+                f.pixels[static_cast<size_t>(y) * w + x] = static_cast<float>(std::clamp(haze + grad + 0.35 * v, 0.0, 1.0));
+            }
+        }
+        return f;
+    };
+
+    const FitsImage ref = makeLowContrast(0.0, 0.0, 0.44f);
+    const FitsImage shifted = makeLowContrast(18.0, -12.0, 0.42f);
+    const QRect smallAnchor(173, 308, 133, 124);
+
+    const SessionAlignResult aligned = alignStackToReference(shifted, ref, TimelapsePreset::Moon, smallAnchor);
+    QVERIFY2(std::abs(aligned.rotationDeg) < 1.0,
+        qPrintable(QString("Unexpected rotation spin-out: %1 deg").arg(aligned.rotationDeg)));
+    QVERIFY2(std::abs(aligned.shiftX - 18.0) < 1.5 && std::abs(aligned.shiftY - (-12.0)) < 1.5,
+        qPrintable(QString("Unexpected shift: (%1, %2)").arg(aligned.shiftX).arg(aligned.shiftY)));
 }
 
 QTEST_MAIN(TimelapseTests)

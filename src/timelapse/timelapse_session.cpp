@@ -931,8 +931,10 @@ void TimelapseSession::processBurst(BurstJob& job)
     try
     {
         double b = 0, w = 1;
-        computeAutoStretchLevels(sharpened, b, w, commonOverlap_);
-        thumb = toneMapFitsToImage(sharpened, b, w, config_.settings.video.gamma, 1.0, {}, 512);
+        std::array<double, 3> chBlack{0.0, 0.0, 0.0};
+        computeAutoStretchLevels(sharpened, b, w, commonOverlap_, &chBlack);
+        thumb = toneMapFitsToImage(sharpened, b, w, config_.settings.video.gamma, 1.0, {}, 512,
+            nullptr, BrightnessLevellingMode::Off, true, sharpened.channels == 3 ? &chBlack : nullptr);
     }
     catch (...)
     {

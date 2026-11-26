@@ -234,7 +234,13 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
 
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
-    if (tone.autoStretch) computeAutoStretchLevels(refImg, black, white, crop);
+    std::array<double, 3> channelBlack{black, black, black};
+    const std::array<double, 3>* chBlackPtr = nullptr;
+    if (tone.autoStretch)
+    {
+        computeAutoStretchLevels(refImg, black, white, crop, &channelBlack);
+        if (refImg.channels == 3) chBlackPtr = &channelBlack;
+    }
     const bool alignedPixels = refImg.meta.targetPreset != "planet";
 
     QDir().mkpath(outputDir);
@@ -254,7 +260,7 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
             if (!readFitsFloat(keptPaths[static_cast<size_t>(i)], img, err)) return {};
             const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
             QImage mapped = toneMapFitsToImage(img, black, white, tone.gamma, 1.0, crop, 0,
-                refPtr, tone.brightnessMode, alignedPixels);
+                refPtr, tone.brightnessMode, alignedPixels, chBlackPtr);
             if (mapped.isNull())
             {
                 err = "could not tone-map FITS stack";
@@ -297,7 +303,7 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
             }
             const FitsImage* refPtr = (i == refIdx) ? &img : &refImg;
             Frame frame = fitsToSerFrame(img, tone.stretchSer, black, white, tone.gamma, crop,
-                refPtr, tone.brightnessMode, alignedPixels);
+                refPtr, tone.brightnessMode, alignedPixels, chBlackPtr);
             frame.frameIndex = static_cast<uint64_t>(i);
             if (!started)
             {

@@ -911,7 +911,7 @@ bool Session::startTimeLapse(const TimelapseSettings& settings, QString& error,
         cfg.stream = streamInfo_;
         cfg.site = site_;
     }
-    cfg.softwareVersion = std::string(SELENEWATCH_VERSION) + " (" + SELENEWATCH_REVISION + ")";
+    cfg.softwareVersion = SELENEWATCH_VERSION;
     cfg.diskReserveBytes = captureSettings_.diskReserveBytes;
     cfg.memory = memory_;
     const auto gStatus = guider_.status();

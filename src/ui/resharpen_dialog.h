@@ -96,6 +96,8 @@ private:
     double cachedBeforeBlack_{-1.0};
     double cachedBeforeWhite_{-1.0};
     double cachedBeforeGamma_{-1.0};
+    std::array<double, 3> cachedBeforeChannelBlack_{-1.0, -1.0, -1.0};
+    bool cachedBeforeAutoStretch_{false};
     QRect cachedBeforeCrop_;
 
     std::optional<QRect> realignBox_;
