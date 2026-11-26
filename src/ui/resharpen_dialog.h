@@ -141,6 +141,8 @@ private:
     QSlider* denoiseSlider_{nullptr};
 
     QCheckBox* autoStretch_{nullptr};
+    QWidget* neutralizeBgRow_{nullptr};
+    QCheckBox* neutralizeBg_{nullptr};
     QDoubleSpinBox* blackLevel_{nullptr};
     QSlider* blackSlider_{nullptr};
     QDoubleSpinBox* whiteLevel_{nullptr};

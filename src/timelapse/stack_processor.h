@@ -168,6 +168,12 @@ struct BrightnessMatch
 void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& outWhite,
     const QRect& crop = {}, std::array<double, 3>* outChannelBlack = nullptr);
 
+// Resolves final black/white and optional per-channel black floors for both auto
+// and manual stretch modes. Returns true when per-channel additive background
+// neutralization should be passed to toneMapFitsToImage / fitsToSerFrame.
+[[nodiscard]] bool resolveStretchLevels(const FitsImage& refImage, const VideoToneSettings& tone,
+    const QRect& crop, double& outBlack, double& outWhite, std::array<double, 3>& outChannelBlack);
+
 // Tone-maps a linear float FitsImage into an 8-bit QImage (Format_RGB888 or
 // Format_Grayscale8) for live thumbnails or FFmpeg video export.
 // When reference is non-null and levelling != Off, equalizes brightness (and

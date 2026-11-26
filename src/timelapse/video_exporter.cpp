@@ -235,12 +235,8 @@ TimelapseExportResult exportTimelapseFromFits(const QString& fitsDir,
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
     std::array<double, 3> channelBlack{black, black, black};
-    const std::array<double, 3>* chBlackPtr = nullptr;
-    if (tone.autoStretch)
-    {
-        computeAutoStretchLevels(refImg, black, white, crop, &channelBlack);
-        if (refImg.channels == 3) chBlackPtr = &channelBlack;
-    }
+    const bool useChBlack = resolveStretchLevels(refImg, tone, crop, black, white, channelBlack);
+    const std::array<double, 3>* chBlackPtr = useChBlack ? &channelBlack : nullptr;
     const bool alignedPixels = refImg.meta.targetPreset != "planet";
 
     QDir().mkpath(outputDir);

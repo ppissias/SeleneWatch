@@ -346,9 +346,9 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
 
 *One sharpened stack of a Moon time-lapse, from 57 stacks a minute apart.*
 
-![Time-lapse mode during a lunar session](docs/images/manual-timelapse.png)
+![Time-lapse mode on a recorded lunar video](docs/images/manual-timelapse.png)
 
-*Time-lapse mode during a lunar session: the **Time-lapse view** bar (**Live camera**, **Latest stack**, **Sequence loop**) above the preview, the pink lunar anchor box on the Moon, the collapsible **Latest stacks** strip below, and the Time-lapse controls on the right.*
+*Test run on a recorded lunar video (not a live time-lapse): Time-lapse mode with the **Time-lapse view** bar (**Live camera**, **Latest stack**, **Sequence loop**) above the preview, the **Guiding lock** box tracking the Moon, the **Latest stacks** thumbnail strip below, and the Time-lapse controls and session progress on the right.*
 
 ![Re-sharpening a time-lapse](docs/images/manual-resharpen.png)
 

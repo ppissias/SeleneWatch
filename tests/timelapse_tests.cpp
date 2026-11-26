@@ -3061,6 +3061,40 @@ void TimelapseTests::autoStretchNeutralizesAdditiveBlueSkyWithoutWashingOutRedPl
     QVERIFY2(std::abs(meanR - meanB) < 6.0 && std::abs(meanR - meanG) < 6.0,
         qPrintable(QString("Daytime Moon should neutralize blue sky, got RGB=(%1, %2, %3)").arg(meanR).arg(meanG).arg(meanB)));
 
+    // 1b. Manual stretch with neutralizeBackground=true must also keep daytime sky colour-neutral
+    // instead of turning blue when the user raises Black level manually.
+    VideoToneSettings manualTone;
+    manualTone.autoStretch = false;
+    manualTone.neutralizeBackground = true;
+    manualTone.blackLevel = 0.37;
+    manualTone.whiteLevel = 0.72;
+    double manB = 0.0, manW = 1.0;
+    std::array<double, 3> manChB{0.0, 0.0, 0.0};
+    QVERIFY(resolveStretchLevels(dayMoon, manualTone, {}, manB, manW, manChB));
+    const QImage manualMoon = toneMapFitsToImage(dayMoon, manB, manW, 1.0, 1.0, {}, 0,
+        nullptr, BrightnessLevellingMode::Off, true, &manChB);
+    double mR = 0.0, mG = 0.0, mB = 0.0;
+    for (int y = 0; y < h; ++y)
+    {
+        const uint8_t* row = manualMoon.constScanLine(y);
+        for (int x = 0; x < w; ++x) { mR += row[3 * x]; mG += row[3 * x + 1]; mB += row[3 * x + 2]; }
+    }
+    QVERIFY2(std::abs(mR / n - mB / n) < 6.0 && std::abs(mR / n - mG / n) < 6.0,
+        qPrintable(QString("Manual stretch with neutralizeBackground should stay neutral, got RGB=(%1,%2,%3)")
+            .arg(mR / n).arg(mG / n).arg(mB / n)));
+
+    // With neutralizeBackground=false, raw linked stretch preserves the blue sky cast.
+    manualTone.neutralizeBackground = false;
+    QVERIFY(!resolveStretchLevels(dayMoon, manualTone, {}, manB, manW, manChB));
+    const QImage rawMoon = toneMapFitsToImage(dayMoon, manB, manW, 1.0, 1.0, {}, 0);
+    double rawR = 0.0, rawB = 0.0;
+    for (int y = 0; y < h; ++y)
+    {
+        const uint8_t* row = rawMoon.constScanLine(y);
+        for (int x = 0; x < w; ++x) { rawR += row[3 * x]; rawB += row[3 * x + 2]; }
+    }
+    QVERIFY(rawB / n > rawR / n + 40.0);
+
     // 2. Night-time red Mars disk on black sky must remain vividly red (shared span preserves colour ratios).
     FitsImage mars;
     mars.width = w;

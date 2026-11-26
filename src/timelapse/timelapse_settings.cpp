@@ -164,6 +164,7 @@ QJsonObject toJson(const VideoToneSettings& v)
 {
     QJsonObject obj;
     obj["autoStretch"] = v.autoStretch;
+    obj["neutralizeBackground"] = v.neutralizeBackground;
     obj["blackLevel"] = v.blackLevel;
     obj["whiteLevel"] = v.whiteLevel;
     obj["gamma"] = v.gamma;
@@ -201,6 +202,7 @@ VideoToneSettings videoFromJson(const QJsonObject& obj)
 {
     VideoToneSettings v;
     v.autoStretch = obj["autoStretch"].toBool(v.autoStretch);
+    v.neutralizeBackground = obj["neutralizeBackground"].toBool(v.neutralizeBackground);
     v.blackLevel = obj["blackLevel"].toDouble(v.blackLevel);
     v.whiteLevel = obj["whiteLevel"].toDouble(v.whiteLevel);
     v.gamma = obj["gamma"].toDouble(v.gamma);

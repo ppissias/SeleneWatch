@@ -69,6 +69,7 @@ struct SharpeningSettings
 struct VideoToneSettings
 {
     bool autoStretch{true};
+    bool neutralizeBackground{true};
     double blackLevel{0.0};
     double whiteLevel{1.0};
     double gamma{1.0};

@@ -1966,6 +1966,41 @@ void computeAutoStretchLevels(const FitsImage& image, double& outBlack, double& 
     if (outChannelBlack) *outChannelBlack = {outBlack, outBlack, outBlack};
 }
 
+bool resolveStretchLevels(const FitsImage& refImage, const VideoToneSettings& tone,
+    const QRect& crop, double& outBlack, double& outWhite, std::array<double, 3>& outChannelBlack)
+{
+    double autoBlack = 0.0;
+    double autoWhite = 1.0;
+    std::array<double, 3> autoChBlack{0.0, 0.0, 0.0};
+    if (tone.autoStretch || (refImage.channels == 3 && tone.neutralizeBackground))
+        computeAutoStretchLevels(refImage, autoBlack, autoWhite, crop, &autoChBlack);
+
+    if (tone.autoStretch)
+    {
+        outBlack = autoBlack;
+        outWhite = autoWhite;
+        if (refImage.channels == 3 && tone.neutralizeBackground)
+        {
+            outChannelBlack = autoChBlack;
+            return true;
+        }
+        outChannelBlack = {outBlack, outBlack, outBlack};
+        return false;
+    }
+
+    outBlack = tone.blackLevel;
+    outWhite = tone.whiteLevel;
+    if (refImage.channels == 3 && tone.neutralizeBackground)
+    {
+        const double bMin = std::min({autoChBlack[0], autoChBlack[1], autoChBlack[2]});
+        for (size_t c = 0; c < 3; ++c)
+            outChannelBlack[c] = outBlack + (autoChBlack[c] - bMin);
+        return true;
+    }
+    outChannelBlack = {outBlack, outBlack, outBlack};
+    return false;
+}
+
 namespace {
 
 cv::Mat prepareLevelledFitsMat(const FitsImage& image,

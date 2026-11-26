@@ -358,6 +358,16 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     autoStretch_->setToolTip("Automatically chooses black and white display levels for the video from the sharpest "
         "clear stack. Uncheck to adjust Black level and White level manually.");
     autoStretch_->setChecked(true);
+    neutralizeBgRow_ = new QWidget(videoBox);
+    auto* neutralizeBgLay = checkboxRowWithHelp(
+        (neutralizeBg_ = new QCheckBox("Neutralize colour background", neutralizeBgRow_)), neutralizeBgRow_);
+    neutralizeBg_->setObjectName("resharpenNeutralizeBg");
+    neutralizeBg_->setChecked(true);
+    neutralizeBg_->setToolTip("For colour (RGB) stacks, subtracts each channel's own additive sky/background floor "
+        "while keeping a shared contrast span, so daytime blue sky or light pollution does not tint the Moon during "
+        "auto or manual stretching, while planets like Mars keep their true colour. Uncheck for raw linked RGB stretch.");
+    neutralizeBgRow_->setLayout(neutralizeBgLay);
+    neutralizeBgRow_->hide();
     blackLevel_ = new QDoubleSpinBox(videoBox);
     blackLevel_->setToolTip("Normalized pixel brightness mapped to pure black in the exported video (used when Auto "
         "stretch is off).");
@@ -500,6 +510,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         "re-running sharpening.");
 
     videoForm->addRow(checkboxRowWithHelp(autoStretch_, videoBox));
+    videoForm->addRow(neutralizeBgRow_);
     videoForm->addRow("Black level", makeSliderRow(videoBox, blackLevel_, blackSlider_, "resharpenBlackSlider", 0.00, 0.98, 1000.0));
     videoForm->addRow("White level", makeSliderRow(videoBox, whiteLevel_, whiteSlider_, "resharpenWhiteSlider", 0.02, 1.00, 1000.0));
     videoForm->addRow("Gamma", makeSliderRow(videoBox, gamma_, gammaSlider_, "resharpenGammaSlider", 0.20, 2.50, 100.0));
@@ -632,8 +643,17 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         blackSlider_->setEnabled(!on);
         whiteLevel_->setEnabled(!on);
         whiteSlider_->setEnabled(!on);
+        if (!updating_ && !on && cachedBeforeBlack_ >= 0.0 && cachedBeforeWhite_ > cachedBeforeBlack_
+            && std::abs(blackLevel_->value()) < 1e-6 && std::abs(whiteLevel_->value() - 1.0) < 1e-6)
+        {
+            updating_ = true;
+            blackLevel_->setValue(std::clamp(cachedBeforeBlack_, blackLevel_->minimum(), blackLevel_->maximum()));
+            whiteLevel_->setValue(std::clamp(cachedBeforeWhite_, whiteLevel_->minimum(), whiteLevel_->maximum()));
+            updating_ = false;
+        }
         if (!updating_) updatePreview();
     });
+    connect(neutralizeBg_, &QCheckBox::toggled, this, [this] { if (!updating_) updatePreview(); });
     connect(rebuildVideoOnly_, &QCheckBox::toggled, this, [this](bool only) {
         for (QWidget* w : std::initializer_list<QWidget*>{
                  radius_, radiusSlider_, amount_, amountSlider_,
@@ -770,6 +790,7 @@ void ResharpenDialog::setControlsFromSettings(const SharpeningSettings& sharp, c
     threshold_->setValue(sharp.threshold);
     denoise_->setValue(sharp.denoise);
     autoStretch_->setChecked(tone.autoStretch);
+    if (neutralizeBg_) neutralizeBg_->setChecked(tone.neutralizeBackground);
     blackLevel_->setValue(tone.blackLevel);
     whiteLevel_->setValue(tone.whiteLevel);
     blackLevel_->setEnabled(!tone.autoStretch);
@@ -986,6 +1007,7 @@ VideoToneSettings ResharpenDialog::currentTone() const
 {
     VideoToneSettings v;
     v.autoStretch = autoStretch_->isChecked();
+    v.neutralizeBackground = neutralizeBg_ ? neutralizeBg_->isChecked() : true;
     v.blackLevel = blackLevel_->value();
     v.whiteLevel = std::max(v.blackLevel + 0.01, whiteLevel_->value());
     v.gamma = gamma_->value();
@@ -1173,21 +1195,20 @@ void ResharpenDialog::updatePreview()
         }
     }
 
+    if (neutralizeBgRow_)
+        neutralizeBgRow_->setVisible(refFits->channels == 3);
+
     double black = tone.blackLevel;
     double white = tone.whiteLevel;
     std::array<double, 3> channelBlack{black, black, black};
-    const std::array<double, 3>* chBlackPtr = nullptr;
-    if (tone.autoStretch)
-    {
-        computeAutoStretchLevels(*refFits, black, white, crop, &channelBlack);
-        if (refFits->channels == 3) chBlackPtr = &channelBlack;
-    }
+    const bool useChBlack = resolveStretchLevels(*refFits, tone, crop, black, white, channelBlack);
+    const std::array<double, 3>* chBlackPtr = useChBlack ? &channelBlack : nullptr;
 
     const bool alignedPixels = refFits->meta.targetPreset != "planet";
 
     if (cachedBeforeImg_.isNull() || cachedBeforeBlack_ != black
         || cachedBeforeWhite_ != white || cachedBeforeGamma_ != tone.gamma
-        || cachedBeforeAutoStretch_ != tone.autoStretch
+        || cachedBeforeAutoStretch_ != (tone.autoStretch || useChBlack)
         || cachedBeforeChannelBlack_ != channelBlack
         || cachedBeforeCrop_ != crop)
     {
@@ -1196,7 +1217,7 @@ void ResharpenDialog::updatePreview()
         cachedBeforeBlack_ = black;
         cachedBeforeWhite_ = white;
         cachedBeforeGamma_ = tone.gamma;
-        cachedBeforeAutoStretch_ = tone.autoStretch;
+        cachedBeforeAutoStretch_ = (tone.autoStretch || useChBlack);
         cachedBeforeChannelBlack_ = channelBlack;
         cachedBeforeCrop_ = crop;
         beforeView_->setImage(cachedBeforeImg_);
