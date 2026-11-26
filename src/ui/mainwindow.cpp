@@ -146,7 +146,7 @@ MainWindow::MainWindow(QWidget *parent, QString outputRoot,std::shared_ptr<ZwoAp
     ui_->setupUi(this);
     ui_->verticalLayout->setContentsMargins(6, 4, 6, 4);
     ui_->verticalLayout->setSpacing(4);
-    setWindowTitle(QString("SeleneWatch %1 — Lunar Observation Monitor").arg(SELENEWATCH_RELEASE));
+    setWindowTitle(QString("SeleneWatch %1 — Sky, Moon & Planetary Monitor").arg(SELENEWATCH_RELEASE));
     applyUiTheme(loadUiTheme());
 
     // Prevent accidental mouse-wheel changes on spin boxes, sliders, and closed combo boxes.
@@ -2220,8 +2220,8 @@ void MainWindow::showAbout()
 QString MainWindow::aboutText()
 {
     return QString("<p><b>SeleneWatch %1</b><br>Source revision %2</p>"
-        "<p>Watches the Moon for impact flashes and the sky for meteors, aircraft, satellites and lightning, "
-        "and keeps the evidence of each candidate.</p>"
+        "<p>Watches the sky for meteors, aircraft, satellites and lightning, makes lunar and planetary time-lapses, "
+        "watches the Moon for shadows and impact flashes, and keeps the evidence of each candidate.</p>"
         "<p>Copyright &copy; 2026, Petros Pissias. BSD 2-Clause License.<br>"
         "<a href=\"https://github.com/ppissias/SeleneWatch\">github.com/ppissias/SeleneWatch</a></p>"
         "<p>Built with Qt %3 under the GNU LGPL version 3 (Help &rarr; About Qt). The license texts of Qt and of "

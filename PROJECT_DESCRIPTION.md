@@ -4,11 +4,11 @@
 
 ## 1. Project Overview
 
-**SeleneWatch** is a native desktop application for continuously observing the Moon using a camera attached to a telescope. Its goal is to help observers discover, capture, review, and document short-lived phenomena that would otherwise be easy to miss.
+**SeleneWatch** is a native desktop application — a **Sky, Moon & Planetary Monitor** — for continuously observing the night sky, the Moon, and the planets using a camera on a telescope or a fixed lens. Its goal is to help observers capture, review, and document short-lived transient phenomena and time-lapses that would otherwise be easy to miss.
 
-The application monitors a high-resolution, high-frame-rate image stream, analyses incoming frames in near real time, and automatically preserves the evidence around interesting events. The primary scientific motivation is the observation of **lunar transient phenomena**, especially brief flashes that may be caused by meteoroid impacts. The system should also be useful for recording other notable events, such as transits, occultations, unexpected moving objects, or image anomalies.
+The application monitors a high-resolution, high-frame-rate image stream, analyses incoming frames in near real time, and automatically preserves lossless evidence around candidate events: meteors, lightning, satellites, aircraft, and aurora/airglow in the sky; shadows and transits across the Moon (or Sun); and **lunar transient phenomena**, especially brief meteoroid impact flashes on the Moon's dark side. It also captures, aligns, stacks, and sharpens lunar and planetary time-lapses, and can lock onto a lunar surface feature or planetary disk to guide an ASCOM mount directly through the main camera.
 
-SeleneWatch aims to make prolonged observation practical: users start a session, let the system monitor continuously, and later inspect a manageable collection of candidate events rather than manually reviewing an entire recording.
+SeleneWatch aims to make prolonged observation practical: users start a session, let the system monitor continuously, and later inspect a structured nightly report and manageable collection of candidate clips rather than manually reviewing hours of raw recordings.
 
 ## 2. Main Goals
 

@@ -102,7 +102,7 @@ install(CODE "
 string(REGEX REPLACE "^20([0-9][0-9])\\.([0-9]+)\\.([0-9]+)$" "\\1.\\2.\\3" selenewatch_msi_version "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_NAME "SeleneWatch")
 set(CPACK_PACKAGE_VENDOR "SeleneWatch")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "SeleneWatch: watches the Moon and the sky for transient events")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "SeleneWatch - Sky, Moon & Planetary Monitor")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/ppissias/SeleneWatch")
 set(CPACK_PACKAGE_VERSION "${selenewatch_msi_version}")
 set(CPACK_PACKAGE_FILE_NAME "SeleneWatch-${SELENEWATCH_RELEASE}-win64")

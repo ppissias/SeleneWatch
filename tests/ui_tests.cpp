@@ -2084,7 +2084,7 @@ void UiTest::theReleaseIsShown()
 {
     QTemporaryDir directory;
     MainWindow window(nullptr, directory.path());
-    const QRegularExpression release(R"(SeleneWatch \d{4}\.\d{2}-\d{2} )");
+    const QRegularExpression release(R"(SeleneWatch \d{4}\.\d{2}-\d{2} — Sky, Moon & Planetary Monitor)");
     QVERIFY2(release.match(window.windowTitle()).hasMatch(), qPrintable(window.windowTitle()));
     const QString about = MainWindow::aboutText();
     QVERIFY2(about.contains(QRegularExpression(R"(<b>SeleneWatch \d{4}\.\d{2}-\d{2}</b>)")), qPrintable(about));

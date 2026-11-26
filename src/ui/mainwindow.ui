@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>SeleneWatch — Lunar Observation Monitor</string>
+   <string>SeleneWatch — Sky, Moon &amp; Planetary Monitor</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="verticalLayout">

@@ -17,7 +17,7 @@
           <Condition>INSTALLDESKTOPSHORTCUT</Condition>
           <Shortcut Id="SeleneWatchDesktopLnk"
                     Name="SeleneWatch"
-                    Description="SeleneWatch: watches the Moon and the sky for transient events"
+                    Description="SeleneWatch - Sky, Moon &amp; Planetary Monitor"
                     Target="[#CM_FP_SeleneWatch.exe]"
                     WorkingDirectory="INSTALL_ROOT"
                     Icon="ProductIcon.ico" />

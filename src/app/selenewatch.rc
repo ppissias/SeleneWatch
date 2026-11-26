@@ -20,7 +20,7 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "SeleneWatch"
-            VALUE "FileDescription", "SeleneWatch, a monitor for transient events on the Moon and in the sky"
+            VALUE "FileDescription", "SeleneWatch - Sky, Moon & Planetary Monitor"
             VALUE "FileVersion", SELENEWATCH_RELEASE
             VALUE "InternalName", "SeleneWatch"
             VALUE "LegalCopyright", "Copyright (c) 2026, Petros Pissias. BSD 2-Clause License."
