@@ -438,7 +438,7 @@ Small meteoroids hit the Moon all the time. On the night side, lit only faintly 
 
 SeleneWatch learns, pixel by pixel, the earthshine's brightness and its noise, over the last two seconds. A pixel that rises K times its own noise is marked, so the same K works on the quiet earthshine and on noisier areas. Marked pixels that touch form a patch; a patch of the right size and shape is a candidate. Because a flash can last a single frame, one frame is enough by default.
 
-The sunlit side and its glare are left out (**Ignore brighter than**, 30% of the camera's range): no flash can be seen there, and its shimmer would only trigger falsely. The excluded area follows the Moon as it drifts. Switch **Preview overlay** to **Excluded mask** to shade the ignored pixels in red hatch on screen so you can verify that the earthshine is clear and the sunlit glare is covered.
+The sunlit side and its glare are left out (**Ignore brighter than**, 30% of the camera's range): no flash can be seen there, and its shimmer would only trigger falsely. The excluded area follows the Moon as it drifts. Tick **Show mask** right beside **Ignore brighter than** (or choose **Preview overlay → Excluded mask**) to shade the ignored pixels in red hatch on screen so you can verify that the earthshine is clear and the sunlit glare is covered.
 
 ### Step by step
 

@@ -2050,7 +2050,7 @@ void UiTest::siteAndRecordingControls()
         window.findChild<QPushButton*>("startButton")->click();
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("monitoringButton")->isEnabled(), 3000);
         window.findChild<QPushButton*>("monitoringButton")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING") && record->isEnabled(), 3000);
         record->click();
         // Feature-33: while recording, the button is Stop with the recording's length.
         QTRY_VERIFY_WITH_TIMEOUT(record->text().startsWith("Stop ") && record->text().contains(':'), 3000);
@@ -2375,10 +2375,18 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
         panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(2);
         QTest::qWait(150);
         QVERIFY(window.grab().save(QString(SELENEWATCH_UI_QA_DIR) + "/window-noise.png"));
-        // Excluded mask overlay: temporarily set Ignore brighter than to 50% so the bright
-        // synthetic Moon disk is hatched excluded while the surrounding sky remains clear.
+        // Excluded mask overlay: toggle the Show mask checkbox right beside Ignore brighter than,
+        // verify it syncs with Preview overlay and hatches the bright synthetic Moon while keeping sky clear.
+        auto* advToggle = panel->findChild<QToolButton*>("advancedDetectionToggle");
+        QVERIFY(advToggle);
+        if (!advToggle->isChecked()) advToggle->click();
+        auto* showMaskCheck = panel->findChild<QCheckBox*>("detectionShowExcludedMask");
+        QVERIFY(showMaskCheck && !showMaskCheck->isChecked());
+        if (auto* scroll = panel->findChild<QScrollArea*>()) scroll->ensureWidgetVisible(showMaskCheck);
         panel->findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(50);
-        panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(3);
+        showMaskCheck->setChecked(true);
+        QCOMPARE(panel->overlay(), DetectionOverlay::Mask);
+        QCOMPARE(panel->findChild<QComboBox*>("detectionOverlay")->currentIndex(), 3);
         QTRY_VERIFY_WITH_TIMEOUT(([&] {
             const QImage img = panel->overlayImage();
             if (img.isNull()) return false;
@@ -2396,8 +2404,11 @@ void UiTest::livePanelInjectionEvidenceAndSavedSettings()
             return sawClear && sawExcluded;
         }()), 5000);
         QVERIFY(window.grab().save(QString(SELENEWATCH_UI_QA_DIR) + "/window-mask.png"));
+        showMaskCheck->setChecked(false);
+        QCOMPARE(panel->overlay(), DetectionOverlay::None);
         panel->findChild<QDoubleSpinBox*>("detectionIgnoreAbove")->setValue(chosen.ignoreAboveShare);
         panel->findChild<QComboBox*>("detectionOverlay")->setCurrentIndex(2);
+        QVERIFY(!showMaskCheck->isChecked());
         QTest::mouseClick(preview, Qt::LeftButton, Qt::NoModifier, preview->imageRect().center());
         QTRY_VERIFY_WITH_TIMEOUT(inject->isEnabled(), 3000);
         auto* readout = window.findChild<QLabel*>("blipStatusLabel");

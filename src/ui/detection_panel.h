@@ -151,6 +151,7 @@ private:
     // Feature-31: the flashes' ceiling, shown only for the flashes.
     QWidget* flashControls_;
     QDoubleSpinBox* ignoreAbove_;
+    QCheckBox* showExcludedMask_;
     // The large darkening, shown only for the shadows (Feature-31).
     QWidget* darkControls_;
     QDoubleSpinBox* darkShare_;

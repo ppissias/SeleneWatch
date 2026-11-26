@@ -604,14 +604,23 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     flashControls_ = new QWidget(advHost);
     auto* flashForm = new QFormLayout(flashControls_);
     flashForm->setContentsMargins(0, 0, 0, 0);
+    auto* ignoreRow = new QHBoxLayout();
+    ignoreRow->setContentsMargins(0, 0, 0, 0);
+    ignoreRow->setSpacing(8);
     ignoreAbove_ = new QDoubleSpinBox(flashControls_);
     ignoreAbove_->setObjectName("detectionIgnoreAbove");
     ignoreAbove_->setRange(0, 100); ignoreAbove_->setDecimals(0); ignoreAbove_->setSingleStep(5);
-    ignoreAbove_->setSuffix(" % of full scale"); ignoreAbove_->setSpecialValueText("Off");
-    ignoreAbove_->setToolTip("Pixels whose learned brightness is above this are not tested: the sunlit side and the "
-        "glare by the terminator, where no flash can be seen and seeing only makes false triggers. It follows the "
-        "Moon's drift. Off tests every pixel.");
-    flashForm->addRow("Ignore brighter than", ignoreAbove_);
+    ignoreAbove_->setSuffix(" %"); ignoreAbove_->setSpecialValueText("Off");
+    ignoreAbove_->setToolTip("Pixels whose learned brightness is above this percentage of full scale are not tested: "
+        "the sunlit side and the glare by the terminator, where no flash can be seen and seeing only makes false "
+        "triggers. It follows the Moon's drift. Off tests every pixel.");
+    showExcludedMask_ = new QCheckBox("Show mask", flashControls_);
+    showExcludedMask_->setObjectName("detectionShowExcludedMask");
+    showExcludedMask_->setToolTip("Shades pixels excluded by Ignore brighter than (and any active mask or stabilized "
+        "border) in red hatch directly on the preview. Clear pixels are actively watched. Display only.");
+    ignoreRow->addWidget(ignoreAbove_, 1);
+    ignoreRow->addWidget(showExcludedMask_);
+    flashForm->addRow("Ignore brighter than", ignoreRow);
     advancedSection_->contentLayout()->addWidget(flashControls_);
 
     // Feature-31: the shadows' large darkening.
@@ -686,7 +695,20 @@ DetectionPanel::DetectionPanel(QWidget* parent) : QWidget(parent)
     connect(compactnessSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) compactness_->setValue(compactnessSlider_->number(p)); });
     connect(referenceSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) referenceTime_->setValue(referenceSlider_->number(p)); });
     connect(noiseSlider_, &QSlider::valueChanged, this, [this](int p) { if (!updating_) minimumNoise_->setValue(noiseSlider_->number(p)); });
-    connect(overlay_, &QComboBox::currentIndexChanged, this, [this] { emit displayChanged(); });
+    connect(overlay_, &QComboBox::currentIndexChanged, this, [this] {
+        if (showExcludedMask_)
+        {
+            const QSignalBlocker blocked(showExcludedMask_);
+            showExcludedMask_->setChecked(overlay() == DetectionOverlay::Mask);
+        }
+        emit displayChanged();
+    });
+    connect(showExcludedMask_, &QCheckBox::toggled, this, [this](bool on) {
+        if (on)
+            overlay_->setCurrentIndex(static_cast<int>(DetectionOverlay::Mask));
+        else if (overlay() == DetectionOverlay::Mask)
+            overlay_->setCurrentIndex(static_cast<int>(DetectionOverlay::None));
+    });
     connect(target_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (!updating_) emit watchRequested(static_cast<Watch>(target_->itemData(index).toInt()));
     });

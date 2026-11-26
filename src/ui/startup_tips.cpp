@@ -83,8 +83,8 @@ const std::vector<StartupTip>& allStartupTips()
             "For lunar impact flashes, open <b>View &rarr; Histogram</b> in <b>Preview</b> and expose so earthshine "
             "sits around <code>3&ndash;10%</code> of full scale with <b>At 0</b> at <code>0.00%</code>. "
             "<b>Ignore brighter than</b> (<code>30%</code> default) automatically excludes the bright sunlit crescent "
-            "and terminator glare while following lunar drift. Switch <b>Preview overlay</b> to <b>Excluded mask</b> "
-            "to see the ignored bright region shaded directly on the live preview.",
+            "and terminator glare while following lunar drift. Tick <b>Show mask</b> right beside it (or choose "
+            "<b>Preview overlay &rarr; Excluded mask</b>) to see the ignored bright region shaded on the live preview.",
             kSectionLunar
         },
         {

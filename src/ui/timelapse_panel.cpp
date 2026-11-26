@@ -19,6 +19,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QStyle>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
 
@@ -38,6 +39,7 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* body = new QWidget(scroll);
     auto* root = new QVBoxLayout(body);
+    root->setContentsMargins(9, 9, 12, 9);
 
     form_ = new QFormLayout();
     auto* form = form_;
@@ -256,6 +258,10 @@ TimelapsePanel::TimelapsePanel(QWidget* parent) : QWidget(parent)
     refreshProfiles();
     loadFromQSettings();
     updateTransitControls();
+
+    // Ensure resizing the dock never clips controls behind the vertical scrollbar.
+    const int sbExtent = style() ? style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, scroll) : 16;
+    setMinimumWidth(std::max(360, body->minimumSizeHint().width() + sbExtent + 8));
 
     connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
         showAnchor();
