@@ -366,7 +366,7 @@ Both packages contain:
 - `opencv_world4140.dll`, `cfitsio.dll`, and external LGPLv3 `ffmpeg.exe` + FFmpeg shared DLLs (`avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`)
 - `LICENSE.txt`, `README.md`, `MANUAL.md`, `CAMERA_SETTINGS_GUIDE.md`, `THIRD_PARTY_LICENSES.md`
 - `icons/selenewatch-256.png` and `docs/images/` (logo and documentation screenshots referenced by `README.md` and `MANUAL.md`)
-- `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), `ZWO-ASI-SDK.txt` (when built with ZWO), `OpenCV-LICENSE.txt`, `CFITSIO-LICENSE.txt`, and `FFmpeg-LICENSE.txt`
+- `licenses/`: Qt's LGPLv3/GPLv3 license text (`Qt-LICENSE.txt`), generated third-party notices for shipped Qt libraries (`Qt-third-party-notices.txt`), `ZWO-ASI-SDK.txt` (when built with ZWO), `OpenCV-LICENSE.txt`, `CFITSIO-LICENSE.txt`, `FFmpeg-LICENSE.txt`, and `QR-Code-generator-LICENSE.txt`
 
 Tests, probes, and QHY / Player One / ToupTek vendor files are never shipped. Debug builds have no `package` target.
 
