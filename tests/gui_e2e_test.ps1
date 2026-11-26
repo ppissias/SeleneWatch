@@ -644,7 +644,10 @@ try {
     $applyBtn = Find-UiaElement -Root $dlg -IdSuffix "resharpenApply"
     $statusLbl = Find-UiaElement -Root $dlg -IdSuffix "resharpenStatus"
     Invoke-UiaClick $applyBtn "Re-generate time-lapse"
-    Wait-Until { $statusLbl.Current.Name -like "Done:*" } "Re-sharpen finished" -TimeoutMs 25000
+    $donePrompt = Find-TopWindow -ProcessId $proc.Id -TitleContains "Time-lapse ready" -OwnerWindow $dlg -TimeoutMs 25000
+    $notNowBtn = Find-UiaElement -Root $donePrompt -Name "Not now" -ControlType ([System.Windows.Automation.ControlType]::Button)
+    Invoke-UiaClick $notNowBtn "Not now (sharpened)"
+    Wait-Until { $statusLbl.Current.Name -like "Done:*" } "Re-sharpen finished" -TimeoutMs 5000
     Write-Host "  Re-sharpen: $($statusLbl.Current.Name)"
     $reDirs = @(Get-ChildItem -Path $sessionDir -Directory -Filter "sharpened_*")
     Assert-True ($reDirs.Count -eq 1) "Expected 1 sharpened_* output folder"
@@ -655,9 +658,12 @@ try {
     Set-UiaCheckBox $rebuildChk $true
     Start-Sleep -Milliseconds 300
     Invoke-UiaClick $applyBtn "Apply Rebuild video only"
+    $donePrompt2 = Find-TopWindow -ProcessId $proc.Id -TitleContains "Time-lapse ready" -OwnerWindow $dlg -TimeoutMs 25000
+    $notNowBtn2 = Find-UiaElement -Root $donePrompt2 -Name "Not now" -ControlType ([System.Windows.Automation.ControlType]::Button)
+    Invoke-UiaClick $notNowBtn2 "Not now (video only)"
     Wait-Until {
         ($statusLbl.Current.Name -like "Done:*") -and ($statusLbl.Current.Name -match "video_")
-    } "Rebuild video only finished into video_* folder" -TimeoutMs 25000
+    } "Rebuild video only finished into video_* folder" -TimeoutMs 5000
     Write-Host "  Rebuild video only: $($statusLbl.Current.Name)"
     $vidDirs = @(Get-ChildItem -Path $sessionDir -Directory -Filter "video_*")
     Assert-True ($vidDirs.Count -eq 1) "Expected 1 non-destructive video_* folder"

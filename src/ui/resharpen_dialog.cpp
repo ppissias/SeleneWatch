@@ -1519,6 +1519,22 @@ void ResharpenDialog::onApplyAll()
                     ? QString(" (%1 dropped)").arg(res.stacksDropped) : QString();
                 statusLabel_->setText(QString("Done: %1 stacks encoded%2 to %3.")
                     .arg(res.stacksUsed).arg(droppedNote, QDir::toNativeSeparators(lastOutputDir_)));
+                if (!lastOutputDir_.isEmpty() && qEnvironmentVariable("QT_QPA_PLATFORM") != "offscreen")
+                {
+                    QMessageBox box(this);
+                    box.setObjectName("resharpenDonePrompt");
+                    box.setIcon(QMessageBox::Information);
+                    box.setWindowTitle("Time-lapse ready");
+                    box.setText(QString("Re-generated time-lapse from %1 stacks%2.").arg(res.stacksUsed).arg(droppedNote));
+                    box.setInformativeText(QString("Saved to:\n%1\n\nWould you like to open the output folder?")
+                        .arg(QDir::toNativeSeparators(lastOutputDir_)));
+                    QPushButton* openBtn = box.addButton("Open output folder", QMessageBox::AcceptRole);
+                    box.addButton("Not now", QMessageBox::RejectRole);
+                    box.setDefaultButton(openBtn);
+                    box.exec();
+                    if (box.clickedButton() == openBtn)
+                        QDesktopServices::openUrl(QUrl::fromLocalFile(lastOutputDir_));
+                }
             }
             else
             {
