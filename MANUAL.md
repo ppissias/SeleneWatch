@@ -352,7 +352,7 @@ Shadows lengthen across craters near the terminator, Jupiter turns in ten hours,
 
 ![Re-sharpening a time-lapse](docs/images/manual-resharpen.png)
 
-*Re-sharpening: the stack before and after, with the sharpening and video settings.*
+*Re-sharpening (recorded-video test run on the Alpine Valley region): the **Frames / stacks** list on the left, synchronized **Before (unsharpened)** and **After (sharpened + tone preview)** views at 146% zoom in the centre, and the sharpening, colour background neutralization, brightness levelling, and export settings on the right.*
 
 ### Watching for transits during a Moon time-lapse
 

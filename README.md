@@ -62,9 +62,9 @@ Switch to **Mode: Time-lapse**, preview and frame your target, and start a sessi
 
 Every stack is kept as a 32-bit FITS file. Afterwards you can re-align (by feature box or automatic multi-point alignment), sharpen again, level brightness across thin clouds, drop blurred or cloudy stacks (by their sharpness, compared with the stacks around them), check every dropped stack, and rebuild MP4, GIF, or lossless SER without capturing again.
 
-![A stack from a Moon time-lapse](docs/images/timelapse-moon-stack.jpg)
+![Re-sharpening a lunar time-lapse in SeleneWatch](docs/images/manual-resharpen.png)
 
-*One stack of a Moon time-lapse, sharpened, from a session of 57 stacks taken a minute apart.*
+*Re-sharpening a lunar time-lapse (recorded-video test run on the Alpine Valley region): the full-height **Frames / stacks** list on the left, synchronized **Before (unsharpened)** and **After (sharpened + tone preview)** views at 146% zoom in the centre, and linear unsharp-mask, colour background neutralization, brightness levelling, and export controls on the right.*
 
 ### 3. Shadows crossing the Moon
 
