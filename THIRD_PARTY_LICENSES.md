@@ -117,6 +117,9 @@ Made by the Release build's `package` target, from the command line or Visual St
   - Qt Network's additional third-party components are **libpsl**, revision `664f3dc85259ec65e30248a61fa1c45b7b0e4c3f` (BSD-3-Clause, https://github.com/rockdaboot/libpsl), and the **Public Suffix List**, `2026-05-14_08-35-31_UTC` (MPL-2.0, https://publicsuffix.org/). Their complete attribution/license texts are generated from the installed Qt documentation into the same notices file. Preserve the MPL notice and corresponding source availability when redistributing the unmodified list as part of Qt; the Qt source archive above includes it. No original SeleneWatch source is placed under MPL.
   - Qt Svg and the OpenSSL/certificate-only TLS backends are not shipped. The Windows Schannel backend uses Windows system libraries; no OpenSSL binaries are added.
 - **ZWO ASI SDK:** `ASICamera2.dll` with `licenses/ZWO-ASI-SDK.txt` (section 2 above), only when the build has the SDK.
+- **OpenCV 4.14.0, Apache-2.0:** `opencv_world4140.dll`, dynamically linked, with `licenses/OpenCV-LICENSE.txt` (section below).
+- **CFITSIO 4.7.0, NASA/GSFC permissive:** `cfitsio.dll`, dynamically linked, with `licenses/CFITSIO-LICENSE.txt` (section below).
+- **FFmpeg 9.0, LGPLv3 (shared, no GPL):** `ffmpeg.exe` and `avcodec-63.dll`, `avdevice-63.dll`, `avfilter-12.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll`, `swscale-10.dll`, invoked out-of-process with replaceable DLLs and `licenses/FFmpeg-LICENSE.txt` (section below).
 - **QR Code generator (Project Nayuki), MIT:** compiled into `SeleneWatch.exe`, with `licenses/QR-Code-generator-LICENSE.txt` (section 9 above).
 - **Microsoft Visual C++ runtime:** as above.
 - **Not shipped:** QHY, Player One and ToupTek files, ASCOM, camera drivers, test and probe programs.

@@ -13,6 +13,8 @@
 #include <QtCore/QUrl>
 #include <QtGui/QCloseEvent>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDialogButtonBox>
@@ -79,7 +81,17 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     setWindowTitle("Re-sharpen & rebuild time-lapse");
     setWindowFlags((windowFlags() & ~Qt::WindowContextHelpButtonHint) | Qt::WindowMinMaxButtonsHint);
     setSizeGripEnabled(true);
-    resize(1260, 780);
+    QSize initialSize(1260, 760);
+    if (const QScreen* scr = (parent && parent->screen()) ? parent->screen() : QGuiApplication::primaryScreen())
+    {
+        const QRect avail = scr->availableGeometry();
+        if (avail.isValid())
+        {
+            initialSize.setWidth(std::min(initialSize.width(), std::max(960, avail.width() - 40)));
+            initialSize.setHeight(std::min(initialSize.height(), std::max(560, avail.height() - 60)));
+        }
+    }
+    resize(initialSize);
 
     auto* root = new QVBoxLayout(this);
 
@@ -166,7 +178,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         view->setDragMode(PreviewWidget::DragMode::Pan);
         view->setPixelSelectionEnabled(false);
         view->setEmptyText("No FITS stacks found");
-        view->setMinimumSize(320, 220);
+        view->setMinimumSize(280, 150);
         view->setToolTip("Mouse wheel: zoom · Drag: pan. Before and After stay synchronized.");
         return view;
     };
@@ -192,10 +204,10 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     ctrlScroll->setFrameShape(QFrame::NoFrame);
     ctrlScroll->setWidgetResizable(true);
     ctrlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    ctrlScroll->setMinimumWidth(340);
+    ctrlScroll->setMinimumWidth(380);
     auto* ctrlHost = new QWidget(ctrlScroll);
     auto* ctrlCol = new QVBoxLayout(ctrlHost);
-    ctrlCol->setContentsMargins(0, 0, 4, 0);
+    ctrlCol->setContentsMargins(0, 0, 8, 0);
 
     auto checkboxRowWithHelp = [](QCheckBox* cb, QWidget* parent) {
         auto* row = new QHBoxLayout();
@@ -211,6 +223,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     auto* profLay = new QHBoxLayout(profileBox);
     profileCombo_ = new QComboBox(profileBox);
     profileCombo_->setObjectName("resharpenProfileCombo");
+    profileCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    profileCombo_->setMinimumContentsLength(14);
     profileCombo_->setToolTip("Load a saved sharpening and video tone-mapping profile.");
     saveProfileBtn_ = new QPushButton("Save…", profileBox);
     saveProfileBtn_->setToolTip("Save the current sharpening and video tone-mapping settings as a reusable profile.");
@@ -229,7 +243,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     realignMode_ = new QComboBox(realignBox);
     realignMode_->setObjectName("resharpenRealignMode");
     realignMode_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    realignMode_->setMinimumContentsLength(22);
+    realignMode_->setMinimumContentsLength(16);
     realignMode_->addItem("Off (keep existing alignment)", static_cast<int>(StackRealignMode::Off));
     realignMode_->addItem("Feature box (draw on Before)", static_cast<int>(StackRealignMode::FeatureBox));
     realignMode_->addItem("Auto multi-point (rigid, Moon)", static_cast<int>(StackRealignMode::AutoMultiPoint));
@@ -368,6 +382,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     gamma_->setValue(1.0);
     brightnessLevel_ = new QComboBox(videoBox);
     brightnessLevel_->setObjectName("resharpenBrightnessLevel");
+    brightnessLevel_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    brightnessLevel_->setMinimumContentsLength(16);
     brightnessLevel_->addItem("Off", static_cast<int>(BrightnessLevellingMode::Off));
     brightnessLevel_->addItem("Match brightness (global)", static_cast<int>(BrightnessLevellingMode::Global));
     brightnessLevel_->addItem("Match brightness + patchy clouds (Moon)", static_cast<int>(BrightnessLevellingMode::GlobalAndPatchy));
@@ -378,6 +394,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         "Preview stack to see its effect here.");
     qualityMode_ = new QComboBox(videoBox);
     qualityMode_->setObjectName("resharpenQualityMode");
+    qualityMode_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    qualityMode_->setMinimumContentsLength(16);
     qualityMode_->addItem("Off (keep all stacks)", -1);
     qualityMode_->addItem("Local rolling median (best for long runs)", static_cast<int>(QualityFilterMode::LocalMedian));
     qualityMode_->addItem("Session median (global)", static_cast<int>(QualityFilterMode::GlobalMedian));
@@ -502,7 +520,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     mainSplitter->setStretchFactor(0, 1);
     mainSplitter->setStretchFactor(1, 3);
     mainSplitter->setStretchFactor(2, 2);
-    mainSplitter->setSizes({290, 600, 360});
+    mainSplitter->setSizes({270, 580, 410});
     root->addWidget(mainSplitter, 1);
 
     progressBar_ = new QProgressBar(this);
@@ -521,10 +539,13 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     applyBtn_->setStyleSheet(primaryActionStyle(currentUiTheme()));
     applyBtn_->setToolTip("Re-sharpen (and re-align, if selected) all kept stacks and generate the new time-lapse into a new folder.");
     cancelBtn_ = new QPushButton("Cancel", this);
+    cancelBtn_->setObjectName("resharpenCancel");
     cancelBtn_->setEnabled(false);
     openDirBtn_ = new QPushButton("Open output folder", this);
+    openDirBtn_->setObjectName("resharpenOpenFolder");
     openDirBtn_->setEnabled(false);
     auto* closeBtn = new QPushButton("Close", this);
+    closeBtn->setObjectName("resharpenClose");
     btnRow->addWidget(applyBtn_);
     btnRow->addWidget(cancelBtn_);
     btnRow->addWidget(openDirBtn_);

@@ -525,9 +525,12 @@ try {
     Write-Host "  Auto-tune: $(($kVerdict.Current.Name -split "`n")[0])"
     Save-WindowScreenshot $tuneWin (Join-Path $ScreenshotDir "02b_autotune_sky.png")
     $applyKBtn = Find-UiaElement -Root $tuneWin -IdSuffix "autoTuneApplyK"
+    $appliedAutoTuneK = $false
     if ($kVerdict.Current.Name -match "Suggested K") {
         Invoke-UiaClick $applyKBtn "Apply suggested K"
-        Wait-Until { Select-String -Path (Join-Path $TempOut "events\sky\candidates.txt") -Pattern " autotune_k target=sky " -Quiet } "autotune_k logged" -TimeoutMs 5000
+        $appliedAutoTuneK = $true
+        Start-Sleep -Milliseconds 300
+        Assert-True (-not (Test-Path (Join-Path $TempOut "events\sky\candidates.txt"))) "Preview auto-tune must not create top-level events\sky\candidates.txt"
     }
     $closePattern = $tuneWin.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
     $closePattern.Close()
@@ -536,7 +539,11 @@ try {
     Start-MonitoringUi "Start Sky monitoring"
     Start-Sleep -Milliseconds 800
 
-    $skyEventsDir = Join-Path (Get-ChildItem (Join-Path $TempOut "events\sky") -Filter "session-*" -Directory | Select-Object -Last 1).FullName "clips"
+    $skyWatchDir = (Get-ChildItem (Join-Path $TempOut "events\sky") -Filter "session-*" -Directory | Select-Object -Last 1).FullName
+    if ($appliedAutoTuneK) {
+        Wait-Until { Select-String -Path (Join-Path $skyWatchDir "autotune.txt") -Pattern " autotune_k target=sky " -Quiet } "autotune_k flushed to session autotune.txt" -TimeoutMs 5000
+    }
+    $skyEventsDir = Join-Path $skyWatchDir "clips"
     Click-ElementAtFraction $previewEl 0.25 0.25
     Select-UiaComboItem -Combo $blipKindCombo -ItemText "Moving streak" -ProcessId $proc.Id
     Wait-Until { $injectBtn.Current.IsEnabled } "Inject blip ready for Sky meteor streak"
@@ -670,7 +677,7 @@ try {
     Assert-True (Test-Path (Join-Path $vidDirs[0].FullName "timelapse.mp4")) "Missing rebuilt timelapse.mp4"
     Assert-True (((Get-Item (Join-Path $sessionDir "timelapse.mp4")).LastWriteTimeUtc) -eq $origMp4Time) "Original timelapse.mp4 was unexpectedly overwritten!"
 
-    $closeDlgBtn = Find-UiaElement -Root $dlg -Name "Close" -ControlType ([System.Windows.Automation.ControlType]::Button)
+    $closeDlgBtn = Find-UiaElement -Root $dlg -IdSuffix "resharpenClose" -ControlType ([System.Windows.Automation.ControlType]::Button)
     Invoke-UiaClick $closeDlgBtn "Close Re-sharpen"
     Start-Sleep -Milliseconds 300
 
