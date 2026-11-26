@@ -617,6 +617,16 @@ void SessionRecordTest::nightlyReportIncludesInlineAnimatedGifControls()
         QVERIFY(gif.open(QIODevice::WriteOnly));
         gif.write("GIF89a");
     }
+    {
+        QFile overview(QDir(watchDir).filePath("clips/20261123-010203-000/00_overview.png"));
+        QVERIFY(overview.open(QIODevice::WriteOnly));
+        overview.write("PNG");
+    }
+    {
+        QFile diff(QDir(watchDir).filePath("clips/20261123-010203-000/03_diff_annotated.png"));
+        QVERIFY(diff.open(QIODevice::WriteOnly));
+        diff.write("PNG");
+    }
 
     QString err;
     const QString reportPath = writeNightlyReport(watchDir, err);
@@ -627,6 +637,14 @@ void SessionRecordTest::nightlyReportIncludesInlineAnimatedGifControls()
     QVERIFY(html.contains("class='cardGif'"));
     QVERIFY(html.contains("clips/20261123-010203-000/04_event_preview.gif"));
     QVERIFY(html.contains("briefGifs.length<=20"));
+    // Clicking the card preview image or file links opens them in a new tab so
+    // closing the preview does not close the report.
+    QVERIFY2(html.contains("class='picture' href='clips/20261123-010203-000/00_overview.png' target='_blank' rel='noopener'")
+        || html.contains("class='strip' href='clips/20261123-010203-000/00_overview.png' target='_blank' rel='noopener'"),
+        qPrintable(html));
+    QVERIFY(html.contains("href=\"clips/20261123-010203-000/00_overview.png\" target=\"_blank\" rel=\"noopener\">Overview</a>"));
+    QVERIFY(html.contains("href=\"clips/20261123-010203-000/03_diff_annotated.png\" target=\"_blank\" rel=\"noopener\">Difference image</a>"));
+    QVERIFY(html.contains("href=\"clips/20261123-010203-000/event.txt\" target=\"_blank\" rel=\"noopener\">Clip metadata</a>"));
 
     // A shadows watch under events/moon labels its report for Moon (or Sun),
     // while a lunar impact-flash watch keeps "Moon watch".

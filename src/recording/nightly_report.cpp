@@ -34,7 +34,7 @@ QString url(const QString& path) { return QString::fromLatin1(QUrl::toPercentEnc
 QString link(const QDir& root, const QString& file, const QString& title)
 {
     if (!QFileInfo(root.filePath(file)).isFile()) return {};
-    return "<a href=\"" + url(file) + "\">" + h(title) + "</a> ";
+    return "<a href=\"" + url(file) + "\" target=\"_blank\" rel=\"noopener\">" + h(title) + "</a> ";
 }
 
 // Feature-46: a link the report's script turns into selenewatch:open or
@@ -343,12 +343,12 @@ QString picture(const QDir& root, const Clip& clip)
     {
         const OverviewLayout layout = overviewLayout(size[0].toInt(), size[1].toInt());
         if (layout.crops.height() > 0)
-            return QString("<a class='strip' href='%1' title='Open the whole overview' style='aspect-ratio:%2/%3'>"
+            return QString("<a class='strip' href='%1' target='_blank' rel='noopener' title='Open the whole overview' style='aspect-ratio:%2/%3'>"
                            "<img loading='lazy' alt='Crops around the peak: before, during, after, and the change' src='%1' style='margin-top:-%4%'></a>")
                 .arg(url(image)).arg(layout.crops.width()).arg(layout.crops.height())
                 .arg(100.0 * layout.crops.top() / layout.crops.width(), 0, 'f', 3);
     }
-    return "<a class='picture' href='" + url(image) + "'><img loading='lazy' alt='Annotated clip overview' src='" + url(image) + "'></a>";
+    return "<a class='picture' href='" + url(image) + "' target='_blank' rel='noopener'><img loading='lazy' alt='Annotated clip overview' src='" + url(image) + "'></a>";
 }
 
 QStringList tagsOf(const Clip& clip)

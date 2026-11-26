@@ -355,7 +355,7 @@ The Release build's `package` target invokes CPack using [packaging/package.cmak
 | Package | Behavior |
 | --- | --- |
 | `SeleneWatch-<version>-win64.zip` | Unpacks into a `SeleneWatch-<version>-win64` folder and runs directly from there. |
-| `SeleneWatch-<version>-win64.msi` | Installs per-user (no administrator rights) in `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry. Newer installers upgrade older ones while preserving the `events` folder on upgrade and uninstall. |
+| `SeleneWatch-<version>-win64.msi` | Installs per-user (no administrator rights) in `%LOCALAPPDATA%\SeleneWatch` with a Start-menu entry, an optional Desktop shortcut (checked by default), and a "Launch SeleneWatch" option on completion. Newer installers upgrade older ones while preserving the `events` folder on upgrade and uninstall. |
 
 Both packages contain:
 

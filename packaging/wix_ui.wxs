@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SeleneWatch Windows installer UI customization (WiX Toolset 3).
+     Replaces the default WixUI_InstallDir sequence so the installer:
+       1. Uses Segoe UI typography on Windows 10/11 dialogs.
+       2. Offers an optional "Create a Desktop shortcut" checkbox (default on)
+          on the destination folder page.
+       3. Offers a "Launch SeleneWatch" checkbox on the completion page. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Public property controlling the optional desktop shortcut (default: on). -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
+
+    <!-- Optional Desktop shortcut component (per-user HKCU keypath for ICE38/43). -->
+    <DirectoryRef Id="TARGETDIR">
+      <Directory Id="DesktopFolder" Name="Desktop">
+        <Component Id="SeleneWatchDesktopShortcut" Guid="A7F4C2B1-8E3D-4B5A-9F6C-1D2E3F4A5B6C">
+          <Condition>INSTALLDESKTOPSHORTCUT</Condition>
+          <Shortcut Id="SeleneWatchDesktopLnk"
+                    Name="SeleneWatch"
+                    Description="SeleneWatch: watches the Moon and the sky for transient events"
+                    Target="[#CM_FP_SeleneWatch.exe]"
+                    WorkingDirectory="INSTALL_ROOT"
+                    Icon="ProductIcon.ico" />
+          <RegistryValue Root="HKCU"
+                         Key="Software\SeleneWatch\SeleneWatch"
+                         Name="DesktopShortcut"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </DirectoryRef>
+
+    <FeatureRef Id="ProductFeature">
+      <ComponentRef Id="SeleneWatchDesktopShortcut" />
+    </FeatureRef>
+
+    <!-- Optional launch-after-install checkbox on the completion screen. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch SeleneWatch" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#CM_FP_SeleneWatch.exe]" />
+    <CustomAction Id="SeleneWatchLaunchApp"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <!-- Destination folder dialog with the Desktop shortcut option. -->
+    <UI>
+      <Dialog Id="SeleneWatchFolderDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="260" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Destination Folder" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose the installation folder and shortcut options." />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+
+        <Control Id="FolderLabel" Type="Text" X="20" Y="62" Width="320" Height="18" NoPrefix="yes" Text="Install [ProductName] to:" />
+        <Control Id="Folder" Type="PathEdit" X="20" Y="84" Width="256" Height="18" Property="WIXUI_INSTALLDIR" Indirect="yes" />
+        <Control Id="ChangeFolder" Type="PushButton" X="284" Y="84" Width="56" Height="18" Text="&amp;Change..." />
+
+        <Control Id="DesktopShortcutCheckBox"
+                 Type="CheckBox"
+                 X="20" Y="122" Width="320" Height="18"
+                 Property="INSTALLDESKTOPSHORTCUT"
+                 CheckBoxValue="1"
+                 Text="Create a &amp;Desktop shortcut" />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&amp;Back" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="&amp;Next" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+    </UI>
+
+    <!-- Custom wizard flow using Segoe UI and standard WiX UI extension dialogs. -->
+    <UI Id="SeleneWatch_InstallDir">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Segoe UI" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Segoe UI" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Segoe UI" Size="9" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <Property Id="WixUI_Mode" Value="InstallDir" />
+      <Property Id="ARPNOMODIFY" Value="1" />
+
+      <DialogRef Id="BrowseDlg" />
+      <DialogRef Id="DiskCostDlg" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <!-- Folder validation when leaving BrowseDlg -->
+      <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIValidatePath" Order="3">1</Publish>
+      <Publish Dialog="BrowseDlg" Control="OK" Event="SpawnDialog" Value="InvalidDirDlg" Order="4"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
+
+      <!-- Completion screen: optionally launch SeleneWatch, then close -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="SeleneWatchLaunchApp" Order="1">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+
+      <!-- Welcome -> License -> Folder -> VerifyReady -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg">NOT Installed</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">Installed AND PATCH</Publish>
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="SeleneWatchFolderDlg">LicenseAccepted = "1"</Publish>
+
+      <Publish Dialog="SeleneWatchFolderDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="ChangeFolder" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="Next" Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath" Order="2">NOT WIXUI_DONTVALIDATEPATH</Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="Next" Event="SpawnDialog" Value="InvalidDirDlg" Order="3"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
+      <Publish Dialog="SeleneWatchFolderDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4">WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID="1"</Publish>
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="SeleneWatchFolderDlg" Order="1">NOT Installed</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed AND NOT PATCH</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">Installed AND PATCH</Publish>
+
+      <!-- Maintenance (Repair / Remove) navigation -->
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>

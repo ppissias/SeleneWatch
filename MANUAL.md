@@ -46,7 +46,7 @@ For building SeleneWatch from source, see [DEVELOPER.md](DEVELOPER.md).
 ### 1.1 Installing and connecting a camera
 
 SeleneWatch runs on Windows 10 and 11, 64-bit. Each release comes in two forms, on the [releases page](https://github.com/ppissias/SeleneWatch/releases):
-- **An installer** that installs SeleneWatch for your Windows user, with a Start menu entry, without administrator rights. Uninstalling it, or installing a newer version, leaves your saved observations alone.
+- **An installer** that installs SeleneWatch for your Windows user, with a Start menu entry and an optional Desktop shortcut, without administrator rights. Uninstalling it, or installing a newer version, leaves your saved observations alone.
 - **A zip** to unpack into any folder you can write to, and run from there.
 
 Both include everything SeleneWatch needs, except camera drivers. Install your camera maker's driver before connecting the camera:
