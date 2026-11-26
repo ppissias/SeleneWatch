@@ -264,6 +264,14 @@ What both share:
 
 *The overview saved with each clip: the frame with what changed (orange) and the trigger marked, the frames before, during and after around it, and a line saying what was measured. The hatched area is the mask over the rooftops.*
 
+![A bright meteor captured automatically on 25 November 2026, played at its real speed](docs/images/readme-meteor-20261125-realtime.gif)
+
+*A longer meteor caught by the same fixed ZWO ASI120MM Mini on 25 November 2026 at 22:05:24 UTC (30 ms exposures, 30 fps), cropped around its track and played at its real speed.*
+
+![The overview of the 25 November 2026 meteor](docs/images/readme-meteor-20261125-overview.jpg)
+
+*Its saved overview: 34 active frames over 1.10 s, moving 42 px right and 362 px down (~330 px/s) with a 48.6 σ peak rise.*
+
 ![The morning report](docs/images/sky-report.png)
 
 *The report of that night: 55 clips became 25 events, grouped by what was measured. The brief events come first; their pictures are crops around each event, so a streak shows as a streak.*

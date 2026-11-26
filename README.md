@@ -39,10 +39,12 @@ There are two ways to watch:
 In the morning, a report lists the night's events. It groups them by what was measured, not by guesses: **brief** (everything in one place within a fifth of a second, such as a meteor), **moving** (along a straight line, such as an aircraft), **wide** (a large part of the sky at once, such as lightning) and **other**. A long aircraft crossing saved as several clips is shown as one event. Each event shows its frames, plays its animation, and opens the original video in your SER player.
 
 <p align="center">
-  <img src="docs/images/readme-meteor-realtime.gif" alt="A meteor captured automatically, played at its real speed" width="426">
+  <img src="docs/images/readme-meteor-realtime.gif" alt="A meteor captured automatically on 21 November 2026, played at its real speed" width="426">
+  &nbsp;&nbsp;
+  <img src="docs/images/readme-meteor-20261125-realtime.gif" alt="A bright meteor streaking across the frame on 25 November 2026, played at its real speed" width="230">
 </p>
 
-*A meteor caught automatically by a fixed camera (ZWO ASI120MM Mini) on 21 November 2026 at 03:49:57 UTC, played at its real speed.*
+*Two meteors caught automatically by a fixed camera (ZWO ASI120MM Mini), played at their real speed: left, 21 November 2026 at 03:49:57 UTC; right, 25 November 2026 at 22:05:24 UTC (30 ms exposures, 34 frames over 1.1 s, 48.6 σ peak rise; its full overview is in the [user manual](MANUAL.md#2-watching-the-sky)).*
 
 ![The overview SeleneWatch made of that meteor](docs/images/readme-meteor-overview.jpg)
 
