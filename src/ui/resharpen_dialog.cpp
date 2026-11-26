@@ -11,6 +11,7 @@
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtGui/QCloseEvent>
 #include <QtGui/QDesktopServices>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -719,6 +720,12 @@ ResharpenDialog::~ResharpenDialog()
 {
     cancelFlag_.store(true);
     if (worker_.joinable()) worker_.join();
+}
+
+void ResharpenDialog::closeEvent(QCloseEvent* event)
+{
+    cancelFlag_.store(true);
+    QDialog::closeEvent(event);
 }
 
 void ResharpenDialog::refreshSavedProfiles()

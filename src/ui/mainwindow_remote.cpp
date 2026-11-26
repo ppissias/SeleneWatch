@@ -72,6 +72,11 @@ void MainWindow::setupRemoteStatus()
     }
 }
 
+void MainWindow::stopRemoteStatus()
+{
+    if (remoteServer_) remoteServer_->stop();
+}
+
 void MainWindow::openRemoteStatus()
 {
     if (!remoteDialog_)

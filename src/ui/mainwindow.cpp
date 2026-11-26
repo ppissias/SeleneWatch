@@ -1881,7 +1881,21 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (!finalizing && !timeLapsing)
     {
         saveWindowLayout();
+        // Close owned modeless dialogs and floating docks so Qt's event loop
+        // exits promptly for this instance without leaving a headless process.
+        for (QWidget* w : std::initializer_list<QWidget*>{
+                 autoTuneWindow_, manualDialog_, tipsDialog_, acknowledgementsDialog_,
+                 aboutDialog_, captureStorageDialog_, remoteDialog_, closingProgress_})
+        {
+            if (w) w->close();
+        }
+        for (QDockWidget* dock : findChildren<QDockWidget*>())
+        {
+            if (dock && dock->isFloating()) dock->close();
+        }
+        stopRemoteStatus();
         QMainWindow::closeEvent(event);
+        emit windowClosing();
         return;
     }
     event->ignore();

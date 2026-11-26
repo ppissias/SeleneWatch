@@ -214,6 +214,7 @@ private slots:
     void guidingInstrumentHeaderBullseyePlotAndAdvancedSection();
     void cameraToolToggleResetLayoutAndRecordingPreviewFirst();
     void recordingContinuousLoopControlsAndPlayback();
+    void closingMainWindowClosesModelessDialogsAndFloatingDocks();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -4810,6 +4811,47 @@ void UiTest::recordingContinuousLoopControlsAndPlayback()
     })(), 8000);
     stop->click();
     QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 4000);
+}
+
+void UiTest::closingMainWindowClosesModelessDialogsAndFloatingDocks()
+{
+    QTemporaryDir dir;
+    MainWindow window(nullptr, dir.path());
+    int closeSignals = 0;
+    QObject::connect(&window, &MainWindow::windowClosing, [&] { ++closeSignals; });
+    window.show();
+
+    // Open several modeless dialogs and float a dock widget.
+    window.findChild<QAction*>("aboutAction")->trigger();
+    window.findChild<QAction*>("acknowledgementsAction")->trigger();
+    window.findChild<QAction*>("userManualAction")->trigger();
+    window.findChild<QPushButton*>("autoTuneButton")->click();
+    auto* detDock = window.findChild<QDockWidget*>("detectionDock");
+    QVERIFY(detDock);
+    detDock->setFloating(true);
+    detDock->show();
+    QApplication::processEvents();
+
+    auto* about = window.findChild<QDialog*>("aboutDialog");
+    auto* ack = window.findChild<QDialog*>("acknowledgementsDialog");
+    auto* manual = window.findChild<QDialog*>("manualDialog");
+    auto* autoTune = window.findChild<QDialog*>("autoTuneWindow");
+    QVERIFY(about && about->isVisible());
+    QVERIFY(ack && ack->isVisible());
+    QVERIFY(manual && manual->isVisible());
+    QVERIFY(autoTune && autoTune->isVisible());
+    QVERIFY(detDock->isFloating() && detDock->isVisible());
+
+    // Closing MainWindow must close every owned secondary window and emit windowClosing()
+    // so this instance exits cleanly even when modeless dialogs or floating docks were open.
+    QVERIFY(window.close());
+    QApplication::processEvents();
+    QCOMPARE(closeSignals, 1);
+    QVERIFY(!about->isVisible());
+    QVERIFY(!ack->isVisible());
+    QVERIFY(!manual->isVisible());
+    QVERIFY(!autoTune->isVisible());
+    QVERIFY(!detDock->isVisible());
 }
 
 int main(int argc, char** argv)

@@ -87,6 +87,12 @@ public:
     // and the window test, which supplies an isolated recording.
     void selectRecording(QString path);
 
+signals:
+    // Emitted once MainWindow accepts a close event (after closing owned
+    // modeless windows and floating docks) so main() can exit this instance's
+    // event loop cleanly without affecting any other running instance.
+    void windowClosing();
+
 private slots:
     void onStartClicked();
     void onStopClicked();
@@ -270,6 +276,7 @@ private:
     // Feature-47: the status page for a phone (mainwindow_remote.cpp). The
     // server answers from snapshots of what the window shows.
     void setupRemoteStatus();
+    void stopRemoteStatus();
     void openRemoteStatus();
     QString applyRemoteStatus(const RemoteStatusDialog::Settings& settings);
     [[nodiscard]] RemoteStatus remoteStatus() const;

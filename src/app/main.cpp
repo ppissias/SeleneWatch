@@ -96,6 +96,9 @@ int main(int argc, char *argv[])
     app.setWindowIcon(icon);
 
     MainWindow window;
+    // Exit this instance's event loop cleanly once its main window accepts
+    // close, without affecting any other SeleneWatch instance running in parallel.
+    QObject::connect(&window, &MainWindow::windowClosing, &app, &QCoreApplication::quit, Qt::QueuedConnection);
     window.show();
     QTimer::singleShot(0, &window, &MainWindow::maybeShowStartupTips);
     // Package/GUI checks use an isolated settings name and do not contact GitHub.

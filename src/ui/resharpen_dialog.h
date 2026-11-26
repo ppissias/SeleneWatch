@@ -14,6 +14,7 @@
 
 class PreviewWidget;
 class QCheckBox;
+class QCloseEvent;
 class QComboBox;
 class QDoubleSpinBox;
 class QGroupBox;
@@ -45,6 +46,9 @@ public:
 
 signals:
     void profilesChanged();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private:
     void loadSelectedStack();
