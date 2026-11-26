@@ -45,6 +45,11 @@ void RecordingSource::setLoopSeconds(double seconds)
     loopSeconds_ = std::max(0.0, seconds);
 }
 
+void RecordingSource::setLoopMode(LoopMode mode)
+{
+    loopMode_ = mode;
+}
+
 void RecordingSource::setNominalFps(double fps)
 {
     nominalFps_ = std::max(1.0, fps);
@@ -82,9 +87,14 @@ bool RecordingSource::open(std::string& error)
     // times of the next lap continue smoothly from the last frame of this
     // one. Frame numbers count the gaps of dropped frames, so the mean
     // interval is per number.
-    const auto nominalInterval = duration_cast<system_clock::duration>(duration<double>(1.0 / nominalFps_));
+    const auto minTick = duration_cast<system_clock::duration>(microseconds{1});
+    const auto nominalInterval = std::max(
+        duration_cast<system_clock::duration>(duration<double>(1.0 / nominalFps_)), minTick);
     const auto span = fileTime(framesPerLap_ - 1) - fileTime(0);
     const auto numberSpan = static_cast<int64_t>(numbersPerLap_ - 1 - reader_->frameNumber(0));
+    defaultFrameInterval_ = (numberSpan > 0 && span > system_clock::duration::zero())
+        ? std::max(span / numberSpan, minTick)
+        : nominalInterval;
     lapLength_ = numberSpan > 0
         ? span + span * static_cast<int64_t>(numbersPerLap_ - static_cast<uint64_t>(numberSpan)) / numberSpan
         : nominalInterval * static_cast<int64_t>(numbersPerLap_);
@@ -108,11 +118,30 @@ StreamInfo RecordingSource::describe() const
 
     if (loopSeconds_ > 0.0)
     {
-        info.playback = std::format("loop over frames 0 to {} of {} (the first {:.3f} s); "
-            "each later lap adds {} to the frame index and {:.6f} s to the frame time",
-            numbersPerLap_ - 1, count, loopSeconds_, numbersPerLap_, duration<double>(lapLength_).count());
-        info.frameTime += "; shifted in later laps of the loop";
-        info.frameIndex += "; shifted in later laps of the loop";
+        if (loopMode_ == LoopMode::ResetEachLap)
+        {
+            info.playback = std::format("loop over frames 0 to {} of {} (the first {:.3f} s); "
+                "each later lap adds {} to the frame index and {:.6f} s to the frame time",
+                numbersPerLap_ - 1, count, loopSeconds_, numbersPerLap_, duration<double>(lapLength_).count());
+            info.frameTime += "; shifted in later laps of the loop";
+            info.frameIndex += "; shifted in later laps of the loop";
+        }
+        else if (loopMode_ == LoopMode::ContinuousPingPong)
+        {
+            info.playback = std::format("continuous ping-pong loop over frames 0 to {} of {} (the first {:.3f} s), "
+                "detector not reset; frames play forward then backward with monotonically advancing index and time",
+                numbersPerLap_ - 1, count, loopSeconds_);
+            info.frameTime += "; advanced continuously across ping-pong playback";
+            info.frameIndex += "; advanced continuously across ping-pong playback";
+        }
+        else
+        {
+            info.playback = std::format("continuous wrap loop over frames 0 to {} of {} (the first {:.3f} s), "
+                "detector not reset; each later lap adds {} to the frame index and {:.6f} s to the frame time",
+                numbersPerLap_ - 1, count, loopSeconds_, numbersPerLap_, duration<double>(lapLength_).count());
+            info.frameTime += "; shifted continuously across wrapped laps";
+            info.frameIndex += "; shifted continuously across wrapped laps";
+        }
     }
     else
     {
@@ -157,9 +186,14 @@ void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listen
     {
         const FineSleepResolution fineSleep;
         const bool looping = loopSeconds_ > 0.0;
+        const bool pingPong = looping && loopMode_ == LoopMode::ContinuousPingPong;
 
         int64_t lap = 0;
         int position = 0;
+        int direction = 1;
+        bool haveEmitted = false;
+        uint64_t continuousIndex = reader_->frameNumber(0);
+        system_clock::time_point continuousTime = fileTime(0);
         std::string error;
 
         // Real-time pacing: when the previous frame was due, and its time.
@@ -169,19 +203,59 @@ void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listen
 
         while (!stopToken.stop_requested())
         {
-            if (position == framesPerLap_)
-            {
-                if (!looping)
-                {
-                    listener.onEnded();
-                    return;
-                }
-                position = 0;
-                ++lap;
-                listener.onDiscontinuity();
-            }
+            uint64_t frameIndex = 0;
+            system_clock::time_point time{};
 
-            const system_clock::time_point time = fileTime(position) + lapLength_ * lap;
+            if (pingPong)
+            {
+                if (haveEmitted)
+                {
+                    const int prevPos = position;
+                    if (framesPerLap_ > 1)
+                    {
+                        if (direction > 0 && position >= framesPerLap_ - 1)
+                        {
+                            direction = -1;
+                        }
+                        else if (direction < 0 && position <= 0)
+                        {
+                            direction = 1;
+                        }
+                        position += direction;
+                    }
+                    const auto rawDt = position >= prevPos
+                        ? fileTime(position) - fileTime(prevPos)
+                        : fileTime(prevPos) - fileTime(position);
+                    const auto dt = rawDt > system_clock::duration::zero() ? rawDt : defaultFrameInterval_;
+                    continuousTime += dt;
+
+                    const uint64_t numA = reader_->frameNumber(prevPos);
+                    const uint64_t numB = reader_->frameNumber(position);
+                    const uint64_t dIndex = numB >= numA ? numB - numA : numA - numB;
+                    continuousIndex += std::max<uint64_t>(1, dIndex);
+                }
+                frameIndex = continuousIndex;
+                time = continuousTime;
+            }
+            else
+            {
+                if (position == framesPerLap_)
+                {
+                    if (!looping)
+                    {
+                        listener.onEnded();
+                        return;
+                    }
+                    position = 0;
+                    ++lap;
+                    if (loopMode_ == LoopMode::ResetEachLap)
+                    {
+                        listener.onDiscontinuity();
+                    }
+                }
+                frameIndex = static_cast<uint64_t>(lap) * numbersPerLap_ + reader_->frameNumber(position);
+                time = fileTime(position) + lapLength_ * lap;
+            }
 
             if (speed_.load() == Speed::RealTime)
             {
@@ -216,14 +290,18 @@ void RecordingSource::run(std::stop_token stopToken, FrameSourceListener& listen
             {
                 throw std::runtime_error(error);
             }
-            frame->frameIndex = static_cast<uint64_t>(lap) * numbersPerLap_ + reader_->frameNumber(position);
+            frame->frameIndex = frameIndex;
             frame->sourceDroppedFrames.reset();
             frame->timestamp = time;
             frame->steadyTimestamp = steady_clock::now();
             listener.onFrame(std::move(frame));
 
             previousTime = time;
-            ++position;
+            haveEmitted = true;
+            if (!pingPong)
+            {
+                ++position;
+            }
         }
     }
     catch (const std::exception& ex)

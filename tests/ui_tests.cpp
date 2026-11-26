@@ -213,6 +213,7 @@ private slots:
     void detectorLearningPeriodSuppressesFeedbackAndKeepsControlsEditable();
     void guidingInstrumentHeaderBullseyePlotAndAdvancedSection();
     void cameraToolToggleResetLayoutAndRecordingPreviewFirst();
+    void recordingContinuousLoopControlsAndPlayback();
 };
 
 // No source at start; View → Testing tools offers the synthetic source and the
@@ -4697,6 +4698,96 @@ void UiTest::cameraToolToggleResetLayoutAndRecordingPreviewFirst()
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QPushButton*>("startButton")->isEnabled(), 4000);
     QVERIFY(tlPrimary->isHidden());
     QVERIFY(!tlSidebar->isEnabled());
+}
+
+// Feature-53: recording loop mode selector (Reset each lap, Continuous ping-pong,
+// Continuous wrap) has help, follows loopCheckBox/running state, fits cleanly on
+// a laptop screen, and keeps the detector & history running across laps.
+void UiTest::recordingContinuousLoopControlsAndPlayback()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    const QString serPath = dir.path() + "/short_loop.ser";
+    {
+        QFile file(serPath);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        Frame f;
+        f.width = 64; f.height = 64; f.format = PixelFormat::Mono8;
+        f.data.assign(64 * 64, 100);
+        f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1700000000};
+        SerWriter writer(file);
+        QString err;
+        QVERIFY(writer.start(f, "TEST: continuous loop recording", err));
+        for (int i = 0; i < 12; ++i)
+        {
+            f.frameIndex = i;
+            f.data.assign(64 * 64, static_cast<uint8_t>(100 + i));
+            f.timestamp = std::chrono::system_clock::time_point{} + std::chrono::seconds{1700000000} + std::chrono::milliseconds{i * 100};
+            QVERIFY(writer.append(f, err));
+        }
+        QVERIFY(writer.finish(err));
+    }
+
+    MainWindow window(nullptr, dir.path());
+    window.resize(1366, 700);
+    window.selectRecording(serPath);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("fileLabel")->text().contains("12 frames, "), 4000);
+
+    auto* loopCheck = window.findChild<QCheckBox*>("loopCheckBox");
+    auto* loopSec = window.findChild<QDoubleSpinBox*>("loopSecondsSpinBox");
+    auto* loopMode = window.findChild<QComboBox*>("loopModeComboBox");
+    auto* speed = window.findChild<QComboBox*>("speedComboBox");
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* buffer = window.findChild<QLabel*>("bufferReadout");
+    QVERIFY(loopCheck && loopSec && loopMode && speed && start && stop && buffer);
+
+    QCOMPARE(loopMode->count(), 3);
+    QCOMPARE(loopMode->currentIndex(), 0);
+    QCOMPARE(loopMode->itemText(0), QString("Reset each lap"));
+    QCOMPARE(loopMode->itemText(1), QString("Continuous (ping-pong)"));
+    QCOMPARE(loopMode->itemText(2), QString("Continuous (wrap)"));
+    QVERIFY(!loopMode->toolTip().isEmpty() && !loopMode->whatsThis().isEmpty());
+    QVERIFY(!loopCheck->isChecked());
+    QVERIFY(!loopSec->isEnabled());
+    QVERIFY(!loopMode->isEnabled());
+
+    loopCheck->setChecked(true);
+    QVERIFY(loopSec->isEnabled());
+    QVERIFY(loopMode->isEnabled());
+    loopSec->setValue(1.0);
+    loopMode->setCurrentIndex(1); // Continuous (ping-pong)
+    speed->setCurrentIndex(1);    // Fast
+    QApplication::processEvents();
+    QVERIFY2(squeezedControls(window).isEmpty(), qPrintable(squeezedControls(window).join('\n')));
+
+    // Start Preview: controls lock while running, and history grows beyond the 10-frame lap.
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(stop->isEnabled(), 4000);
+    QVERIFY(!loopCheck->isEnabled() && !loopSec->isEnabled() && !loopMode->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const QString text = buffer->text();
+        const QRegularExpression re(R"((\d+) frames)");
+        const auto m = re.match(text);
+        return m.hasMatch() && m.captured(1).toInt() > 15;
+    })(), 8000);
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 4000);
+    QVERIFY(loopCheck->isEnabled() && loopSec->isEnabled() && loopMode->isEnabled());
+
+    // Continuous (wrap) also keeps history growing past one lap.
+    loopMode->setCurrentIndex(2);
+    start->click();
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const QRegularExpression re(R"((\d+) frames)");
+        const auto m = re.match(buffer->text());
+        return m.hasMatch() && m.captured(1).toInt() > 15;
+    })(), 8000);
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 4000);
 }
 
 int main(int argc, char** argv)

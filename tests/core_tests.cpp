@@ -883,6 +883,8 @@ private slots:
     void droppedFramesLeaveGapsInIndexAndTime();
     void wholeFilePlaysEveryFrameThenEnds();
     void loopRestartsAndKeepsCounting();
+    void continuousPingPongLoopsSmoothlyWithoutDiscontinuity();
+    void continuousWrapLoopsWithoutDiscontinuity();
     void realTimeFollowsTheFileIntervals();
     void fileWithoutTrailerGetsNominalTimes();
 };
@@ -896,6 +898,7 @@ private slots:
     void serFileThroughSessionWritesAClip();
     void endOfFileHandsOffTheOpenClip();
     void loopJumpFiresNoCandidate();
+    void continuousLoopPreservesDetectorHistoryAndAutoTune();
     void unreadableFileDoesNotStart();
     void injectedRecordingWritesMarkedPixels_data();
     void injectedRecordingWritesMarkedPixels();
@@ -2285,6 +2288,140 @@ void RecordingSourceTest::loopRestartsAndKeepsCounting()
     }
 }
 
+// Feature-53: continuous ping-pong plays 0..N-1..0 without repeating endpoints
+// or notifying onDiscontinuity(), advancing indices and non-uniform intervals
+// monotonically forward. Also verifies 2-frame and 1-frame edge cases.
+void RecordingSourceTest::continuousPingPongLoopsSmoothlyWithoutDiscontinuity()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // Non-uniform intervals: 0, 50, 200, 250 ms for the first 4 frames (loop 0.26 s).
+    SerFileSpec spec;
+    const std::vector<int> timesMs{0, 50, 200, 250, 350, 450, 550};
+    for (size_t i = 0; i < timesMs.size(); ++i)
+    {
+        spec.frames.push_back(BudgetVector<uint8_t>(8, static_cast<uint8_t>(i)));
+        spec.trailer.push_back(serTicks(testTime(timesMs[i])));
+    }
+    const QString path = writeSerFile(dir.path(), "pingpong.ser", spec);
+
+    RecordingSource source(fsPath(path));
+    source.setLoopSeconds(0.26);
+    source.setLoopMode(RecordingSource::LoopMode::ContinuousPingPong);
+    source.setSpeed(RecordingSource::Speed::Fast);
+    std::string error;
+    QVERIFY2(source.open(error), error.c_str());
+    const QString playback = QString::fromStdString(source.streamInfo().playback);
+    QVERIFY2(playback.contains("continuous ping-pong loop over frames 0 to 3 of 7"), qPrintable(playback));
+    QVERIFY2(playback.contains("detector not reset"), qPrintable(playback));
+
+    CollectingListener listener;
+    source.start(listener);
+    QTRY_VERIFY_WITH_TIMEOUT(listener.frameCount() >= 12, 10000);
+    source.stop();
+    QVERIFY(!listener.ended());
+    QVERIFY2(listener.sequence().find('|') == std::string::npos, listener.sequence().c_str());
+
+    const std::vector<int> expectedPos{0, 1, 2, 3, 2, 1, 0, 1, 2, 3, 2, 1};
+    const std::vector<int> expectedMs{0, 50, 200, 250, 300, 450, 500, 550, 700, 750, 800, 950};
+    const std::vector<FramePtr> frames = listener.frames();
+    for (size_t k = 0; k < expectedPos.size(); ++k)
+    {
+        QCOMPARE(frames[k]->frameIndex, static_cast<uint64_t>(k));
+        QVERIFY2(frames[k]->timestamp == testTime(expectedMs[k]),
+            qPrintable(QString("frame %1 time mismatch").arg(k)));
+        QCOMPARE(frames[k]->data, spec.frames[static_cast<size_t>(expectedPos[k])]);
+    }
+
+    // Two-frame lap alternates 0, 1, 0, 1 without discontinuity.
+    {
+        RecordingSource two(fsPath(path));
+        two.setLoopSeconds(0.01);
+        two.setLoopMode(RecordingSource::LoopMode::ContinuousPingPong);
+        two.setSpeed(RecordingSource::Speed::Fast);
+        QVERIFY2(two.open(error), error.c_str());
+        CollectingListener twoListener;
+        two.start(twoListener);
+        QTRY_VERIFY_WITH_TIMEOUT(twoListener.frameCount() >= 6, 10000);
+        two.stop();
+        QVERIFY(twoListener.sequence().find('|') == std::string::npos);
+        const auto twoFrames = twoListener.frames();
+        for (size_t k = 0; k < 6; ++k)
+        {
+            QCOMPARE(twoFrames[k]->frameIndex, static_cast<uint64_t>(k));
+            QCOMPARE(twoFrames[k]->data, spec.frames[k % 2]);
+            QVERIFY(twoFrames[k]->timestamp == testTime(50 * static_cast<int>(k)));
+        }
+    }
+
+    // One-frame file still advances index and time cleanly without stalling.
+    {
+        SerFileSpec oneSpec;
+        oneSpec.frames.push_back(BudgetVector<uint8_t>(8, 42));
+        oneSpec.trailer.push_back(serTicks(testTime(0)));
+        const QString onePath = writeSerFile(dir.path(), "single.ser", oneSpec);
+        RecordingSource one(fsPath(onePath));
+        one.setNominalFps(20.0);
+        one.setLoopSeconds(1.0);
+        one.setLoopMode(RecordingSource::LoopMode::ContinuousPingPong);
+        one.setSpeed(RecordingSource::Speed::Fast);
+        QVERIFY2(one.open(error), error.c_str());
+        CollectingListener oneListener;
+        one.start(oneListener);
+        QTRY_VERIFY_WITH_TIMEOUT(oneListener.frameCount() >= 4, 10000);
+        one.stop();
+        QVERIFY(oneListener.sequence().find('|') == std::string::npos);
+        const auto oneFrames = oneListener.frames();
+        for (size_t k = 0; k < 4; ++k)
+        {
+            QCOMPARE(oneFrames[k]->frameIndex, static_cast<uint64_t>(k));
+            QCOMPARE(oneFrames[k]->data, oneSpec.frames[0]);
+            if (k > 0) QVERIFY(oneFrames[k]->timestamp > oneFrames[k - 1]->timestamp);
+        }
+    }
+}
+
+// Feature-53: continuous wrap loops forward 0..N-1 without notifying onDiscontinuity().
+void RecordingSourceTest::continuousWrapLoopsWithoutDiscontinuity()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    SerFileSpec spec;
+    for (int i = 0; i < 10; ++i)
+    {
+        spec.frames.push_back(BudgetVector<uint8_t>(8, static_cast<uint8_t>(i)));
+        spec.trailer.push_back(serTicks(testTime(100 * i)));
+    }
+    const QString path = writeSerFile(dir.path(), "wrap.ser", spec);
+
+    RecordingSource source(fsPath(path));
+    source.setLoopSeconds(0.35);
+    source.setLoopMode(RecordingSource::LoopMode::ContinuousWrap);
+    source.setSpeed(RecordingSource::Speed::Fast);
+    std::string error;
+    QVERIFY2(source.open(error), error.c_str());
+    const QString playback = QString::fromStdString(source.streamInfo().playback);
+    QVERIFY2(playback.contains("continuous wrap loop over frames 0 to 3 of 10"), qPrintable(playback));
+    QVERIFY2(playback.contains("detector not reset"), qPrintable(playback));
+
+    CollectingListener listener;
+    source.start(listener);
+    QTRY_VERIFY_WITH_TIMEOUT(listener.frameCount() >= 12, 10000);
+    source.stop();
+    QVERIFY(!listener.ended());
+    QVERIFY2(listener.sequence().find('|') == std::string::npos, listener.sequence().c_str());
+
+    const std::vector<FramePtr> frames = listener.frames();
+    for (size_t k = 0; k < 12; ++k)
+    {
+        QCOMPARE(frames[k]->frameIndex, static_cast<uint64_t>(k));
+        QVERIFY(frames[k]->timestamp == testTime(100 * static_cast<int>(k)));
+        QCOMPARE(frames[k]->data, spec.frames[k % 4]);
+    }
+}
+
 void RecordingSourceTest::realTimeFollowsTheFileIntervals()
 {
     QTemporaryDir dir;
@@ -2503,6 +2640,104 @@ void SessionTest::loopJumpFiresNoCandidate()
     const QStringList lines = candidateLines(latestWatch(eventsFolder(root, Target::Moon)));
     QCOMPARE(lines.size(), static_cast<qsizetype>(1));
     QVERIFY(lines[0].contains(" session_start "));
+}
+
+// Feature-53: continuous ping-pong playback keeps the detector adapted, keeps
+// the ring buffer filled across lap turnarounds, lets Auto-Tune complete a
+// multi-lap watch, and lets clips finish normally across a turnaround.
+void SessionTest::continuousLoopPreservesDetectorHistoryAndAutoTune()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    const int width = 64;
+    const int height = 48;
+    SerFileSpec spec;
+    spec.width = width;
+    spec.height = height;
+    // 10 frames, 100 ms apart (1.0 s total), gently varying background so a
+    // hard jump would step by 18 ADU while ping-pong steps smoothly by 2 ADU.
+    for (int i = 0; i < 10; ++i)
+    {
+        spec.frames.push_back(BudgetVector<uint8_t>(static_cast<size_t>(width * height),
+            static_cast<uint8_t>(100 + 2 * i)));
+        spec.trailer.push_back(serTicks(testTime(100 * i)));
+    }
+    const QString path = writeSerFile(dir.path(), "smooth_pingpong.ser", spec);
+    const QString root = QDir(dir.path()).filePath("events");
+
+    QObject context;
+    std::vector<ClipWriteResult> results;
+    int candidates = 0;
+    {
+        Session::Notifications notifications;
+        notifications.candidateStarted = [&candidates] { ++candidates; };
+        notifications.clipWritten = [&results](const ClipWriteResult& result) { results.push_back(result); };
+        Session session(&context, root, std::move(notifications));
+
+        DetectionSettings det;
+        det.sigma = 6;
+        det.minPixels = 8;
+        det.maxPixels = 400;
+        det.oneFrame = false;
+        det.referenceTimeConstantSeconds = 0.6;
+        session.setDetectionSettings(det);
+
+        CaptureSettings cap;
+        cap.historySeconds = 2.0;
+        cap.postSeconds = 1.5;
+        cap.maxPostSeconds = 3.0;
+        session.setCaptureSettings(cap);
+
+        auto source = std::make_unique<RecordingSource>(fsPath(path));
+        source->setLoopSeconds(10.0);
+        source->setLoopMode(RecordingSource::LoopMode::ContinuousPingPong);
+        source->setSpeed(RecordingSource::Speed::Fast);
+        session.setSource(std::move(source));
+
+        QString error;
+        QVERIFY2(session.start(error, Session::Mode::Preview), qPrintable(error));
+
+        // Let playback cross multiple laps and finish the Feature-52 warmup.
+        QTRY_VERIFY_WITH_TIMEOUT(session.acquiredFrames() >= 35, 10000);
+        // Ring buffer exceeds a single 10-frame lap because it was never reset.
+        QVERIFY2(session.bufferSize() > 12, qPrintable(QString("bufferSize=%1").arg(session.bufferSize())));
+
+        // Verify the detector stayed adapted across laps (not reset to learningFrames < 10).
+        std::shared_ptr<const DetectionView> latestView;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            if (auto pf = session.takePreview(); pf.detection) latestView = pf.detection;
+            return latestView && latestView->summary.ready && !latestView->summary.warmingUp
+                && latestView->summary.learningFrames > 15;
+        })(), 10000);
+
+        // Auto-Tune Sensitivity watch spans multiple laps (2.5 s over a 1.0 s file) without interrupting.
+        TuneWatchRequest req;
+        req.kind = TuneWatchRequest::Kind::Sensitivity;
+        req.seconds = 2.5;
+        req.settings = det;
+        req.kValues = {6.0};
+        QVERIFY(session.startAutoTune(req) != 0);
+        QTRY_COMPARE_WITH_TIMEOUT(session.autoTuneStatus().state, TuneWatchStatus::State::Finished, 15000);
+        const TuneWatchStatus tune = session.autoTuneStatus();
+        QVERIFY2(tune.seconds >= 2.4, qPrintable(QString("tune seconds=%1 note=%2").arg(tune.seconds).arg(QString::fromStdString(tune.note))));
+        QVERIFY2(tune.note.find("Ended early") == std::string::npos, tune.note.c_str());
+
+        // Switch to Monitoring and trigger a manual clip that spans >1.5 s (>1 lap);
+        // it must complete normally instead of being truncated at a playback loop boundary.
+        QVERIFY(session.requestMonitoring(true));
+        QTRY_COMPARE_WITH_TIMEOUT(session.mode(), Session::Mode::Monitoring, 10000);
+        QVERIFY(session.requestManualSave());
+        QTRY_COMPARE_WITH_TIMEOUT(results.size(), static_cast<size_t>(1), 15000);
+        session.stop();
+    }
+
+    QCOMPARE(candidates, 0);
+    QVERIFY2(results[0].notSaved.isEmpty(), qPrintable(results[0].notSaved));
+    const QString eventTxt = readText(QDir(results[0].folder).filePath("event.txt"));
+    QVERIFY2(eventTxt.contains("playback: continuous ping-pong loop"), qPrintable(eventTxt));
+    QVERIFY2(eventTxt.contains("collection_end: post-event interval complete"), qPrintable(eventTxt));
+    QVERIFY2(!eventTxt.contains("playback loop boundary"), qPrintable(eventTxt));
 }
 
 void SessionTest::unreadableFileDoesNotStart()

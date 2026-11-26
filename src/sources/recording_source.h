@@ -12,13 +12,15 @@
 #include <thread>
 
 // Plays a recording as a frame source: the whole file once, or a loop over
-// its first seconds (Feature-6, Playback). A .ser file is read by SerReader
+// its first seconds (Feature-6, Feature-53). A .ser file is read by SerReader
 // and an .avi file by AviReader.
 //
 // Frame times are the reader's: stored in the file, or nominal. The frame
 // index is the position in the file. In a loop both keep increasing across
-// laps, and at each lap the listener is told that the next frame does not
-// follow the previous one. A frame's monotonic time is when it was played.
+// laps. ResetEachLap notifies onDiscontinuity() at each wrap so detection and
+// history restart; ContinuousPingPong (smooth forward-and-back) and
+// ContinuousWrap keep the detector, ring buffer and auto-tune running as one
+// continuous test stream. A frame's monotonic time is when it was played.
 //
 // At real-time speed the source waits out the intervals between the file's
 // frame times, never more than one second for a single interval. At fast
@@ -33,6 +35,14 @@ public:
         Fast
     };
 
+    // How repeated playback transitions at the end of the looped span (Feature-53).
+    enum class LoopMode
+    {
+        ResetEachLap,
+        ContinuousPingPong,
+        ContinuousWrap
+    };
+
     // reader, when given, is one already opened from path off the window's
     // thread: an AVI file's index can take seconds to read. The source reads
     // it only while running, so one reader can serve run after run.
@@ -45,6 +55,10 @@ public:
     // Before open(). Zero plays the whole file once. Otherwise the frames in
     // the first loopSeconds of the file play again and again.
     void setLoopSeconds(double seconds);
+
+    // Before open(). Selects whether looping resets at each lap or continues
+    // uninterrupted (ping-pong or forward wrap). Defaults to ResetEachLap.
+    void setLoopMode(LoopMode mode);
 
     // Before open(). The frame rate assumed for a file that stores neither
     // frame times nor a rate: a SER file without a trailer, or an AVI file
@@ -69,6 +83,7 @@ private:
 
     const std::filesystem::path path_;
     double loopSeconds_{0.0};
+    LoopMode loopMode_{LoopMode::ResetEachLap};
     double nominalFps_{30.0};
     std::atomic<Speed> speed_{Speed::RealTime};
 
@@ -79,6 +94,7 @@ private:
     // Frame numbers a lap spans, gaps included.
     uint64_t numbersPerLap_{0};
     std::chrono::system_clock::duration lapLength_{};
+    std::chrono::system_clock::duration defaultFrameInterval_{};
     StreamInfo info_;
 
     std::jthread worker_;

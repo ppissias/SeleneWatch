@@ -191,7 +191,7 @@
          <bool>false</bool>
         </property>
         <property name="toolTip">
-         <string>Plays the first seconds of the recording again and again. Each lap restarts detection.</string>
+         <string>Repeats the first seconds of the recording using the selected loop mode.</string>
         </property>
         <property name="text">
          <string>Loop first</string>
@@ -200,7 +200,7 @@
       </item>
       <item>
        <widget class="QDoubleSpinBox" name="loopSecondsSpinBox">
-        <property name="toolTip"><string>How many seconds at the start of the recording are played again and again.</string></property>
+        <property name="toolTip"><string>How many seconds at the start of the recording are repeated.</string></property>
         <property name="enabled">
          <bool>false</bool>
         </property>
@@ -219,6 +219,31 @@
         <property name="suffix">
          <string> s</string>
         </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="loopModeComboBox">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>How each repeated lap transitions. Reset each lap restarts the detector and history at the start of every lap. Continuous (ping-pong) plays forward and backward with no jump at the ends and keeps the detector, history and auto-tune running. Continuous (wrap) jumps back to the start without resetting the detector.</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Reset each lap</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Continuous (ping-pong)</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Continuous (wrap)</string>
+         </property>
+        </item>
        </widget>
       </item>
       <item>

@@ -85,6 +85,9 @@ namespace {
 
 // Fast playback entry in the form's speed box.
 constexpr int kFastEntry = 1;
+// Loop transition modes in loopModeComboBox (Feature-53).
+constexpr int kLoopPingPongEntry = 1;
+constexpr int kLoopWrapEntry = 2;
 
 constexpr int kSyntheticWidth = 640;
 constexpr int kSyntheticHeight = 480;
@@ -569,7 +572,7 @@ void MainWindow::arrangeTopControls()
     pbRow->setContentsMargins(0, 0, 0, 0);
     pbRow->setSpacing(10);
     fpsGroup_ = together(playbackBar_, {ui_->fpsLabel, ui_->targetFpsSpinBox});
-    recordingPlaybackGroup_ = together(playbackBar_, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox});
+    recordingPlaybackGroup_ = together(playbackBar_, {ui_->speedLabel, ui_->speedComboBox, ui_->loopCheckBox, ui_->loopSecondsSpinBox, ui_->loopModeComboBox});
     pbRow->addWidget(fpsGroup_);
     pbRow->addWidget(recordingPlaybackGroup_);
     pbRow->addStretch(1);
@@ -2767,6 +2770,7 @@ void MainWindow::setupStatusBar()
     framesLabel_->setObjectName("framesReadout");
     candidatesLabel_ = new ElidedLabel;
     bufferLabel_ = new ElidedLabel;
+    bufferLabel_->setObjectName("bufferReadout");
     frameLabel_ = new ElidedLabel("No frame yet");
     lockLabel_ = new ElidedLabel("Lock: off");
     lockLabel_->setObjectName("lockReadout");
@@ -3236,7 +3240,9 @@ void MainWindow::updateControls()
     }
     ui_->openFileButton->setEnabled(!busy && recording);
     ui_->loopCheckBox->setEnabled(!busy && recording);
-    ui_->loopSecondsSpinBox->setEnabled(!busy && recording && ui_->loopCheckBox->isChecked());
+    const bool loopActive = !busy && recording && ui_->loopCheckBox->isChecked();
+    ui_->loopSecondsSpinBox->setEnabled(loopActive);
+    ui_->loopModeComboBox->setEnabled(loopActive);
 
     // The speed may change while a recording plays.
     ui_->speedComboBox->setEnabled(recording);
@@ -3601,6 +3607,12 @@ std::unique_ptr<FrameSource> MainWindow::makeSource()
     // makes sure it is this file's), shared from run to run.
     auto source = std::make_unique<RecordingSource>(std::filesystem::path(recordingPath_.toStdWString()), preparedReader_);
     source->setLoopSeconds(ui_->loopCheckBox->isChecked() ? ui_->loopSecondsSpinBox->value() : 0.0);
+    RecordingSource::LoopMode loopMode = RecordingSource::LoopMode::ResetEachLap;
+    if (ui_->loopModeComboBox->currentIndex() == kLoopPingPongEntry)
+        loopMode = RecordingSource::LoopMode::ContinuousPingPong;
+    else if (ui_->loopModeComboBox->currentIndex() == kLoopWrapEntry)
+        loopMode = RecordingSource::LoopMode::ContinuousWrap;
+    source->setLoopMode(loopMode);
     source->setNominalFps(fps);
     source->setSpeed(ui_->speedComboBox->currentIndex() == kFastEntry
         ? RecordingSource::Speed::Fast : RecordingSource::Speed::RealTime);

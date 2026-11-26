@@ -57,6 +57,7 @@ Features 5, 8 to 10, 12 to 14, 16 to 18, 22 to 26 and 28 to 32 were moved here o
 - [Feature-50 — Optional runtime sub-pixel registration for stabilized detection](#feature-50--optional-runtime-sub-pixel-registration-for-stabilized-detection)
 - [Feature-51 — Observation Workspaces & Instrument UI Redesign (Phases 1–4)](#feature-51--observation-workspaces--instrument-ui-redesign-phases-14)
 - [Feature-52 — Detector Learning Period & Preview-First Session Consistency](#feature-52--detector-learning-period--preview-first-session-consistency)
+- [Feature-53 — Continuous Recording Loop Modes (Ping-Pong & Forward Wrap)](#feature-53--continuous-recording-loop-modes-ping-pong--forward-wrap)
 
 ## Feature-2 — Preview and synthetic source (Stage 2)
 
@@ -3760,3 +3761,27 @@ Two workflow and reliability improvements decided after testing shaky planetary 
 - Added `DetectionTest::detectorLearningPeriodSuppressesStartupSpikesAndRearmPreservesState` in `tests/detection_tests.cpp` verifying suppression during `1 × Reference time`, empty history during warmup, post-warmup triggering, zero-wait `rearm()`, and the `15 s` cap.
 - Updated `MANUAL.md`, `tests/ui_tests.cpp`, and `tests/gui_e2e_test.ps1` (including `Wait-DetectorAdapted` and Preview-first recording Time-lapse in Scenario 4).
 - Verified with full `Release-x64` build, all 26 CTest suites, and real Windows GUI E2E (`tests/gui_e2e_test.ps1`) with screenshot inspection.
+
+
+---
+
+## Feature-53 — Continuous Recording Loop Modes (Ping-Pong & Forward Wrap)
+
+*Proposed, approved, and implemented on 26 November 2026.*
+
+Allows observers and developers to repeat the first *X* seconds of a recorded SER or AVI video as a continuous stream without resetting the detector, history ring, stabilizer, or Auto-Tune at each lap boundary—enabling realistic multi-minute/long-term testing on short sample recordings.
+
+### Playback modes (`RecordingSource::LoopMode`)
+- **`ResetEachLap` (default):** Preserves existing `Loop first` behavior—wraps to frame 0 and notifies `onDiscontinuity()` at each lap so detection, history, stabilizer, open clips, and Auto-Tune reset cleanly.
+- **`ContinuousPingPong` (primary continuous mode):** Plays forward `0 → N-1` and backward `N-2 → 1 → 0 → 1 …` without repeating endpoint frames and without notifying `onDiscontinuity()`. Frame indices and UTC timestamps advance monotonically forward using each adjacent pair's recorded interval (with a safe fallback for constant timestamps or single-frame files), eliminating scene/drift seam jumps for `FlashDetector`, `FrameRingBuffer`, `FrameStabilizer`, and `AutoTuneWatch`.
+- **`ContinuousWrap`:** Wraps forward `0 → N-1 → 0` with monotonically advancing indices and timestamps and without notifying `onDiscontinuity()`.
+
+### Evidence transparency & UI
+- `RecordingSource::describe()` records the exact loop mode (`continuous ping-pong loop ... detector not reset` or `continuous wrap loop ... detector not reset`) and timestamp/index policy in `StreamInfo::playback` / `event.txt` / `candidates.txt`.
+- Added `loopModeComboBox` (**Reset each lap** | **Continuous (ping-pong)** | **Continuous (wrap)**) beside **Loop first … s** in the recording playback bar ([mainwindow.ui](src/ui/mainwindow.ui), [mainwindow.cpp](src/ui/mainwindow.cpp)), enabled whenever **Loop first** is checked and the stream is stopped, with full Feature-24 tooltip / What's This help.
+
+### Verification & acceptance
+- Added `RecordingSourceTest::continuousPingPongLoopsSmoothlyWithoutDiscontinuity` (including non-uniform intervals, 2-frame, and 1-frame edge cases), `RecordingSourceTest::continuousWrapLoopsWithoutDiscontinuity`, and `SessionTest::continuousLoopPreservesDetectorHistoryAndAutoTune` (verifying detector warmup/reference continuity, ring buffer continuity, multi-lap Auto-Tune completion, and clip completion across a turnaround) in `tests/core_tests.cpp`.
+- Added `UiTest::recordingContinuousLoopControlsAndPlayback` in `tests/ui_tests.cpp`.
+- Updated `MANUAL.md` and `PROJECT_DESCRIPTION.md`.
+- Built and verified on `Debug-x64` across the full CTest suite (leaving `out\build\release` untouched during a live overnight sky session; Release build and desktop GUI E2E deferred until observing finishes).
