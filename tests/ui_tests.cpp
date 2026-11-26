@@ -3012,7 +3012,14 @@ void UiTest::timelapsePanelAndResharpenWorkflow()
         QCoreApplication::processEvents();
         QVERIFY(stackCombo->currentText().startsWith("[DROP] "));
 
-        // Expand stack inspector table and manually override a dropped row back to Keep.
+        // The full-height frames/stacks list on the left is visible by default,
+        // can be toggled with Inspect stacks, and supports manual keep/drop overrides.
+        QCOMPARE(applyBtn->text(), QString("Re-generate time-lapse"));
+        QVERIFY(!applyBtn->styleSheet().isEmpty());
+        QVERIFY(inspectBtn->isChecked());
+        QVERIFY(stackTable->isVisibleTo(&dlg));
+        inspectBtn->click();
+        QVERIFY(!stackTable->isVisibleTo(&dlg));
         inspectBtn->click();
         QVERIFY(stackTable->isVisibleTo(&dlg));
         QCOMPARE(stackTable->rowCount(), stackCombo->count());

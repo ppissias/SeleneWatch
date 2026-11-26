@@ -3,6 +3,7 @@
 #include "timelapse/stack_processor.h"
 #include "ui/preview_widget.h"
 #include "ui/widgets/control_help.h"
+#include "ui/widgets/theme.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -28,6 +29,7 @@
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QSplitter>
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
@@ -76,7 +78,7 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     setWindowTitle("Re-sharpen & rebuild time-lapse");
     setWindowFlags((windowFlags() & ~Qt::WindowContextHelpButtonHint) | Qt::WindowMinMaxButtonsHint);
     setSizeGripEnabled(true);
-    resize(1040, 740);
+    resize(1260, 780);
 
     auto* root = new QVBoxLayout(this);
 
@@ -98,10 +100,38 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     topRow->addWidget(browseBtn_);
     root->addLayout(topRow);
 
-    auto* mainRow = new QHBoxLayout();
+    auto* mainSplitter = new QSplitter(Qt::Horizontal, this);
+    mainSplitter->setObjectName("resharpenSplitter");
+    mainSplitter->setChildrenCollapsible(false);
 
-    // Left: synchronized full-resolution before / after previews with zoom & pan
-    auto* previewCol = new QVBoxLayout();
+    // Left: full-height stack/frame list for quick inspection and keep/drop overrides
+    stackListBox_ = new QGroupBox("Frames / stacks", mainSplitter);
+    stackListBox_->setObjectName("resharpenStackListBox");
+    stackListBox_->setMinimumWidth(240);
+    auto* stackListLay = new QVBoxLayout(stackListBox_);
+    stackListLay->setContentsMargins(6, 6, 6, 6);
+    stackTable_ = new QTableWidget(0, 5, stackListBox_);
+    stackTable_->setObjectName("resharpenStackTable");
+    stackTable_->setHorizontalHeaderLabels({"Keep", "Stack", "Quality", "Ref", "Status"});
+    stackTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    stackTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    stackTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    stackTable_->setAlternatingRowColors(true);
+    stackTable_->verticalHeader()->setVisible(false);
+    stackTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    stackTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    stackTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    stackTable_->setToolTip("Every stack in the session with its sharpness score and keep/drop status. Click or use "
+        "Up/Down arrow keys to inspect a frame in the Before/After preview, or tick/untick Keep to override the quality filter.");
+    stackListLay->addWidget(stackTable_);
+    mainSplitter->addWidget(stackListBox_);
+
+    // Center: synchronized full-resolution before / after previews with zoom & pan
+    auto* previewPane = new QWidget(mainSplitter);
+    auto* previewCol = new QVBoxLayout(previewPane);
+    previewCol->setContentsMargins(0, 0, 0, 0);
     auto* zoomRow = new QHBoxLayout();
     zoomRow->setContentsMargins(0, 0, 0, 0);
     zoomRow->setSpacing(4);
@@ -140,13 +170,13 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         return view;
     };
 
-    auto* beforeBox = new QGroupBox("Before (unsharpened)", this);
+    auto* beforeBox = new QGroupBox("Before (unsharpened)", previewPane);
     auto* beforeLay = new QVBoxLayout(beforeBox);
     beforeLay->setContentsMargins(4, 4, 4, 4);
     beforeView_ = makePreviewView(beforeBox, "resharpenBefore");
     beforeLay->addWidget(beforeView_);
 
-    afterBox_ = new QGroupBox("After (sharpened + tone preview)", this);
+    afterBox_ = new QGroupBox("After (sharpened + tone preview)", previewPane);
     auto* afterLay = new QVBoxLayout(afterBox_);
     afterLay->setContentsMargins(4, 4, 4, 4);
     afterView_ = makePreviewView(afterBox_, "resharpenAfter");
@@ -154,33 +184,10 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 
     previewCol->addWidget(beforeBox, 1);
     previewCol->addWidget(afterBox_, 1);
-
-    stackListBox_ = new QGroupBox("Stack quality filter inspector (click a stack to preview; tick/untick to override)", this);
-    stackListBox_->setObjectName("resharpenStackListBox");
-    auto* stackListLay = new QVBoxLayout(stackListBox_);
-    stackListLay->setContentsMargins(6, 6, 6, 6);
-    stackTable_ = new QTableWidget(0, 5, stackListBox_);
-    stackTable_->setObjectName("resharpenStackTable");
-    stackTable_->setHorizontalHeaderLabels({"Keep", "Stack", "Quality", "Reference", "Status"});
-    stackTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    stackTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    stackTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    stackTable_->verticalHeader()->setVisible(false);
-    stackTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    stackTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    stackTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    stackTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    stackTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    stackTable_->setMaximumHeight(175);
-    stackTable_->setToolTip("Every stack in the session with its sharpness score and keep/drop status. Click any row "
-        "to inspect that frame in the Before/After preview, or toggle Keep to manually override the quality filter.");
-    stackListLay->addWidget(stackTable_);
-    stackListBox_->hide();
-    previewCol->addWidget(stackListBox_);
-    mainRow->addLayout(previewCol, 3);
+    mainSplitter->addWidget(previewPane);
 
     // Right: controls (scrollable so everything stays accessible on compact displays)
-    auto* ctrlScroll = new QScrollArea(this);
+    auto* ctrlScroll = new QScrollArea(mainSplitter);
     ctrlScroll->setFrameShape(QFrame::NoFrame);
     ctrlScroll->setWidgetResizable(true);
     ctrlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -421,8 +428,8 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     inspectStacksBtn_->setObjectName("resharpenInspectStacks");
     inspectStacksBtn_->setText("Inspect stacks");
     inspectStacksBtn_->setCheckable(true);
-    inspectStacksBtn_->setToolTip("Show the full stack quality list so you can inspect dropped frames and manually "
-        "keep or drop individual stacks.");
+    inspectStacksBtn_->setChecked(true);
+    inspectStacksBtn_->setToolTip("Show or hide the full-height frames/stacks list on the left.");
     resetOverridesBtn_ = new QToolButton(videoBox);
     resetOverridesBtn_->setObjectName("resharpenResetOverrides");
     resetOverridesBtn_->setText("Reset");
@@ -490,8 +497,12 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
 
     ctrlCol->addStretch(1);
     ctrlScroll->setWidget(ctrlHost);
-    mainRow->addWidget(ctrlScroll, 2);
-    root->addLayout(mainRow, 1);
+    mainSplitter->addWidget(ctrlScroll);
+    mainSplitter->setStretchFactor(0, 1);
+    mainSplitter->setStretchFactor(1, 3);
+    mainSplitter->setStretchFactor(2, 2);
+    mainSplitter->setSizes({290, 600, 360});
+    root->addWidget(mainSplitter, 1);
 
     progressBar_ = new QProgressBar(this);
     progressBar_->setRange(0, 100);
@@ -502,8 +513,12 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
     root->addWidget(statusLabel_);
 
     auto* btnRow = new QHBoxLayout();
-    applyBtn_ = new QPushButton("Apply to all", this);
+    applyBtn_ = new QPushButton("Re-generate time-lapse", this);
     applyBtn_->setObjectName("resharpenApply");
+    applyBtn_->setAutoDefault(false);
+    applyBtn_->setMinimumHeight(30);
+    applyBtn_->setStyleSheet(primaryActionStyle(currentUiTheme()));
+    applyBtn_->setToolTip("Re-sharpen (and re-align, if selected) all kept stacks and generate the new time-lapse into a new folder.");
     cancelBtn_ = new QPushButton("Cancel", this);
     cancelBtn_->setEnabled(false);
     openDirBtn_ = new QPushButton("Open output folder", this);
@@ -623,6 +638,11 @@ ResharpenDialog::ResharpenDialog(QString timelapsesRoot, const QString& initialS
         refreshQualityFilter();
     });
     connect(stackTable_, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (row >= 0 && row < stackCombo_->count() && stackCombo_->currentIndex() != row)
+            stackCombo_->setCurrentIndex(row);
+    });
+    connect(stackTable_, &QTableWidget::currentCellChanged, this, [this](int row, int, int, int) {
+        if (updatingTable_) return;
         if (row >= 0 && row < stackCombo_->count() && stackCombo_->currentIndex() != row)
             stackCombo_->setCurrentIndex(row);
     });

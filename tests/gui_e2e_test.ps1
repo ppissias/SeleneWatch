@@ -643,7 +643,7 @@ try {
 
     $applyBtn = Find-UiaElement -Root $dlg -IdSuffix "resharpenApply"
     $statusLbl = Find-UiaElement -Root $dlg -IdSuffix "resharpenStatus"
-    Invoke-UiaClick $applyBtn "Apply to all"
+    Invoke-UiaClick $applyBtn "Re-generate time-lapse"
     Wait-Until { $statusLbl.Current.Name -like "Done:*" } "Re-sharpen finished" -TimeoutMs 25000
     Write-Host "  Re-sharpen: $($statusLbl.Current.Name)"
     $reDirs = @(Get-ChildItem -Path $sessionDir -Directory -Filter "sharpened_*")
