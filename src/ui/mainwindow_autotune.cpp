@@ -452,7 +452,7 @@ void MainWindow::refineCameraGain(const TuneWatchStatus& status, const QString& 
             compared << QString("gain=%1 level=%2% black=%3% noise=%4% snr=%5").arg(c.gain, 0, 'g', 6)
                 .arg(100 * c.level, 0, 'f', 2).arg(100 * c.black, 0, 'f', 2).arg(100 * c.noise, 0, 'f', 3)
                 .arg(c.signalToNoise(), 0, 'f', 1);
-        session_->logRecord(QString("%1 autotune_gain_choice target=%2 exposure_ms=%3 gain=%4 compared=\"%5\"\n")
+        session_->logAutoTune(QString("%1 autotune_gain_choice target=%2 exposure_ms=%3 gain=%4 compared=\"%5\"\n")
             .arg(utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon")
             .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(gain, 0, 'g', 6).arg(compared.join("; ")));
         tuneResult_ = "Tuned in %1: in the aim, at the gain with the faintest threshold. Go on to step 2.";
@@ -481,7 +481,7 @@ void MainWindow::leaveRefining()
     const TuneCamera camera = tuneCamera();
     if (camera.exposure && camera.exposure->value != tuneExposureUs_) controls->setControlValue(kExposureControl, tuneExposureUs_);
     if (camera.gain && camera.gain->value != tuneReachedGain_) controls->setControlValue(kGainControl, tuneReachedGain_);
-    session_->logRecord(QString("%1 autotune_camera target=%2 stage=stopped applied=\"Exposure=%3 ms; Gain=%4\"\n")
+    session_->logAutoTune(QString("%1 autotune_camera target=%2 stage=stopped applied=\"Exposure=%3 ms; Gain=%4\"\n")
         .arg(utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon")
         .arg(tuneExposureUs_ / 1000, 0, 'g', 6).arg(tuneReachedGain_, 0, 'g', 6));
 }
@@ -540,7 +540,7 @@ void MainWindow::setCameraLive(double exposureUs, double gain, const QString& re
         changed |= controls->setControlValue(kGainControl, gain);
         applied << QString("Gain=%1").arg(gain, 0, 'g', 6);
     }
-    session_->logRecord(QString("%1 autotune_camera target=%2 %3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
+    session_->logAutoTune(QString("%1 autotune_camera target=%2 %3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
         target() == Target::Sky ? "sky" : "moon", record, applied.join("; ")));
     if (!changed)
     {
@@ -589,7 +589,7 @@ void MainWindow::restoreAutoTuneCamera()
         controls->setControlValue(kGainControl, tuneRestore_->gain->value);
         applied << QString("Gain=%1").arg(tuneRestore_->gain->value, 0, 'g', 6);
     }
-    session_->logRecord(QString("%1 autotune_camera target=%2 restore=yes applied=\"%3\"\n").arg(
+    session_->logAutoTune(QString("%1 autotune_camera target=%2 restore=yes applied=\"%3\"\n").arg(
         utcText(std::chrono::system_clock::now()), target() == Target::Sky ? "sky" : "moon", applied.join("; ")));
     tuneRestore_.reset();
     tuneHistory_.clear();
@@ -650,7 +650,7 @@ void MainWindow::applyAutoTuneCamera()
     }
     const QString measured = tuneHistory_.empty() ? QString()
         : QString(" measured_level=%1%").arg(100 * tuneHistory_.back().brightness.level, 0, 'f', 2);
-    session_->logRecord(QString("%1 autotune_camera target=%2%3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
+    session_->logAutoTune(QString("%1 autotune_camera target=%2%3 applied=\"%4\"\n").arg(utcText(std::chrono::system_clock::now()),
         target() == Target::Sky ? "sky" : "moon", measured, applied.join("; ")));
     if (cameraChanged)
     {
@@ -681,7 +681,7 @@ void MainWindow::onCameraReadbackForAutoTune()
     {
         tuneReadbackTimer_->stop();
         const StreamInfo info = session_->streamInfo();
-        session_->logRecord(QString("%1 autotune_readback exposure=\"%2\" gain=\"%3\" offset=\"%4\"\n")
+        session_->logAutoTune(QString("%1 autotune_readback exposure=\"%2\" gain=\"%3\" offset=\"%4\"\n")
             .arg(utcText(std::chrono::system_clock::now()), QString::fromStdString(info.exposure),
                 QString::fromStdString(info.gain), QString::fromStdString(info.offset)));
         tunePhase_ = TunePhase::Idle;
@@ -772,7 +772,7 @@ void MainWindow::applyAutoTuneK()
         return;
     }
     const double before = detectionPanel_->settings().sigma;
-    session_->logRecord(QString("%1 autotune_k target=%2 k_from=%3 k_to=%4 %5\n").arg(utcText(std::chrono::system_clock::now()),
+    session_->logAutoTune(QString("%1 autotune_k target=%2 k_from=%3 k_to=%4 %5\n").arg(utcText(std::chrono::system_clock::now()),
         target() == Target::Sky ? "sky" : "moon").arg(before, 0, 'f', 1).arg(*k, 0, 'f', 1).arg(autoTunePanel_->kRecord()));
     DetectionSettings settings = detectionPanel_->settings();
     settings.sigma = *k;
@@ -996,7 +996,7 @@ void MainWindow::applyAutoTuneMinPatch()
     DetectionSettings settings = detectionPanel_->settings();
     const int before = settings.minPixels;
     const FlashWidth width = tuneFlashWidth();
-    session_->logRecord(QString("%1 autotune_min_patch target=moon k=%2 min_from=%3 min_to=%4 flash_width_px=%5 "
+    session_->logAutoTune(QString("%1 autotune_min_patch target=moon k=%2 min_from=%3 min_to=%4 flash_width_px=%5 "
         "flash_width_from=%6 %7\n").arg(utcText(std::chrono::system_clock::now())).arg(settings.sigma, 0, 'f', 1).arg(before)
         .arg(*minPixels).arg(width.pixels, 0, 'f', 1).arg(width.fromSeeing ? "seeing" : "test_flash")
         .arg(autoTunePanel_->minPatchRecord()));

@@ -1572,13 +1572,9 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QVERIFY(gainBox->value() > gainBefore);
     // The loop owns exposure and gain: no rows for them are left to apply.
     QVERIFY(!panel->findChild<QCheckBox*>(QString("autoTuneRow%1").arg(static_cast<int>(TuneRow::Kind::Gain))));
-    const QString log = eventsFolder(dir.path(), Target::Sky) + "/candidates.txt";
-    QTRY_VERIFY_WITH_TIMEOUT(text(log).contains(" autotune_camera target=sky round=1 measured_level="), 3000);
-    QVERIFY(text(log).contains(" autotune_readback exposure="));
-    // The choice is logged with what was compared, and is the camera's gain now.
-    const QString choice = text(log).section(" autotune_gain_choice ", 1).section('\n', 0, 0);
-    QVERIFY2(choice.startsWith("target=sky exposure_ms=40 gain=") && choice.contains(" snr="), qPrintable(choice));
-    QCOMPARE(gainBox->value(), choice.section("gain=", 1).section(' ', 0, 0).toDouble());
+    // Preview auto-tune never writes top-level .txt files outside a session folder;
+    // its log is flushed into <session>/autotune.txt when Monitoring begins.
+    QVERIFY(QDir(eventsFolder(dir.path(), Target::Sky)).entryList({"*.txt"}, QDir::Files).isEmpty());
     QVERIFY(restore->isEnabled());
 
     // Step 2: the K watch, shortened for the test.
@@ -1609,7 +1605,6 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QTRY_VERIFY_WITH_TIMEOUT(applyK->isEnabled(), 15000);
     applyK->click();
     QCOMPARE(window.findChild<QDoubleSpinBox*>("detectionSigma")->value(), 5.0);
-    QVERIFY(text(log).contains(" autotune_k target=sky k_from=6.0 k_to=5.0 k_tested=\""));
 
     // The flash check, with the testing tools: a 100 ADU flash on a flat sky is caught.
     auto* check = panel->findChild<QPushButton*>("autoTuneCheckFlash");
@@ -1623,7 +1618,6 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     restore->click();
     QCOMPARE(exposureBox->value(), exposureBefore);
     QCOMPARE(gainBox->value(), gainBefore);
-    QVERIFY(text(log).contains(" autotune_camera target=sky restore=yes applied=\""));
     QTRY_VERIFY_WITH_TIMEOUT(!restore->isEnabled() && tune->isEnabled(), 5000);
 
     // During a recording, no camera change and no test flash.
@@ -1631,10 +1625,22 @@ void UiTest::autoTuneTunesTheCameraLiveThenWatchesK()
     QTRY_VERIFY_WITH_TIMEOUT(!check->isEnabled(), 3000);
     window.findChild<QPushButton*>("recordButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(check->isEnabled(), 3000);
-    // Monitoring: auto-tune waits for Preview.
+    // Still no top-level .txt files outside a monitoring session.
+    QVERIFY(QDir(eventsFolder(dir.path(), Target::Sky)).entryList({"*.txt"}, QDir::Files).isEmpty());
+    // Monitoring: auto-tune waits for Preview, and its Preview log is flushed into <watch>/autotune.txt.
     window.findChild<QPushButton*>("monitoringButton")->click();
     QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 5000);
     QVERIFY(!watch->isEnabled() && !tune->isEnabled());
+    const QString watchDir = latestWatch(eventsFolder(dir.path(), Target::Sky));
+    QVERIFY(!watchDir.isEmpty());
+    const QString log = watchDir + "/autotune.txt";
+    QTRY_VERIFY_WITH_TIMEOUT(text(log).contains(" autotune_camera target=sky round=1 measured_level="), 3000);
+    QVERIFY(text(log).contains(" autotune_readback exposure="));
+    const QString choice = text(log).section(" autotune_gain_choice ", 1).section('\n', 0, 0);
+    QVERIFY2(choice.startsWith("target=sky exposure_ms=40 gain=") && choice.contains(" snr="), qPrintable(choice));
+    QVERIFY(text(log).contains(" autotune_k target=sky k_from=6.0 k_to=5.0 k_tested=\""));
+    QVERIFY(text(log).contains(" autotune_camera target=sky restore=yes applied=\""));
+    QVERIFY(QDir(eventsFolder(dir.path(), Target::Sky)).entryList({"*.txt"}, QDir::Files).isEmpty());
     window.findChild<QPushButton*>("stopButton")->click();
 }
 
@@ -1708,8 +1714,17 @@ void UiTest::autoTuneSuggestsTheMinimumPatchForFlashes()
     QVERIFY(apply->isEnabled());
     apply->click();
     QCOMPARE(window.findChild<QSpinBox*>("detectionMinPixels")->value(), 3);
-    QTRY_VERIFY_WITH_TIMEOUT(text(eventsFolder(dir.path(), Target::Moon) + "/candidates.txt").contains(
+    // No top-level .txt files in events/moon during Preview; flushed to <watch>/autotune.txt on Monitoring.
+    QVERIFY(QDir(eventsFolder(dir.path(), Target::Moon)).entryList({"*.txt"}, QDir::Files).isEmpty());
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("MONITORING"), 5000);
+    const QString moonWatch = latestWatch(eventsFolder(dir.path(), Target::Moon));
+    QVERIFY(!moonWatch.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(text(moonWatch + "/autotune.txt").contains(
         " autotune_min_patch target=moon k=6.0 min_from=8 min_to=3 "), 3000);
+    QVERIFY(QDir(eventsFolder(dir.path(), Target::Moon)).entryList({"*.txt"}, QDir::Files).isEmpty());
+    window.findChild<QPushButton*>("monitoringButton")->click();
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QLabel*>("captureModeLabel")->text().contains("PREVIEW"), 5000);
     // With only the focal length, the camera's pixel size gives the scale:
     // 3.75 µm at 1000 mm is 0.77″ per pixel, so 2.5″ seeing is 3.2 px.
     ObservingSite focalOnly;

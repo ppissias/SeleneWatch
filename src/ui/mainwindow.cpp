@@ -1201,13 +1201,13 @@ void MainWindow::checkSkyExposure(std::chrono::steady_clock::time_point now)
     if (!change) return;
     controls->setControlValue(kExposure, change->exposureUs);
     if (gain) controls->setControlValue(kGain, change->gain);
-    session_->logRecord(QString("%1 exposure_change exposure_ms=%2 to %3 gain=%4 to %5 reason=\"%6\"\n")
-        .arg(utcText(std::chrono::system_clock::now())).arg(*exposure / 1000, 0, 'g', 6).arg(change->exposureUs / 1000, 0, 'g', 6)
-        .arg(gain.value_or(0), 0, 'g', 6).arg(change->gain, 0, 'g', 6).arg(QString::fromStdString(change->reason)));
     showMessage(QString("The exposure follows the sky: %1 ms, gain %2 (%3).")
         .arg(change->exposureUs / 1000, 0, 'g', 4).arg(change->gain, 0, 'f', 0).arg(QString::fromStdString(change->reason)), 8000);
     if (session_->mode() == Session::Mode::Monitoring)
     {
+        session_->logRecord(QString("%1 exposure_change exposure_ms=%2 to %3 gain=%4 to %5 reason=\"%6\"\n")
+            .arg(utcText(std::chrono::system_clock::now())).arg(*exposure / 1000, 0, 'g', 6).arg(change->exposureUs / 1000, 0, 'g', 6)
+            .arg(gain.value_or(0), 0, 'g', 6).arg(change->gain, 0, 'g', 6).arg(QString::fromStdString(change->reason)));
         // A camera's settings are fixed while Monitoring: the clip in hand is
         // written and Monitoring starts again, with the new settings read back.
         bufferReadoutTimer_->stop();

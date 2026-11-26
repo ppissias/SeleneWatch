@@ -16,6 +16,36 @@
 #include <utility>
 #include <stdexcept>
 
+namespace {
+
+// Plain-text summary of the active detector (and optionally capture) settings
+// written to session.txt on monitoring_start and on mid-watch changes.
+QString detectorConfigLine(const char* kind, const DetectionSettings& d, const CaptureSettings* c)
+{
+    QString line = utcText(std::chrono::system_clock::now()) + " " + kind
+        + QString(" sigma=%1 min_pixels=%2 max_pixels=%3 one_frame=%4 ref_s=%5 min_noise_adu=%6 max_box_ratio=%7")
+              .arg(d.sigma, 0, 'g', 6).arg(d.minPixels).arg(d.maxPixels).arg(d.oneFrame ? "yes" : "no")
+              .arg(d.referenceTimeConstantSeconds, 0, 'g', 6).arg(d.minNoiseAdu, 0, 'g', 6)
+              .arg(d.maxPatchBoxRatio, 0, 'g', 6);
+    if (d.darkening)
+        line += QString(" darkening=yes max_dark_pixels=%1 max_dark_box_ratio=%2")
+                    .arg(d.maxDarkPixels).arg(d.maxDarkBoxRatio, 0, 'g', 6);
+    else
+        line += " darkening=no";
+    if (d.brighteningShare > 0) line += QString(" brightening_share=%1").arg(d.brighteningShare, 0, 'g', 6);
+    if (d.darkeningShare > 0) line += QString(" darkening_share=%1").arg(d.darkeningShare, 0, 'g', 6);
+    if (d.releaseSeconds > 0) line += QString(" release_s=%1").arg(d.releaseSeconds, 0, 'g', 6);
+    if (d.ignoreAboveShare > 0) line += QString(" ignore_above_share=%1").arg(d.ignoreAboveShare, 0, 'g', 6);
+    if (!d.mask.empty()) line += QString(" mask_shapes=%1").arg(d.mask.count());
+    if (d.stabilizeDetection) line += " stabilize=yes";
+    if (c)
+        line += QString(" history_s=%1 post_s=%2 max_post_s=%3")
+                    .arg(c->historySeconds, 0, 'g', 6).arg(c->postSeconds, 0, 'g', 6).arg(c->maxPostSeconds, 0, 'g', 6);
+    return line + "\n";
+}
+
+} // namespace
+
 Session::Session(QObject* context, QString outputRoot, Notifications notifications)
     : context_(context)
     , notifications_(std::move(notifications))
@@ -66,7 +96,7 @@ Session::Session(QObject* context, QString outputRoot, Notifications notificatio
           addToRecord(watchFolder, "session.txt", QString("%1 timelapse_stop frames=%2 skipped=%3 video=%4 reason=\"%5\"%6\n")
               .arg(utcText(std::chrono::system_clock::now())).arg(status.frames).arg(status.skipped)
               .arg(status.videoPath.isEmpty() ? "none" : "timelapse/timelapse.mp4", status.endReason,
-                  status.problem.isEmpty() ? QString() : " problem=\"" + status.problem + "\""), false);
+                  status.problem.isEmpty() ? QString() : " problem=\"" + status.problem + "\""), true);
           if (auto ended = notifications_.watchTimelapseEnded) post([ended, status] { ended(status); });
       })
 {
@@ -120,15 +150,37 @@ bool Session::openWatch(QString& error)
     writer_.setOutputRoot(watchFolder_, true);
     watchIntervalOpen_ = true;
     watchStart_ = std::chrono::steady_clock::now();
+    watchFrames_ = 0;
+    watchFrameGaps_ = 0;
+    watchHasFrameIndex_ = false;
+    watchLastFrameIndex_ = 0;
+    watchSourceDropsStart_.reset();
+    watchSourceDropsLast_.reset();
+    watchStabActiveFrames_ = 0;
+    watchStabFallbackFrames_ = 0;
     Watch watch;
     double timelapseSeconds = 0;
+    DetectionSettings initialDetection;
+    QString pendingAutoTune;
     {
         std::lock_guard lock(requestMutex_);
         watch = watch_;
         timelapseSeconds = watchTimelapseSeconds_;
+        initialDetection = detectionSettings_;
+        if (pendingAutoTuneTarget_ == captureSettings_.target && !pendingAutoTune_.isEmpty())
+        {
+            pendingAutoTune = pendingAutoTune_.join(QString());
+            pendingAutoTune_.clear();
+        }
     }
+    watchLoggedDetection_ = initialDetection;
+    watchDetectionLogged_ = true;
     writer_.logRecord(utcText(std::chrono::system_clock::now()) + " monitoring_start target="
         + targetName(captureSettings_.target) + " watch=" + watchName(watch) + "\n", watchFolder_, "session.txt");
+    writer_.logRecord(detectorConfigLine("detector_config", initialDetection, &captureSettings_), watchFolder_, "session.txt");
+    if (!pendingAutoTune.isEmpty())
+        writer_.logRecord(pendingAutoTune, watchFolder_, "autotune.txt");
+    guider_.requestWatchSnapshot();
     // Feature-36: one time-lapse per watch folder, across its restarts.
     if (newFolder && timelapseSeconds > 0)
     {
@@ -146,9 +198,19 @@ void Session::closeWatch(const QString& reason, bool resume)
     if (watchIntervalOpen_)
     {
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - watchStart_).count();
-        writer_.logRecord(utcText(std::chrono::system_clock::now()) + " monitoring_stop seconds="
-            + QString::number(seconds, 'f', 3) + " reason=" + reason + "\n", watchFolder_, "session.txt");
+        const double fps = seconds > 0.0 ? static_cast<double>(watchFrames_) / seconds : 0.0;
+        QString stopLine = utcText(std::chrono::system_clock::now()) + " monitoring_stop seconds="
+            + QString::number(seconds, 'f', 3)
+            + QString(" frames=%1 fps=%2 frame_gaps=%3").arg(watchFrames_).arg(fps, 0, 'f', 2).arg(watchFrameGaps_);
+        if (watchSourceDropsStart_ && watchSourceDropsLast_ && *watchSourceDropsLast_ >= *watchSourceDropsStart_)
+            stopLine += QString(" source_drops=%1").arg(*watchSourceDropsLast_ - *watchSourceDropsStart_);
+        if (watchStabActiveFrames_ > 0 || watchStabFallbackFrames_ > 0)
+            stopLine += QString(" stab_active=%1 stab_fallback=%2").arg(watchStabActiveFrames_).arg(watchStabFallbackFrames_);
+        // reason= must stay last because a reason contains spaces.
+        stopLine += " reason=" + reason + "\n";
+        writer_.logRecord(stopLine, watchFolder_, "session.txt");
         watchIntervalOpen_ = false;
+        watchDetectionLogged_ = false;
     }
     if (resume) return;
     skyTimelapse_.finish(reason);
@@ -428,9 +490,37 @@ void Session::setSource(std::unique_ptr<FrameSource> source)
     source_ = std::move(source);
 }
 
+void Session::logRecord(const QString& lines)
+{
+    if (mode_.load() != Mode::Monitoring || lines.isEmpty()) return;
+    writer_.logRecord(lines);
+}
+
+void Session::logAutoTune(const QString& lines)
+{
+    if (lines.isEmpty()) return;
+    std::lock_guard lock(requestMutex_);
+    if (pendingAutoTuneTarget_ != captureSettings_.target)
+    {
+        pendingAutoTune_.clear();
+        pendingAutoTuneTarget_ = captureSettings_.target;
+    }
+    constexpr qsizetype kMaxPendingLines = 500;
+    if (pendingAutoTune_.size() >= kMaxPendingLines) pendingAutoTune_.pop_front();
+    pendingAutoTune_.append(lines);
+}
+
 void Session::setCaptureSettings(CaptureSettings settings)
 {
     if (running_ || !settings.valid()) throw std::invalid_argument("capture settings must be valid and changed while stopped");
+    {
+        std::lock_guard lock(requestMutex_);
+        if (pendingAutoTuneTarget_ != settings.target)
+        {
+            pendingAutoTune_.clear();
+            pendingAutoTuneTarget_ = settings.target;
+        }
+    }
     captureSettings_ = settings;
     writer_.setOutputRoot(::eventsFolder(outputRoot_, captureSettings_.target));
 }
@@ -602,6 +692,11 @@ bool Session::applyPreviewWatch()
         // until those readers drain if the observer chose a lower ceiling.
         if (captureSettings_.memoryBytes != next.capture.memoryBytes && !memory_.setLimit(next.capture.memoryBytes))
             return false;
+        if (captureSettings_.target != next.capture.target)
+        {
+            pendingAutoTune_.clear();
+            pendingAutoTuneTarget_ = next.capture.target;
+        }
         captureSettings_ = next.capture;
         watch_ = next.watch;
         detectionSettings_ = next.detection;
@@ -1159,9 +1254,35 @@ void Session::onFrame(std::shared_ptr<Frame> frame)
     const bool previewDue = now - lastPreviewTime_ >= std::chrono::milliseconds{50};
     display.makeMap = previewDue;
     capture_.setDetectionSettings(settings);
+    const bool monitoring = mode_.load() == Mode::Monitoring;
+    if (monitoring)
+    {
+        ++watchFrames_;
+        if (watchHasFrameIndex_ && published->frameIndex > watchLastFrameIndex_ + 1)
+            watchFrameGaps_ += published->frameIndex - watchLastFrameIndex_ - 1;
+        watchLastFrameIndex_ = published->frameIndex;
+        watchHasFrameIndex_ = true;
+        if (published->sourceDroppedFrames)
+        {
+            if (!watchSourceDropsStart_) watchSourceDropsStart_ = *published->sourceDroppedFrames;
+            watchSourceDropsLast_ = *published->sourceDroppedFrames;
+        }
+        if (watchDetectionLogged_ && settings != watchLoggedDetection_ && !watchFolder_.isEmpty())
+        {
+            writer_.logRecord(detectorConfigLine("detector_change", settings, nullptr), watchFolder_, "session.txt");
+            watchLoggedDetection_ = settings;
+        }
+    }
     const bool stabilizeNow = !settling && settings.stabilizeDetection && captureSettings_.target != Target::Sky;
     const FrameShift shift = stepStabilizer(*published, stabilizeNow,
-        mode_.load() == Mode::Monitoring ? watchFolder_ : QString());
+        monitoring ? watchFolder_ : QString());
+    if (monitoring && stabilizeNow)
+    {
+        if (stabilizer_.state() == StabilizationState::Locked || stabilizer_.state() == StabilizationState::GraceHold)
+            ++watchStabActiveFrames_;
+        else
+            ++watchStabFallbackFrames_;
+    }
     capture_.onFrame(published, display, shift);
     // Feature-26: auto-tune measures after the live detector learned from the frame.
     if (tuneWatch_.busy())

@@ -223,6 +223,15 @@ void Guider::endGuiding(std::string reason)
     wake_.notify_one();
 }
 
+void Guider::requestWatchSnapshot()
+{
+    {
+        std::lock_guard lock(mutex_);
+        requests_.watchSnapshot = true;
+    }
+    wake_.notify_one();
+}
+
 GuiderStatus Guider::status() const
 {
     notifyPending_.store(false);
@@ -447,6 +456,18 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
         maxPulseMs_ = *requests.maxPulseMs;
         if (controller_) controller_->setMaxPulseMs(maxPulseMs_);
     }
+    if (requests.watchSnapshot && (mount_ || tracker_.status().state != LockState::Off))
+    {
+        QString line = hostTime() + " guide_config mount=" + quotedText(mount_ ? mount_->name() : std::string("none"))
+            + QString(" calibrated=%1").arg(calibration_ ? "yes" : "no");
+        if (calibration_)
+            line += " west_px_per_s=" + vectorText(calibration_->west, 1000, 3)
+                + " north_px_per_s=" + vectorText(calibration_->north, 1000, 3);
+        line += QString(" tolerance_px=%1 give_up_px=%2 gain=%3 max_pulse_ms=%4 settle_s=%5\n")
+            .arg(tolerance_, 0, 'f', 1).arg(giveUpTolerance_, 0, 'f', 1)
+            .arg(gain_, 0, 'g', 4).arg(maxPulseMs_).arg(GuideController::Settings{}.settleSeconds, 0, 'g', 4);
+        writer_.logGuiding(line);
+    }
     if (requests.guide && !*requests.guide) stopActivity("Guiding stopped by the observer.", recording);
 
     const bool wantsCalibration = requests.calibrate;
@@ -512,10 +533,11 @@ void Guider::handleMountRequests(Requests& requests, bool recording)
     message_.clear();
     pulses_ = 0;
     lastPulse_.reset();
-    log(hostTime() + QString(" guide_start tolerance_px=%1 speed_px_per_frame=%2 gain=%3 max_pulse_ms=%4 settle_s=%5\n")
-                         .arg(tolerance_, 0, 'f', 1)
-                         .arg(GuideController::guideSpeedPixelsPerFrame(*calibration_, frameInterval_), 0, 'f', 3)
-                         .arg(settings.gain).arg(settings.maxPulseMs).arg(settings.settleSeconds),
+    log(hostTime() + " guide_start mount=" + quotedText(mount_->name())
+            + QString(" tolerance_px=%1 give_up_px=%2 speed_px_per_frame=%3 gain=%4 max_pulse_ms=%5 settle_s=%6\n")
+                  .arg(tolerance_, 0, 'f', 1).arg(giveUpTolerance_, 0, 'f', 1)
+                  .arg(GuideController::guideSpeedPixelsPerFrame(*calibration_, frameInterval_), 0, 'f', 3)
+                  .arg(settings.gain).arg(settings.maxPulseMs).arg(settings.settleSeconds),
         recording);
 }
 
@@ -637,7 +659,7 @@ void Guider::run(std::stop_token stopToken)
                 return pending_ != nullptr || requests_.unlock || requests_.discontinuity || requests_.connect
                     || requests_.disconnect || requests_.calibrate || requests_.guide || requests_.tolerance
                     || requests_.giveUpTolerance || requests_.gain || requests_.maxPulseMs || requests_.end
-                    || requests_.lostAfter || requests_.stopTracking;
+                    || requests_.lostAfter || requests_.stopTracking || requests_.watchSnapshot;
             };
             // With a mount, the guider also wakes to follow pulses and read the mount's state.
             if (mount_) wake_.wait_for(lock, stopToken, std::chrono::milliseconds{100}, ready);
@@ -660,6 +682,7 @@ void Guider::run(std::stop_token stopToken)
             requests.end = std::exchange(requests_.end, std::nullopt);
             requests.lostAfter = std::exchange(requests_.lostAfter, std::nullopt);
             requests.stopTracking = std::exchange(requests_.stopTracking, false);
+            requests.watchSnapshot = std::exchange(requests_.watchSnapshot, false);
         }
 
         const LockStatus before = tracker_.status();

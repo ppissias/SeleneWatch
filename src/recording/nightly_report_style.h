@@ -24,6 +24,19 @@ section{padding:30px 0;border-bottom:1px solid var(--line);scroll-margin:15px}.r
 .badge.brief,.ruler a.brief{background:#ffd166}.badge.moving,.ruler a.moving{background:#8fb3c4}.badge.wide,.ruler a.wide{background:#f78c6b}.badge.other,.ruler a.other{background:#c5b3e6}
 .groupBlock{margin:28px 0 8px;scroll-margin:15px}.groupTitle{font-size:1.2rem;margin:0 0 2px}.facts{margin:8px 0;font-size:.92rem}
 ol.clips{padding-left:20px;margin:6px 0}ol.clips>li{margin:10px 0;padding-top:8px;border-top:1px solid var(--line);font-size:.9rem}
+.configGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
+.configCard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.configCard h3{margin:0 0 10px;font-size:.98rem;color:var(--accent)}
+.kv{width:100%;border-collapse:collapse;font-size:.86rem}
+.kv th{text-align:left;color:var(--muted);font-weight:500;padding:4px 10px 4px 0;vertical-align:top;white-space:nowrap}
+.kv td{color:var(--ink);padding:4px 0;overflow-wrap:anywhere}
+.kv tr+tr th,.kv tr+tr td{border-top:1px solid rgba(52,73,84,.55)}
+.warn{color:#f78c6b;font-weight:600}
+.guideChart{background:#0c141d;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:16px 0 8px}
+.guideChart svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);margin-top:8px;align-items:center}
+.swatch{display:inline-block;width:12px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.swatch.box{height:10px;width:10px;border-radius:2px}
 </style>)HTML";
 
 constexpr auto reportScript = R"HTML(<script>

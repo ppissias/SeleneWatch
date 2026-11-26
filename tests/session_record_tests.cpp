@@ -14,10 +14,12 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QTimeZone>
 #include <QtGui/QGuiApplication>
 #include <QtTest/QTest>
 
 #include <atomic>
+#include <cmath>
 #include <filesystem>
 #include <random>
 #include <thread>
@@ -171,6 +173,7 @@ private slots:
     void previewRecordingWithFrameLimitWritesExactFramesWithoutCandidates();
     void outputPathsAndValidationSeparateModesAndDetectIssues();
     void nightlyReportIncludesInlineAnimatedGifControls();
+    void nightlyReportShowsSetupStreamHealthTimelapseAndMultiHourGuiding();
 };
 
 // Done-when items 1 and 2: by frame time, on a played file, with a clip in it.
@@ -671,6 +674,132 @@ void SessionRecordTest::nightlyReportIncludesInlineAnimatedGifControls()
         const QString reportHtml = contents(p);
         QVERIFY2(reportHtml.contains(expectedHeading), qPrintable(reportHtml));
     }
+}
+
+void SessionRecordTest::nightlyReportShowsSetupStreamHealthTimelapseAndMultiHourGuiding()
+{
+    QTemporaryDir dir;
+    const QString watchDir = QDir(dir.path()).filePath("events/moon/session-20261126-010000-000");
+    QVERIFY(QDir().mkpath(watchDir + "/timelapse"));
+
+    // 0-clip watch: detector config, camera/optics, timing, stream health,
+    // multi-hour guiding (~7 hours / 25,200 1 Hz lines), timelapse and autotune.
+    {
+        QFile cand(QDir(watchDir).filePath("candidates.txt"));
+        QVERIFY(cand.open(QIODevice::WriteOnly | QIODevice::Text));
+        cand.write(
+            "2026-11-26T01:00:00.000Z session_start camera=\"ASI678MM\" sensor_adc_bits=\"12\" "
+            "sdk=\"1.35\" serial=\"abc\" exposure=\"20 ms\" gain=\"150\" offset=\"10\" binning=\"1\" roi=\"1920x1080\" "
+            "sample_layout=\"Raw16\" usb_bandwidth=\"80\" high_speed=\"on\" frame_time=\"host UTC\" frame_index=\"source\" "
+            "observer=\"Test Observer\" site=\"Test Site\" telescope=\"C11\" aperture_mm=279 focal_length_mm=2800 "
+            "pixel_size_um=2.00 image_scale_arcsec_per_pixel=0.147 software=\"SeleneWatch 2026.11-01\" "
+            "testing_tools=\"off\" clock_check=\"NTP +1.2 ms\" source=\"ZWO ASI678MM\"\n");
+    }
+    {
+        QFile sess(QDir(watchDir).filePath("session.txt"));
+        QVERIFY(sess.open(QIODevice::WriteOnly | QIODevice::Text));
+        sess.write(
+            "2026-11-26T01:00:00.000Z monitoring_start target=moon watch=moon_flashes\n"
+            "2026-11-26T01:00:00.001Z detector_config sigma=6.5 min_pixels=4 max_pixels=400 one_frame=no "
+            "ref_s=2.5 min_noise_adu=2 max_box_ratio=0.35 darkening=no ignore_above_share=0.55 mask_shapes=2 "
+            "stabilize=yes history_s=5 post_s=3 max_post_s=10\n"
+            "2026-11-26T02:30:00.000Z detector_change sigma=7.0 min_pixels=5 max_pixels=400 one_frame=no "
+            "ref_s=2.5 min_noise_adu=2 max_box_ratio=0.35 darkening=no stabilize=yes\n"
+            "2026-11-26T01:00:00.002Z timelapse_start interval_s=30 folder=timelapse\n"
+            "2026-11-26T08:00:00.000Z timelapse_stop frames=840 skipped=2 video=timelapse/timelapse.mp4 reason=\"monitoring stopped\"\n"
+            "2026-11-26T08:00:00.000Z monitoring_stop seconds=25200.000 frames=755990 fps=30.00 frame_gaps=10 source_drops=3 "
+            "stab_active=755000 stab_fallback=990 reason=monitoring stopped\n");
+    }
+    {
+        QFile tlVideo(QDir(watchDir).filePath("timelapse/timelapse.mp4"));
+        QVERIFY(tlVideo.open(QIODevice::WriteOnly));
+        tlVideo.write("MP4");
+        QFile tlMeta(QDir(watchDir).filePath("timelapse/timelapse.txt"));
+        QVERIFY(tlMeta.open(QIODevice::WriteOnly | QIODevice::Text));
+        tlMeta.write("frames: 840\n");
+        QFile at(QDir(watchDir).filePath("autotune.txt"));
+        QVERIFY(at.open(QIODevice::WriteOnly | QIODevice::Text));
+        at.write("2026-11-26T00:55:00.000Z autotune_k target=moon k_from=6.0 k_to=6.5\n");
+    }
+    // 7-hour guiding.txt at 1 Hz (25,200 offset lines) with a brief lock loss and guide pulses.
+    {
+        QFile gf(QDir(watchDir).filePath("guiding.txt"));
+        QVERIFY(gf.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream out(&gf);
+        out << "2026-11-26T01:00:00.000Z guide_config mount=\"ASCOM EQMod\" calibrated=yes "
+               "west_px_per_s=12.500,-0.400 north_px_per_s=0.300,12.200 tolerance_px=8.0 give_up_px=30.0 "
+               "gain=0.7 max_pulse_ms=1000 settle_s=0.5\n";
+        const qint64 baseMs = QDateTime::fromString("2026-11-26T01:00:00.000Z", Qt::ISODateWithMs).toMSecsSinceEpoch();
+        for (int s = 0; s < 25200; ++s)
+        {
+            const QString ts = QDateTime::fromMSecsSinceEpoch(baseMs + int64_t{s} * 1000, QTimeZone::utc()).toString(Qt::ISODateWithMs);
+            if (s == 10000) out << ts << " guide_state state=\"Lost\" frame=300000 reason=\"cloud\"\n";
+            if (s >= 10000 && s < 10060)
+            {
+                out << ts << " guide_offset state=\"Lost\" mode=guiding frame=" << (s * 30)
+                    << " region=10,10,64,64 binning=1 dx=+0.00 dy=+0.00 score=0.100 valid=no estimate=none samples=0\n";
+                continue;
+            }
+            const double dx = 1.5 * std::sin(s * 0.01);
+            const double dy = -1.0 * std::cos(s * 0.007);
+            out << ts << " guide_offset state=\"Locked\" mode=guiding frame=" << (s * 30)
+                << " region=10,10,64,64 binning=1 dx=" << QString::number(dx, 'f', 2)
+                << " dy=" << QString::number(dy, 'f', 2) << " score=0.950 valid=yes estimate_dx=0.00 estimate_dy=0.00 samples=10\n";
+            if (s > 0 && s % 300 == 0)
+                out << ts << " guide_pulse purpose=guiding direction=West ms=120 estimate=+1.00,+0.00 found=+1.00,+0.00\n";
+        }
+    }
+
+    QString err;
+    const QString reportPath = writeNightlyReport(watchDir, err);
+    QVERIFY2(!reportPath.isEmpty(), qPrintable(err));
+    const QString html = contents(reportPath);
+
+    // Camera/optics, detector (even with 0 clips), mid-watch change, timing, stream health.
+    QVERIFY(html.contains("ASI678MM"));
+    QVERIFY(html.contains("0.147″/px"));
+    QVERIFY(html.contains("Moon impact flashes"));
+    QVERIFY(html.contains("6.5 σ"));
+    QVERIFY(html.contains("4 – 400 px"));
+    QVERIFY(html.contains("2 shapes"));
+    QVERIFY(html.contains("5 s pre · 3–10 s post"));
+    QVERIFY(html.contains("1 mid-watch change"));
+    QVERIFY(html.contains("NTP +1.2 ms"));
+    QVERIFY(html.contains("755990"));
+    QVERIFY(html.contains("Frame gaps</th><td class='warn'>10</td>"));
+    QVERIFY(html.contains("Camera drops</th><td class='warn'>3</td>"));
+    QVERIFY(html.contains("Stabilizer lock"));
+
+    // Guiding config, stats, and multi-hour bounded SVG chart.
+    QVERIFY(html.contains("ASCOM EQMod"));
+    QVERIFY(html.contains("8.0 px (give up 30.0 px)"));
+    QVERIFY(html.contains("25140 locked, 60 lost"));
+    QVERIFY(html.contains("Lock losses</th><td class='warn'>1</td>"));
+    QVERIFY(html.contains("<div class='guideChart'><svg"));
+    const qsizetype svgStart = html.indexOf("<div class='guideChart'><svg");
+    const qsizetype svgEnd = html.indexOf("</svg>", svgStart);
+    QVERIFY(svgStart > 0 && svgEnd > svgStart);
+    const qsizetype svgBytes = svgEnd - svgStart;
+    // Multi-hour guiding SVG must stay compact (bucketed to <= 300 bins), not 25,200 points.
+    QVERIFY2(svgBytes < 30000, qPrintable(QString("SVG too large: %1 bytes").arg(svgBytes)));
+
+    // Watch time-lapse section and autotune.txt link.
+    QVERIFY(html.contains("id='timelapse'"));
+    QVERIFY(html.contains("1 frame every 30 s"));
+    QVERIFY(html.contains("840 (2 skipped)"));
+    QVERIFY(html.contains("timelapse/timelapse.mp4"));
+    QVERIFY(html.contains("href=\"autotune.txt\" target=\"_blank\" rel=\"noopener\">Auto-tune log</a>"));
+
+    // Verify Session::logAutoTune never writes top-level .txt files outside session folders.
+    const QString rootOut = QDir(dir.path()).filePath("live_out");
+    QObject ctx;
+    Session session(&ctx, rootOut, {});
+    CaptureSettings cap;
+    cap.target = Target::Sky;
+    session.setCaptureSettings(cap);
+    session.logAutoTune("2026-11-26T00:50:00.000Z autotune_k target=sky k_from=10.0 k_to=9.0\n");
+    session.logRecord("2026-11-26T00:51:00.000Z exposure_change exposure_ms=10 to 20 gain=1 to 1 reason=\"preview\"\n");
+    QVERIFY(QDir(eventsFolder(rootOut, Target::Sky)).entryList({"*.txt"}, QDir::Files).isEmpty());
 }
 
 int main(int argc, char** argv)

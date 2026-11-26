@@ -569,7 +569,7 @@ At the top, the report says how many events of each group the session has. Each 
 
 **Opening the files.** **Open SER** opens the clip in the program Windows uses for SER files, such as SER Player, and **Show in folder** opens Explorer with the file selected. A browser cannot hand a file on your disk to another program itself, so these two links go through SeleneWatch: the browser asks once whether to open SeleneWatch, which opens the file and closes without a window. For safety they open only video, image and text files inside a monitoring session's folder.
 
-**Coverage and follow-up.** The report also shows when monitoring was running, the night's timeline, and any candidate that could not be saved. A star marks an event for follow-up; **Save marks** keeps the marks beside the report.
+**Coverage, setup and guiding.** The report also shows the camera, optics, detector, timing and stream health configuration, when monitoring was running, the night's timeline, any guiding summary and drift plot, any watch time-lapse, and any candidate that could not be saved. Clicking a preview image or file link opens it in a new browser tab. A star marks an event for follow-up; **Save marks** keeps the marks beside the report.
 
 ### What is in the output folder
 
@@ -578,9 +578,10 @@ At the top, the report says how many events of each group the session has. Each 
     events/moon/ and events/sky/
         session-<UTC start>/
             report.html              the nightly report
-            session.txt              when monitoring started and stopped, and why
+            session.txt              monitoring intervals, detector settings and stream health
             candidates.txt           every candidate, saved or not, and every setting change
-            guiding.txt              the lock and every guide correction
+            guiding.txt              the lock and every guide correction (when used)
+            autotune.txt             Preview auto-tune adjustments before the watch (when used)
             clips/<UTC>/             one clip: see below
             recordings/<UTC>/        recordings made while monitoring
             timelapse/               the slow sky watch's time-lapse

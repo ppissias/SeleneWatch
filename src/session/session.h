@@ -190,8 +190,12 @@ public:
     [[nodiscard]] std::optional<Schedule> schedule() const;
     [[nodiscard]] RecordingWriter::Status recordingStatus() const;
     // Any thread. Lines for candidates.txt that are not about a clip, such as
-    // an exposure change (Feature-15).
-    void logRecord(const QString& lines) { writer_.logRecord(lines); }
+    // an exposure change (Feature-15). Ignored outside Monitoring so no
+    // top-level candidates.txt is created outside session folders.
+    void logRecord(const QString& lines);
+    // Any thread. Auto-tune entries logged during Preview (held in memory per
+    // target and flushed into <watchFolder>/autotune.txt when Monitoring opens).
+    void logAutoTune(const QString& lines);
     // Tests: the recording writer's drive query and pace.
     [[nodiscard]] RecordingWriter& recordingWriter() { return recorder_; }
 
@@ -253,6 +257,20 @@ private:
     QString lastWatchFolder_;
     bool watchIntervalOpen_{false};
     std::chrono::steady_clock::time_point watchStart_{};
+    // Source thread: per-monitoring-interval stream health and active detector config.
+    uint64_t watchFrames_{0};
+    uint64_t watchFrameGaps_{0};
+    bool watchHasFrameIndex_{false};
+    uint64_t watchLastFrameIndex_{0};
+    std::optional<uint64_t> watchSourceDropsStart_;
+    std::optional<uint64_t> watchSourceDropsLast_;
+    uint64_t watchStabActiveFrames_{0};
+    uint64_t watchStabFallbackFrames_{0};
+    DetectionSettings watchLoggedDetection_;
+    bool watchDetectionLogged_{false};
+    // Under requestMutex_: Preview auto-tune entries flushed to <watch>/autotune.txt.
+    Target pendingAutoTuneTarget_{Target::Moon};
+    QStringList pendingAutoTune_;
     // Source thread: starts, feeds and ends the continuous recording.
     void updateRecording(const FramePtr& frame);
     void beginRecording(const FramePtr& first, const std::string& startedBy, uint64_t maxFrames = 0);

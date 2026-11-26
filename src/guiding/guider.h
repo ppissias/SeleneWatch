@@ -143,6 +143,10 @@ public:
     // stop the mount's tracking. Ends guiding first. The result is in
     // status().guide.trackingStopResult once trackingStops has grown.
     void requestStopTracking();
+    // Any thread. When Monitoring opens a watch folder, records the active
+    // mount, calibration and guide tuning in guiding.txt (writes nothing if
+    // neither a mount nor a lock is active).
+    void requestWatchSnapshot();
 
     // Any thread.
     [[nodiscard]] GuiderStatus status() const;
@@ -167,6 +171,7 @@ private:
         std::optional<std::string> end;
         std::optional<double> lostAfter;
         bool stopTracking{false};
+        bool watchSnapshot{false};
     };
 
     void run(std::stop_token stopToken);

@@ -1285,6 +1285,7 @@ bool EventWriter::appendSessionStart(const SessionStart& start) const
     // Feature-14: where and with what, and the last clock check. Whether the
     // window's testing tools were on: injected frames carry their own marks.
     line += siteFields(start.site);
+    line += QString(" software=\"SeleneWatch %1\"").arg(SELENEWATCH_VERSION);
     line += QString(" testing_tools=\"%1\"").arg(start.testingTools ? "on" : "off");
     line += QString(" clock_check=\"%1\"").arg(start.clockRecord.empty() ? QString("not made")
         : QString::fromStdString(start.clockRecord).replace('"', '\''));
