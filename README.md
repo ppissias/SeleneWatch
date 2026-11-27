@@ -88,6 +88,14 @@ The feature lock and mount guiding keep the Moon in place. **Auto-tune** measure
 
 *Sample data: the overview SeleneWatch saved for the same public-domain NASA lunar ISS transit sequence (credit: NASA / Joel Kowsky, `NHQ201903160004`), replayed through the shadows watch at its default K 12 with a one-frame trigger. SeleneWatch detected all five crossing frames in a straight line (grouped as **Moving**, 220 σ deepest fall) and centred the crop strip on the ISS silhouette. The [user manual](MANUAL.md#4-shadows-crossing-the-moon) also shows the solar ISS transit overview and a test-signal run.*
 
+*Unexpected bench validation (real capture):* not quite the ISS—while testing the shadows watch live at a bright window on a ZWO ASI120MM Mini, an uninvited bug flew through the frame and got tracked across 4 frames over 0.10 s in a straight line (5,767 px/s, 99.7 σ deepest fall, grouped as **Moving**):
+
+<p align="center">
+  <img src="docs/images/transit-bug-window.gif" alt="Animated clip of a bug flying past a bright window during daytime bench testing of the shadows watch" width="460">
+</p>
+
+![SeleneWatch detection overview of a bug crossing a bright window during daytime bench testing](docs/images/transit-bug-window.png)
+
 ### 4. Impact flashes on the Moon's dark side
 
 Small meteoroids hit the Moon all the time. On the part of the Moon lit only faintly by the Earth (earthshine), a large enough impact shows as a flash lasting a few hundredths of a second. Watching for these **lunar impact flashes** is one of the ways amateurs contribute to the study of lunar transient phenomena.
