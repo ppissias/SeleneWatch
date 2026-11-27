@@ -10,6 +10,68 @@
     <!-- Public property controlling the optional desktop shortcut (default: on). -->
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
 
+    <!-- Remember the custom install directory for per-user Uninstall, Repair, and Upgrade.
+         CPack's per-user WiX components use HKCU RegistryValue KeyPaths (ICE38/43), so
+         Windows Installer does not remember a custom INSTALL_ROOT from file KeyPaths,
+         and CPack's default FindInstallLocation searches HKLM instead of HKCU. -->
+    <Property Id="SELENEWATCH_PRODUCT_INSTALL_DIR" Secure="yes">
+      <RegistrySearch Id="SeleneWatchFindProductInstallDir"
+                      Root="HKCU"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[ProductCode]"
+                      Name="InstallLocation"
+                      Type="raw"
+                      Win64="yes" />
+    </Property>
+    <Property Id="SELENEWATCH_UPGRADE_INSTALL_DIR" Secure="yes">
+      <RegistrySearch Id="SeleneWatchFindUpgradeInstallDir"
+                      Root="HKCU"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[WIX_UPGRADE_DETECTED]"
+                      Name="InstallLocation"
+                      Type="raw"
+                      Win64="yes" />
+    </Property>
+    <Property Id="SELENEWATCH_REMEMBERED_INSTALL_DIR" Secure="yes">
+      <RegistrySearch Id="SeleneWatchFindRememberedInstallDir"
+                      Root="HKCU"
+                      Key="Software\SeleneWatch\Installer"
+                      Name="InstallDir"
+                      Type="raw"
+                      Win64="yes" />
+    </Property>
+
+    <CustomAction Id="SeleneWatchSetInstallRootFromProduct"
+                  Property="INSTALL_ROOT"
+                  Value="[SELENEWATCH_PRODUCT_INSTALL_DIR]" />
+    <CustomAction Id="SeleneWatchSetInstallRootFromUpgrade"
+                  Property="INSTALL_ROOT"
+                  Value="[SELENEWATCH_UPGRADE_INSTALL_DIR]" />
+    <CustomAction Id="SeleneWatchSetInstallRootFromRegistry"
+                  Property="INSTALL_ROOT"
+                  Value="[SELENEWATCH_REMEMBERED_INSTALL_DIR]" />
+
+    <InstallUISequence>
+      <Custom Action="SeleneWatchSetInstallRootFromProduct" After="AppSearch">SELENEWATCH_PRODUCT_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+      <Custom Action="SeleneWatchSetInstallRootFromUpgrade" After="SeleneWatchSetInstallRootFromProduct">SELENEWATCH_UPGRADE_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+      <Custom Action="SeleneWatchSetInstallRootFromRegistry" After="SeleneWatchSetInstallRootFromUpgrade">SELENEWATCH_REMEMBERED_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+    </InstallUISequence>
+
+    <InstallExecuteSequence>
+      <Custom Action="SeleneWatchSetInstallRootFromProduct" After="AppSearch">SELENEWATCH_PRODUCT_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+      <Custom Action="SeleneWatchSetInstallRootFromUpgrade" After="SeleneWatchSetInstallRootFromProduct">SELENEWATCH_UPGRADE_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+      <Custom Action="SeleneWatchSetInstallRootFromRegistry" After="SeleneWatchSetInstallRootFromUpgrade">SELENEWATCH_REMEMBERED_INSTALL_DIR AND NOT INSTALL_ROOT</Custom>
+    </InstallExecuteSequence>
+
+    <DirectoryRef Id="INSTALL_ROOT">
+      <Component Id="SeleneWatchRememberInstallDir" Guid="9E3A6D42-7B1F-4C8E-A512-6F8D3E2C1A09">
+        <RegistryValue Root="HKCU"
+                       Key="Software\SeleneWatch\Installer"
+                       Name="InstallDir"
+                       Type="string"
+                       Value="[INSTALL_ROOT]"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
     <!-- Optional Desktop shortcut component (per-user HKCU keypath for ICE38/43). -->
     <DirectoryRef Id="TARGETDIR">
       <Directory Id="DesktopFolder" Name="Desktop">
@@ -32,6 +94,7 @@
     </DirectoryRef>
 
     <FeatureRef Id="ProductFeature">
+      <ComponentRef Id="SeleneWatchRememberInstallDir" />
       <ComponentRef Id="SeleneWatchDesktopShortcut" />
     </FeatureRef>
 
