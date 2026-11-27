@@ -2,10 +2,15 @@
 
 # SeleneWatch
 
-### Watch the sky, Moon and planets. From split-second flashes to all-night time-lapses.
-SeleneWatch watches the stream of a camera, on a telescope or on a fixed lens pointed at the sky, and keeps the moments when something changes. It saves those moments as lossless video, with the frames from just before and after, the exact times, and a picture of what changed. It also makes time-lapses of the Moon and the planets, and can lock directly onto a lunar crater or planetary disk to guide your ASCOM mount through the main camera—no guide scope or guide star required.
+### Catch the unexpected. Time-lapse the Moon and planets.
 
-It runs on Windows and works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
+SeleneWatch is a free, open-source astronomy application for Windows that uses a camera—on a telescope or a fixed lens—to capture both fleeting events and gradual changes in the sky.
+
+From meteors, satellite transits and lunar impact flashes to evolving lunar shadows, planetary rotation and the motion of moons, SeleneWatch detects transient candidates and builds automated time-lapses as the night unfolds.
+
+It combines real-time event detection, UTC-timestamped lossless recordings (with frames from before and after each event), stacked time-lapses, and lunar and planetary guiding directly through the main camera—making extended, unattended observing sessions practical.
+
+It works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
 
 [Download releases](https://github.com/ppissias/SeleneWatch/releases) · [Website](https://startales.eu/SeleneWatch/) · [User manual](MANUAL.md) · [Camera settings guide](CAMERA_SETTINGS_GUIDE.md)
 
