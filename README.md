@@ -62,6 +62,10 @@ Switch to **Mode: Time-lapse**, preview and frame your target, and start a sessi
 
 Every stack is kept as a 32-bit FITS file. Afterwards you can re-align (by feature box or automatic multi-point alignment), sharpen again, level brightness across thin clouds, drop blurred or cloudy stacks (by their sharpness, compared with the stacks around them), check every dropped stack, and rebuild MP4, GIF, or lossless SER without capturing again.
 
+![SeleneWatch time-lapse imaging workflow diagram](docs/images/timelapse-infographic.jpg)
+
+*Diagram: how SeleneWatch builds a lunar or planetary time-lapse — interval bursts, sharpest-frame selection, alignment and stacking, and final video export.*
+
 ![Re-sharpening a lunar time-lapse in SeleneWatch](docs/images/manual-resharpen.png)
 
 *Re-sharpening a lunar time-lapse (recorded-video test run on the Alpine Valley region): the full-height **Frames / stacks** list on the left, synchronized **Before (unsharpened)** and **After (sharpened + tone preview)** views at 146% zoom in the centre, and linear unsharp-mask, colour background neutralization, brightness levelling, and export controls on the right.*
