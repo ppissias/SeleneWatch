@@ -12,12 +12,13 @@ It combines real-time event detection, UTC-timestamped lossless recordings (with
 
 It works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER and AVI recordings.
 
-[Download releases](https://github.com/ppissias/SeleneWatch/releases) · [Website](https://startales.eu/SeleneWatch/) · [User manual](MANUAL.md) · [Camera settings guide](CAMERA_SETTINGS_GUIDE.md)
+[Download releases](https://github.com/ppissias/SeleneWatch/releases) · [Website](https://startales.eu/SeleneWatch/) · [Video tutorial](https://youtu.be/CpH4f08rm_M) · [User manual](MANUAL.md) · [Camera settings guide](CAMERA_SETTINGS_GUIDE.md)
 
 > **What SeleneWatch saves are candidates, not discoveries.** A clip shows that something changed in the frame. What it was is for you to judge, and a lunar impact flash is normally confirmed only when another observer recorded it too.
 
 ## Start here
 
+- [Video tutorial](#video-tutorial)
 - [What you can do with it](#what-you-can-do-with-it) ([Sky](#1-watch-the-sky-through-the-night) · [Time-lapses](#2-time-lapses-of-the-moon-and-the-planets) · [Lunar shadows](#3-shadows-crossing-the-moon) · [Impact flashes](#4-impact-flashes-on-the-moons-dark-side))
 - [Surface-feature and planetary guiding](#surface-feature-and-planetary-guiding)
 - [Status on your phone](#status-on-your-phone)
@@ -28,6 +29,18 @@ It works with ZWO, QHYCCD, Player One and ToupTek cameras, or with your own SER 
 - [Acknowledgements](#acknowledgements)
 
 ![SeleneWatch monitoring the Moon](docs/images/readme-main-window.png)
+
+---
+
+## Video tutorial
+
+<p align="center">
+  <a href="https://youtu.be/CpH4f08rm_M">
+    <img src="docs/images/youtube-tutorial.jpg" alt="SeleneWatch Tutorial on YouTube — Sky Monitoring, Transit Detection, Lunar Impact Monitor, and Time-lapses" width="760">
+  </a>
+</p>
+
+*Watch the [SeleneWatch Tutorial on YouTube](https://youtu.be/CpH4f08rm_M) for a walkthrough of sky monitoring, transit detection, lunar impact flashes, and lunar and planetary time-lapses.*
 
 ---
 
@@ -179,6 +192,7 @@ The [user manual](MANUAL.md#11-what-has-been-tested) lists what has been tested,
 
 | Document | For | What it covers |
 | --- | --- | --- |
+| [Video tutorial](https://youtu.be/CpH4f08rm_M) | Observers | YouTube walkthrough of sky monitoring, transits, lunar impact flashes, and time-lapses |
 | [User manual](MANUAL.md) | Observers | Setting up, the four ways of observing, the report and the files, troubleshooting |
 | [Camera settings guide](CAMERA_SETTINGS_GUIDE.md) | Observers | Exposure, gain and histogram for each kind of observing |
 | [Developer guide](DEVELOPER.md) | Contributors | Building from source, tests, packaging |
